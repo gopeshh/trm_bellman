@@ -205,7 +205,7 @@ class EditPolicy(nn.Module):
             lp_pos = lp_pos + mask_pos.log()
         pos = torch.distributions.Categorical(logits=lp_pos).sample()
         if mask_val is not None:
-            lp_val = lp_val + mask_val[pos]
+            lp_val = lp_val + mask_val.log()
         val = torch.distributions.Categorical(logits=lp_val).sample()
         lp = lp_pos.gather(-1, pos.unsqueeze(-1)).squeeze(-1) + lp_val.gather(
             -1, val.unsqueeze(-1)
