@@ -23,6 +23,14 @@ from puzzle_dataset import PuzzleDatasetMetadata
 # Import RL components
 from rl.advantages import center_advantages, compute_advantages
 from rl.contraction import LipschitzMonitor, apply_spectral_norm, estimate_Lz
+from rl.logging import (
+    RLLogger,
+    compute_policy_entropy,
+    compute_policy_kl,
+    compute_ppo_clip_fraction,
+    compute_spectral_product,
+    compute_value_residual,
+)
 from rl.losses import ppo_policy_loss, value_bellman_residual_loss
 from rl.meta_mdp import SudokuMetaMDP
 from rl.policy_head import EditPolicy
@@ -139,6 +147,16 @@ class RLTrainer:
         # Logging config
         self.log_Lz = self.rl_cfg.get("logging", {}).get("log_Lz", True)
         self.log_residuals = self.rl_cfg.get("logging", {}).get("log_residuals", True)
+        log_interval = self.rl_cfg.get("logging", {}).get("log_interval", 10)
+
+        # Initialize logger
+        use_wandb = cfg.get("use_wandb", False)
+        self.logger = RLLogger(
+            use_wandb=use_wandb,
+            log_interval=log_interval,
+            project_name=cfg.get("project_name"),
+            run_name=cfg.get("run_name"),
+        )
 
         # Apply spectral normalization if enabled
         if self.use_spectral_norm:
@@ -221,9 +239,9 @@ class RLTrainer:
         # Recompute log prob under current policy
         new_log_prob = self.policy.log_prob(y, z_n, x, action)
 
-        # Entropy (optional)
-        # For factorized discrete policy, entropy can be computed from logits
-        # entropy = ...  # Placeholder
+        # Compute policy entropy for factorized policy
+        log_probs_pos, log_probs_val = self.policy.dist(y, z_n, x)
+        policy_entropy = compute_policy_entropy(log_probs_pos, log_probs_val)
 
         # PPO loss with clipping
         policy_loss = ppo_policy_loss(
@@ -231,7 +249,7 @@ class RLTrainer:
             old_log_probs=old_log_prob.detach(),
             advantages=advantages_centered,
             epsilon=self.ppo_clip,
-            entropy=None,  # TODO: compute entropy
+            entropy=policy_entropy,
             beta=self.entropy_beta,
         )
 
@@ -279,6 +297,22 @@ class RLTrainer:
             "value/predictions_mean": value_pred.mean().item(),
         }
 
+        # Policy metrics
+        policy_kl = compute_policy_kl(new_log_prob, old_log_prob.detach())
+        ppo_clip_frac = compute_ppo_clip_fraction(
+            new_log_prob, old_log_prob.detach(), self.ppo_clip
+        )
+
+        metrics["policy/kl"] = policy_kl.item()
+        metrics["policy/entropy"] = policy_entropy.item()
+        metrics["policy/ppo_clip_frac"] = ppo_clip_frac.item()
+
+        # Value residuals (max Bellman error across batch)
+        if self.log_residuals:
+            value_residual = compute_value_residual(value_pred, G_K.detach())
+            metrics["value/residual_max"] = value_residual.item()
+            metrics["value/residual_mean"] = (value_pred - G_K.detach()).abs().mean().item()
+
         # Lipschitz constant monitoring
         if self.log_Lz and self.step % 10 == 0:
             try:
@@ -291,17 +325,26 @@ class RLTrainer:
 
                 metrics["contraction/Lz"] = L_z
                 metrics["contraction/Lz_ema"] = self.lipschitz_monitor.get_ema_lipschitz()
+
+                # Spectral product (if spectral norm is applied)
+                if self.use_spectral_norm:
+                    try:
+                        spectral_prod = compute_spectral_product(self.model)
+                        metrics["contraction/spectral_prod"] = spectral_prod
+                    except Exception:
+                        pass  # Spectral product computation may fail if no SN applied
             except Exception as e:
                 print(f"Warning: Failed to estimate Lz: {e}")
 
-        # Bellman residuals
-        if self.log_residuals:
-            residuals = (value_pred - G_K.detach()).abs()
-            metrics["value/residual_mean"] = residuals.mean().item()
-            metrics["value/residual_max"] = residuals.max().item()
+        # Task-specific metrics (score delta per edit)
+        # For Sudoku, compute validity score before and after edit
+        # scores_before = self.env.score_sudoku(y)
+        # scores_after = self.env.score_sudoku(y_prime)
+        # score_delta = compute_score_delta(scores_before, scores_after)
+        # metrics["task/score_delta"] = score_delta.item()
 
-        # Task-specific metrics (Sudoku validity)
-        # metrics["task/sudoku_validity"] = ...  # TODO
+        # Log metrics using RLLogger
+        self.logger.log(metrics, step=self.step)
 
         self.step += 1
         return metrics

@@ -31,3 +31,5 @@ spectral:
 logging:
   log_Lz: true              # Log empirical Lipschitz constant L_z
   log_residuals: true       # Log Bellman residuals for diagnostics
+  log_interval: 10          # Log metrics every N steps
+  ema_alpha: 0.9            # EMA smoothing for Lipschitz monitor

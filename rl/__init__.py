@@ -14,4 +14,5 @@ __all__ = [
     "advantages",
     "losses",
     "contraction",
+    "logging",
 ]
