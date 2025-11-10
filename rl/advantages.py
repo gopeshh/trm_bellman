@@ -6,32 +6,25 @@ Generalized Advantage Estimation (GAE) for policy gradient methods.
 
 from typing import Any, Optional
 
-# Lazy imports for stub compatibility
-torch: Any = None
+import torch
 
 
 def compute_advantages(
-    rewards: Any,
-    values: Any,
-    bootstrap_value: Any,
-    gamma: float = 0.99,
-    dones: Optional[Any] = None,
-) -> Any:
-    """Compute advantages from K-step returns.
+    returns: torch.Tensor,
+    baseline: torch.Tensor,
+) -> torch.Tensor:
+    """Compute advantages from returns and baseline.
 
-    A(s,a) = Q(s,a) - V(s) where Q is estimated from K-step returns.
+    A(s,a) = Q(s,a) - V(s) = returns - baseline
 
     Args:
-        rewards: Reward sequence (T, B)
-        values: Value estimates V(s_t) (T, B)
-        bootstrap_value: Bootstrap value V(s_{T+1}) (B,)
-        gamma: Discount factor
-        dones: Optional done flags (T, B)
+        returns: Computed returns (B,) or (T, B)
+        baseline: Value estimates V(s) (B,) or (T, B)
 
     Returns:
-        Advantages (T, B)
+        Advantages (B,) or (T, B)
     """
-    pass
+    return returns - baseline
 
 
 def compute_gae(
@@ -62,7 +55,7 @@ def compute_gae(
     pass
 
 
-def center_advantages(advantages: Any, eps: float = 1e-8) -> Any:
+def center_advantages(advantages: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """Center and normalize advantages for stability.
 
     Normalizes advantages to have zero mean and unit variance across batch.
@@ -74,7 +67,9 @@ def center_advantages(advantages: Any, eps: float = 1e-8) -> Any:
     Returns:
         Centered and normalized advantages
     """
-    pass
+    mean = advantages.mean()
+    std = advantages.std() + eps
+    return (advantages - mean) / std
 
 
 def compute_returns(

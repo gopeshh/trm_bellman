@@ -9,50 +9,81 @@ This module implements various RL losses:
 
 from typing import Any, Dict, Optional, Tuple
 
+import torch
+
 
 def value_bellman_residual_loss(
-    values: Any,
-    target_values: Any,
-    returns: Any,
+    values: torch.Tensor,
+    returns: torch.Tensor,
     clip_value: Optional[float] = None,
-) -> Any:
+) -> torch.Tensor:
     """Compute value function Bellman residual loss.
+
+    L_br = (V(s) - stop_grad(G_K))^2
 
     Minimizes squared error between value predictions and returns,
     optionally with clipping for stability.
 
     Args:
         values: Value predictions V(s) (B,)
-        target_values: Target network values (B,)
-        returns: Computed returns (B,)
+        returns: Computed returns G_K (B,)
         clip_value: Optional value clipping threshold
 
     Returns:
         Value loss scalar
     """
-    pass
+    # Detach returns to stop gradient (stop_grad)
+    targets = returns.detach()
+
+    if clip_value is not None:
+        # Clip value predictions for stability
+        values = torch.clamp(values, -clip_value, clip_value)
+
+    # MSE loss
+    loss = ((values - targets) ** 2).mean()
+    return loss
 
 
 def ppo_policy_loss(
-    log_probs: Any,
-    old_log_probs: Any,
-    advantages: Any,
+    log_probs: torch.Tensor,
+    old_log_probs: torch.Tensor,
+    advantages: torch.Tensor,
     epsilon: float = 0.2,
-) -> Any:
-    """Compute PPO clipped policy loss.
+    entropy: Optional[torch.Tensor] = None,
+    beta: float = 0.001,
+) -> torch.Tensor:
+    """Compute PPO clipped policy loss with optional entropy regularization.
 
-    L^CLIP(θ) = -E[min(ratio * A, clip(ratio, 1-ε, 1+ε) * A)]
+    L^CLIP(θ) = -E[min(ratio * A, clip(ratio, 1-ε, 1+ε) * A)] - β * H[π]
 
     Args:
         log_probs: Current policy log probs log π(a|s) (B,)
         old_log_probs: Old policy log probs log π_old(a|s) (B,)
         advantages: Advantage estimates A(s,a) (B,)
         epsilon: PPO clipping parameter (typically 0.2)
+        entropy: Optional policy entropy for regularization (B,)
+        beta: Entropy regularization coefficient (default: 0.001)
 
     Returns:
         PPO loss scalar
     """
-    pass
+    # Compute probability ratio: π(a|s) / π_old(a|s)
+    ratio = (log_probs - old_log_probs).exp()
+
+    # Unclipped objective
+    unclipped = ratio * advantages
+
+    # Clipped objective
+    clipped = torch.clamp(ratio, 1 - epsilon, 1 + epsilon) * advantages
+
+    # PPO loss: negative because we want to maximize the objective
+    loss = -torch.min(unclipped, clipped).mean()
+
+    # Entropy regularization (encourage exploration)
+    if entropy is not None:
+        loss -= beta * entropy.mean()
+
+    return loss
 
 
 def trpo_surrogate_loss(
