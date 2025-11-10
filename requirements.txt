@@ -9,12 +9,20 @@ wandb
 omegaconf
 hydra-core
 huggingface_hub
-packaging 
-ninja 
-wheel 
-setuptools 
+packaging
+ninja
+wheel
+setuptools
 setuptools-scm
 pydantic-core
-huggingface_hub 
+huggingface_hub
 numba
 triton
+
+# Development dependencies
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pre-commit>=3.5.0
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.1.0
