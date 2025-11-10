@@ -27,7 +27,7 @@ Tiny Recursion Model (TRM) recursively improves its predicted answer y with a ti
 pip install --upgrade pip wheel setuptools
 pip install --pre --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu126 # install torch based on your cuda version
 pip install -r requirements.txt # install requirements
-pip install --no-cache-dir --no-build-isolation adam-atan2 
+pip install --no-cache-dir --no-build-isolation adam-atan2
 wandb login YOUR-LOGIN # login if you want the logger to sync results to your Weights & Biases (https://wandb.ai/)
 ```
 
@@ -135,19 +135,162 @@ arch.H_cycles=3 arch.L_cycles=4 \
 
 *Runtime:* < 24 hours
 
+---
+
+## TRM + Unrolled Policy Iteration (RL)
+
+In addition to supervised pretraining, TRM can be trained with **Reinforcement Learning** using a **Meta-MDP** formulation where the model learns to *edit* its own internal states to improve task performance. This approach, inspired by Unrolled Policy Iteration, treats the recursive computation as a learnable policy optimization problem.
+
+### Key Idea
+
+Instead of only learning from ground-truth labels, the RL training loop:
+1. **Samples edits** from a learned policy πφ(a|y, z_n, x)
+2. **Applies edits** to the current output y to get y'
+3. **Performs K-step rollouts** with bootstrapped returns G^(K)
+4. **Updates value function** V_ψ to minimize Bellman residual: L_br = (V - G^(K))²
+5. **Updates policy** with PPO clipped loss using centered advantages
+
+This enables the model to learn from *task improvement signals* rather than requiring perfect supervision.
+
+### Dataset Preparation
+
+Use the same Sudoku dataset builder as supervised training:
+
+```bash
+# Sudoku-Extreme (1000 examples, 1000 augments)
+python dataset/build_sudoku_dataset.py \
+  --output-dir data/sudoku-extreme-1k-aug-1000 \
+  --subsample-size 1000 \
+  --num-aug 1000
+```
+
+### Running RL Training
+
+**Basic Command (single GPU):**
+
+```bash
+python train_rl.py \
+  arch=trm \
+  data_paths="[data/sudoku-extreme-1k-aug-1000]" \
+  rl.enabled=True \
+  rl.K=3 \
+  rl.gamma=0.985 \
+  rl.n_inner=6 \
+  arch.L_layers=2 \
+  arch.H_cycles=3 \
+  arch.L_cycles=4 \
+  +run_name=trm_upi_sudoku
+```
+
+**With Weights & Biases Logging:**
+
+```bash
+python train_rl.py \
+  arch=trm \
+  data_paths="[data/sudoku-extreme-1k-aug-1000]" \
+  rl.enabled=True \
+  rl.K=3 \
+  rl.gamma=0.985 \
+  +use_wandb=True \
+  +project_name=trm-rl \
+  +run_name=trm_upi_sudoku_exp1
+```
+
+### Key Hyperparameters & Ablation Flags
+
+The RL training exposes several theory-aligned hyperparameters for ablation studies:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `rl.K` | 3 | Number of rollout steps for K-step returns (trade-off: bias vs variance) |
+| `rl.n_inner` | 6 | Number of inner TRM iterations (recurrence depth n) |
+| `rl.gamma` | 0.985 | Discount factor γ for returns |
+| `rl.ppo_clip` | 0.2 | PPO clipping parameter ε (ratio clipping range: [1-ε, 1+ε]) |
+| `rl.entropy_beta` | 0.001 | Entropy regularization coefficient β |
+| `rl.alpha_br` | 1.0 | Weight for Bellman residual (value) loss |
+| `rl.alpha_pi` | 1.0 | Weight for policy loss |
+| `rl.alpha_sup` | 1.0 | Weight for supervised loss (if mixing with supervised training) |
+| `rl.spectral.enabled` | true | Apply spectral normalization to control Lipschitz constant L_z |
+| `rl.spectral.target_prod` | 0.95 | Target spectral norm product (contraction control) |
+| `rl.tau_ema` | 0.995 | EMA decay rate τ for value target network |
+
+### Ablation Study Examples
+
+**Vary K-step returns:**
+```bash
+# Short rollouts (less variance, more bias)
+python train_rl.py ... rl.K=1
+
+# Longer rollouts (more variance, less bias)
+python train_rl.py ... rl.K=5
+```
+
+**Vary inner recursion depth n:**
+```bash
+# Shallow recursion
+python train_rl.py ... rl.n_inner=3
+
+# Deep recursion
+python train_rl.py ... rl.n_inner=12
+```
+
+**Disable spectral normalization:**
+```bash
+# Without contraction control (may diverge)
+python train_rl.py ... rl.spectral.enabled=False
+```
+
+**Adjust PPO clipping:**
+```bash
+# More conservative policy updates
+python train_rl.py ... rl.ppo_clip=0.1
+
+# More aggressive policy updates
+python train_rl.py ... rl.ppo_clip=0.3
+```
+
+### Monitoring Training
+
+The RL training logs key metrics at each step:
+
+- **Loss metrics**: `loss/total`, `loss/value`, `loss/policy`
+- **Policy metrics**: `policy/kl`, `policy/entropy`, `policy/ppo_clip_frac`
+- **Value metrics**: `value/residual_max`, `value/residual_mean`, `value/returns_mean`
+- **Contraction metrics**: `contraction/Lz` (empirical Lipschitz constant), `contraction/Lz_ema`
+
+Example output:
+```
+[Step 10] loss/total: 2.345600 | policy/kl: 0.012340 | value/residual_max: 0.567800 | contraction/Lz: 0.876540
+[Step 20] loss/total: 2.123400 | policy/kl: 0.010200 | value/residual_max: 0.512300 | contraction/Lz: 0.845600
+```
+
+Values should trend downward for residuals and losses, indicating learning progress.
+
+### Configuration
+
+All RL hyperparameters can be found in `config/rl/default.yaml`. You can override any parameter via CLI:
+
+```bash
+python train_rl.py ... rl.gamma=0.99 rl.K=5 rl.spectral.target_prod=0.90
+```
+
+For more details on the RL components, see `tests/RL_TEST_SUMMARY.md`.
+
+---
+
 ## Reference
 
 If you find our work useful, please consider citing:
 
 ```bibtex
 @misc{jolicoeurmartineau2025morerecursivereasoningtiny,
-      title={Less is More: Recursive Reasoning with Tiny Networks}, 
+      title={Less is More: Recursive Reasoning with Tiny Networks},
       author={Alexia Jolicoeur-Martineau},
       year={2025},
       eprint={2510.04871},
       archivePrefix={arXiv},
       primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2510.04871}, 
+      url={https://arxiv.org/abs/2510.04871},
 }
 ```
 
@@ -155,13 +298,13 @@ and the Hierarchical Reasoning Model (HRM):
 
 ```bibtex
 @misc{wang2025hierarchicalreasoningmodel,
-      title={Hierarchical Reasoning Model}, 
+      title={Hierarchical Reasoning Model},
       author={Guan Wang and Jin Li and Yuhao Sun and Xing Chen and Changling Liu and Yue Wu and Meng Lu and Sen Song and Yasin Abbasi Yadkori},
       year={2025},
       eprint={2506.21734},
       archivePrefix={arXiv},
       primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2506.21734}, 
+      url={https://arxiv.org/abs/2506.21734},
 }
 ```
 
