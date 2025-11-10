@@ -1,0 +1,33 @@
+# RL Training Configuration
+# Toggle with: +rl.enabled=True/False
+
+# Main toggle for RL training
+enabled: true
+
+# Core RL hyperparameters
+gamma: 0.985          # Discount factor for returns
+K: 3                  # Number of rollout steps for K-step returns
+n_inner: 6            # Number of inner TRM iterations (recurrence depth)
+tau_ema: 0.995        # EMA decay rate for value target network
+
+# Loss weights
+alpha_br: 1.0         # Weight for Bellman residual (value) loss
+alpha_pi: 1.0         # Weight for policy loss
+alpha_sup: 1.0        # Weight for supervised loss (if using mixed training)
+
+# Policy optimization
+entropy_beta: 0.001   # Entropy regularization coefficient
+ppo_clip: 0.2         # PPO clipping epsilon (ratio clipping range: [1-ε, 1+ε])
+trpo_kl_target: 0.01  # TRPO KL divergence target (if using TRPO)
+use_trpo: false       # Use TRPO instead of PPO (requires conjugate gradient)
+
+# Spectral normalization for Lipschitz control
+spectral:
+  enabled: true       # Apply spectral norm to z→z path
+  target_prod: 0.95   # Target cumulative spectral norm product
+  weight: 1.0e-4      # Regularizer weight for R_lip loss
+
+# Logging and monitoring
+logging:
+  log_Lz: true              # Log empirical Lipschitz constant L_z
+  log_residuals: true       # Log Bellman residuals for diagnostics
