@@ -209,7 +209,8 @@ class RLTrainer:
 
         # ===== K-STEP ROLLOUT =====
         # Collect K-step trajectory with bootstrapped returns
-        state_0 = (x, y_prime)
+        # State includes (x, y, z_n) for policy and value function calls
+        state_0 = (x, y_prime, z_n)
 
         # Compute returns G^(K)
         G_K, state_final = rollout_k(
@@ -219,6 +220,8 @@ class RLTrainer:
             s0=state_0,
             K=self.K,
             gamma=self.gamma,
+            f_theta=self.model.inner_unroll,
+            n_inner=self.n_inner,
         )
 
         # ===== VALUE LOSS (BELLMAN RESIDUAL) =====

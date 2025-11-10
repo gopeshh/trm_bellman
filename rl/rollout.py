@@ -14,10 +14,12 @@ def rollout_k(
     policy: Callable,
     value_target: Callable,
     env: Any,
-    s0: Tuple[torch.Tensor, torch.Tensor],
+    s0: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     K: int,
     gamma: float,
-) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    f_theta: Optional[Callable] = None,
+    n_inner: int = 6,
+) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """Perform K-step rollout with bootstrapped target value.
 
     Collects a K-step trajectory using the policy, accumulates discounted
@@ -27,37 +29,54 @@ def rollout_k(
         G = Σ_{t=0}^{K-1} γ^t * r_t + γ^K * V_target(s_K)
 
     Args:
-        policy: Policy with sample(*s) -> (action, log_prob) method
-        value_target: Target value function with (*s) -> value method
-        env: Environment with step(s, a) -> (s', r, done, info) method
-        s0: Initial state (x, y)
+        policy: Policy with sample(y, z_n, x) -> (action, log_prob) method
+        value_target: Target value function with (z_n, x) -> value method
+        env: Environment with step(s, a, x) -> (s', r, done, info) method
+        s0: Initial state (x, y, z_n) tuple
         K: Number of rollout steps
         gamma: Discount factor
+        f_theta: Optional model for recomputing z_n after edits
+        n_inner: Number of inner reasoning steps for z_n recomputation
 
     Returns:
         Tuple of (G, s) where:
             - G: Bootstrapped return (B,)
-            - s: Final state (x, y)
+            - s: Final state (x, y, z_n)
     """
-    s = s0
+    x, y, z_n = s0
     G = 0.0
     pow_gamma = 1.0
 
     for _ in range(K):
-        a, _ = policy.sample(*s)
-        s_prime, r, done, info = env.step(s, a, s[0])  # env.step needs x
+        # Sample action from policy with correct signature: (y, z_n, x)
+        a, _ = policy.sample(y, z_n, x)
+
+        # Take environment step (returns (x, y') state without z_n)
+        s_prime_xy, r, done, info = env.step((x, y), a, x)
+        x_prime, y_prime = s_prime_xy
+
+        # Recompute z_n for new state if model provided
+        if f_theta is not None:
+            z_n_prime = f_theta(y_prime, x_prime, n=n_inner)
+        else:
+            # If no model, keep previous z_n (not ideal but allows testing)
+            z_n_prime = z_n
+
+        # Accumulate discounted reward
         G = G + pow_gamma * r
         pow_gamma *= gamma
-        s = s_prime
+
+        # Update state
+        x, y, z_n = x_prime, y_prime, z_n_prime
 
         # Early termination if episode ends
         if done.any():
             break
 
-    # Bootstrap with target value
-    G = G + pow_gamma * value_target(*s)
+    # Bootstrap with target value using correct signature: (z_n, x)
+    G = G + pow_gamma * value_target(z_n, x)
 
-    return G, s
+    return G, (x, y, z_n)
 
 
 class RolloutBuffer:

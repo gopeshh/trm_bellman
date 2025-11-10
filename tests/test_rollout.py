@@ -20,8 +20,14 @@ class MockPolicy:
         self.actions = actions
         self.idx = 0
 
-    def sample(self, x, y):
-        """Return next action in sequence."""
+    def sample(self, y, z_n, x):
+        """Return next action in sequence.
+
+        Args:
+            y: Current output (B, 9, 9)
+            z_n: Internal state (B, z_dim)
+            x: Input (B, x_dim)
+        """
         if self.idx < len(self.actions):
             action = self.actions[self.idx]
             self.idx += 1
@@ -41,9 +47,14 @@ class MockValueTarget:
         """
         self.value = value
 
-    def __call__(self, x, y):
-        """Return fixed value for any state."""
-        batch_size = x.shape[0] if hasattr(x, "shape") else 1
+    def __call__(self, z_n, x):
+        """Return fixed value for any state.
+
+        Args:
+            z_n: Internal state (B, z_dim)
+            x: Input (B, x_dim)
+        """
+        batch_size = z_n.shape[0] if hasattr(z_n, "shape") else 1
         return torch.full((batch_size,), self.value, dtype=torch.float)
 
 
@@ -95,7 +106,9 @@ def test_rollout_k_basic_accumulation():
     # Setup
     x = torch.randn(batch_size, 10)
     y = torch.zeros(batch_size, 9, 9)
-    s0 = (x, y)
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    s0 = (x, y, z_n)
 
     # Rewards: [1.0, 2.0, 3.0]
     rewards = [1.0, 2.0, 3.0]
@@ -128,7 +141,9 @@ def test_rollout_k_gamma_one_equals_sum():
 
     x = torch.randn(batch_size, 10)
     y = torch.zeros(batch_size, 9, 9)
-    s0 = (x, y)
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    s0 = (x, y, z_n)
 
     rewards = [1.0, 2.0, 3.0, 4.0]
     env = MockEnv(rewards)
@@ -163,7 +178,8 @@ def test_rollout_k_monte_carlo_when_k_equals_episode():
 
     x = torch.randn(batch_size, 10)
     y = torch.zeros(batch_size, 9, 9)
-    s0 = (x, y)
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    s0 = (x, y, z_n)
 
     # Episode terminates after 5 steps
     rewards = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -200,7 +216,8 @@ def test_rollout_k_truncated_plus_bootstrap():
 
     x = torch.randn(batch_size, 10)
     y = torch.zeros(batch_size, 9, 9)
-    s0 = (x, y)
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    s0 = (x, y, z_n)
 
     # Long episode (10 steps) but we only roll out K=3
     rewards = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
@@ -234,7 +251,8 @@ def test_rollout_k_zero_gamma():
 
     x = torch.randn(batch_size, 10)
     y = torch.zeros(batch_size, 9, 9)
-    s0 = (x, y)
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    s0 = (x, y, z_n)
 
     rewards = [5.0, 10.0, 15.0]
     env = MockEnv(rewards)
@@ -263,7 +281,8 @@ def test_rollout_k_returns_final_state():
 
     x = torch.randn(batch_size, 10)
     y = torch.zeros(batch_size, 9, 9)
-    s0 = (x, y)
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    s0 = (x, y, z_n)
 
     rewards = [1.0, 2.0, 3.0]
     env = MockEnv(rewards)
@@ -290,7 +309,8 @@ def test_rollout_k_early_termination():
 
     x = torch.randn(batch_size, 10)
     y = torch.zeros(batch_size, 9, 9)
-    s0 = (x, y)
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    s0 = (x, y, z_n)
 
     # Episode ends after 2 steps
     rewards = [1.0, 2.0, 0.0, 0.0, 0.0]
@@ -321,7 +341,8 @@ def test_rollout_k_no_grad():
 
     x = torch.randn(batch_size, 10, requires_grad=True)
     y = torch.zeros(batch_size, 9, 9, requires_grad=True)
-    s0 = (x, y)
+    z_n = torch.randn(batch_size, 128, requires_grad=True)  # Mock internal state
+    s0 = (x, y, z_n)
 
     rewards = [1.0, 2.0]
     env = MockEnv(rewards)
@@ -346,7 +367,8 @@ def test_rollout_k_batch_processing():
 
     x = torch.randn(batch_size, 10)
     y = torch.zeros(batch_size, 9, 9)
-    s0 = (x, y)
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    s0 = (x, y, z_n)
 
     # Both batch elements get same rewards for simplicity
     rewards = [1.0, 2.0, 3.0]
@@ -375,7 +397,8 @@ def test_rollout_k_single_step():
 
     x = torch.randn(batch_size, 10)
     y = torch.zeros(batch_size, 9, 9)
-    s0 = (x, y)
+    z_n = torch.randn(batch_size, 128)  # Mock internal state
+    s0 = (x, y, z_n)
 
     rewards = [3.0]
     env = MockEnv(rewards)
