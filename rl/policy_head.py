@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class PolicyHead:
+class PolicyHead(nn.Module):
     """Policy network that outputs edit actions given current state.
 
     The policy πφ(edit | x, state) learns to propose edits that will
@@ -95,7 +95,7 @@ class PolicyHead:
         pass
 
 
-class DiscretePolicyHead:
+class DiscretePolicyHead(nn.Module):
     """Discrete policy for categorical edit actions.
 
     Alternative to continuous PolicyHead for discrete edit spaces.
@@ -109,6 +109,7 @@ class DiscretePolicyHead:
             num_actions: Number of discrete edit actions
             hidden_dim: Dimension of hidden layers
         """
+        super().__init__()
         self.state_dim = state_dim
         self.num_actions = num_actions
         self.hidden_dim = hidden_dim
