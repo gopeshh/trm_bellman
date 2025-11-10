@@ -4,7 +4,60 @@ This module handles collecting K-step trajectories from the meta-MDP
 using the current policy, with value bootstrapping for finite horizons.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import torch
+
+
+@torch.no_grad()
+def rollout_k(
+    policy: Callable,
+    value_target: Callable,
+    env: Any,
+    s0: Tuple[torch.Tensor, torch.Tensor],
+    K: int,
+    gamma: float,
+) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    """Perform K-step rollout with bootstrapped target value.
+
+    Collects a K-step trajectory using the policy, accumulates discounted
+    rewards, and bootstraps with the target value function.
+
+    The return is computed as:
+        G = Σ_{t=0}^{K-1} γ^t * r_t + γ^K * V_target(s_K)
+
+    Args:
+        policy: Policy with sample(*s) -> (action, log_prob) method
+        value_target: Target value function with (*s) -> value method
+        env: Environment with step(s, a) -> (s', r, done, info) method
+        s0: Initial state (x, y)
+        K: Number of rollout steps
+        gamma: Discount factor
+
+    Returns:
+        Tuple of (G, s) where:
+            - G: Bootstrapped return (B,)
+            - s: Final state (x, y)
+    """
+    s = s0
+    G = 0.0
+    pow_gamma = 1.0
+
+    for _ in range(K):
+        a, _ = policy.sample(*s)
+        s_prime, r, done, info = env.step(s, a, s[0])  # env.step needs x
+        G = G + pow_gamma * r
+        pow_gamma *= gamma
+        s = s_prime
+
+        # Early termination if episode ends
+        if done.any():
+            break
+
+    # Bootstrap with target value
+    G = G + pow_gamma * value_target(*s)
+
+    return G, s
 
 
 class RolloutBuffer:
