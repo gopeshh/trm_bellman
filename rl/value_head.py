@@ -4,123 +4,76 @@ This module implements Vψ (value function) with an exponential moving average (
 target network for computing stable value targets during training.
 """
 
-from typing import Any
+from copy import deepcopy
+
+import torch
+import torch.nn as nn
 
 
-class ValueHead:
+class ValueHead(nn.Module):
     """Value function network that estimates state values.
 
-    The value function Vψ(x, state) estimates the expected return from
+    The value function Vψ(x, z) estimates the expected return from
     a given state, used for advantage estimation and bootstrapping.
 
+    Uses an EMA target network for stable value targets as in Eq. (3).
+
     Attributes:
-        state_dim: Dimension of state representations
-        hidden_dim: Dimension of hidden layers
-        ema_decay: Decay rate for EMA target network
+        z_dim: Dimension of internal state representations
+        x_dim: Dimension of input
+        hidden: Dimension of hidden layers
+        net: Online value network
+        target: Target network (EMA of online network)
     """
 
-    def __init__(
-        self,
-        state_dim: int,
-        hidden_dim: int = 256,
-        num_layers: int = 2,
-        ema_decay: float = 0.995,
-    ):
+    def __init__(self, z_dim: int, x_dim: int, hidden: int = 256):
         """Initialize value head with EMA target.
 
         Args:
-            state_dim: Dimension of state representations
-            hidden_dim: Dimension of hidden layers
-            num_layers: Number of hidden layers
-            ema_decay: Decay rate for EMA target (0.995 typical)
+            z_dim: Dimension of internal state representations
+            x_dim: Dimension of input
+            hidden: Dimension of hidden layers (default: 256)
         """
-        self.state_dim = state_dim
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
-        self.ema_decay = ema_decay
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(z_dim + x_dim, hidden), nn.ReLU(), nn.Linear(hidden, 1))
+        self.target = deepcopy(self.net)
+        for p in self.target.parameters():
+            p.requires_grad_(False)
 
-        # Target network will be created as EMA of online network
-        self.target_network = None
-
-    def forward(self, x: Any, state: Any) -> Any:
-        """Forward pass to compute state value.
+    def forward(self, z_n: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass to compute state value using online network.
 
         Args:
-            x: Input tensor (B, input_dim)
-            state: Current internal state (B, state_dim)
+            z_n: Internal state tensor (B, z_dim)
+            x: Input tensor (B, x_dim)
 
         Returns:
-            Value estimate (B, 1)
+            Value estimate (B,)
         """
-        pass
+        return self.net(torch.cat([z_n, x], dim=-1)).squeeze(-1)
 
-    def forward_target(self, x: Any, state: Any) -> Any:
-        """Forward pass using target network.
+    @torch.no_grad()
+    def target_value(self, z_n: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass using target network for stable bootstrapping.
 
         Args:
-            x: Input tensor (B, input_dim)
-            state: Current internal state (B, state_dim)
+            z_n: Internal state tensor (B, z_dim)
+            x: Input tensor (B, x_dim)
 
         Returns:
-            Target value estimate (B, 1)
+            Target value estimate (B,)
         """
-        pass
+        return self.target(torch.cat([z_n, x], dim=-1)).squeeze(-1)
 
-    def update_target(self):
+    @torch.no_grad()
+    def update_target(self, tau: float = 0.995):
         """Update target network using exponential moving average.
 
         Updates target parameters:
-            θ_target = ema_decay * θ_target + (1 - ema_decay) * θ_online
-        """
-        pass
-
-    def init_target(self):
-        """Initialize target network by copying online network parameters."""
-        pass
-
-
-class ValueHeadWithBaseline:
-    """Value head with input-dependent baseline for variance reduction.
-
-    Extends ValueHead with an additional baseline term V₀(x) that depends
-    only on the input, used to reduce variance in advantage estimation.
-    """
-
-    def __init__(
-        self,
-        state_dim: int,
-        input_dim: int,
-        hidden_dim: int = 256,
-        ema_decay: float = 0.995,
-    ):
-        """Initialize value head with baseline.
+            θ_target = tau * θ_target + (1 - tau) * θ_online
 
         Args:
-            state_dim: Dimension of state representations
-            input_dim: Dimension of input
-            hidden_dim: Dimension of hidden layers
-            ema_decay: Decay rate for EMA target
+            tau: EMA decay rate (default: 0.995)
         """
-        self.state_dim = state_dim
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.ema_decay = ema_decay
-
-    def forward(self, x: Any, state: Any) -> Any:
-        """Compute value with input baseline.
-
-        Returns:
-            V(x, state) = V₀(x) + ΔV(x, state)
-        """
-        pass
-
-    def baseline(self, x: Any) -> Any:
-        """Compute input-only baseline V₀(x).
-
-        Args:
-            x: Input tensor (B, input_dim)
-
-        Returns:
-            Baseline value (B, 1)
-        """
-        pass
+        for p, tp in zip(self.net.parameters(), self.target.parameters()):
+            tp.data.mul_(tau).add_(p.data, alpha=1 - tau)
