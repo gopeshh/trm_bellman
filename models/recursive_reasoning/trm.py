@@ -1,4 +1,4 @@
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List, Dict, Optional, Any
 from dataclasses import dataclass
 import math
 import torch
@@ -159,6 +159,17 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
             self.q_head.weight.zero_()
             self.q_head.bias.fill_(-5)  # type: ignore
 
+    def build_seq_info(self) -> Dict[str, Optional[CosSin]]:
+        return dict(
+            cos_sin=self.rotary_emb() if hasattr(self, "rotary_emb") else None,
+        )
+
+    def build_latent_context(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        return {
+            "seq_info": self.build_seq_info(),
+            "input_embeddings": self._input_embeddings(batch["inputs"], batch["puzzle_identifiers"]),
+        }
+
     def _input_embeddings(self, input: torch.Tensor, puzzle_identifiers: torch.Tensor):
         # Token embedding
         embedding = self.embed_tokens(input.to(torch.int32))
@@ -181,39 +192,57 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
         # Scale
         return self.embed_scale * embedding
 
-    def empty_carry(self, batch_size: int):
+    def empty_carry(self, batch_size: int, device: Optional[torch.device] = None):
+        device = device or self.H_init.device
         return TinyRecursiveReasoningModel_ACTV1InnerCarry(
-            z_H=torch.empty(batch_size, self.config.seq_len + self.puzzle_emb_len, self.config.hidden_size, dtype=self.forward_dtype),
-            z_L=torch.empty(batch_size, self.config.seq_len + self.puzzle_emb_len, self.config.hidden_size, dtype=self.forward_dtype),
+            z_H=torch.empty(
+                batch_size,
+                self.config.seq_len + self.puzzle_emb_len,
+                self.config.hidden_size,
+                dtype=self.forward_dtype,
+                device=device,
+            ),
+            z_L=torch.empty(
+                batch_size,
+                self.config.seq_len + self.puzzle_emb_len,
+                self.config.hidden_size,
+                dtype=self.forward_dtype,
+                device=device,
+            ),
         )
-        
+
     def reset_carry(self, reset_flag: torch.Tensor, carry: TinyRecursiveReasoningModel_ACTV1InnerCarry):
+        reset_flag = reset_flag.to(self.H_init.device)
         return TinyRecursiveReasoningModel_ACTV1InnerCarry(
             z_H=torch.where(reset_flag.view(-1, 1, 1), self.H_init, carry.z_H),
             z_L=torch.where(reset_flag.view(-1, 1, 1), self.L_init, carry.z_L),
         )
 
-    def forward(self, carry: TinyRecursiveReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        seq_info = dict(
-            cos_sin=self.rotary_emb() if hasattr(self, "rotary_emb") else None,
-        )
-
-        # Input encoding
-        input_embeddings = self._input_embeddings(batch["inputs"], batch["puzzle_identifiers"])
-
-        # Forward iterations
-        it = 0
+    def latent_step(
+        self,
+        carry: TinyRecursiveReasoningModel_ACTV1InnerCarry,
+        input_embeddings: torch.Tensor,
+        seq_info: Dict[str, Optional[CosSin]],
+    ) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
         z_H, z_L = carry.z_H, carry.z_L
-        # H_cycles-1 without grad
-        with torch.no_grad():
-            for _H_step in range(self.config.H_cycles-1):
-                for _L_step in range(self.config.L_cycles):
-                    z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
-                z_H = self.L_level(z_H, z_L, **seq_info)
-        # 1 with grad
         for _L_step in range(self.config.L_cycles):
             z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
         z_H = self.L_level(z_H, z_L, **seq_info)
+        return TinyRecursiveReasoningModel_ACTV1InnerCarry(z_H=z_H, z_L=z_L)
+
+    def forward(self, carry: TinyRecursiveReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        latent_context = self.build_latent_context(batch)
+        input_embeddings = latent_context["input_embeddings"]
+        seq_info = latent_context["seq_info"]
+
+        z = carry
+        # H_cycles-1 without grad
+        with torch.no_grad():
+            for _H_step in range(self.config.H_cycles - 1):
+                z = self.latent_step(z, input_embeddings, seq_info)
+        # 1 with grad
+        z = self.latent_step(z, input_embeddings, seq_info)
+        z_H, z_L = z.z_H, z.z_L
 
         # LM Outputs
         new_carry = TinyRecursiveReasoningModel_ACTV1InnerCarry(z_H=z_H.detach(), z_L=z_L.detach())  # New carry no grad
@@ -245,7 +274,77 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             
             current_data={k: torch.empty_like(v) for k, v in batch.items()}
         )
-        
+
+    def _standardize_latent_batch(self, x: Any, y: Any) -> Dict[str, torch.Tensor]:
+        """
+        Normalize the latent helper inputs to the batch dict format expected by the inner model.
+        """
+        if not isinstance(x, dict):
+            raise TypeError("Expected `x` to be a batch dict containing `inputs` and `puzzle_identifiers`.")
+        if "inputs" not in x or "puzzle_identifiers" not in x:
+            missing = {"inputs", "puzzle_identifiers"} - set(x.keys())
+            raise KeyError(f"Missing required keys for latent helpers: {missing}.")
+        return x
+
+    def _resolve_latent_context(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        """
+        Returns cached (or freshly computed) latent context for update_latent-style calls.
+        """
+        context = batch.get("_latent_context")
+        if context is None:
+            context = self.inner.build_latent_context(batch)
+        return context
+
+    def init_latent(self, x: Any, y: Any) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
+        """
+        Initialize z^(0) from (x, y) by reusing the standard inner carry reset logic.
+        """
+        batch = self._standardize_latent_batch(x, y)
+        batch_size = batch["inputs"].shape[0]
+        device = batch["inputs"].device
+        empty_carry = self.inner.empty_carry(batch_size, device=device)
+        reset_flag = torch.ones(batch_size, dtype=torch.bool, device=device)
+        return self.inner.reset_carry(reset_flag, empty_carry)
+
+    def update_latent(
+        self,
+        z: TinyRecursiveReasoningModel_ACTV1InnerCarry,
+        y: Any,
+        x: Any,
+    ) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
+        """
+        One application of the inner map f_theta(z, y, x) -> z_next.
+        """
+        batch = self._standardize_latent_batch(x, y)
+        context = self._resolve_latent_context(batch)
+        return self.inner.latent_step(z, context["input_embeddings"], context["seq_info"])
+
+    def unroll_latent(
+        self,
+        x: Any,
+        y: Any,
+        n: int,
+    ) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, List[TinyRecursiveReasoningModel_ACTV1InnerCarry]]:
+        """
+        Run the inner recursion for n steps starting from z^(0).
+        """
+        batch = dict(self._standardize_latent_batch(x, y))
+        batch["_latent_context"] = self.inner.build_latent_context(batch)
+
+        z = self.init_latent(batch, y)
+        zs: List[TinyRecursiveReasoningModel_ACTV1InnerCarry] = [z]
+        for _ in range(n):
+            z = self.update_latent(z, y, batch)
+            zs.append(z)
+        return z, zs
+
+    def eval_latent(self, x: Any, y: Any, n: int) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
+        """
+        Convenience wrapper used by RL code. Runs unroll_latent and returns only z^(n).
+        """
+        z_n, _ = self.unroll_latent(x, y, n)
+        return z_n
+
     def forward(self, carry: TinyRecursiveReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
 
         # Update data, carry (removing halted sequences)
