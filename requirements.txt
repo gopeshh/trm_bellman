@@ -17,4 +17,3 @@ setuptools-scm
 pydantic-core
 huggingface_hub 
 numba
-triton

@@ -10,6 +10,8 @@ import random
 from models.common import trunc_normal_init_
 from models.layers import rms_norm, LinearSwish, SwiGLU, Attention, RotaryEmbedding, CosSin, CastedEmbedding, CastedLinear
 from models.sparse_embedding import CastedSparseEmbedding
+from models.value_head import LatentValueHead
+from utils.lipschitz import apply_spectral_norm_to_trm, apply_spectral_norm_to_value_head
 
 IGNORE_LABEL_ID = -100
 
@@ -61,6 +63,13 @@ class TinyRecursiveReasoningModel_ACTV1Config(BaseModel):
     mlp_t: bool = False # use mlp on L instead of transformer
     puzzle_emb_len: int = 16 # if non-zero, its specified to this value
     no_ACT_continue: bool =  True # No continue ACT loss, only use the sigmoid of the halt which makes much more sense
+
+    # RL / value-head / contraction dials (defaults keep them OFF)
+    rl_enable_value_head: bool = False
+    rl_enable_contraction: bool = False
+    rl_value_hidden_dim: int = 256
+    rl_target_Lz: float = 0.9
+    rl_target_Lv: float = 1.0
 
 class TinyRecursiveReasoningModel_ACTV1Block(nn.Module):
     def __init__(self, config: TinyRecursiveReasoningModel_ACTV1Config) -> None:
@@ -258,6 +267,22 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         super().__init__()
         self.config = TinyRecursiveReasoningModel_ACTV1Config(**config_dict)
         self.inner = TinyRecursiveReasoningModel_ACTV1_Inner(self.config)
+        self.z_dim = self.config.hidden_size
+        self.x_embed_dim = self.config.hidden_size
+
+        if self.config.rl_enable_value_head:
+            self.value_head = LatentValueHead(
+                z_dim=self.z_dim,
+                x_dim=self.x_embed_dim,
+                hidden_dim=self.config.rl_value_hidden_dim,
+            )
+        else:
+            self.value_head = None
+
+        if self.config.rl_enable_contraction:
+            apply_spectral_norm_to_trm(self.inner)
+            if self.value_head is not None:
+                apply_spectral_norm_to_value_head(self.value_head)
 
     @property
     def puzzle_emb(self):
@@ -344,6 +369,30 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         """
         z_n, _ = self.unroll_latent(x, y, n)
         return z_n
+
+    def used_value(self, x: Dict[str, torch.Tensor], y: Any, n: int) -> torch.Tensor:
+        """
+        Compute U_n(s) = V_ψ(z^(n)(s), x) for a batch.
+
+        - x: batch dict with at least ["inputs", "puzzle_identifiers"]
+        - y: plan (currently unused, kept for future RL integration)
+        - n: number of inner latent steps
+        """
+        if self.value_head is None:
+            raise RuntimeError("Value head is not enabled; set rl_enable_value_head=True in the config.")
+
+        # 1) Run episodic latent unrolling to get z^(n)
+        z_n, _ = self.unroll_latent(x, y, n)
+        z_vec = z_n.z_H.mean(dim=1)
+
+        # 2) Build a fresh latent context to obtain input embeddings and summarize x
+        batch = self._standardize_latent_batch(x, y)
+        latent_context = self.inner.build_latent_context(batch)
+        input_embeddings = latent_context["input_embeddings"]
+        x_embed = input_embeddings.mean(dim=1)
+
+        # 3) Apply value head
+        return self.value_head(z_vec, x_embed)
 
     def forward(self, carry: TinyRecursiveReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
 
