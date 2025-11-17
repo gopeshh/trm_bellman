@@ -9,6 +9,10 @@ from rl.upi_trm_trainer import UPITrmTrainer
 from upi_trm_train import DummyPuzzleDataset, dummy_checker
 
 
+def _num_actions(seq_len: int, vocab_size: int) -> int:
+    return seq_len * vocab_size + 1
+
+
 def _tiny_trm_cfg(seq_len: int, vocab_size: int, num_identifiers: int, batch_size: int):
     return dict(
         batch_size=batch_size,
@@ -35,15 +39,15 @@ def _tiny_trm_cfg(seq_len: int, vocab_size: int, num_identifiers: int, batch_siz
         rl_enable_value_head=True,
         rl_enable_contraction=False,
         rl_enable_policy_head=True,
-        rl_num_actions=4,
+        rl_num_actions=_num_actions(seq_len, vocab_size),
     )
 
 
 def test_k_step_value_update_runs():
     dataset = DummyPuzzleDataset(num_instances=8, seq_len=8, vocab_size=16)
-    env_cfg = PlanEditEnvConfig(max_edits=4, gamma=0.9, reward_shaping=True)
+    env_cfg = PlanEditEnvConfig(max_edits=4, gamma=0.9, reward_shaping=True, vocab_size=dataset.vocab_size)
     env = PlanEditEnv(dataset=dataset, checker=dummy_checker, config=env_cfg)
-    env.set_stop_action_id(stop_id=3)
+    env.set_stop_action_id(stop_id=_num_actions(dataset.seq_len, dataset.vocab_size) - 1)
 
     rl_cfg = RLConfig(
         batch_size=4,

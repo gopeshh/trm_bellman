@@ -38,4 +38,5 @@ class RLConfig(BaseModel):
     eval_interval: int = 50
     eval_num_episodes: int = 50
     use_tqdm: bool = True
+    debug_checks: bool = False
 

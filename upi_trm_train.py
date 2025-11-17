@@ -142,6 +142,7 @@ def parse_args():
     parser.add_argument("--eval-episodes", type=int, default=50, help="Number of episodes per evaluation call.")
     parser.add_argument("--no-tqdm", action="store_true", help="Disable tqdm progress bar.")
     parser.add_argument("--seed", type=int, default=None, help="Optional global random seed.")
+    parser.add_argument("--debug-checks", action="store_true", help="Enable additional debug assertions/prints.")
     parser.add_argument(
         "--config",
         type=str,
@@ -166,6 +167,7 @@ def main():
         eval_interval=args.eval_interval,
         eval_num_episodes=args.eval_episodes,
         use_tqdm=not args.no_tqdm,
+        debug_checks=args.debug_checks,
     )
 
     if args.config is not None:
@@ -184,10 +186,12 @@ def main():
         max_edits=rl_cfg.max_edits,
         gamma=rl_cfg.gamma,
         reward_shaping=True,
+        vocab_size=vocab_size,
     )
     env = PlanEditEnv(dataset=dataset, checker=dummy_checker, config=env_cfg)
 
-    rl_num_actions = 4  # placeholder discrete action space (3 edits + STOP)
+    num_edit_actions = seq_len * vocab_size
+    rl_num_actions = num_edit_actions + 1  # STOP action appended at the end
     env.set_stop_action_id(stop_id=rl_num_actions - 1)
 
     trm_cfg_dict = dict(
@@ -214,6 +218,8 @@ def main():
         no_ACT_continue=True,
         rl_enable_value_head=True,
         rl_enable_contraction=rl_cfg.enable_contraction,
+        rl_target_Lz=rl_cfg.target_Lz,
+        rl_target_Lv=rl_cfg.target_Lv,
         rl_enable_policy_head=True,
         rl_num_actions=rl_num_actions,
     )

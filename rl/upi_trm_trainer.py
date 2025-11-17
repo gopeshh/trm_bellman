@@ -1,6 +1,6 @@
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, List, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -10,6 +10,7 @@ from evaluators.rl_plan_evaluator import evaluate_plan_policy
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from utils.lipschitz import estimate_local_Lz
 
 
 @dataclass
@@ -58,6 +59,7 @@ class UPITrmTrainer:
         self.env_config: PlanEditEnvConfig = env.config
         self.rl_cfg = rl_cfg
         self.device = device
+        self.debug_checks = bool(getattr(self.rl_cfg, "debug_checks", False))
 
         self.replay = ReplayBuffer(capacity=rl_cfg.replay_capacity)
 
@@ -83,6 +85,8 @@ class UPITrmTrainer:
             if "edit_policy" in name:
                 continue
             value_params.append(param)
+
+        self._freeze_policy_backbone()
 
         policy_params: List[nn.Parameter] = []
         for name, param in self.policy_model_candidate.named_parameters():
@@ -127,16 +131,103 @@ class UPITrmTrainer:
 
     def _sync_policy_old_towards_candidate(self) -> None:
         """
-        Conservatively move policy_model_old parameters towards policy_model_candidate.
+        Conservatively move only the edit-policy head parameters of policy_model_old
+        towards policy_model_candidate. The value/evaluator backbone stays under
+        the control of the value optimizer.
         """
 
         alpha = self.rl_cfg.mixture_alpha
         if alpha <= 0.0:
             return
 
+        non_edit_snapshot: Dict[str, torch.Tensor] = {}
         with torch.no_grad():
-            for p_old, p_new in zip(self.policy_model_old.parameters(), self.policy_model_candidate.parameters()):
+            params_old = dict(self.policy_model_old.named_parameters())
+            params_new = dict(self.policy_model_candidate.named_parameters())
+            if self.debug_checks:
+                for name, p_old in params_old.items():
+                    if name.startswith("edit_policy"):
+                        continue
+                    non_edit_snapshot[name] = p_old.data.clone()
+            for name, p_new in params_new.items():
+                if not name.startswith("edit_policy"):
+                    continue
+                p_old = params_old.get(name)
+                if p_old is None:
+                    continue
                 p_old.data.mul_(1.0 - alpha).add_(p_new.data, alpha=alpha)
+        if self.debug_checks and non_edit_snapshot:
+            with torch.no_grad():
+                for name, before in non_edit_snapshot.items():
+                    current = dict(self.policy_model_old.named_parameters()).get(name)
+                    if current is None:
+                        continue
+                    if not torch.allclose(current.data, before, atol=1e-7, rtol=1e-5):
+                        raise AssertionError(
+                            f"_sync_policy_old_towards_candidate unexpectedly modified non-edit parameter `{name}`"
+                        )
+
+    def _freeze_policy_backbone(self) -> None:
+        """
+        Only allow the edit-policy head parameters to receive policy-gradient updates.
+        """
+
+        # Candidate policy (actor)
+        if self.policy_model_candidate.edit_policy is not None:
+            for name, param in self.policy_model_candidate.named_parameters():
+                trainable = name.startswith("edit_policy")
+                param.requires_grad_(trainable)
+
+        # Old policy model (deployed policy, aliased with self.model)
+        if self.policy_model_old.edit_policy is not None:
+            for name, param in self.policy_model_old.named_parameters():
+                trainable = name.startswith("edit_policy")
+                if self.policy_model_old is self.model:
+                    # Preserve critic training while still documenting which params participate in policy gradients.
+                    if trainable:
+                        param.requires_grad_(True)
+                else:
+                    param.requires_grad_(param.requires_grad and trainable)
+
+    def _maybe_run_value_debug_checks(self, x_batch: Dict[str, torch.Tensor], y_batch: torch.Tensor) -> None:
+        if not self.debug_checks or self.model.value_head is None:
+            return
+        self._debug_assert_plan_affects_value(x_batch, y_batch)
+        self._debug_log_local_contraction(x_batch, y_batch)
+
+    def _debug_assert_plan_affects_value(
+        self, x_batch: Dict[str, torch.Tensor], y_batch: torch.Tensor
+    ) -> None:
+        if y_batch.dim() == 0 or y_batch.shape[0] < 2:
+            return
+        perm = torch.randperm(y_batch.shape[0], device=y_batch.device)
+        y_shuffled = y_batch[perm]
+        if torch.equal(y_shuffled, y_batch):
+            return
+        with torch.no_grad():
+            v_orig = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+            v_perm = self.model.used_value(x_batch, y_shuffled, n=self.rl_cfg.inner_unroll_n)
+        if torch.allclose(v_orig, v_perm, atol=1e-5, rtol=1e-4):
+            raise AssertionError("used_value outputs are invariant to plan changes in debug mode.")
+
+    def _debug_log_local_contraction(self, x_batch: Dict[str, torch.Tensor], y_batch: torch.Tensor) -> None:
+        if y_batch.numel() == 0:
+            return
+        x_single = {k: v[:1].detach().clone() for k, v in x_batch.items()}
+        y_single = y_batch[:1].detach().clone()
+        try:
+            with torch.no_grad():
+                carry = self.model.eval_latent(x_single, y_single, n=self.rl_cfg.inner_unroll_n)
+                latent_batch = self.model._standardize_latent_batch(x_single, y_single)
+                context = self.model._build_latent_context_with_plan(latent_batch)
+                est = estimate_local_Lz(self.model.inner, carry, context, num_samples=2)
+            print(
+                "[debug] est_local_Lz={:.4f} target_Lz={:.3f} target_Lv={:.3f}".format(
+                    est, float(self.model.config.rl_target_Lz), float(self.model.config.rl_target_Lv)
+                )
+            )
+        except Exception as exc:
+            print(f"[debug] local Lipschitz estimate failed: {exc}")
 
     def collect_episode(self) -> None:
         """
@@ -197,7 +288,9 @@ class UPITrmTrainer:
             if not torch.is_tensor(tensor):
                 tensor = torch.as_tensor(tensor)
             if not batched:
-                if tensor.ndim == 0 or key == "inputs":
+                if tensor.ndim == 0:
+                    tensor = tensor.unsqueeze(0)
+                elif key == "inputs" and tensor.ndim == 1:
                     tensor = tensor.unsqueeze(0)
             batch[key] = tensor.to(self.device)
         return batch
@@ -363,9 +456,11 @@ class UPITrmTrainer:
         if len(self.replay) < self.rl_cfg.batch_size:
             return 0.0
 
+        debug_batch: Optional[Tuple[Dict[str, torch.Tensor], torch.Tensor]] = None
         if self.rl_cfg.K == 1:
             transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
             x_batch, y_batch, x_next_batch, y_next_batch, _, rewards, dones = self._stack_batch(transitions)
+            debug_batch = (x_batch, y_batch)
 
             self.model.train()
             self.value_opt.zero_grad()
@@ -387,6 +482,7 @@ class UPITrmTrainer:
                 rewards_K,
                 dones_K,
             ) = self._sample_k_step_batch(self.rl_cfg.batch_size)
+            debug_batch = (x_batch, y_batch)
 
             self.model.train()
             self.value_opt.zero_grad()
@@ -405,6 +501,9 @@ class UPITrmTrainer:
         loss_val.backward()
         self.value_opt.step()
         self._soft_update_target()
+
+        if debug_batch is not None:
+            self._maybe_run_value_debug_checks(*debug_batch)
 
         return float(loss_val.item())
 

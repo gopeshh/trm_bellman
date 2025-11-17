@@ -25,21 +25,25 @@ def dummy_checker(x, y) -> float:
 
 def test_plan_edit_env_step_and_stop():
     dataset = DummyDataset()
-    cfg = PlanEditEnvConfig(max_edits=3, gamma=0.99, reward_shaping=True)
+    cfg = PlanEditEnvConfig(max_edits=3, gamma=0.99, reward_shaping=True, vocab_size=4)
     env = PlanEditEnv(dataset, dummy_checker, cfg)
-    env.set_stop_action_id(stop_id=0)
+    seq_len = dataset.data[0]["inputs"].numel()
+    stop_id = seq_len * cfg.vocab_size
+    env.set_stop_action_id(stop_id=stop_id)
 
     x, y = env.reset()
     assert env.step_count == 0
     assert env.done is False
 
-    # Take a non-stop action (no-op edit by default)
-    (x1, y1), r1, done1, _ = env.step(action=1)
+    # Take a non-stop action (edit position 1 -> token 2)
+    edit_action = 1 * cfg.vocab_size + 2
+    (x1, y1), r1, done1, _ = env.step(action=edit_action)
     assert env.step_count == 1
     assert done1 is False
+    assert torch.equal(y1, torch.tensor([0, 2, 0]))
 
     # Take STOP action
-    (x2, y2), r2, done2, _ = env.step(action=0)
+    (x2, y2), r2, done2, _ = env.step(action=stop_id)
     assert done2 is True
     assert env.done is True
 
