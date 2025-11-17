@@ -20,6 +20,8 @@ class Transition:
     x_next: Any
     y_next: Any
     done: torch.Tensor
+    episode_id: int
+    timestep: int
 
 
 class ReplayBuffer:
@@ -80,6 +82,7 @@ class UPITrmTrainer:
         for param in self.target_model.parameters():
             param.requires_grad_(False)
         self._hard_update_target()
+        self._next_episode_id: int = 0
 
     def _config_to_dict(self, config: Any) -> Dict[str, Any]:
         if hasattr(config, "model_dump"):
@@ -102,6 +105,8 @@ class UPITrmTrainer:
         """
 
         self.model.eval()
+        episode_id = self._next_episode_id
+        t = 0
         x, y = self.env.reset()
         done = False
         edit_budget = min(self.rl_cfg.max_edits, self.env_config.max_edits)
@@ -124,10 +129,15 @@ class UPITrmTrainer:
                 x_next=self._clone_state(x_next),
                 y_next=self._clone_state(y_next),
                 done=torch.tensor([done], dtype=torch.bool),
+                episode_id=episode_id,
+                timestep=t,
             )
             self.replay.add(transition)
 
             x, y = x_next, y_next
+            t += 1
+
+        self._next_episode_id += 1
 
     def _prepare_batch_x(self, x: Dict[str, torch.Tensor], batched: bool) -> Dict[str, torch.Tensor]:
         """
@@ -230,29 +240,127 @@ class UPITrmTrainer:
             return False
         return inputs.shape[0] == puzzle_ids.shape[0]
 
+    def _sample_k_step_batch(
+        self, batch_size: int
+    ) -> Tuple[
+        Dict[str, torch.Tensor],
+        torch.Tensor,
+        Dict[str, torch.Tensor],
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """
+        Sample a batch of K-step segments from replay, collecting up to K rewards per start state.
+        """
+
+        assert self.rl_cfg.K >= 1, "RLConfig.K must be >= 1."
+        storage = list(self.replay.storage)
+        assert len(storage) >= batch_size, "Not enough transitions in replay buffer"
+
+        indices = torch.randint(low=0, high=len(storage), size=(batch_size,)).tolist()
+        horizon = self.rl_cfg.K
+
+        start_inputs: List[torch.Tensor] = []
+        start_puzzle_ids: List[torch.Tensor] = []
+        start_plans: List[torch.Tensor] = []
+
+        end_inputs: List[torch.Tensor] = []
+        end_puzzle_ids: List[torch.Tensor] = []
+        end_plans: List[torch.Tensor] = []
+
+        rewards_K = torch.zeros(batch_size, horizon, dtype=torch.float32, device=self.device)
+        dones_K = torch.zeros(batch_size, horizon, dtype=torch.bool, device=self.device)
+
+        for batch_idx, start_idx in enumerate(indices):
+            transition = storage[start_idx]
+            start_inputs.append(transition.x["inputs"])
+            start_puzzle_ids.append(transition.x["puzzle_identifiers"])
+            start_plans.append(self._plan_tensor(transition.y))
+
+            last_transition = transition
+            current_idx = start_idx
+            steps = 0
+            while steps < horizon and current_idx < len(storage):
+                current = storage[current_idx]
+                if current.episode_id != transition.episode_id:
+                    break
+
+                last_transition = current
+                reward_value = float(current.reward.view(-1)[0].item())
+                done_value = bool(current.done.view(-1)[0].item())
+
+                rewards_K[batch_idx, steps] = reward_value
+                dones_K[batch_idx, steps] = done_value
+
+                steps += 1
+                if done_value:
+                    break
+                current_idx += 1
+
+            end_inputs.append(last_transition.x_next["inputs"])
+            end_puzzle_ids.append(last_transition.x_next["puzzle_identifiers"])
+            end_plans.append(self._plan_tensor(last_transition.y_next))
+
+        x_batch = {
+            "inputs": torch.stack(start_inputs, dim=0).to(self.device),
+            "puzzle_identifiers": torch.stack(start_puzzle_ids, dim=0).to(self.device),
+        }
+        y_batch = torch.stack(start_plans, dim=0).to(self.device)
+
+        xK_batch = {
+            "inputs": torch.stack(end_inputs, dim=0).to(self.device),
+            "puzzle_identifiers": torch.stack(end_puzzle_ids, dim=0).to(self.device),
+        }
+        yK_batch = torch.stack(end_plans, dim=0).to(self.device)
+
+        return x_batch, y_batch, xK_batch, yK_batch, rewards_K, dones_K
+
     def value_update(self) -> float:
-        """
-        Perform one value-function update using K-step bootstrapped targets.
-        Here we use a simplified 1-step TD version for code clarity.
-        """
+        """Perform one value-function update using either 1-step or K-step bootstrapped targets."""
 
         if len(self.replay) < self.rl_cfg.batch_size:
             return 0.0
 
-        transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
-        x_batch, y_batch, x_next_batch, y_next_batch, _, rewards, dones = self._stack_batch(transitions)
+        if self.rl_cfg.K == 1:
+            transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
+            x_batch, y_batch, x_next_batch, y_next_batch, _, rewards, dones = self._stack_batch(transitions)
 
-        self.model.train()
-        self.value_opt.zero_grad()
+            self.model.train()
+            self.value_opt.zero_grad()
 
-        with torch.no_grad():
-            v_next = self.target_model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
-            mask = (~dones).float()
-            v_next = v_next * mask
+            with torch.no_grad():
+                v_next = self.target_model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
+                mask = (~dones).float()
+                v_next = v_next * mask
 
-        v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
-        td_target = rewards + self.rl_cfg.gamma * v_next
-        loss_val = F.mse_loss(v_s, td_target.detach())
+            v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+            td_target = rewards + self.rl_cfg.gamma * v_next
+            loss_val = F.mse_loss(v_s, td_target.detach())
+        else:
+            (
+                x_batch,
+                y_batch,
+                xK_batch,
+                yK_batch,
+                rewards_K,
+                dones_K,
+            ) = self._sample_k_step_batch(self.rl_cfg.batch_size)
+
+            self.model.train()
+            self.value_opt.zero_grad()
+
+            with torch.no_grad():
+                v_K = self.target_model.used_value(xK_batch, yK_batch, n=self.rl_cfg.inner_unroll_n)
+                terminal_mask = dones_K.any(dim=1).float()
+                v_K = v_K * (1.0 - terminal_mask)
+                gammas = rewards_K.new_tensor([self.rl_cfg.gamma ** k for k in range(self.rl_cfg.K)])
+                returns = (rewards_K * gammas).sum(dim=1) + (self.rl_cfg.gamma ** self.rl_cfg.K) * v_K
+                G_K = returns
+
+            v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+            loss_val = F.mse_loss(v_s, G_K.detach())
+
         loss_val.backward()
         self.value_opt.step()
         self._soft_update_target()
