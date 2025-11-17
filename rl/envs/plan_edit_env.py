@@ -125,7 +125,7 @@ class PlanEditEnv:
         max_edit_action = num_positions * vocab_size
 
         if action < 0 or action >= max_edit_action:
-            # Invalid edit: no-op.
+            # Invalid edit: no-op; return the original plan.
             return plan_tensor
 
         pos = action // vocab_size

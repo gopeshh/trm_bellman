@@ -455,11 +455,14 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
 
     def used_value(self, x: Dict[str, torch.Tensor], y: Any, n: int) -> torch.Tensor:
         """
-        Compute U_n(s) = V_ψ(z^(n)(s), x) for a batch.
+        Compute U_n(s) = V_ψ(z^(n)(s), x) for a batch, using the episodic latent variant:
 
         - x: batch dict with at least ["inputs", "puzzle_identifiers"]
         - y: plan tensor (same batch size and shape as `inputs`), used to build plan embeddings.
         - n: number of inner latent steps
+
+        This function reinitializes z^(0) from (x, y) and applies the inner map
+        f_θ n times; it does not reuse the ACT carry from the supervised TRM forward.
         """
         if self.value_head is None:
             raise RuntimeError("Value head is not enabled; set rl_enable_value_head=True in the config.")
@@ -489,6 +492,10 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
     ) -> Categorical:
         """
         Produce a Categorical distribution over edit actions given (x, y).
+
+        This uses the episodic latent evaluator: it reinitializes z^(0) from (x, y),
+        unrolls the inner recursion for n steps to obtain z^(n), and then queries the
+        edit-policy head on (z^(n), x_embed, y_embed).
 
         - x: batch dict with at least ["inputs", "puzzle_identifiers"]
         - y: plan tensor (same batch size), currently assumed to have shape compatible with inputs.

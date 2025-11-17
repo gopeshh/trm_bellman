@@ -292,7 +292,12 @@ class UPITrmTrainer:
                     tensor = tensor.unsqueeze(0)
                 elif key == "inputs" and tensor.ndim == 1:
                     tensor = tensor.unsqueeze(0)
-            batch[key] = tensor.to(self.device)
+            tensor = tensor.to(self.device)
+            if key == "inputs":
+                tensor = tensor.to(torch.long)
+            elif key == "puzzle_identifiers":
+                tensor = tensor.to(torch.long)
+            batch[key] = tensor
         return batch
 
     def _prepare_plan(self, y: Any, batched: bool) -> torch.Tensor:
@@ -310,7 +315,7 @@ class UPITrmTrainer:
             plan = torch.as_tensor(plan)
         if not batched:
             plan = plan.unsqueeze(0)
-        return plan.to(self.device)
+        return plan.to(self.device).to(torch.long)
 
     def _stack_batch(
         self, transitions: List[Transition]
@@ -522,6 +527,10 @@ class UPITrmTrainer:
         self.policy_model_candidate.train()
         self.policy_opt.zero_grad()
 
+        # For the actor, we use 1-step TD with the current value network (self.model),
+        # not the EMA target_model. This keeps the policy update tightly coupled to
+        # the latest critic, while the target network is reserved for stabilizing
+        # value-learning.
         with torch.no_grad():
             v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
             v_next = self.model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
@@ -552,10 +561,27 @@ class UPITrmTrainer:
         loss_val = self.value_update()
         loss_policy = self.policy_update()
 
-        return {
+        debug_metrics: Dict[str, float] = {}
+        if self.rl_cfg.debug_checks and len(self.replay) >= self.rl_cfg.batch_size:
+            with torch.no_grad():
+                transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
+                x_b, y_b, x_next_b, y_next_b, _, rewards_b, dones_b = self._stack_batch(transitions)
+                v_s = self.model.used_value(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
+                v_next = self.model.used_value(x_next_b, y_next_b, n=self.rl_cfg.inner_unroll_n)
+                mask = (~dones_b).float()
+                td_target = rewards_b + self.rl_cfg.gamma * v_next * mask
+                adv = td_target - v_s
+                debug_metrics["value_mean"] = float(v_s.mean().item())
+                debug_metrics["value_std"] = float(v_s.std(unbiased=False).item())
+                debug_metrics["adv_mean"] = float(adv.mean().item())
+                debug_metrics["adv_std"] = float(adv.std(unbiased=False).item())
+
+        metrics = {
             "loss_value": loss_val,
             "loss_policy": loss_policy,
         }
+        metrics.update(debug_metrics)
+        return metrics
 
     def evaluate_policy_success_rate(self, env_cfg: PlanEditEnvConfig, dataset: Any, checker: Any) -> float:
         """
