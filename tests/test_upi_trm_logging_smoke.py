@@ -56,6 +56,7 @@ def test_logging_and_eval_hooks_run():
         eval_interval=2,
         eval_num_episodes=5,
         use_tqdm=False,
+        gamma=env_cfg.gamma,
     )
 
     model_cfg = _tiny_trm_cfg(

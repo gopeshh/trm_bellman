@@ -55,6 +55,7 @@ def test_k_step_value_update_runs():
         rollout_episodes_per_step=1,
         max_edits=4,
         K=3,
+        gamma=env_cfg.gamma,
     )
 
     model_cfg = _tiny_trm_cfg(

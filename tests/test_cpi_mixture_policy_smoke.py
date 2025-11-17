@@ -54,6 +54,7 @@ def test_cpi_mixture_policy_runs():
         max_edits=4,
         K=1,
         mixture_alpha=0.1,
+        gamma=env_cfg.gamma,
     )
 
     model_cfg = _tiny_trm_cfg(

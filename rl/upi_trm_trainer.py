@@ -1,3 +1,4 @@
+import math
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional, Tuple
@@ -58,10 +59,17 @@ class UPITrmTrainer:
         self.env = env
         self.env_config: PlanEditEnvConfig = env.config
         self.rl_cfg = rl_cfg
+        assert math.isclose(
+            self.env_config.gamma,
+            self.rl_cfg.gamma,
+            rel_tol=1e-6,
+            abs_tol=1e-8,
+        ), f"Env gamma ({self.env_config.gamma}) and RL gamma ({self.rl_cfg.gamma}) must match."
         self.device = device
         self.debug_checks = bool(getattr(self.rl_cfg, "debug_checks", False))
 
         self.replay = ReplayBuffer(capacity=rl_cfg.replay_capacity)
+        self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}
 
         self.target_model = TinyRecursiveReasoningModel_ACTV1(self._config_to_dict(self.model.config)).to(device)
         self.target_model.eval()
@@ -242,6 +250,7 @@ class UPITrmTrainer:
         x, y = self.env.reset()
         done = False
         edit_budget = min(self.rl_cfg.max_edits, self.env_config.max_edits)
+        last_info: Optional[Dict[str, Any]] = None
 
         while not done and self.env.step_count < edit_budget:
             batched = self._state_is_batched(x)
@@ -251,7 +260,8 @@ class UPITrmTrainer:
             dist = self._mixed_policy_dist(batch_x, batch_y, n=self.rl_cfg.inner_unroll_n)
             action = dist.sample()
 
-            (x_next, y_next), reward, done, _ = self.env.step(action.item())
+            (x_next, y_next), reward, done, info = self.env.step(action.item())
+            last_info = info
 
             transition = Transition(
                 x=self._clone_state(x),
@@ -270,6 +280,10 @@ class UPITrmTrainer:
             t += 1
 
         self._next_episode_id += 1
+        if last_info is not None:
+            reason = last_info.get("done_reason")
+            if reason in self.term_stats:
+                self.term_stats[reason] += 1
 
     def _prepare_batch_x(self, x: Dict[str, torch.Tensor], batched: bool) -> Dict[str, torch.Tensor]:
         """
@@ -579,6 +593,9 @@ class UPITrmTrainer:
         metrics = {
             "loss_value": loss_val,
             "loss_policy": loss_policy,
+            "term_stop": float(self.term_stats["stop"]),
+            "term_solved": float(self.term_stats["solved"]),
+            "term_budget": float(self.term_stats["budget"]),
         }
         metrics.update(debug_metrics)
         return metrics

@@ -12,6 +12,7 @@ class PlanEditEnvConfig:
     # Optional task type for future specialization (e.g., "sudoku", "arc", "maze")
     task_type: Optional[str] = None
     vocab_size: Optional[int] = None  # number of discrete plan tokens
+    solved_threshold: Optional[float] = None  # checker score that auto-terminates when reached
 
 
 class PlanEditEnv:
@@ -148,29 +149,74 @@ class PlanEditEnv:
         assert self.stop_action_id is not None, "stop_action_id must be set before calling step()"
         assert not self.done, "Cannot call step() on a finished episode. Call reset() first."
 
+        done_reason: Optional[str] = None
+        terminated_by_stop = False
+        terminated_by_budget = False
+        terminated_by_solved = False
+
         self.step_count += 1
         if action == self.stop_action_id:
             # terminal, no edit
             y_next = self.y
             done = True
+            done_reason = "stop"
+            terminated_by_stop = True
         else:
             y_next = self.apply_edit(self.y, action, self.x)
-            done = self.step_count >= self.config.max_edits
+            done = False
+
+        pending_budget_termination = False
+        if not done and self.step_count >= self.config.max_edits:
+            done = True
+            pending_budget_termination = True
+
+        phi_old: Optional[float] = None
+        phi_new: Optional[float] = None
+
+        if self.config.reward_shaping:
+            phi_old = float(self.checker(self.x, self.y))
+
+        needs_phi_new = (
+            done or self.config.reward_shaping or self.config.solved_threshold is not None
+        )
+        if needs_phi_new:
+            phi_new = float(self.checker(self.x, y_next))
+
+        solved = (
+            self.config.solved_threshold is not None
+            and phi_new is not None
+            and phi_new >= self.config.solved_threshold
+        )
+        if solved:
+            done = True
+            if done_reason is None:
+                done_reason = "solved"
+            terminated_by_solved = True
+
+        if done_reason is None and pending_budget_termination:
+            done_reason = "budget"
+            terminated_by_budget = True
 
         # Base reward from checker: only on terminal step
-        r_base = 0.0
-        if done:
-            r_base = float(self.checker(self.x, y_next))
+        r_base = float(phi_new) if done and phi_new is not None else 0.0
 
         # Potential-based shaping
         if self.config.reward_shaping:
-            phi_old = float(self.checker(self.x, self.y))
-            phi_new = float(self.checker(self.x, y_next))
+            assert phi_old is not None and phi_new is not None
             r = r_base + self.config.gamma * phi_new - phi_old
         else:
             r = r_base
 
+        info = {
+            "done_reason": done_reason,
+            "terminated_by_stop": terminated_by_stop,
+            "terminated_by_budget": terminated_by_budget,
+            "terminated_by_solved": terminated_by_solved,
+            "phi_old": phi_old,
+            "phi_new": phi_new,
+        }
+
         self.y = y_next
         self.done = done
-        return (self.x, self.y), r, done, {}
+        return (self.x, self.y), r, done, info
 
