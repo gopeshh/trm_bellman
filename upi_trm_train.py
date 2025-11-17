@@ -16,15 +16,39 @@ from rl.upi_trm_trainer import UPITrmTrainer
 from utils.seeding import set_global_seed
 
 
+def _to_plan_tensor(value):
+    if torch.is_tensor(value):
+        return value
+    return torch.as_tensor(value)
+
+
 def dummy_checker(x, y) -> float:
     """
     Placeholder checker: reward is negative L1 distance between plan and inputs.
     """
     target = x["inputs"]
-    plan = y if torch.is_tensor(y) else torch.as_tensor(y)
+    plan = _to_plan_tensor(y)
     target = target.to(torch.float32)
     plan = plan.to(torch.float32)
     return float(-(target - plan).abs().mean().item())
+
+
+def sudoku_checker(x, y) -> float:
+    """
+    Returns the fraction of cells where the current plan matches the Sudoku solution (in [0, 1]).
+    Falls back to dummy_checker if no solution is attached to the sample.
+    """
+
+    solution = x.get("solution")
+    if solution is None:
+        return dummy_checker(x, y)
+
+    plan = _to_plan_tensor(y).to(torch.long)
+    solution_tensor = _to_plan_tensor(solution).to(torch.long)
+    if plan.shape != solution_tensor.shape:
+        solution_tensor = solution_tensor.view_as(plan)
+    matches = (plan == solution_tensor).to(torch.float32)
+    return float(matches.mean().item())
 
 
 class DummyPuzzleDataset:
@@ -46,6 +70,7 @@ class DummyPuzzleDataset:
                     "inputs": inputs,
                     "puzzle_identifiers": puzzle_identifier,
                     "initial_plan": torch.zeros_like(inputs),
+                        "solution": inputs.clone(),  # dummy solution identical to inputs
                 }
             )
 
@@ -99,15 +124,18 @@ def build_dataset_from_paths(
             for _set_name, batch, _ in iterable:
                 batch_inputs = batch["inputs"]
                 batch_ids = batch["puzzle_identifiers"]
+                batch_labels = batch.get("labels")
                 batch_size = batch_inputs.shape[0]
                 for i in range(batch_size):
                     inputs = batch_inputs[i].clone()
                     puzzle_id = batch_ids[i].clone()
+                    solution = batch_labels[i].clone() if batch_labels is not None else None
                     samples.append(
                         {
                             "inputs": inputs,
                             "puzzle_identifiers": puzzle_id,
                             "initial_plan": torch.zeros_like(inputs),
+                            **({"solution": solution} if solution is not None else {}),
                         }
                     )
                     if len(samples) >= pool_size:
@@ -182,13 +210,23 @@ def main():
         pool_size=max(rl_cfg.batch_size, 8),
     )
 
+    checker_fn = sudoku_checker
+    if len(dataset) == 0:
+        checker_fn = dummy_checker
+    else:
+        sample = dataset[0]
+        if not (isinstance(sample, dict) and "solution" in sample):
+            checker_fn = dummy_checker
+    is_sudoku_checker = checker_fn is sudoku_checker
+
     env_cfg = PlanEditEnvConfig(
         max_edits=rl_cfg.max_edits,
         gamma=rl_cfg.gamma,
         reward_shaping=True,
         vocab_size=vocab_size,
+        solved_threshold=1.0 if is_sudoku_checker else None,
     )
-    env = PlanEditEnv(dataset=dataset, checker=dummy_checker, config=env_cfg)
+    env = PlanEditEnv(dataset=dataset, checker=checker_fn, config=env_cfg)
 
     num_edit_actions = seq_len * vocab_size
     rl_num_actions = num_edit_actions + 1  # STOP action appended at the end
@@ -246,7 +284,11 @@ def main():
                 print(msg)
 
         if (step + 1) % rl_cfg.eval_interval == 0:
-            success_rate = trainer.evaluate_policy_success_rate(env_cfg=env_cfg, dataset=dataset, checker=dummy_checker)
+            success_rate = trainer.evaluate_policy_success_rate(
+                env_cfg=env_cfg,
+                dataset=dataset,
+                checker=checker_fn,
+            )
             eval_msg = f"[step {step+1:05d}] eval_success_rate={success_rate:.3f}"
             if hasattr(step_iter, "write"):
                 step_iter.write(eval_msg)

@@ -89,9 +89,11 @@ def evaluate_plan_policy(
             x, y = env.reset(idx=episode_idx % dataset_size)
             done = False
 
-            optimal_plan = x.get("inputs")
+            optimal_plan = x.get("solution")
             if optimal_plan is None:
-                raise KeyError("Environment state must include `inputs` for reward reference.")
+                optimal_plan = x.get("inputs")
+            if optimal_plan is None:
+                raise KeyError("Environment state must include `solution` or `inputs` for reward reference.")
             episode_max_reward = float(checker(x, optimal_plan))
 
             for _ in range(env_cfg.max_edits):
