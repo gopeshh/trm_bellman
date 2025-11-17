@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from evaluators.rl_plan_evaluator import evaluate_plan_policy
+from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
@@ -600,12 +600,12 @@ class UPITrmTrainer:
         metrics.update(debug_metrics)
         return metrics
 
-    def evaluate_policy_success_rate(self, env_cfg: PlanEditEnvConfig, dataset: Any, checker: Any) -> float:
+    def evaluate_policy_metrics(self, env_cfg: PlanEditEnvConfig, dataset: Any, checker: Any) -> Dict[str, float]:
         """
-        Convenience wrapper to evaluate the current deployed policy in plan space.
+        Evaluate the deployed policy, returning both strict success rate and mean checker score.
         """
 
-        return evaluate_plan_policy(
+        mean_score, success_rate = evaluate_plan_policy_with_scores(
             model=self.policy_model_old,
             dataset=dataset,
             checker=checker,
@@ -613,4 +613,14 @@ class UPITrmTrainer:
             num_episodes=self.rl_cfg.eval_num_episodes,
             inner_unroll_n=self.rl_cfg.inner_unroll_n,
         )
+
+        return {"mean_score": mean_score, "success_rate": success_rate}
+
+    def evaluate_policy_success_rate(self, env_cfg: PlanEditEnvConfig, dataset: Any, checker: Any) -> float:
+        """
+        Backwards-compatible alias returning only the strict success rate.
+        """
+
+        metrics = self.evaluate_policy_metrics(env_cfg=env_cfg, dataset=dataset, checker=checker)
+        return metrics["success_rate"]
 

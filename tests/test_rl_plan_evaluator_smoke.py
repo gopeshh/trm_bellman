@@ -1,6 +1,8 @@
+import math
+
 import torch
 
-from evaluators.rl_plan_evaluator import evaluate_plan_policy
+from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.envs.plan_edit_env import PlanEditEnvConfig
 from upi_trm_train import DummyPuzzleDataset, dummy_checker
@@ -66,4 +68,34 @@ def test_evaluate_plan_policy_smoke():
 
     assert isinstance(score, float)
     assert 0.0 <= score <= 1.0
+
+
+def test_evaluate_plan_policy_with_scores_smoke():
+    torch.manual_seed(1)
+
+    dataset = DummyPuzzleDataset(num_instances=6, seq_len=10, vocab_size=8)
+    env_cfg = PlanEditEnvConfig(max_edits=3, gamma=0.95, reward_shaping=True, vocab_size=dataset.vocab_size)
+
+    batch_size = 4
+    cfg = _tiny_trm_cfg(
+        seq_len=dataset.seq_len,
+        vocab_size=dataset.vocab_size,
+        num_identifiers=dataset.num_identifiers,
+        batch_size=batch_size,
+    )
+    model = TinyRecursiveReasoningModel_ACTV1(cfg)
+
+    mean_score, success_rate = evaluate_plan_policy_with_scores(
+        model=model,
+        dataset=dataset,
+        checker=dummy_checker,
+        env_cfg=env_cfg,
+        num_episodes=12,
+        inner_unroll_n=2,
+    )
+
+    assert isinstance(mean_score, float)
+    assert isinstance(success_rate, float)
+    assert math.isfinite(mean_score)
+    assert 0.0 <= success_rate <= 1.0
 

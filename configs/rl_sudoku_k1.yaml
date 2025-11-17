@@ -1,0 +1,18 @@
+gamma: 0.99
+K: 1
+inner_unroll_n: 4
+max_edits: 81
+num_train_steps: 20000
+batch_size: 128
+rollout_episodes_per_step: 4
+mixture_alpha: 0.05
+entropy_coef: 0.01
+value_lr: 0.001
+policy_lr: 0.0003
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 5.0
+log_interval: 100
+eval_interval: 200
+eval_num_episodes: 100
+

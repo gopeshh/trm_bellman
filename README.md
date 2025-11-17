@@ -10,7 +10,7 @@ This repository extends the Tiny Recursive Model (TRM) codebase with a plan-spac
 - `rl/envs/plan_edit_env.py` – plan-space meta-MDP describing edit actions over latent plans.
 - `rl/upi_trm_trainer.py` – trainer implementing 1-step + K-step TD, CPI mixtures, and evaluation hooks.
 - `upi_trm_train.py` – main entry point that wires the TRM, env, dummy dataset, and trainer together.
-- `evaluators/rl_plan_evaluator.py` – helper to measure success rate of a trained plan policy.
+- `evaluators/rl_plan_evaluator.py` – helpers to measure strict success rate and mean checker score for a trained plan policy.
 - `tests/` – smoke tests and unit tests for heads, TD targets, CPI mixture, logging, and evaluator glue.
 - `scripts/` – ready-to-run helpers: `run_rl_dummy.sh`, `run_tests.sh`, `run_k_step_experiment.sh`.
 
@@ -50,7 +50,18 @@ python upi_trm_train.py \
     --eval-interval 50 \
     --eval-episodes 50
 ```
-This uses the in-memory `DummyPuzzleDataset`, collects short plan-edit episodes, and prints both policy/value losses plus `evaluate_policy_success_rate` estimates. The `scripts/run_rl_dummy.sh` helper runs an equivalent configuration with a smaller batch size (16) to finish even faster.
+This uses the in-memory `DummyPuzzleDataset`, collects short plan-edit episodes, and prints policy/value losses plus both `eval_success_rate` and `eval_mean_score`. The `scripts/run_rl_dummy.sh` helper runs an equivalent configuration with a smaller batch size (16) to finish even faster.
+
+### Sudoku-focused long run
+For Sudoku-style plan editing, we provide `configs/rl_sudoku_k1.yaml`, which switches to `K=1`, increases entropy, and bumps replayed batch sizes/rollout counts. Launch it with:
+
+```bash
+python upi_trm_train.py \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --config configs/rl_sudoku_k1.yaml
+```
+
+The config already sets `train_steps=20000`, `batch_size=128`, `rollouts_per_step=4`, `max_edits=81`, and longer eval cadences, so the CLI only needs the dataset path (and any logging toggles you prefer). `./scripts/run_sudoku_rl.sh` wraps the same call and accepts an optional dataset directory argument.
 
 ## Ablation Experiments
 To reproduce the ICML ablation sweeps, point the helper script at any YAML inside `configs/ablations/`. Each YAML only overrides the `RLConfig` fields mentioned inside, so unspecified hyperparameters fall back to the CLI defaults above.
@@ -62,10 +73,10 @@ To reproduce the ICML ablation sweeps, point the helper script at any YAML insid
 Swap the config path to compare different K horizons (`upi_trm_K1.yaml`, `upi_trm_K3.yaml`, `upi_trm_K5.yaml`) or inner-loop depths (`upi_trm_unroll2.yaml`, `upi_trm_unroll4.yaml`). Flip CPI strength (`upi_trm_alpha0.yaml`, `upi_trm_alpha03.yaml`) or contraction penalties (`upi_trm_no_contraction.yaml`) the same way—the wrapper seeds everything to zero for deterministic, reviewer-friendly runs.
 
 ## Evaluating a Trained Policy (Optional)
-To run policy-only evaluation outside the training loop, load the model checkpoint and call `evaluate_plan_policy`:
+To run policy-only evaluation outside the training loop, load the model checkpoint and call `evaluate_plan_policy` (strict success) or `evaluate_plan_policy_with_scores` (mean score + success):
 ```python
 import torch
-from evaluators.rl_plan_evaluator import evaluate_plan_policy
+from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 from rl.envs.plan_edit_env import PlanEditEnvConfig
 from upi_trm_train import DummyPuzzleDataset, dummy_checker
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
@@ -86,13 +97,23 @@ success = evaluate_plan_policy(
     inner_unroll_n=RLConfig().inner_unroll_n,
 )
 print(f"Success rate: {success:.3f}")
+
+mean_score, success_rate = evaluate_plan_policy_with_scores(
+    model=model,
+    dataset=dataset,
+    checker=dummy_checker,
+    env_cfg=env_cfg,
+    num_episodes=50,
+    inner_unroll_n=RLConfig().inner_unroll_n,
+)
+print(f"Mean checker score: {mean_score:.3f} | Success rate: {success_rate:.3f}")
 ```
 
 ## Experimental Notes
 - **Latent evaluator** \(U_n(s)\): `TinyRecursiveReasoningModel_ACTV1.used_value()` unrolls the latent state and applies the spectral-normalized `value_head`.
 - **K-step operator**: `UPITrmTrainer.value_update()` pulls trajectories from replay and mixes 1-step / K-step returns via `RLConfig.K`.
 - **CPI mixture**: `_mixed_policy_dist()` blends the frozen and candidate policies, while `_sync_policy_old_towards_candidate()` softly updates the target head. These are tested in `tests/test_cpi_mixture_policy_smoke.py`.
-- **Logging / evaluation**: `UPITrmTrainer.evaluate_policy_success_rate()` is surfaced via `upi_trm_train.py`, and `RLConfig` toggles log/eval cadence.
+- **Logging / evaluation**: `UPITrmTrainer.evaluate_policy_metrics()` (and the success-rate-only alias) surface both strict solves and mean checker scores via `upi_trm_train.py`; `RLConfig` toggles log/eval cadence.
 - **K-step sweeps**: tweak `RLConfig.K` (either directly in `rl/config.py` or by editing the dataclass instantiation) before running `scripts/run_k_step_experiment.sh`.
 
 ## Reproducibility & Random Seeds

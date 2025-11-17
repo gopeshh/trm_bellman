@@ -130,11 +130,12 @@ def build_dataset_from_paths(
                     inputs = batch_inputs[i].clone()
                     puzzle_id = batch_ids[i].clone()
                     solution = batch_labels[i].clone() if batch_labels is not None else None
+                    initial_plan = inputs.clone()
                     samples.append(
                         {
                             "inputs": inputs,
                             "puzzle_identifiers": puzzle_id,
-                            "initial_plan": torch.zeros_like(inputs),
+                            "initial_plan": initial_plan,
                             **({"solution": solution} if solution is not None else {}),
                         }
                     )
@@ -284,12 +285,16 @@ def main():
                 print(msg)
 
         if (step + 1) % rl_cfg.eval_interval == 0:
-            success_rate = trainer.evaluate_policy_success_rate(
+            eval_metrics = trainer.evaluate_policy_metrics(
                 env_cfg=env_cfg,
                 dataset=dataset,
                 checker=checker_fn,
             )
-            eval_msg = f"[step {step+1:05d}] eval_success_rate={success_rate:.3f}"
+            eval_msg = (
+                f"[step {step+1:05d}] "
+                f"eval_success_rate={eval_metrics['success_rate']:.3f} "
+                f"eval_mean_score={eval_metrics['mean_score']:.3f}"
+            )
             if hasattr(step_iter, "write"):
                 step_iter.write(eval_msg)
             else:

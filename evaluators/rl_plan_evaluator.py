@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
 
@@ -50,19 +50,19 @@ def _prepare_plan(y: Any, device: torch.device, batched: bool) -> torch.Tensor:
     return plan.to(device)
 
 
-def evaluate_plan_policy(
+def evaluate_plan_policy_with_scores(
     model: TinyRecursiveReasoningModel_ACTV1,
     dataset: Any,
     checker: Callable[[Any, Any], float],
     env_cfg: PlanEditEnvConfig,
     num_episodes: int = 100,
     inner_unroll_n: Optional[int] = None,
-) -> float:
+) -> Tuple[float, float]:
     """
     Evaluate a TRM + policy head in plan space on a given dataset.
 
     Returns:
-        Average success rate (fraction of episodes where the final plan receives max reward).
+        (mean_checker_score, success_rate)
     """
 
     device = next(model.parameters()).device
@@ -80,9 +80,11 @@ def evaluate_plan_policy(
 
     dataset_size = len(dataset)
     if dataset_size == 0:
-        return 0.0
+        return 0.0, 0.0
 
     num_solved = 0
+    total_score = 0.0
+    episodes_ran = 0
 
     with torch.no_grad():
         for episode_idx in range(num_episodes):
@@ -108,10 +110,38 @@ def evaluate_plan_policy(
                 x, y = x_next, y_next
 
                 if done:
-                    final_score = float(checker(x, y))
-                    if abs(final_score - episode_max_reward) < 1e-6:
-                        num_solved += 1
                     break
 
-    return num_solved / float(max(num_episodes, 1))
+            final_score = float(checker(x, y))
+            total_score += final_score
+            episodes_ran += 1
+            if abs(final_score - episode_max_reward) < 1e-6:
+                num_solved += 1
+
+    mean_score = total_score / float(max(episodes_ran, 1))
+    success_rate = num_solved / float(max(episodes_ran, 1))
+    return mean_score, success_rate
+
+
+def evaluate_plan_policy(
+    model: TinyRecursiveReasoningModel_ACTV1,
+    dataset: Any,
+    checker: Callable[[Any, Any], float],
+    env_cfg: PlanEditEnvConfig,
+    num_episodes: int = 100,
+    inner_unroll_n: Optional[int] = None,
+) -> float:
+    """
+    Backwards-compatible wrapper that only returns the strict success rate.
+    """
+
+    _, success_rate = evaluate_plan_policy_with_scores(
+        model=model,
+        dataset=dataset,
+        checker=checker,
+        env_cfg=env_cfg,
+        num_episodes=num_episodes,
+        inner_unroll_n=inner_unroll_n,
+    )
+    return success_rate
 
