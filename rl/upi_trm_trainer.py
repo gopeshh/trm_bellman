@@ -60,28 +60,37 @@ class UPITrmTrainer:
 
         self.replay = ReplayBuffer(capacity=rl_cfg.replay_capacity)
 
-        value_params: List[nn.Parameter] = []
-        policy_params: List[nn.Parameter] = []
-
-        for name, param in self.model.named_parameters():
-            if not param.requires_grad:
-                continue
-            if "value_head" in name:
-                value_params.append(param)
-            elif "edit_policy" in name:
-                policy_params.append(param)
-            else:
-                value_params.append(param)
-                policy_params.append(param)
-
-        self.value_opt = torch.optim.Adam(value_params, lr=rl_cfg.value_lr)
-        self.policy_opt = torch.optim.Adam(policy_params, lr=rl_cfg.policy_lr)
-
         self.target_model = TinyRecursiveReasoningModel_ACTV1(self._config_to_dict(self.model.config)).to(device)
         self.target_model.eval()
         for param in self.target_model.parameters():
             param.requires_grad_(False)
         self._hard_update_target()
+
+        # Policy models:
+        # - policy_model_old: deployed policy (data collection)
+        # - policy_model_candidate: receives policy-gradient updates
+        self.policy_model_old = self.model
+        self.policy_model_candidate = TinyRecursiveReasoningModel_ACTV1(
+            self._config_to_dict(self.model.config)
+        ).to(device)
+        self.policy_model_candidate.load_state_dict(self.model.state_dict())
+
+        value_params: List[nn.Parameter] = []
+        for name, param in self.model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if "edit_policy" in name:
+                continue
+            value_params.append(param)
+
+        policy_params: List[nn.Parameter] = []
+        for name, param in self.policy_model_candidate.named_parameters():
+            if not param.requires_grad:
+                continue
+            policy_params.append(param)
+
+        self.value_opt = torch.optim.Adam(value_params, lr=rl_cfg.value_lr)
+        self.policy_opt = torch.optim.Adam(policy_params, lr=rl_cfg.policy_lr)
         self._next_episode_id: int = 0
 
     def _config_to_dict(self, config: Any) -> Dict[str, Any]:
@@ -98,6 +107,36 @@ class UPITrmTrainer:
             for p, p_targ in zip(self.model.parameters(), self.target_model.parameters()):
                 p_targ.data.mul_(tau).add_(p.data, alpha=1 - tau)
 
+    def _mixed_policy_dist(self, x_batch, y_batch, n: int):
+        """
+        Construct a mixture policy distribution:
+          π_mix = (1 - α) π_old + α π_candidate
+        using the current policy_model_old and policy_model_candidate.
+        """
+
+        alpha = self.rl_cfg.mixture_alpha
+        dist_old = self.policy_model_old.policy_dist(x_batch, y_batch, n=n)
+        dist_new = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=n)
+
+        probs_old = dist_old.probs
+        probs_new = dist_new.probs
+        probs_mix = (1.0 - alpha) * probs_old + alpha * probs_new
+
+        return torch.distributions.Categorical(probs=probs_mix)
+
+    def _sync_policy_old_towards_candidate(self) -> None:
+        """
+        Conservatively move policy_model_old parameters towards policy_model_candidate.
+        """
+
+        alpha = self.rl_cfg.mixture_alpha
+        if alpha <= 0.0:
+            return
+
+        with torch.no_grad():
+            for p_old, p_new in zip(self.policy_model_old.parameters(), self.policy_model_candidate.parameters()):
+                p_old.data.mul_(1.0 - alpha).add_(p_new.data, alpha=alpha)
+
     def collect_episode(self) -> None:
         """
         Run a single episode in the plan-space env using the current policy_dist,
@@ -105,6 +144,7 @@ class UPITrmTrainer:
         """
 
         self.model.eval()
+        self.policy_model_candidate.eval()
         episode_id = self._next_episode_id
         t = 0
         x, y = self.env.reset()
@@ -116,7 +156,7 @@ class UPITrmTrainer:
             batch_x = self._prepare_batch_x(x, batched=batched)
             batch_y = self._prepare_plan(y, batched=batched)
 
-            dist = self.model.policy_dist(batch_x, batch_y, n=self.rl_cfg.inner_unroll_n)
+            dist = self._mixed_policy_dist(batch_x, batch_y, n=self.rl_cfg.inner_unroll_n)
             action = dist.sample()
 
             (x_next, y_next), reward, done, _ = self.env.step(action.item())
@@ -379,6 +419,7 @@ class UPITrmTrainer:
         x_batch, y_batch, x_next_batch, y_next_batch, actions, rewards, dones = self._stack_batch(transitions)
 
         self.model.train()
+        self.policy_model_candidate.train()
         self.policy_opt.zero_grad()
 
         with torch.no_grad():
@@ -389,13 +430,14 @@ class UPITrmTrainer:
             td_target = rewards + self.rl_cfg.gamma * v_next
             adv = td_target - v_s
 
-        dist = self.model.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+        dist = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
         log_prob = dist.log_prob(actions)
         entropy = dist.entropy().mean()
 
         loss_policy = -(log_prob * adv.detach()).mean() - self.rl_cfg.entropy_coef * entropy
         loss_policy.backward()
         self.policy_opt.step()
+        self._sync_policy_old_towards_candidate()
 
         return float(loss_policy.item())
 
