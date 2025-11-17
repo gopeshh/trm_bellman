@@ -13,6 +13,7 @@ from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.upi_trm_trainer import UPITrmTrainer
+from utils.seeding import set_global_seed
 
 
 def dummy_checker(x, y) -> float:
@@ -140,11 +141,21 @@ def parse_args():
     parser.add_argument("--eval-interval", type=int, default=50, help="Evaluation interval in train steps.")
     parser.add_argument("--eval-episodes", type=int, default=50, help="Number of episodes per evaluation call.")
     parser.add_argument("--no-tqdm", action="store_true", help="Disable tqdm progress bar.")
+    parser.add_argument("--seed", type=int, default=None, help="Optional global random seed.")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Optional path to YAML config overriding RLConfig defaults.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+
+    if args.seed is not None:
+        set_global_seed(args.seed)
 
     rl_cfg = RLConfig(
         batch_size=args.batch_size,
@@ -156,6 +167,13 @@ def main():
         eval_num_episodes=args.eval_episodes,
         use_tqdm=not args.no_tqdm,
     )
+
+    if args.config is not None:
+        import yaml
+
+        with open(args.config, "r") as f:
+            override = yaml.safe_load(f) or {}
+        rl_cfg = RLConfig(**{**rl_cfg.dict(), **override})
 
     dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
         dataset_paths=args.dataset_paths,

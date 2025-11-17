@@ -52,6 +52,15 @@ python upi_trm_train.py \
 ```
 This uses the in-memory `DummyPuzzleDataset`, collects short plan-edit episodes, and prints both policy/value losses plus `evaluate_policy_success_rate` estimates. The `scripts/run_rl_dummy.sh` helper runs an equivalent configuration with a smaller batch size (16) to finish even faster.
 
+## Ablation Experiments
+To reproduce the ICML ablation sweeps, point the helper script at any YAML inside `configs/ablations/`. Each YAML only overrides the `RLConfig` fields mentioned inside, so unspecified hyperparameters fall back to the CLI defaults above.
+
+```bash
+./scripts/run_ablation.sh configs/ablations/upi_trm_K3.yaml
+```
+
+Swap the config path to compare different K horizons (`upi_trm_K1.yaml`, `upi_trm_K3.yaml`, `upi_trm_K5.yaml`) or inner-loop depths (`upi_trm_unroll2.yaml`, `upi_trm_unroll4.yaml`). Flip CPI strength (`upi_trm_alpha0.yaml`, `upi_trm_alpha03.yaml`) or contraction penalties (`upi_trm_no_contraction.yaml`) the same way—the wrapper seeds everything to zero for deterministic, reviewer-friendly runs.
+
 ## Evaluating a Trained Policy (Optional)
 To run policy-only evaluation outside the training loop, load the model checkpoint and call `evaluate_plan_policy`:
 ```python

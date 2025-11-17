@@ -1,0 +1,5 @@
+K: 1
+inner_unroll_n: 4
+mixture_alpha: 0.1
+enable_contraction: true
+
