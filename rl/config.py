@@ -33,3 +33,9 @@ class RLConfig(BaseModel):
     num_train_steps: int = 10_000
     rollout_episodes_per_step: int = 4
 
+    # Logging / evaluation
+    log_interval: int = 10
+    eval_interval: int = 50
+    eval_num_episodes: int = 50
+    use_tqdm: bool = True
+

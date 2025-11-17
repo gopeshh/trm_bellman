@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from evaluators.rl_plan_evaluator import evaluate_plan_policy
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
@@ -456,4 +457,18 @@ class UPITrmTrainer:
             "loss_value": loss_val,
             "loss_policy": loss_policy,
         }
+
+    def evaluate_policy_success_rate(self, env_cfg: PlanEditEnvConfig, dataset: Any, checker: Any) -> float:
+        """
+        Convenience wrapper to evaluate the current deployed policy in plan space.
+        """
+
+        return evaluate_plan_policy(
+            model=self.policy_model_old,
+            dataset=dataset,
+            checker=checker,
+            env_cfg=env_cfg,
+            num_episodes=self.rl_cfg.eval_num_episodes,
+            inner_unroll_n=self.rl_cfg.inner_unroll_n,
+        )
 

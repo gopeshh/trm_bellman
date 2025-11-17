@@ -3,6 +3,11 @@ from typing import List, Optional, Tuple
 
 import torch
 
+try:
+    from tqdm import trange
+except ImportError:  # pragma: no cover
+    trange = None
+
 from puzzle_dataset import PuzzleDataset, PuzzleDatasetConfig  # type: ignore
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
@@ -131,6 +136,10 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=32, help="Mini-batch size for TD updates.")
     parser.add_argument("--rollouts-per-step", type=int, default=1, help="Episodes collected before each optimization step.")
     parser.add_argument("--max-edits", type=int, default=8, help="Maximum edits per episode.")
+    parser.add_argument("--log-interval", type=int, default=10, help="Logging interval in train steps.")
+    parser.add_argument("--eval-interval", type=int, default=50, help="Evaluation interval in train steps.")
+    parser.add_argument("--eval-episodes", type=int, default=50, help="Number of episodes per evaluation call.")
+    parser.add_argument("--no-tqdm", action="store_true", help="Disable tqdm progress bar.")
     return parser.parse_args()
 
 
@@ -142,6 +151,10 @@ def main():
         num_train_steps=args.train_steps,
         rollout_episodes_per_step=args.rollouts_per_step,
         max_edits=args.max_edits,
+        log_interval=args.log_interval,
+        eval_interval=args.eval_interval,
+        eval_num_episodes=args.eval_episodes,
+        use_tqdm=not args.no_tqdm,
     )
 
     dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
@@ -191,13 +204,30 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
 
-    for step in range(rl_cfg.num_train_steps):
+    if rl_cfg.use_tqdm and trange is not None:
+        step_iter = trange(rl_cfg.num_train_steps, desc="UPI-TRM RL training")
+    else:
+        step_iter = range(rl_cfg.num_train_steps)
+
+    for step in step_iter:
         metrics = trainer.train_step()
-        if step % 10 == 0:
-            print(
-                f"[step {step:05d}] value_loss={metrics['loss_value']:.6f} "
+        if (step + 1) % rl_cfg.log_interval == 0:
+            msg = (
+                f"[step {step+1:05d}] value_loss={metrics['loss_value']:.6f} "
                 f"policy_loss={metrics['loss_policy']:.6f}"
             )
+            if hasattr(step_iter, "write"):
+                step_iter.write(msg)
+            else:
+                print(msg)
+
+        if (step + 1) % rl_cfg.eval_interval == 0:
+            success_rate = trainer.evaluate_policy_success_rate(env_cfg=env_cfg, dataset=dataset, checker=dummy_checker)
+            eval_msg = f"[step {step+1:05d}] eval_success_rate={success_rate:.3f}"
+            if hasattr(step_iter, "write"):
+                step_iter.write(eval_msg)
+            else:
+                print(eval_msg)
 
 
 if __name__ == "__main__":
