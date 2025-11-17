@@ -5,12 +5,14 @@ import torch
 import copy
 import torch.nn.functional as F
 from torch import nn
+from torch.distributions import Categorical
 from pydantic import BaseModel
 import random
 from models.common import trunc_normal_init_
 from models.layers import rms_norm, LinearSwish, SwiGLU, Attention, RotaryEmbedding, CosSin, CastedEmbedding, CastedLinear
 from models.sparse_embedding import CastedSparseEmbedding
 from models.value_head import LatentValueHead
+from models.edit_policy import EditPolicyHead
 from utils.lipschitz import apply_spectral_norm_to_trm, apply_spectral_norm_to_value_head
 
 IGNORE_LABEL_ID = -100
@@ -70,6 +72,8 @@ class TinyRecursiveReasoningModel_ACTV1Config(BaseModel):
     rl_value_hidden_dim: int = 256
     rl_target_Lz: float = 0.9
     rl_target_Lv: float = 1.0
+    rl_enable_policy_head: bool = False
+    rl_num_actions: int = 0   # total number of discrete actions; last index is STOP
 
 class TinyRecursiveReasoningModel_ACTV1Block(nn.Module):
     def __init__(self, config: TinyRecursiveReasoningModel_ACTV1Config) -> None:
@@ -269,6 +273,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         self.inner = TinyRecursiveReasoningModel_ACTV1_Inner(self.config)
         self.z_dim = self.config.hidden_size
         self.x_embed_dim = self.config.hidden_size
+        self.y_embed_dim = self.config.hidden_size  # placeholder pooled representation of y
 
         if self.config.rl_enable_value_head:
             self.value_head = LatentValueHead(
@@ -278,6 +283,18 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             )
         else:
             self.value_head = None
+
+        if self.config.rl_enable_policy_head:
+            if self.config.rl_num_actions <= 0:
+                raise ValueError("rl_num_actions must be > 0 when rl_enable_policy_head=True")
+            self.edit_policy = EditPolicyHead(
+                latent_dim=self.z_dim,
+                x_embed_dim=self.x_embed_dim,
+                y_embed_dim=self.y_embed_dim,
+                action_dim=self.config.rl_num_actions,
+            )
+        else:
+            self.edit_policy = None
 
         if self.config.rl_enable_contraction:
             apply_spectral_norm_to_trm(self.inner)
@@ -393,6 +410,43 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
 
         # 3) Apply value head
         return self.value_head(z_vec, x_embed)
+
+    def policy_dist(
+        self,
+        x: Dict[str, torch.Tensor],
+        y: torch.Tensor,
+        n: int,
+        action_mask: Optional[torch.Tensor] = None,
+    ) -> Categorical:
+        """
+        Produce a Categorical distribution over edit actions given (x, y).
+
+        - x: batch dict with at least ["inputs", "puzzle_identifiers"]
+        - y: plan tensor (same batch size), currently assumed to have shape compatible with inputs.
+        - n: number of inner latent steps for the evaluator.
+        - action_mask: optional [B, action_dim] boolean mask.
+        """
+
+        if self.edit_policy is None:
+            raise RuntimeError(
+                "Policy head is not enabled; set rl_enable_policy_head=True and rl_num_actions>0 in the config."
+            )
+
+        # 1) Get z^(n) via episodic latent unrolling
+        z_n, _ = self.unroll_latent(x, y, n)
+        z_vec = z_n.z_H.mean(dim=1)
+
+        # 2) Summarize x via latent context embeddings
+        batch = self._standardize_latent_batch(x, y)
+        latent_context = self.inner.build_latent_context(batch)
+        input_embeddings = latent_context["input_embeddings"]
+        x_embed = input_embeddings.mean(dim=1)
+
+        # 3) For now, we treat y embedding as the same as x embedding (placeholder).
+        #    Later this can be replaced with a true plan encoder.
+        y_embed = x_embed
+
+        return self.edit_policy(z_vec, x_embed, y_embed, action_mask=action_mask)
 
     def forward(self, carry: TinyRecursiveReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
 
