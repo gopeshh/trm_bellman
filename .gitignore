@@ -2,6 +2,7 @@
 # Python
 # ----------------------------
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.so
 *.pyd
@@ -39,6 +40,7 @@ logs/
 data/
 datasets/
 *.zip
+artifact/*.zip
 *.tar
 *.tar.gz
 
