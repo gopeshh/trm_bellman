@@ -69,12 +69,13 @@ class PlanEditEnv:
         # Typical format: {"inputs": ..., "puzzle_identifiers": ..., "initial_plan": ...}
         # For now, use "inputs" as x and "initial_plan" if present, else a zero plan.
         if isinstance(sample, dict):
-            self.x = sample
+            self.x = self._standardize_state(sample)
             if "initial_plan" in sample:
-                self.y = sample["initial_plan"]
+                self.y = self._standardize_plan(sample["initial_plan"])
             else:
                 # Default: trivial zero plan with same shape as inputs
-                self.y = torch.zeros_like(sample["inputs"])
+                inputs = self.x["inputs"]
+                self.y = torch.zeros_like(inputs)
         else:
             # Fallback: treat sample as x and create a trivial zero plan
             self.x = sample
@@ -83,6 +84,33 @@ class PlanEditEnv:
         self.step_count = 0
         self.done = False
         return self.x, self.y
+
+    def _standardize_state(self, sample: Any) -> Any:
+        """
+        Ensure environment state tensors have at least 1 dimension to satisfy batch heuristics.
+        """
+        if not isinstance(sample, dict):
+            return sample
+        state = dict(sample)
+        for key in ("inputs", "puzzle_identifiers"):
+            tensor = state.get(key)
+            if tensor is None:
+                continue
+            if not torch.is_tensor(tensor):
+                tensor = torch.as_tensor(tensor)
+            if tensor.ndim == 0:
+                tensor = tensor.unsqueeze(0)
+            state[key] = tensor
+        return state
+
+    def _standardize_plan(self, plan: Any) -> torch.Tensor:
+        if torch.is_tensor(plan):
+            tensor = plan
+        else:
+            tensor = torch.as_tensor(plan)
+        if tensor.ndim == 0:
+            tensor = tensor.unsqueeze(0)
+        return tensor
 
     def _infer_vocab_size(self) -> Optional[int]:
         if not hasattr(self.dataset, "__len__") or len(self.dataset) == 0:
