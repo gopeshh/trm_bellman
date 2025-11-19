@@ -15,11 +15,11 @@ class RLConfig(BaseModel):
 
     # CPI / TRPO-style "dials"
     mixture_alpha: float = 0.1  # mixture weight between old and candidate policy
-    trust_region_kl: float = 0.01  # reserved for future KL-trust-region variant
+    trust_region_kl: float = 0.01  # Reserved for future TRPO-style KL trust regions; unused today.
 
     # Theory-exact toggles
     exact_k_step_targets: bool = False  # If True, use fixed-horizon γ^K bootstrap in K-step value update
-    centered_advantage: bool = False  # If True, use a centered advantage estimator in policy update
+    centered_advantage: bool = True  # If True, use a centered advantage estimator in policy update
     distill_mixture_policy: bool = False  # If True, distill the mixture policy into policy_model_old
 
     # Optimization

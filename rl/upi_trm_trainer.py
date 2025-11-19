@@ -44,6 +44,42 @@ class ReplayBuffer:
         return [self.storage[i] for i in indices]
 
 
+def compute_k_step_bootstrapped_target(
+    rewards_K: torch.Tensor,
+    dones_K: torch.Tensor,
+    steps_taken: torch.Tensor,
+    v_K: torch.Tensor,
+    gamma: float,
+    K: int,
+    exact_k_step_targets: bool = False,
+) -> torch.Tensor:
+    """
+    Compute K-step bootstrapped targets with proper terminal masking.
+    """
+
+    gammas = rewards_K.new_tensor([gamma**k for k in range(K)])
+    reward_returns = (rewards_K * gammas).sum(dim=1)
+
+    if exact_k_step_targets:
+        bootstrap_factor = gamma**K
+    else:
+        bootstrap_factor = gamma ** steps_taken.float()
+
+    batch_size = rewards_K.shape[0]
+    if batch_size == 0:
+        return reward_returns
+
+    final_idx = (steps_taken - 1).clamp(min=0)
+    batch_indices = torch.arange(batch_size, device=rewards_K.device)
+    done_final = dones_K[batch_indices, final_idx]
+    # Do not bootstrap from terminal segments: if the segment hits done early,
+    # the true return is purely the discounted reward sum (V(s_terminal) = 0).
+    not_done_final = (~done_final).to(v_K.dtype)
+    v_K = v_K * not_done_final
+
+    return reward_returns + bootstrap_factor * v_K
+
+
 class UPITrmTrainer:
     """
     Unrolled Policy Iteration trainer for TinyRecursiveReasoningModel_ACTV1 in plan space.
@@ -125,9 +161,9 @@ class UPITrmTrainer:
 
         if getattr(self.rl_cfg, "trust_region_kl", 0.0) not in (0.0, None):
             print(
-                "[warning] RLConfig.trust_region_kl is set, "
-                "but no KL-based trust-region update is implemented. "
-                "Current updates use mixture_alpha and (optional) distillation instead."
+                "[warning] RLConfig.trust_region_kl is set, but no KL-based trust-region update is implemented yet. "
+                "The current algorithm uses CPI-style mixture updates controlled by mixture_alpha (with optional "
+                "mixture distillation), as discussed in the paper."
             )
 
     def _config_to_dict(self, config: Any) -> Dict[str, Any]:
@@ -481,7 +517,7 @@ class UPITrmTrainer:
         """
 
         assert self.rl_cfg.K >= 1, "RLConfig.K must be >= 1."
-        storage = list(self.replay.storage)
+        storage = self.replay.storage
         assert len(storage) >= batch_size, "Not enough transitions in replay buffer"
 
         indices = torch.randint(low=0, high=len(storage), size=(batch_size,)).tolist()
@@ -591,18 +627,15 @@ class UPITrmTrainer:
                 K = self.rl_cfg.K
 
                 v_K = self.target_model.used_value(xK_batch, yK_batch, n=self.rl_cfg.inner_unroll_n)
-                terminal_mask = dones_K.any(dim=1)
-                v_K = v_K * (~terminal_mask).float()
-
-                gammas = rewards_K.new_tensor([gamma ** k for k in range(K)])  # [K]
-                reward_returns = (rewards_K * gammas).sum(dim=1)  # [B]
-
-                if getattr(self.rl_cfg, "exact_k_step_targets", False):
-                    bootstrap_factor = gamma ** K
-                else:
-                    bootstrap_factor = gamma ** steps_taken.float()
-
-                G_K = reward_returns + bootstrap_factor * v_K
+                G_K = compute_k_step_bootstrapped_target(
+                    rewards_K=rewards_K,
+                    dones_K=dones_K,
+                    steps_taken=steps_taken,
+                    v_K=v_K,
+                    gamma=gamma,
+                    K=K,
+                    exact_k_step_targets=bool(getattr(self.rl_cfg, "exact_k_step_targets", False)),
+                )
 
             v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
             value_clip = getattr(self.rl_cfg, "value_target_clip", None)

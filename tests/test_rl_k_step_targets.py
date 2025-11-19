@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from rl.upi_trm_trainer import compute_k_step_bootstrapped_target
+
 
 class TinyValueModel(nn.Module):
     """
@@ -62,4 +64,31 @@ def test_k_step_targets_move_value_towards_true_values():
     final_error = torch.mean(torch.abs(v_learned - true_values))
 
     assert final_error < initial_error
+
+
+def test_k_step_targets_do_not_bootstrap_past_terminal():
+    gamma = 0.5
+    K = 4
+
+    rewards_K = torch.zeros(1, K, dtype=torch.float32)
+    rewards_K[0, 0] = 1.0
+    rewards_K[0, 1] = 2.0
+    dones_K = torch.zeros(1, K, dtype=torch.bool)
+    dones_K[0, 1] = True  # Episode terminates before reaching the full K steps.
+    steps_taken = torch.tensor([2], dtype=torch.long)
+    v_K = torch.tensor([10.0], dtype=torch.float32)
+
+    targets = compute_k_step_bootstrapped_target(
+        rewards_K=rewards_K,
+        dones_K=dones_K,
+        steps_taken=steps_taken,
+        v_K=v_K,
+        gamma=gamma,
+        K=K,
+        exact_k_step_targets=False,
+    )
+
+    expected_return = (rewards_K[0, 0] + gamma * rewards_K[0, 1]).item()
+    expected_tensor = torch.tensor([expected_return], dtype=targets.dtype)
+    assert torch.allclose(targets, expected_tensor, atol=1e-6)
 
