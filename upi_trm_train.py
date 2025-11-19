@@ -53,6 +53,8 @@ def sudoku_checker(x, y) -> float:
 
 class DummyPuzzleDataset:
     """
+    DummyPuzzleDataset is only used when no real Sudoku dataset is found.
+    It provides a tiny synthetic environment for smoke-testing the RL loop.
     Tiny in-memory dataset suitable for smoke tests of the RL loop.
     """
 
@@ -61,18 +63,17 @@ class DummyPuzzleDataset:
         self.vocab_size = vocab_size
         self.num_identifiers = num_instances
 
-        self.samples = []
+        self.samples: List[dict] = []
         for idx in range(num_instances):
             inputs = torch.randint(low=0, high=vocab_size, size=(seq_len,), dtype=torch.long)
             puzzle_identifier = torch.tensor(idx, dtype=torch.long)
-            self.samples.append(
-                {
-                    "inputs": inputs,
-                    "puzzle_identifiers": puzzle_identifier,
-                    "initial_plan": torch.zeros_like(inputs),
-                        "solution": inputs.clone(),  # dummy solution identical to inputs
-                }
-            )
+            sample = {
+                "inputs": inputs,  # tokenized Sudoku grid encoded like the real dataset
+                "puzzle_identifiers": puzzle_identifier,
+                "initial_plan": torch.zeros_like(inputs),
+                "solution": inputs.clone(),  # dummy solution identical to inputs
+            }
+            self.samples.append(sample)
 
     def __len__(self) -> int:
         return len(self.samples)

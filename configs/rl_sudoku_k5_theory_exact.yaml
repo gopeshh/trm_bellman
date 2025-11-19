@@ -26,6 +26,6 @@ policy_epsilon: 0.05
 
 # Theory-exact features (matching the paper)
 exact_k_step_targets: true      # Use fixed-horizon γ^K bootstrap for T_K^π operator
-centered_advantage: true         # Use Q-centered advantage estimator Â_U_n
+centered_advantage: true         # Use batch-centered 1-step actor-critic advantage
 distill_mixture_policy: true     # Distill mixture distribution (1-α)π_old + απ_new
 

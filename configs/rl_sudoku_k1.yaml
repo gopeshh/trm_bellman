@@ -1,3 +1,6 @@
+# Baseline UPI-TRM configuration for Sudoku (K=1)
+# This config does NOT enable the theory-exact toggles; it's a simpler baseline.
+
 gamma: 0.99
 K: 1
 inner_unroll_n: 4

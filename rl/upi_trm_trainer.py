@@ -125,9 +125,9 @@ class UPITrmTrainer:
 
         if getattr(self.rl_cfg, "trust_region_kl", 0.0) not in (0.0, None):
             print(
-                "[warning] RLConfig.trust_region_kl is set "
-                "but no KL-based trust-region update is implemented yet. "
-                "Current updates rely on mixture_alpha and (optional) distillation."
+                "[warning] RLConfig.trust_region_kl is set, "
+                "but no KL-based trust-region update is implemented. "
+                "Current updates use mixture_alpha and (optional) distillation instead."
             )
 
     def _config_to_dict(self, config: Any) -> Dict[str, Any]:
@@ -667,7 +667,8 @@ class UPITrmTrainer:
             nn_utils.clip_grad_norm_(self._policy_params, policy_grad_clip)
         self.policy_opt.step()
         
-        if getattr(self.rl_cfg, "distill_mixture_policy", False) and self.old_policy_distill_opt is not None:
+        distill_enabled = getattr(self.rl_cfg, "distill_mixture_policy", False)
+        if distill_enabled and self.old_policy_distill_opt is not None:
             num_distill = min(len(self.replay), self.rl_cfg.batch_size)
             if num_distill > 0:
                 transitions = self.replay.sample_batch(num_distill)
@@ -691,7 +692,9 @@ class UPITrmTrainer:
                     nn_utils.clip_grad_norm_(self._old_policy_params, policy_grad_clip)
                 self.old_policy_distill_opt.step()
         
-        self._sync_policy_old_towards_candidate()
+        if not distill_enabled:
+            # Use parameter-space interpolation only when we are not distilling the mixture.
+            self._sync_policy_old_towards_candidate()
 
         return float(loss_policy.item())
 
