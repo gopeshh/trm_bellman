@@ -1,3 +1,6 @@
+# Theory-exact UPI-TRM configuration for Sudoku (K=1)
+# This config enables all theory-exact features from the paper
+
 gamma: 0.99
 K: 1
 inner_unroll_n: 4
@@ -20,4 +23,9 @@ policy_grad_clip: 0.25
 value_target_clip: 2.0
 advantage_clip: 2.0
 policy_epsilon: 0.05
+
+# Theory-exact features (matching the paper)
+exact_k_step_targets: true      # Use fixed-horizon γ^K bootstrap for T_K^π operator
+centered_advantage: true         # Use Q-centered advantage estimator Â_U_n
+distill_mixture_policy: true     # Distill mixture distribution (1-α)π_old + απ_new
 

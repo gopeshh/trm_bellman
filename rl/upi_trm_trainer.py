@@ -6,6 +6,7 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.utils as nn_utils
 
 from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
@@ -95,6 +96,7 @@ class UPITrmTrainer:
             value_params.append(param)
 
         self._freeze_policy_backbone()
+        self._sync_candidate_backbone_from_model()
 
         policy_params: List[nn.Parameter] = []
         for name, param in self.policy_model_candidate.named_parameters():
@@ -102,9 +104,31 @@ class UPITrmTrainer:
                 continue
             policy_params.append(param)
 
+        self._value_params = value_params
+        self._policy_params = policy_params
+
+        old_policy_params: List[nn.Parameter] = []
+        for name, param in self.policy_model_old.named_parameters():
+            if not param.requires_grad:
+                continue
+            if not name.startswith("edit_policy"):
+                continue
+            old_policy_params.append(param)
+        self._old_policy_params = old_policy_params
+
         self.value_opt = torch.optim.Adam(value_params, lr=rl_cfg.value_lr)
         self.policy_opt = torch.optim.Adam(policy_params, lr=rl_cfg.policy_lr)
+        self.old_policy_distill_opt: Optional[torch.optim.Optimizer] = None
+        if old_policy_params:
+            self.old_policy_distill_opt = torch.optim.Adam(old_policy_params, lr=rl_cfg.policy_lr)
         self._next_episode_id: int = 0
+
+        if getattr(self.rl_cfg, "trust_region_kl", 0.0) not in (0.0, None):
+            print(
+                "[warning] RLConfig.trust_region_kl is set "
+                "but no KL-based trust-region update is implemented yet. "
+                "Current updates rely on mixture_alpha and (optional) distillation."
+            )
 
     def _config_to_dict(self, config: Any) -> Dict[str, Any]:
         if hasattr(config, "model_dump"):
@@ -122,9 +146,14 @@ class UPITrmTrainer:
 
     def _mixed_policy_dist(self, x_batch, y_batch, n: int):
         """
-        Construct a mixture policy distribution:
-          π_mix = (1 - α) π_old + α π_candidate
-        using the current policy_model_old and policy_model_candidate.
+        Return the behavior policy distribution used for data collection.
+        Mathematically, this is intended to correspond to a mixture policy
+        pi_beh = (1 - alpha) * pi_old + alpha * pi_candidate,
+        optionally mixed with a small uniform component (policy_epsilon).
+        Note: The deployed policy_model_old is updated toward the candidate policy
+        via parameter interpolation in `_sync_policy_old_towards_candidate`, so
+        its action distribution is only an approximation of this mixture unless
+        `distill_mixture_policy=True`, which triggers an explicit KL distillation.
         """
 
         alpha = self.rl_cfg.mixture_alpha
@@ -135,13 +164,24 @@ class UPITrmTrainer:
         probs_new = dist_new.probs
         probs_mix = (1.0 - alpha) * probs_old + alpha * probs_new
 
+        eps = getattr(self.rl_cfg, "policy_epsilon", 0.0)
+        if eps > 0.0:
+            num_actions = probs_mix.shape[-1]
+            uniform = torch.full_like(probs_mix, 1.0 / num_actions)
+            probs_mix = (1.0 - eps) * probs_mix + eps * uniform
+
         return torch.distributions.Categorical(probs=probs_mix)
 
     def _sync_policy_old_towards_candidate(self) -> None:
         """
-        Conservatively move only the edit-policy head parameters of policy_model_old
-        towards policy_model_candidate. The value/evaluator backbone stays under
-        the control of the value optimizer.
+        Interpolate the deployed policy's edit_policy head toward the candidate's head.
+        This function operates in parameter space, not directly in distribution space,
+        so policy_model_old's action distribution will only approximate the ideal
+        mixture pi_new = (1 - alpha) * pi_old + alpha * pi_candidate.
+        
+        Note: For a more exact treatment, use distill_mixture_policy=True to distill
+        the distributional mixture _mixed_policy_dist into policy_model_old using
+        a KL loss, rather than raw weight interpolation.
         """
 
         alpha = self.rl_cfg.mixture_alpha
@@ -196,6 +236,29 @@ class UPITrmTrainer:
                         param.requires_grad_(True)
                 else:
                     param.requires_grad_(param.requires_grad and trainable)
+
+    def _sync_candidate_backbone_from_model(self) -> None:
+        """
+        Copy all non-policy-head parameters from the critic / deployed model (self.model)
+        into the candidate policy model (self.policy_model_candidate), without touching
+        the candidate's edit_policy head weights or their requires_grad flags.
+        This keeps the candidate policy operating on the same latent representation
+        as the critic, while still allowing its edit_policy head to be optimized
+        separately by policy gradients.
+        """
+        if self.policy_model_candidate is None:
+            return
+
+        with torch.no_grad():
+            src_params = dict(self.model.named_parameters())
+            for name, param in self.policy_model_candidate.named_parameters():
+                # Only sync non-policy parameters, i.e., everything except edit_policy.*
+                if name.startswith("edit_policy"):
+                    continue
+                src_param = src_params.get(name)
+                if src_param is None:
+                    continue
+                param.data.copy_(src_param.data)
 
     def _maybe_run_value_debug_checks(self, x_batch: Dict[str, torch.Tensor], y_batch: torch.Tensor) -> None:
         if not self.debug_checks or self.model.value_head is None:
@@ -402,9 +465,19 @@ class UPITrmTrainer:
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
+        torch.Tensor,
     ]:
         """
         Sample a batch of K-step segments from replay, collecting up to K rewards per start state.
+        
+        Returns:
+            x_batch: Starting states (inputs and puzzle_identifiers)
+            y_batch: Starting plans
+            xK_batch: End states after steps_taken steps
+            yK_batch: End plans after steps_taken steps
+            rewards_K: [batch_size, K] rewards (zero-padded if fewer than K steps)
+            dones_K: [batch_size, K] done flags (zero-padded if fewer than K steps)
+            steps_taken: [batch_size] actual number of steps collected per sample (1 to K)
         """
 
         assert self.rl_cfg.K >= 1, "RLConfig.K must be >= 1."
@@ -424,6 +497,7 @@ class UPITrmTrainer:
 
         rewards_K = torch.zeros(batch_size, horizon, dtype=torch.float32, device=self.device)
         dones_K = torch.zeros(batch_size, horizon, dtype=torch.bool, device=self.device)
+        steps_taken = torch.zeros(batch_size, dtype=torch.long, device=self.device)
 
         for batch_idx, start_idx in enumerate(indices):
             transition = storage[start_idx]
@@ -454,6 +528,7 @@ class UPITrmTrainer:
             end_inputs.append(last_transition.x_next["inputs"])
             end_puzzle_ids.append(last_transition.x_next["puzzle_identifiers"])
             end_plans.append(self._plan_tensor(last_transition.y_next))
+            steps_taken[batch_idx] = steps
 
         x_batch = {
             "inputs": torch.stack(start_inputs, dim=0).to(self.device),
@@ -467,7 +542,7 @@ class UPITrmTrainer:
         }
         yK_batch = torch.stack(end_plans, dim=0).to(self.device)
 
-        return x_batch, y_batch, xK_batch, yK_batch, rewards_K, dones_K
+        return x_batch, y_batch, xK_batch, yK_batch, rewards_K, dones_K, steps_taken
 
     def value_update(self) -> float:
         """Perform one value-function update using either 1-step or K-step bootstrapped targets."""
@@ -491,6 +566,10 @@ class UPITrmTrainer:
 
             v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
             td_target = rewards + self.rl_cfg.gamma * v_next
+            value_clip = getattr(self.rl_cfg, "value_target_clip", None)
+            if value_clip is not None and value_clip > 0:
+                td_target = td_target.clamp(-value_clip, value_clip)
+                v_s = v_s.clamp(-value_clip, value_clip)
             loss_val = F.mse_loss(v_s, td_target.detach())
         else:
             (
@@ -500,6 +579,7 @@ class UPITrmTrainer:
                 yK_batch,
                 rewards_K,
                 dones_K,
+                steps_taken,
             ) = self._sample_k_step_batch(self.rl_cfg.batch_size)
             debug_batch = (x_batch, y_batch)
 
@@ -507,17 +587,34 @@ class UPITrmTrainer:
             self.value_opt.zero_grad()
 
             with torch.no_grad():
+                gamma = self.rl_cfg.gamma
+                K = self.rl_cfg.K
+
                 v_K = self.target_model.used_value(xK_batch, yK_batch, n=self.rl_cfg.inner_unroll_n)
-                terminal_mask = dones_K.any(dim=1).float()
-                v_K = v_K * (1.0 - terminal_mask)
-                gammas = rewards_K.new_tensor([self.rl_cfg.gamma ** k for k in range(self.rl_cfg.K)])
-                returns = (rewards_K * gammas).sum(dim=1) + (self.rl_cfg.gamma ** self.rl_cfg.K) * v_K
-                G_K = returns
+                terminal_mask = dones_K.any(dim=1)
+                v_K = v_K * (~terminal_mask).float()
+
+                gammas = rewards_K.new_tensor([gamma ** k for k in range(K)])  # [K]
+                reward_returns = (rewards_K * gammas).sum(dim=1)  # [B]
+
+                if getattr(self.rl_cfg, "exact_k_step_targets", False):
+                    bootstrap_factor = gamma ** K
+                else:
+                    bootstrap_factor = gamma ** steps_taken.float()
+
+                G_K = reward_returns + bootstrap_factor * v_K
 
             v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+            value_clip = getattr(self.rl_cfg, "value_target_clip", None)
+            if value_clip is not None and value_clip > 0:
+                G_K = G_K.clamp(-value_clip, value_clip)
+                v_s = v_s.clamp(-value_clip, value_clip)
             loss_val = F.mse_loss(v_s, G_K.detach())
 
         loss_val.backward()
+        value_grad_clip = getattr(self.rl_cfg, "value_grad_clip", None)
+        if value_grad_clip is not None and value_grad_clip > 0 and self._value_params:
+            nn_utils.clip_grad_norm_(self._value_params, value_grad_clip)
         self.value_opt.step()
         self._soft_update_target()
 
@@ -527,12 +624,13 @@ class UPITrmTrainer:
         return float(loss_val.item())
 
     def policy_update(self) -> float:
-        """
-        Perform one policy-gradient step using 1-step TD advantages.
-        """
+        """Perform one policy-gradient step with an optional centered advantage estimator."""
 
         if len(self.replay) < self.rl_cfg.batch_size:
             return 0.0
+
+        # Ensure the candidate policy uses the current critic backbone for its features.
+        self._sync_candidate_backbone_from_model()
 
         transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
         x_batch, y_batch, x_next_batch, y_next_batch, actions, rewards, dones = self._stack_batch(transitions)
@@ -541,17 +639,22 @@ class UPITrmTrainer:
         self.policy_model_candidate.train()
         self.policy_opt.zero_grad()
 
-        # For the actor, we use 1-step TD with the current value network (self.model),
-        # not the EMA target_model. This keeps the policy update tightly coupled to
-        # the latest critic, while the target network is reserved for stabilizing
-        # value-learning.
         with torch.no_grad():
             v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
             v_next = self.model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
             mask = (~dones).float()
             v_next = v_next * mask
-            td_target = rewards + self.rl_cfg.gamma * v_next
+            gamma = self.rl_cfg.gamma
+            td_target = rewards + gamma * v_next
             adv = td_target - v_s
+            if getattr(self.rl_cfg, "centered_advantage", False):
+                # Optional: center the estimator so that E[Â] ≈ 0 under the sampled batch,
+                # matching the CPI analysis assumption up to sampling noise.
+                adv = adv - adv.mean()
+
+            adv_clip = getattr(self.rl_cfg, "advantage_clip", None)
+            if adv_clip is not None and adv_clip > 0:
+                adv = adv.clamp(-adv_clip, adv_clip)
 
         dist = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
         log_prob = dist.log_prob(actions)
@@ -559,7 +662,35 @@ class UPITrmTrainer:
 
         loss_policy = -(log_prob * adv.detach()).mean() - self.rl_cfg.entropy_coef * entropy
         loss_policy.backward()
+        policy_grad_clip = getattr(self.rl_cfg, "policy_grad_clip", None)
+        if policy_grad_clip is not None and policy_grad_clip > 0 and self._policy_params:
+            nn_utils.clip_grad_norm_(self._policy_params, policy_grad_clip)
         self.policy_opt.step()
+        
+        if getattr(self.rl_cfg, "distill_mixture_policy", False) and self.old_policy_distill_opt is not None:
+            num_distill = min(len(self.replay), self.rl_cfg.batch_size)
+            if num_distill > 0:
+                transitions = self.replay.sample_batch(num_distill)
+                x_d, y_d, _, _, _, _, _ = self._stack_batch(transitions)
+                with torch.no_grad():
+                    mixed_dist = self._mixed_policy_dist(x_d, y_d, n=self.rl_cfg.inner_unroll_n)
+                    target_probs = mixed_dist.probs.detach()
+
+                self.policy_model_old.train()
+                self.old_policy_distill_opt.zero_grad()
+                old_dist = self.policy_model_old.policy_dist(x_d, y_d, n=self.rl_cfg.inner_unroll_n)
+                log_probs_old = old_dist.logits.log_softmax(dim=-1)
+                kl = (
+                    target_probs
+                    * (target_probs.clamp_min(1e-8).log() - log_probs_old)
+                ).sum(dim=-1).mean()
+                kl.backward()
+
+                policy_grad_clip = getattr(self.rl_cfg, "policy_grad_clip", None)
+                if policy_grad_clip is not None and policy_grad_clip > 0 and self._old_policy_params:
+                    nn_utils.clip_grad_norm_(self._old_policy_params, policy_grad_clip)
+                self.old_policy_distill_opt.step()
+        
         self._sync_policy_old_towards_candidate()
 
         return float(loss_policy.item())
@@ -598,6 +729,10 @@ class UPITrmTrainer:
             "term_budget": float(self.term_stats["budget"]),
         }
         metrics.update(debug_metrics)
+        
+        # Reset termination stats for the next logging window
+        self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}
+        
         return metrics
 
     def evaluate_policy_metrics(self, env_cfg: PlanEditEnvConfig, dataset: Any, checker: Any) -> Dict[str, float]:

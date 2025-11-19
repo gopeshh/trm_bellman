@@ -1,0 +1,23 @@
+# Ablation config: Theory-exact UPI-TRM
+# Enables all theory-exact features from the paper
+
+gamma: 0.99
+K: 5
+inner_unroll_n: 4
+max_edits: 120
+num_train_steps: 20000
+batch_size: 128
+rollout_episodes_per_step: 6
+mixture_alpha: 0.1
+entropy_coef: 0.02
+value_lr: 0.0001
+policy_lr: 0.0001
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 5.0
+
+# Theory-exact features
+exact_k_step_targets: true
+centered_advantage: true
+distill_mixture_policy: true
+

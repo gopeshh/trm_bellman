@@ -202,9 +202,12 @@ def main():
     if args.config is not None:
         import yaml
 
+        # The override config is expected to be a flat dict with keys matching RLConfig
+        # fields, e.g. {"gamma": 0.95, "K": 3}. Nested structures (e.g. trainer: rl: ...)
+        # are not currently supported.
         with open(args.config, "r") as f:
             override = yaml.safe_load(f) or {}
-        rl_cfg = RLConfig(**{**rl_cfg.dict(), **override})
+        rl_cfg = RLConfig(**{**rl_cfg.model_dump(), **override})
 
     dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
         dataset_paths=args.dataset_paths,
