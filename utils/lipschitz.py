@@ -121,9 +121,12 @@ def estimate_local_Lz(
     context,
     num_samples: int = 4,
     eps: float = 1e-3,
-) -> float:
+    return_samples: bool = False,
+):
     """
     Estimate ||f(z+δ) - f(z)|| / ||δ|| for the inner latent map using random perturbations.
+
+    Set `return_samples=True` to also receive the individual per-sample norm estimates.
     """
 
     if not hasattr(carry, "z_H") or not hasattr(carry, "z_L"):
@@ -157,6 +160,11 @@ def estimate_local_Lz(
             norms.append(diff / eps)
 
     if not norms:
+        if return_samples:
+            return 0.0, torch.zeros(0, dtype=torch.float32)
         return 0.0
     stacked = torch.stack(norms)
-    return float(stacked.mean().item())
+    mean_value = float(stacked.mean().item())
+    if return_samples:
+        return mean_value, stacked
+    return mean_value

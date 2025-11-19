@@ -327,10 +327,24 @@ class UPITrmTrainer:
                 carry = self.model.eval_latent(x_single, y_single, n=self.rl_cfg.inner_unroll_n)
                 latent_batch = self.model._standardize_latent_batch(x_single, y_single)
                 context = self.model._build_latent_context_with_plan(latent_batch)
-                est = estimate_local_Lz(self.model.inner, carry, context, num_samples=2)
+                est, samples = estimate_local_Lz(
+                    self.model.inner, carry, context, num_samples=2, return_samples=True
+                )
+            if samples.numel() > 0:
+                mean_Lz = float(samples.mean().item())
+                median_Lz = float(samples.median().item())
+                max_Lz = float(samples.max().item())
+            else:
+                mean_Lz = median_Lz = max_Lz = 0.0
             print(
-                "[debug] est_local_Lz={:.4f} target_Lz={:.3f} target_Lv={:.3f}".format(
-                    est, float(self.model.config.rl_target_Lz), float(self.model.config.rl_target_Lv)
+                "[debug] est_local_Lz={:.4f} mean_Lz={:.4f} median_Lz={:.4f} max_Lz={:.4f} "
+                "target_Lz={:.3f} target_Lv={:.3f}".format(
+                    est,
+                    mean_Lz,
+                    median_Lz,
+                    max_Lz,
+                    float(self.model.config.rl_target_Lz),
+                    float(self.model.config.rl_target_Lv),
                 )
             )
         except Exception as exc:
