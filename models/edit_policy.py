@@ -10,8 +10,8 @@ class EditPolicyHead(nn.Module):
     Generic interface: given summarized (z, x, y), produce a distribution over edits + STOP.
     Inputs:
       - z_vec:   [B, latent_dim]   (summary of latent state, e.g. pooled z_H)
-      - x_embed: [B, x_embed_dim]  (summary embedding of the input x)
-      - y_embed: [B, y_embed_dim]  (summary embedding of the plan y)
+      - x_embed: [B, x_embed_dim]  (summary embedding of the input x; aligns with the plan-space meta-MDP context)
+      - y_embed: [B, y_embed_dim]  (summary embedding of the plan y; matches the plan-space meta-MDP state)
     Output:
       - Categorical distribution over action_dim discrete actions.
     """

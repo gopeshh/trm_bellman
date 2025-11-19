@@ -405,6 +405,10 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
     def init_latent(self, x: Any, y: Any) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
         """
         Initialize z^(0) from (x, y) by reusing the standard inner carry reset logic.
+
+        Note: In the current implementation z^(0) is a learned global initialization
+        (H_init, L_init) that does not depend explicitly on (x, y); the dependence
+        enters through the first latent_step via the input + plan embeddings.
         """
         batch = self._standardize_latent_batch(x, y)
         batch_size = batch["inputs"].shape[0]
@@ -464,6 +468,11 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         This function reinitializes z^(0) from (x, y) and applies the inner map
         f_θ n times; it does not reuse the ACT carry from the supervised TRM forward.
         """
+        # Note: In the paper we write V_ψ(z, x) and treat x as an "instance embedding".
+        # Here, we fold both the input instance and the current plan y into a single
+        # embedding `combined_embed = concat(x_embed, y_embed)` and feed that to the
+        # value head. All theoretical bounds only depend on the Lipschitz constant of
+        # V_ψ w.r.t. z, so this extra dependence on y is harmless for the analysis.
         if self.value_head is None:
             raise RuntimeError("Value head is not enabled; set rl_enable_value_head=True in the config.")
 

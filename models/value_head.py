@@ -4,10 +4,11 @@ import torch.nn as nn
 
 class LatentValueHead(nn.Module):
     """
-    Simple MLP mapping (z_vec, x_embed_vec) -> scalar value per example.
+    Simple MLP mapping (z_vec, x_like_embed) -> scalar value per example.
 
-    - z:   [B, z_dim]      (summary of latent state, e.g. from z_H)
-    - x_embed: [B, x_dim]  (summary embedding of the input instance x)
+    - z: [B, z_dim]          (summary of latent state, e.g. pooled z_H)
+    - x_like_embed: [B, x_dim]  (summary embedding of the "context", which in our
+                                 implementation is concat(x_embed, y_embed))
     """
 
     def __init__(self, z_dim: int, x_dim: int, hidden_dim: int):

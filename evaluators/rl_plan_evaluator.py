@@ -13,6 +13,11 @@ def _state_is_batched(x: Dict[str, torch.Tensor]) -> bool:
     puzzle_ids = x.get("puzzle_identifiers")
     if not (torch.is_tensor(inputs) and torch.is_tensor(puzzle_ids)):
         return False
+    if inputs.ndim not in (1, 2) or puzzle_ids.ndim not in (1, 2):
+        raise ValueError(
+            "Expected `inputs` and `puzzle_identifiers` to be 1D or 2D tensors, "
+            f"got shapes {tuple(inputs.shape)} and {tuple(puzzle_ids.shape)}."
+        )
     if inputs.ndim == 0 or puzzle_ids.ndim == 0:
         return False
     return inputs.shape[0] == puzzle_ids.shape[0]

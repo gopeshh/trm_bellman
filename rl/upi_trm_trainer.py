@@ -486,6 +486,11 @@ class UPITrmTrainer:
         puzzle_ids = x.get("puzzle_identifiers")
         if not (torch.is_tensor(inputs) and torch.is_tensor(puzzle_ids)):
             return False
+        if inputs.ndim not in (1, 2) or puzzle_ids.ndim not in (1, 2):
+            raise ValueError(
+                "Expected `inputs` and `puzzle_identifiers` to be 1D or 2D tensors, "
+                f"got shapes {tuple(inputs.shape)} and {tuple(puzzle_ids.shape)}."
+            )
         if inputs.ndim == 0:
             return False
         if puzzle_ids.ndim == 0:
@@ -756,6 +761,8 @@ class UPITrmTrainer:
                 debug_metrics["value_std"] = float(v_s.std(unbiased=False).item())
                 debug_metrics["adv_mean"] = float(adv.mean().item())
                 debug_metrics["adv_std"] = float(adv.std(unbiased=False).item())
+                debug_metrics["adv_abs_mean"] = float(adv.abs().mean().item())
+                debug_metrics["adv_abs_max"] = float(adv.abs().max().item())
 
         metrics = {
             "loss_value": loss_val,
