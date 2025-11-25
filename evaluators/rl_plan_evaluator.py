@@ -1,58 +1,10 @@
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 import torch
 
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
-
-
-def _state_is_batched(x: Dict[str, torch.Tensor]) -> bool:
-    if not isinstance(x, dict):
-        return False
-    inputs = x.get("inputs")
-    puzzle_ids = x.get("puzzle_identifiers")
-    if not (torch.is_tensor(inputs) and torch.is_tensor(puzzle_ids)):
-        return False
-    if inputs.ndim not in (1, 2) or puzzle_ids.ndim not in (1, 2):
-        raise ValueError(
-            "Expected `inputs` and `puzzle_identifiers` to be 1D or 2D tensors, "
-            f"got shapes {tuple(inputs.shape)} and {tuple(puzzle_ids.shape)}."
-        )
-    if inputs.ndim == 0 or puzzle_ids.ndim == 0:
-        return False
-    return inputs.shape[0] == puzzle_ids.shape[0]
-
-
-def _prepare_batch_x(x: Dict[str, Any], device: torch.device, batched: bool) -> Dict[str, torch.Tensor]:
-    if not isinstance(x, dict):
-        raise TypeError("Environment state `x` must be a dict with tensor entries.")
-
-    batch: Dict[str, torch.Tensor] = {}
-    for key in ("inputs", "puzzle_identifiers"):
-        if key not in x:
-            raise KeyError(f"Missing required key `{key}` in environment state.")
-        tensor = x[key]
-        if not torch.is_tensor(tensor):
-            tensor = torch.as_tensor(tensor)
-        if not batched:
-            tensor = tensor.unsqueeze(0)
-        batch[key] = tensor.to(device)
-    return batch
-
-
-def _prepare_plan(y: Any, device: torch.device, batched: bool) -> torch.Tensor:
-    if isinstance(y, dict):
-        plan = y.get("inputs")
-        if plan is None:
-            raise KeyError("Dictionary plan must include an `inputs` tensor.")
-    else:
-        plan = y
-
-    if not torch.is_tensor(plan):
-        plan = torch.as_tensor(plan)
-    if not batched:
-        plan = plan.unsqueeze(0)
-    return plan.to(device)
 
 
 def evaluate_plan_policy_with_scores(
@@ -104,9 +56,9 @@ def evaluate_plan_policy_with_scores(
             episode_max_reward = float(checker(x, optimal_plan))
 
             for _ in range(env_cfg.max_edits):
-                batched = _state_is_batched(x)
-                batch_x = _prepare_batch_x(x, device=device, batched=batched)
-                plan = _prepare_plan(y, device=device, batched=batched)
+                batched = state_is_batched(x)
+                batch_x = prepare_batch_x(x, device=device, batched=batched)
+                plan = prepare_plan(y, device=device, batched=batched)
 
                 dist = model.policy_dist(batch_x, plan, n=inner_unroll_n)
                 action = dist.sample().item()

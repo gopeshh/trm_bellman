@@ -208,7 +208,9 @@ def main():
         # are not currently supported.
         with open(args.config, "r") as f:
             override = yaml.safe_load(f) or {}
-        rl_cfg = RLConfig(**{**rl_cfg.model_dump(), **override})
+        # Pydantic v2 uses model_dump(), v1 uses dict()
+        base_dict = rl_cfg.model_dump() if hasattr(rl_cfg, "model_dump") else rl_cfg.dict()
+        rl_cfg = RLConfig(**{**base_dict, **override})
 
     dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
         dataset_paths=args.dataset_paths,

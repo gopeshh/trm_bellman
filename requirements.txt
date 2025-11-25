@@ -17,3 +17,6 @@ setuptools-scm
 pydantic-core
 huggingface_hub 
 numba
+pytest
+pyyaml
+numpy

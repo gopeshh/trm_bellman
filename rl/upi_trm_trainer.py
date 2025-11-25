@@ -10,6 +10,7 @@ import torch.nn.utils as nn_utils
 
 from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from utils.lipschitz import estimate_local_Lz
@@ -401,50 +402,12 @@ class UPITrmTrainer:
                 self.term_stats[reason] += 1
 
     def _prepare_batch_x(self, x: Dict[str, torch.Tensor], batched: bool) -> Dict[str, torch.Tensor]:
-        """
-        Normalize env state dictionaries into the TRM batch dict format.
-        Ensures we always return tensors shaped as:
-          inputs  -> [B, seq_len]
-          puzzle_identifiers -> [B]
-        """
-        if not isinstance(x, dict):
-            raise TypeError("Expected environment state x to be a dict with tensor entries.")
-        batch = {}
-        for key in ("inputs", "puzzle_identifiers"):
-            if key not in x:
-                raise KeyError(f"Expected key `{key}` in environment state for TRM inputs.")
-            tensor = x[key]
-            if not torch.is_tensor(tensor):
-                tensor = torch.as_tensor(tensor)
-            if not batched:
-                if tensor.ndim == 0:
-                    tensor = tensor.unsqueeze(0)
-                elif key == "inputs" and tensor.ndim == 1:
-                    tensor = tensor.unsqueeze(0)
-            tensor = tensor.to(self.device)
-            if key == "inputs":
-                tensor = tensor.to(torch.long)
-            elif key == "puzzle_identifiers":
-                tensor = tensor.to(torch.long)
-            batch[key] = tensor
-        return batch
+        """Delegate to shared batch_utils.prepare_batch_x."""
+        return prepare_batch_x(x, self.device, batched)
 
     def _prepare_plan(self, y: Any, batched: bool) -> torch.Tensor:
-        """
-        Convert plan objects to tensors shaped [B, seq_len].
-        Currently treats plans as simple tensors mirroring the input tokens.
-        """
-        if isinstance(y, dict):
-            plan = y.get("inputs")
-            if plan is None:
-                raise KeyError("Dictionary plan must contain an `inputs` tensor.")
-        else:
-            plan = y
-        if not torch.is_tensor(plan):
-            plan = torch.as_tensor(plan)
-        if not batched:
-            plan = plan.unsqueeze(0)
-        return plan.to(self.device).to(torch.long)
+        """Delegate to shared batch_utils.prepare_plan."""
+        return prepare_plan(y, self.device, batched)
 
     def _stack_batch(
         self, transitions: List[Transition]
@@ -492,26 +455,8 @@ class UPITrmTrainer:
         return state
 
     def _state_is_batched(self, x: Dict[str, torch.Tensor]) -> bool:
-        """
-        Heuristic to detect whether the env already produced a batch of states.
-        PlanEditEnv currently returns single instances, but custom envs may batch.
-        """
-        if not isinstance(x, dict):
-            return False
-        inputs = x.get("inputs")
-        puzzle_ids = x.get("puzzle_identifiers")
-        if not (torch.is_tensor(inputs) and torch.is_tensor(puzzle_ids)):
-            return False
-        if inputs.ndim not in (1, 2) or puzzle_ids.ndim not in (1, 2):
-            raise ValueError(
-                "Expected `inputs` and `puzzle_identifiers` to be 1D or 2D tensors, "
-                f"got shapes {tuple(inputs.shape)} and {tuple(puzzle_ids.shape)}."
-            )
-        if inputs.ndim == 0:
-            return False
-        if puzzle_ids.ndim == 0:
-            return False
-        return inputs.shape[0] == puzzle_ids.shape[0]
+        """Delegate to shared batch_utils.state_is_batched."""
+        return state_is_batched(x)
 
     def _sample_k_step_batch(
         self, batch_size: int

@@ -7,9 +7,9 @@ import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Categorical
 from pydantic import BaseModel
-import random
+
 from models.common import trunc_normal_init_
-from models.layers import rms_norm, LinearSwish, SwiGLU, Attention, RotaryEmbedding, CosSin, CastedEmbedding, CastedLinear
+from models.layers import rms_norm, SwiGLU, Attention, RotaryEmbedding, CosSin, CastedEmbedding, CastedLinear
 from models.sparse_embedding import CastedSparseEmbedding
 from models.value_head import LatentValueHead
 from models.edit_policy import EditPolicyHead
@@ -316,12 +316,13 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
 
     def initial_carry(self, batch: Dict[str, torch.Tensor]):
         batch_size = batch["inputs"].shape[0]
+        device = batch["inputs"].device
 
         return TinyRecursiveReasoningModel_ACTV1Carry(
-            inner_carry=self.inner.empty_carry(batch_size),  # Empty is expected, it will be reseted in first pass as all sequences are halted.
+            inner_carry=self.inner.empty_carry(batch_size, device=device),  # Empty is expected, it will be reseted in first pass as all sequences are halted.
             
-            steps=torch.zeros((batch_size, ), dtype=torch.int32),
-            halted=torch.ones((batch_size, ), dtype=torch.bool),  # Default to halted
+            steps=torch.zeros((batch_size, ), dtype=torch.int32, device=device),
+            halted=torch.ones((batch_size, ), dtype=torch.bool, device=device),  # Default to halted
             
             current_data={k: torch.empty_like(v) for k, v in batch.items()}
         )
@@ -440,13 +441,20 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         """
         Run the inner recursion for n steps starting from z^(0).
         """
-        batch = dict(self._standardize_latent_batch(x, y))
-        batch["_latent_context"] = self._build_latent_context_with_plan(batch)
-
-        z = self.init_latent(batch, y)
+        # Initialize latent state from (x, y)
+        z = self.init_latent(x, y)
         zs: List[TinyRecursiveReasoningModel_ACTV1InnerCarry] = [z]
+        
+        # Pre-compute latent context once for efficiency
+        batch = self._standardize_latent_batch(x, y)
+        batch["_latent_context"] = self._build_latent_context_with_plan(batch)
+        
         for _ in range(n):
-            z = self.update_latent(z, y, batch)
+            # Pass pre-standardized batch directly to inner latent step to avoid
+            # redundant standardization while preserving cached context
+            context = self._resolve_latent_context(batch)
+            input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+            z = self.inner.latent_step(z, input_embeds, context["seq_info"])
             zs.append(z)
         return z, zs
 
