@@ -56,6 +56,12 @@ def compute_k_step_bootstrapped_target(
     """
     Compute K-step bootstrapped targets with proper terminal masking.
     """
+    batch_size = rewards_K.shape[0]
+
+    # Mask rewards beyond steps_taken for each sample (defensive against improper padding)
+    step_indices = torch.arange(K, device=rewards_K.device).unsqueeze(0)  # [1, K]
+    valid_mask = step_indices < steps_taken.unsqueeze(1)  # [batch_size, K]
+    rewards_K = rewards_K * valid_mask
 
     gammas = rewards_K.new_tensor([gamma**k for k in range(K)])
     reward_returns = (rewards_K * gammas).sum(dim=1)
@@ -64,10 +70,6 @@ def compute_k_step_bootstrapped_target(
         bootstrap_factor = gamma**K
     else:
         bootstrap_factor = gamma ** steps_taken.float()
-
-    batch_size = rewards_K.shape[0]
-    if batch_size == 0:
-        return reward_returns
 
     final_idx = (steps_taken - 1).clamp(min=0)
     batch_indices = torch.arange(batch_size, device=rewards_K.device)
