@@ -168,3 +168,104 @@ def estimate_local_Lz(
     if return_samples:
         return mean_value, stacked
     return mean_value
+
+
+def estimate_Cz(
+    model: nn.Module,
+    x_batch: dict,
+    y_batch: torch.Tensor,
+) -> float:
+    """
+    Estimate C_z = max ||z^(1) - z^(0)|| over a batch.
+
+    This corresponds to Equation 9 in the paper:
+        C_z = sup_{(x,y)} ||f_θ(z^(0)(x,y), y, x) - z^(0)(x,y)||
+
+    Args:
+        model: TRM model with init_latent and update_latent methods
+        x_batch: Batch dict with "inputs" and "puzzle_identifiers"
+        y_batch: Plan tensor [B, seq_len]
+
+    Returns:
+        Maximum ||z^(1) - z^(0)|| over the batch (scalar float)
+    """
+    with torch.no_grad():
+        z0 = model.init_latent(x_batch, y_batch)
+        z1 = model.update_latent(z0, y_batch, x_batch)
+
+        # Compute ||z^(1) - z^(0)|| for each sample in batch
+        diff_H = (z1.z_H - z0.z_H).pow(2).sum(dim=(1, 2))  # [B]
+        diff_L = (z1.z_L - z0.z_L).pow(2).sum(dim=(1, 2))  # [B]
+        diff_norms = torch.sqrt(diff_H + diff_L)  # [B]
+
+        return float(diff_norms.max().item())
+
+
+def estimate_Lv(
+    value_head: nn.Module,
+    z_batch: torch.Tensor,
+    x_embed_batch: torch.Tensor,
+    num_samples: int = 4,
+    eps: float = 1e-3,
+) -> float:
+    """
+    Estimate the Lipschitz constant L_V of the value head with respect to z.
+
+    Uses random perturbations to estimate ||V(z+δ, x) - V(z, x)|| / ||δ||.
+
+    Args:
+        value_head: Value head module V_ψ(z, x_embed)
+        z_batch: Latent tensor [B, z_dim]
+        x_embed_batch: Context embedding [B, x_dim]
+        num_samples: Number of perturbation samples
+        eps: Perturbation magnitude
+
+    Returns:
+        Estimated Lipschitz constant (max over samples)
+    """
+    if eps <= 0.0:
+        raise ValueError("`eps` must be positive.")
+
+    ratios = []
+    with torch.no_grad():
+        baseline = value_head(z_batch, x_embed_batch)  # [B]
+        for _ in range(max(num_samples, 1)):
+            noise = torch.randn_like(z_batch)
+            noise_norm = noise.pow(2).sum(dim=-1, keepdim=True).sqrt().clamp_min(1e-12)
+            perturbed_z = z_batch + eps * noise / noise_norm
+            perturbed_v = value_head(perturbed_z, x_embed_batch)
+            diff = (perturbed_v - baseline).abs()  # [B]
+            ratios.append(diff / eps)
+
+    if not ratios:
+        return 0.0
+    stacked = torch.stack(ratios, dim=0)  # [num_samples, B]
+    return float(stacked.max().item())
+
+
+def compute_unrolling_term_proxy(
+    hat_Lv: float,
+    hat_Lz: float,
+    hat_Cz: float,
+    n: int,
+) -> float:
+    """
+    Compute the finite-unrolling term proxy from Equation 10 in the paper:
+
+        L_V * L_z^n * C_z / (1 - L_z)
+
+    This bounds the value error due to finite unrolling.
+
+    Args:
+        hat_Lv: Estimated Lipschitz constant of value head w.r.t. z
+        hat_Lz: Estimated contraction constant of inner map
+        hat_Cz: Estimated ||z^(1) - z^(0)|| bound
+        n: Number of inner unrolling steps
+
+    Returns:
+        Unrolling term proxy (scalar float)
+    """
+    if hat_Lz >= 1.0:
+        # Not contractive; term would be infinite
+        return float("inf")
+    return hat_Lv * (hat_Lz ** n) * hat_Cz / (1.0 - hat_Lz)

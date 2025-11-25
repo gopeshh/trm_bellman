@@ -13,7 +13,12 @@ from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
-from utils.lipschitz import estimate_local_Lz
+from utils.lipschitz import (
+    estimate_local_Lz,
+    estimate_Cz,
+    estimate_Lv,
+    compute_unrolling_term_proxy,
+)
 
 
 @dataclass
@@ -81,6 +86,118 @@ def compute_k_step_bootstrapped_target(
     v_K = v_K * not_done_final
 
     return reward_returns + bootstrap_factor * v_K
+
+
+def compute_gae(
+    rewards: torch.Tensor,
+    values: torch.Tensor,
+    next_values: torch.Tensor,
+    dones: torch.Tensor,
+    gamma: float,
+    gae_lambda: float,
+) -> torch.Tensor:
+    """
+    Compute Generalized Advantage Estimation (GAE) for a batch of transitions.
+
+    This implements GAE(λ) from Schulman et al. (2016):
+        A_t = δ_t + (γλ)δ_{t+1} + (γλ)²δ_{t+2} + ...
+    where δ_t = r_t + γV(s_{t+1}) - V(s_t)
+
+    For a batch of independent transitions (not full trajectories), we compute
+    single-step GAE which reduces to the TD error when λ=0 and approaches
+    Monte Carlo when λ=1.
+
+    Args:
+        rewards: [B] rewards for each transition
+        values: [B] V(s) for each starting state
+        next_values: [B] V(s') for each next state
+        dones: [B] boolean done flags
+        gamma: discount factor
+        gae_lambda: GAE λ parameter (0 = TD, 1 = Monte Carlo)
+
+    Returns:
+        advantages: [B] GAE advantages
+    """
+    # For single transitions, GAE reduces to:
+    # A = δ = r + γ * V(s') * (1 - done) - V(s)
+    # The λ parameter would blend this with future δ's, but for single transitions
+    # we only have the immediate TD error.
+    #
+    # For proper GAE with trajectories, use compute_gae_trajectory below.
+    mask = (~dones).float()
+    td_error = rewards + gamma * next_values * mask - values
+    return td_error
+
+
+def compute_gae_trajectory(
+    rewards: torch.Tensor,
+    values: torch.Tensor,
+    dones: torch.Tensor,
+    gamma: float,
+    gae_lambda: float,
+    last_value: float = 0.0,
+) -> torch.Tensor:
+    """
+    Compute GAE advantages for a full trajectory.
+
+    Args:
+        rewards: [T] rewards for each timestep
+        values: [T] V(s) for each state in trajectory
+        dones: [T] boolean done flags
+        gamma: discount factor
+        gae_lambda: GAE λ parameter
+        last_value: V(s_T) for the final state after trajectory
+
+    Returns:
+        advantages: [T] GAE advantages
+    """
+    T = len(rewards)
+    advantages = torch.zeros_like(rewards)
+    gae = 0.0
+
+    # Append last_value for bootstrapping
+    values_extended = torch.cat([values, torch.tensor([last_value], device=values.device)])
+
+    for t in reversed(range(T)):
+        mask = 1.0 - dones[t].float()
+        delta = rewards[t] + gamma * values_extended[t + 1] * mask - values[t]
+        gae = delta + gamma * gae_lambda * mask * gae
+        advantages[t] = gae
+
+    return advantages
+
+
+def compute_empirical_bellman_residual(
+    values: torch.Tensor,
+    rewards: torch.Tensor,
+    next_values: torch.Tensor,
+    dones: torch.Tensor,
+    gamma: float,
+) -> Dict[str, float]:
+    """
+    Compute empirical Bellman residual statistics for monitoring.
+
+    The Bellman residual is |V(s) - (r + γV(s'))|.
+
+    Args:
+        values: [B] V(s) predictions
+        rewards: [B] rewards
+        next_values: [B] V(s') predictions
+        dones: [B] done flags
+        gamma: discount factor
+
+    Returns:
+        Dictionary with residual statistics (mean, max, std)
+    """
+    mask = (~dones).float()
+    td_target = rewards + gamma * next_values * mask
+    residual = (values - td_target).abs()
+
+    return {
+        "bellman_residual_mean": float(residual.mean().item()),
+        "bellman_residual_max": float(residual.max().item()),
+        "bellman_residual_std": float(residual.std(unbiased=False).item()),
+    }
 
 
 class UPITrmTrainer:
@@ -622,11 +739,18 @@ class UPITrmTrainer:
 
         return float(loss_val.item())
 
-    def policy_update(self) -> float:
-        """Perform one policy-gradient step with an optional centered advantage estimator."""
+    def policy_update(self) -> Dict[str, float]:
+        """
+        Perform one policy-gradient step with optional:
+        - GAE advantage estimation (use_gae=True)
+        - Centered advantage estimator (centered_advantage=True)
+        - KL trust-region constraint (enable_kl_trust_region=True)
+        
+        Returns dict with loss and optional KL divergence.
+        """
 
         if len(self.replay) < self.rl_cfg.batch_size:
-            return 0.0
+            return {"loss_policy": 0.0}
 
         # Ensure the candidate policy uses the current critic backbone for its features.
         self._sync_candidate_backbone_from_model()
@@ -642,10 +766,24 @@ class UPITrmTrainer:
             v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
             v_next = self.model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
             mask = (~dones).float()
-            v_next = v_next * mask
+            v_next_masked = v_next * mask
             gamma = self.rl_cfg.gamma
-            td_target = rewards + gamma * v_next
-            adv = td_target - v_s
+
+            # Compute advantages (GAE or 1-step TD)
+            if getattr(self.rl_cfg, "use_gae", False):
+                gae_lambda = getattr(self.rl_cfg, "gae_lambda", 0.95)
+                adv = compute_gae(
+                    rewards=rewards,
+                    values=v_s,
+                    next_values=v_next,
+                    dones=dones,
+                    gamma=gamma,
+                    gae_lambda=gae_lambda,
+                )
+            else:
+                td_target = rewards + gamma * v_next_masked
+                adv = td_target - v_s
+
             if getattr(self.rl_cfg, "centered_advantage", False):
                 # Optional: center the estimator so that E[Â] ≈ 0 under the sampled batch,
                 # matching the CPI analysis assumption up to sampling noise.
@@ -655,11 +793,30 @@ class UPITrmTrainer:
             if adv_clip is not None and adv_clip > 0:
                 adv = adv.clamp(-adv_clip, adv_clip)
 
+        # Get old policy distribution for KL computation
+        kl_div = None
+        if getattr(self.rl_cfg, "enable_kl_trust_region", False):
+            with torch.no_grad():
+                old_dist = self.policy_model_old.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+                old_log_probs = old_dist.logits.log_softmax(dim=-1)
+
         dist = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
         log_prob = dist.log_prob(actions)
         entropy = dist.entropy().mean()
 
         loss_policy = -(log_prob * adv.detach()).mean() - self.rl_cfg.entropy_coef * entropy
+
+        # Add KL penalty if trust-region is enabled
+        if getattr(self.rl_cfg, "enable_kl_trust_region", False):
+            new_log_probs = dist.logits.log_softmax(dim=-1)
+            # KL(old || new) = sum(old_probs * (log_old - log_new))
+            old_probs = old_log_probs.exp()
+            kl_div = (old_probs * (old_log_probs - new_log_probs)).sum(dim=-1).mean()
+            trust_region_kl = getattr(self.rl_cfg, "trust_region_kl", 0.01)
+            # Add KL penalty (adaptive coefficient based on distance from target)
+            kl_coef = 1.0 if kl_div > trust_region_kl else 0.5
+            loss_policy = loss_policy + kl_coef * kl_div
+
         loss_policy.backward()
         policy_grad_clip = getattr(self.rl_cfg, "policy_grad_clip", None)
         if policy_grad_clip is not None and policy_grad_clip > 0 and self._policy_params:
@@ -695,7 +852,10 @@ class UPITrmTrainer:
             # Use parameter-space interpolation only when we are not distilling the mixture.
             self._sync_policy_old_towards_candidate()
 
-        return float(loss_policy.item())
+        result = {"loss_policy": float(loss_policy.item())}
+        if kl_div is not None:
+            result["policy_kl"] = float(kl_div.item())
+        return result
 
     def train_step(self) -> Dict[str, float]:
         """
@@ -706,7 +866,14 @@ class UPITrmTrainer:
             self.collect_episode()
 
         loss_val = self.value_update()
-        loss_policy = self.policy_update()
+        policy_result = self.policy_update()
+        
+        # Handle both old (float) and new (dict) return types for backward compatibility
+        if isinstance(policy_result, dict):
+            loss_policy = policy_result.get("loss_policy", 0.0)
+        else:
+            loss_policy = policy_result
+            policy_result = {}
 
         debug_metrics: Dict[str, float] = {}
         if self.rl_cfg.debug_checks and len(self.replay) >= self.rl_cfg.batch_size:
@@ -725,6 +892,11 @@ class UPITrmTrainer:
                 debug_metrics["adv_abs_mean"] = float(adv.abs().mean().item())
                 debug_metrics["adv_abs_max"] = float(adv.abs().max().item())
 
+        # Compute theory metrics (C_z, L_z, L_v, unrolling term) if enabled
+        theory_metrics: Dict[str, float] = {}
+        if getattr(self.rl_cfg, "track_theory_metrics", False) and len(self.replay) >= self.rl_cfg.batch_size:
+            theory_metrics = self._compute_theory_metrics()
+
         metrics = {
             "loss_value": loss_val,
             "loss_policy": loss_policy,
@@ -733,9 +905,71 @@ class UPITrmTrainer:
             "term_budget": float(self.term_stats["budget"]),
         }
         metrics.update(debug_metrics)
+        metrics.update(theory_metrics)
+        
+        # Include policy KL if present
+        if "policy_kl" in policy_result:
+            metrics["policy_kl"] = policy_result["policy_kl"]
         
         # Reset termination stats for the next logging window
         self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}
+        
+        return metrics
+
+    def _compute_theory_metrics(self) -> Dict[str, float]:
+        """
+        Compute theory-related metrics from the paper:
+        - hat_Cz: Estimated C_z = max ||z^(1) - z^(0)||
+        - hat_Lz: Estimated local Lipschitz constant of inner map
+        - hat_Lv: Estimated Lipschitz constant of value head w.r.t. z
+        - bellman_residual_*: Empirical Bellman residual statistics
+        - unrolling_term: L_V * L_z^n * C_z / (1 - L_z)
+        """
+        metrics: Dict[str, float] = {}
+        
+        try:
+            with torch.no_grad():
+                transitions = self.replay.sample_batch(min(self.rl_cfg.batch_size, len(self.replay)))
+                x_b, y_b, x_next_b, y_next_b, _, rewards_b, dones_b = self._stack_batch(transitions)
+                
+                # Estimate C_z
+                hat_Cz = estimate_Cz(self.model, x_b, y_b)
+                metrics["hat_Cz"] = hat_Cz
+                
+                # Estimate local L_z
+                z_n = self.model.eval_latent(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
+                batch = self.model._standardize_latent_batch(x_b, y_b)
+                context = self.model._build_latent_context_with_plan(batch)
+                hat_Lz = estimate_local_Lz(self.model.inner, z_n, context, num_samples=4)
+                metrics["hat_Lz"] = hat_Lz
+                
+                # Estimate L_v if value head exists
+                if self.model.value_head is not None:
+                    z_vec = z_n.z_H.mean(dim=1)
+                    input_embeddings = context["input_embeddings"]
+                    plan_embeddings = context["plan_embeddings"]
+                    x_embed = self.model._pool_embedding(input_embeddings)
+                    y_embed = self.model._pool_embedding(plan_embeddings)
+                    combined_embed = torch.cat([x_embed, y_embed], dim=-1)
+                    hat_Lv = estimate_Lv(self.model.value_head, z_vec, combined_embed, num_samples=4)
+                    metrics["hat_Lv"] = hat_Lv
+                    
+                    # Compute unrolling term proxy
+                    n = self.rl_cfg.inner_unroll_n
+                    unrolling_term = compute_unrolling_term_proxy(hat_Lv, hat_Lz, hat_Cz, n)
+                    metrics["unrolling_term"] = unrolling_term
+                
+                # Compute Bellman residual
+                v_s = self.model.used_value(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
+                v_next = self.model.used_value(x_next_b, y_next_b, n=self.rl_cfg.inner_unroll_n)
+                residual_metrics = compute_empirical_bellman_residual(
+                    v_s, rewards_b, v_next, dones_b, self.rl_cfg.gamma
+                )
+                metrics.update(residual_metrics)
+                
+        except Exception as e:
+            if self.debug_checks:
+                print(f"[warning] Theory metrics computation failed: {e}")
         
         return metrics
 

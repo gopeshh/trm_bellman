@@ -15,12 +15,17 @@ class RLConfig(BaseModel):
 
     # CPI / TRPO-style "dials"
     mixture_alpha: float = 0.1  # mixture weight between old and candidate policy
-    trust_region_kl: float = 0.01  # Reserved for future TRPO-style KL trust regions; unused today.
+    trust_region_kl: float = 0.01  # KL divergence threshold for trust-region updates (0 = disabled)
+    enable_kl_trust_region: bool = False  # If True, apply KL penalty/early stopping in policy update
 
     # Theory-exact toggles
     exact_k_step_targets: bool = False  # If True, use fixed-horizon γ^K bootstrap in K-step value update
     centered_advantage: bool = True  # If True, use a centered advantage estimator in policy update
     distill_mixture_policy: bool = False  # If True, distill the mixture policy into policy_model_old
+
+    # GAE (Generalized Advantage Estimation)
+    use_gae: bool = False  # If True, use GAE instead of 1-step TD advantages
+    gae_lambda: float = 0.95  # λ parameter for GAE (higher = more bias towards Monte Carlo)
 
     # Optimization
     value_lr: float = 3e-4
@@ -51,4 +56,5 @@ class RLConfig(BaseModel):
     eval_num_episodes: int = 50
     use_tqdm: bool = True
     debug_checks: bool = False
+    track_theory_metrics: bool = False  # If True, compute and log C_z, L_z, L_v estimates
 

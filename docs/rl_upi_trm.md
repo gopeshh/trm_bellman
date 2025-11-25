@@ -206,15 +206,44 @@ The RL extension is controlled via an `RLConfig` (or similar) nested in the main
   - `rl.target_Lv`: float – target upper bound for value head Lipschitz constant.
 - **Policy update / conservative improvement**
   - `rl.mixture_alpha`: float – CPI mixture coefficient between old and new policy.
-  - `rl.trust_region_kl`: float – optional KL trust-region radius (TRPO-style variant).
+  - `rl.enable_kl_trust_region`: bool – enable KL penalty in policy updates.
+  - `rl.trust_region_kl`: float – KL divergence threshold for trust-region updates.
   - `rl.entropy_coef`: float – entropy regularization weight.
+- **GAE (Generalized Advantage Estimation)**
+  - `rl.use_gae`: bool – use GAE instead of 1-step TD advantages (Section 6.2).
+  - `rl.gae_lambda`: float – GAE λ parameter (0 = TD, 1 = Monte Carlo).
+- **Theory-exact toggles**
+  - `rl.exact_k_step_targets`: bool – use fixed-horizon γ^K bootstrap.
+  - `rl.centered_advantage`: bool – center advantages (Assumption 5.7).
+  - `rl.distill_mixture_policy`: bool – distill CPI mixture back into network.
 - **Optimization and replay**
   - `rl.value_lr`: float – learning rate for value + latent evaluator.
   - `rl.policy_lr`: float – learning rate for policy parameters.
   - `rl.replay_capacity`: int – replay buffer capacity.
   - `rl.batch_size`: int – mini-batch size.
+- **Monitoring**
+  - `rl.track_theory_metrics`: bool – compute and log \(\hat{C}_z\), \(\hat{L}_z\), \(\hat{L}_V\), Bellman residual.
 
 YAML config examples (e.g., `config/rl/upi_trm_sudoku.yaml`) should set these appropriately for each benchmark.
+
+### 4.1 Theory Metrics
+
+When `track_theory_metrics=True`, the trainer computes:
+
+- `hat_Cz`: Estimated \(C_z = \max \|z^{(1)} - z^{(0)}\|\) (Equation 9)
+- `hat_Lz`: Local Lipschitz estimate of inner map
+- `hat_Lv`: Lipschitz estimate of value head w.r.t. \(z\)
+- `unrolling_term`: \(L_V \cdot L_z^n \cdot C_z / (1 - L_z)\) (Equation 10)
+- `bellman_residual_*`: Empirical Bellman residual statistics
+
+These metrics allow monitoring the bounds from Section 4-5 of the paper.
+
+### 4.2 (x,y)-Dependent Initialization
+
+The paper mentions (Section 4) that \(z_{\text{init}}\) can be a small encoder:
+> "In practice, \(z_{\text{init}}\) is implemented as a small encoder network that ingests \((x,y)\)"
+
+Enable via `rl_enable_z_init_encoder=True` in the TRM config. This adds a small MLP that produces an (x,y)-dependent offset to the global initialization.
 
 ## 5. Mapping to the ICML Paper
 

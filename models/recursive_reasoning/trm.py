@@ -79,6 +79,7 @@ class TinyRecursiveReasoningModel_ACTV1Config(BaseModel):
     rl_target_Lv: float = 1.0
     rl_enable_policy_head: bool = False
     rl_num_actions: int = 0   # total number of discrete actions; last index is STOP
+    rl_enable_z_init_encoder: bool = False  # If True, use (x,y)-dependent initialization instead of global H_init/L_init
 
 class TinyRecursiveReasoningModel_ACTV1Block(nn.Module):
     def __init__(self, config: TinyRecursiveReasoningModel_ACTV1Config) -> None:
@@ -269,6 +270,49 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
         return new_carry, output, (q_logits[..., 0], q_logits[..., 1])
 
 
+class ZInitEncoder(nn.Module):
+    """
+    Encoder network that produces z^(0) from (x, y) embeddings.
+    
+    This implements the z_init(x, y) function from the paper (Section 4),
+    allowing the initial latent state to depend on the current instance and plan.
+    """
+    
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, seq_len: int):
+        super().__init__()
+        self.seq_len = seq_len
+        self.output_dim = output_dim
+        # MLP that maps pooled (x, y) embeddings to z^(0)
+        self.mlp = nn.Sequential(
+            nn.Linear(input_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, seq_len * output_dim),
+        )
+        
+        # Initialize to small values so initial behavior is close to global init
+        with torch.no_grad():
+            for layer in self.mlp:
+                if isinstance(layer, nn.Linear):
+                    nn.init.normal_(layer.weight, std=0.01)
+                    if layer.bias is not None:
+                        nn.init.zeros_(layer.bias)
+    
+    def forward(self, x_embed: torch.Tensor, y_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x_embed: [B, input_dim] pooled input embedding
+            y_embed: [B, input_dim] pooled plan embedding
+        
+        Returns:
+            z_init: [B, seq_len, output_dim] initial latent state
+        """
+        combined = torch.cat([x_embed, y_embed], dim=-1)  # [B, input_dim * 2]
+        out = self.mlp(combined)  # [B, seq_len * output_dim]
+        return out.view(-1, self.seq_len, self.output_dim)
+
+
 class TinyRecursiveReasoningModel_ACTV1(nn.Module):
     """ACT wrapper."""
 
@@ -302,6 +346,19 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             )
         else:
             self.edit_policy = None
+
+        # Optional (x,y)-dependent initialization encoder
+        if getattr(self.config, "rl_enable_z_init_encoder", False):
+            puzzle_emb_len = self.inner.puzzle_emb_len
+            total_seq_len = self.config.seq_len + puzzle_emb_len
+            self.z_init_encoder = ZInitEncoder(
+                input_dim=self.x_embed_dim,
+                hidden_dim=self.config.rl_value_hidden_dim,
+                output_dim=self.z_dim,
+                seq_len=total_seq_len,
+            )
+        else:
+            self.z_init_encoder = None
 
         if self.config.rl_enable_contraction:
             apply_spectral_norm_to_trm(self.inner)
@@ -405,18 +462,45 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
 
     def init_latent(self, x: Any, y: Any) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
         """
-        Initialize z^(0) from (x, y) by reusing the standard inner carry reset logic.
+        Initialize z^(0) from (x, y).
 
-        Note: In the current implementation z^(0) is a learned global initialization
-        (H_init, L_init) that does not depend explicitly on (x, y); the dependence
-        enters through the first latent_step via the input + plan embeddings.
+        If z_init_encoder is enabled (rl_enable_z_init_encoder=True), this produces
+        an (x,y)-dependent initialization as described in Section 4 of the paper:
+            z^(0) = z_init(x, y)
+        
+        Otherwise, uses the learned global initialization (H_init, L_init) that does
+        not depend explicitly on (x, y); the dependence enters through the first
+        latent_step via the input + plan embeddings.
         """
         batch = self._standardize_latent_batch(x, y)
         batch_size = batch["inputs"].shape[0]
         device = batch["inputs"].device
-        empty_carry = self.inner.empty_carry(batch_size, device=device)
-        reset_flag = torch.ones(batch_size, dtype=torch.bool, device=device)
-        return self.inner.reset_carry(reset_flag, empty_carry)
+        
+        if self.z_init_encoder is not None:
+            # Use (x, y)-dependent initialization
+            context = self._build_latent_context_with_plan(batch)
+            input_embeddings = context["input_embeddings"]
+            plan_embeddings = context["plan_embeddings"]
+            x_embed = self._pool_embedding(input_embeddings)
+            y_embed = self._pool_embedding(plan_embeddings)
+            
+            # Get encoded initial latent
+            z_init_encoded = self.z_init_encoder(x_embed, y_embed)  # [B, seq_len, hidden_size]
+            z_init_encoded = z_init_encoded.to(self.inner.forward_dtype)
+            
+            # Add global initialization as a residual for stability
+            global_H = self.inner.H_init.unsqueeze(0).expand(batch_size, -1, -1)
+            global_L = self.inner.L_init.unsqueeze(0).expand(batch_size, -1, -1)
+            
+            return TinyRecursiveReasoningModel_ACTV1InnerCarry(
+                z_H=global_H + z_init_encoded,
+                z_L=global_L + z_init_encoded,
+            )
+        else:
+            # Use global initialization
+            empty_carry = self.inner.empty_carry(batch_size, device=device)
+            reset_flag = torch.ones(batch_size, dtype=torch.bool, device=device)
+            return self.inner.reset_carry(reset_flag, empty_carry)
 
     def update_latent(
         self,
