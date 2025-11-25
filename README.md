@@ -52,16 +52,124 @@ python upi_trm_train.py \
 ```
 This uses the in-memory `DummyPuzzleDataset`, collects short plan-edit episodes, and prints policy/value losses plus both `eval_success_rate` and `eval_mean_score`. The `scripts/run_rl_dummy.sh` helper runs an equivalent configuration with a smaller batch size (16) to finish even faster.
 
-### Sudoku-focused long run
-For Sudoku-style plan editing, we provide `configs/rl_sudoku_k1.yaml`, which switches to `K=1`, increases entropy, and bumps replayed batch sizes/rollout counts. Launch it with:
+### Sudoku UPI-TRM Training
+
+We provide multiple configurations for training UPI-TRM on Sudoku puzzles with varying theory-exactness and K-step horizons.
+
+#### Quick Start (using the provided script)
+
+```bash
+./scripts/run_sudoku_rl.sh
+```
+
+This uses the default dataset at `data/sudoku-extreme-1k-aug-1000/train` with the baseline `configs/rl_sudoku_k1.yaml` config.
+
+#### Manual Commands with Different Configs
+
+**Baseline K=1 (simple 1-step TD):**
+```bash
+python upi_trm_train.py \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --config configs/rl_sudoku_k1.yaml \
+    --seed 42
+```
+
+**Theory-exact K=1 (all paper features enabled):**
+```bash
+python upi_trm_train.py \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --config configs/rl_sudoku_k1_theory_exact.yaml \
+    --seed 42
+```
+
+**Practical K=3 baseline (faster learning):**
+```bash
+python upi_trm_train.py \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --config configs/rl_sudoku_k3_baseline.yaml \
+    --seed 42
+```
+
+**K=5 multi-step unrolled (theory-exact):**
+```bash
+python upi_trm_train.py \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --config configs/rl_sudoku_k5_theory_exact.yaml \
+    --seed 42
+```
+
+**Full theory config with GAE + all dials:**
+```bash
+python upi_trm_train.py \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --config configs/ablations/upi_trm_full_theory.yaml \
+    --seed 42
+```
+
+#### Available Sudoku Configs
+
+| Config | K | Theory Features | Description |
+|--------|---|-----------------|-------------|
+| `rl_sudoku_k1.yaml` | 1 | Baseline | Simple 1-step TD, conservative α=0.01 |
+| `rl_sudoku_k1_theory_exact.yaml` | 1 | All ON | Exact targets + centered adv + distillation |
+| `rl_sudoku_k3_baseline.yaml` | 3 | Partial | Practical K=3, faster learning rates |
+| `rl_sudoku_k5_theory_exact.yaml` | 5 | All ON | Multi-step unrolled with theory features |
+| `ablations/upi_trm_full_theory.yaml` | 5 | All + GAE | Full paper implementation with λ-returns |
+
+#### Theory-Exact Features Explained
+
+- **`exact_k_step_targets`**: Uses fixed-horizon γ^K bootstrap for T_K^π operator (vs. γ^steps_taken)
+- **`centered_advantage`**: Batch-centered advantage estimator (Assumption 5.7 in paper)
+- **`distill_mixture_policy`**: Distills CPI mixture π_new = (1-α)π_old + απ_candidate back into network
+- **`use_gae`**: Enables GAE (λ-returns) for variance reduction (Section 6.2)
+
+#### CLI Options
+
+```bash
+python upi_trm_train.py --help
+```
+
+Key flags:
+- `--dataset-paths`: Path(s) to Sudoku dataset directories
+- `--config`: YAML config file for RLConfig overrides
+- `--train-steps`: Number of training steps (overrides config)
+- `--batch-size`: Mini-batch size (overrides config)
+- `--max-edits`: Max edits per episode
+- `--seed`: Random seed for reproducibility
+- `--no-tqdm`: Disable progress bar (useful for logging to files)
+- `--debug-checks`: Enable debug assertions and verbose logging
+
+#### Smoke Testing Without a Dataset
+
+If you don't have the Sudoku dataset, the script automatically falls back to a `DummyPuzzleDataset` for testing:
+
+```bash
+python upi_trm_train.py \
+    --train-steps 100 \
+    --batch-size 16 \
+    --max-edits 8 \
+    --seed 0
+```
+
+This runs on synthetic data to verify the training loop works correctly.
+
+#### Monitoring Theory Metrics
+
+To track the paper's theoretical quantities (C_z, L_z, L_v, Bellman residual, unrolling term), enable theory metrics:
 
 ```bash
 python upi_trm_train.py \
     --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
-    --config configs/rl_sudoku_k1.yaml
+    --config configs/ablations/upi_trm_full_theory.yaml \
+    --seed 42
 ```
 
-The config already sets `train_steps=20000`, `batch_size=128`, `rollouts_per_step=4`, `max_edits=81`, and longer eval cadences, so the CLI only needs the dataset path (and any logging toggles you prefer). `./scripts/run_sudoku_rl.sh` wraps the same call and accepts an optional dataset directory argument.
+The `upi_trm_full_theory.yaml` config sets `track_theory_metrics: true`, which logs:
+- `hat_Cz`: Estimated ||z^(1) - z^(0)|| bound
+- `hat_Lz`: Local Lipschitz estimate of inner map
+- `hat_Lv`: Lipschitz estimate of value head w.r.t. z
+- `unrolling_term`: L_V · L_z^n · C_z / (1 - L_z) (finite unrolling bias bound)
+- `bellman_residual_*`: Empirical Bellman residual statistics
 
 ## Ablation Experiments
 To reproduce the ICML ablation sweeps, point the helper script at any YAML inside `configs/ablations/`. Each YAML only overrides the `RLConfig` fields mentioned inside, so unspecified hyperparameters fall back to the CLI defaults above.
