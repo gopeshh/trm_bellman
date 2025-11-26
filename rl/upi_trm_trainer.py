@@ -97,15 +97,19 @@ def compute_gae(
     gae_lambda: float,
 ) -> torch.Tensor:
     """
-    Compute Generalized Advantage Estimation (GAE) for a batch of transitions.
+    Compute Generalized Advantage Estimation (GAE) for a batch of independent transitions.
 
-    This implements GAE(λ) from Schulman et al. (2016):
-        A_t = δ_t + (γλ)δ_{t+1} + (γλ)²δ_{t+2} + ...
-    where δ_t = r_t + γV(s_{t+1}) - V(s_t)
+    This implements a single-step approximation of GAE(λ) from Schulman et al. (2016).
+    For independent transitions (not full trajectories), we compute:
+        A = δ * (1 + γλ(1-done))
+    where δ = r + γV(s') - V(s) is the TD error.
 
-    For a batch of independent transitions (not full trajectories), we compute
-    single-step GAE which reduces to the TD error when λ=0 and approaches
-    Monte Carlo when λ=1.
+    This approximation assumes the next advantage is approximately equal to the current
+    TD error, which provides a λ-weighted blend between TD(0) and a 2-step lookahead.
+    - When λ=0: Returns pure TD error (δ)
+    - When λ=1: Returns δ * (1 + γ) for non-terminal states (approximates 2-step return)
+
+    For proper multi-step GAE with full trajectory information, use compute_gae_trajectory.
 
     Args:
         rewards: [B] rewards for each transition
@@ -113,20 +117,21 @@ def compute_gae(
         next_values: [B] V(s') for each next state
         dones: [B] boolean done flags
         gamma: discount factor
-        gae_lambda: GAE λ parameter (0 = TD, 1 = Monte Carlo)
+        gae_lambda: GAE λ parameter (0 = TD, 1 = Monte Carlo-like)
 
     Returns:
-        advantages: [B] GAE advantages
+        advantages: [B] GAE-approximated advantages
     """
-    # For single transitions, GAE reduces to:
-    # A = δ = r + γ * V(s') * (1 - done) - V(s)
-    # The λ parameter would blend this with future δ's, but for single transitions
-    # we only have the immediate TD error.
-    #
-    # For proper GAE with trajectories, use compute_gae_trajectory below.
     mask = (~dones).float()
     td_error = rewards + gamma * next_values * mask - values
-    return td_error
+    
+    # For single transitions, we approximate the GAE recursion:
+    # A_t = δ_t + γλ * A_{t+1}
+    # By assuming A_{t+1} ≈ δ_t (the TD error is a reasonable proxy),
+    # we get: A_t ≈ δ_t * (1 + γλ) for non-terminal transitions.
+    # This provides meaningful λ-blending without requiring full trajectories.
+    gae_factor = 1.0 + gamma * gae_lambda * mask
+    return td_error * gae_factor
 
 
 def compute_gae_trajectory(
@@ -510,7 +515,7 @@ class UPITrmTrainer:
             batch_y = self._prepare_plan(y, batched=batched)
 
             dist = self._mixed_policy_dist(batch_x, batch_y, n=self.rl_cfg.inner_unroll_n)
-            action = dist.sample()
+            action = dist.sample().squeeze()  # Ensure scalar (0-D) tensor for single-state sampling
 
             (x_next, y_next), reward, done, info = self.env.step(action.item())
             last_info = info

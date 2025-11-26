@@ -8,18 +8,18 @@ from rl.upi_trm_trainer import compute_gae, compute_gae_trajectory
 
 
 def test_gae_single_step_equals_td_error():
-    """Test that single-step GAE equals TD error."""
+    """Test that single-step GAE with λ=0 equals TD error."""
     batch_size = 4
     rewards = torch.tensor([1.0, 2.0, 0.5, -0.5])
     values = torch.tensor([0.5, 1.0, 0.3, 0.2])
     next_values = torch.tensor([0.8, 0.9, 0.4, 0.1])
     dones = torch.zeros(batch_size, dtype=torch.bool)
     gamma = 0.99
-    gae_lambda = 0.95
+    gae_lambda = 0.0  # λ=0 gives pure TD error
 
     gae = compute_gae(rewards, values, next_values, dones, gamma, gae_lambda)
 
-    # For single transitions, GAE = TD error = r + γV(s') - V(s)
+    # For λ=0, GAE = TD error = r + γV(s') - V(s)
     expected = rewards + gamma * next_values - values
     assert torch.allclose(gae, expected)
 
@@ -35,13 +35,35 @@ def test_gae_with_terminal_masks_bootstrap():
 
     gae = compute_gae(rewards, values, next_values, dones, gamma, gae_lambda)
 
-    # For non-terminal: r + γV(s') - V(s)
-    expected_0 = 1.0 + 0.99 * 0.8 - 0.5
-    # For terminal: r + 0 - V(s) (no bootstrap)
-    expected_1 = 2.0 - 1.0
+    # For non-terminal with λ>0: TD_error * (1 + γλ)
+    td_error_0 = 1.0 + 0.99 * 0.8 - 0.5  # = 1.292
+    expected_0 = td_error_0 * (1.0 + gamma * gae_lambda)  # = 1.292 * 1.9405
 
-    assert abs(gae[0].item() - expected_0) < 1e-6
+    # For terminal: TD_error * 1 (mask zeros out the λ term)
+    expected_1 = 2.0 - 1.0  # = 1.0
+
+    assert abs(gae[0].item() - expected_0) < 1e-5
     assert abs(gae[1].item() - expected_1) < 1e-6
+
+
+def test_gae_single_step_lambda_effect():
+    """Test that non-zero λ amplifies advantages for non-terminal states."""
+    rewards = torch.tensor([1.0, 1.0])
+    values = torch.tensor([0.5, 0.5])
+    next_values = torch.tensor([0.6, 0.6])
+    dones = torch.zeros(2, dtype=torch.bool)
+    gamma = 0.99
+
+    # Compare λ=0 (pure TD) vs λ=0.95 (GAE-approximated)
+    gae_0 = compute_gae(rewards, values, next_values, dones, gamma, gae_lambda=0.0)
+    gae_95 = compute_gae(rewards, values, next_values, dones, gamma, gae_lambda=0.95)
+
+    # With λ>0, advantages should be scaled up for non-terminal transitions
+    # gae_95 = gae_0 * (1 + γλ) = gae_0 * 1.9405
+    assert torch.allclose(gae_95, gae_0 * (1 + gamma * 0.95), atol=1e-5)
+
+    # Higher λ should give larger advantages
+    assert (gae_95 > gae_0).all()
 
 
 def test_gae_trajectory_simple_case():
