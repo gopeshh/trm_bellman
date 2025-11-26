@@ -231,10 +231,14 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
         )
 
     def reset_carry(self, reset_flag: torch.Tensor, carry: TinyRecursiveReasoningModel_ACTV1InnerCarry):
-        reset_flag = reset_flag.to(self.H_init.device)
+        # Use the carry's device to ensure consistency with input batch
+        device = carry.z_H.device
+        reset_flag = reset_flag.to(device)
+        H_init = self.H_init.to(device)
+        L_init = self.L_init.to(device)
         return TinyRecursiveReasoningModel_ACTV1InnerCarry(
-            z_H=torch.where(reset_flag.view(-1, 1, 1), self.H_init, carry.z_H),
-            z_L=torch.where(reset_flag.view(-1, 1, 1), self.L_init, carry.z_L),
+            z_H=torch.where(reset_flag.view(-1, 1, 1), H_init, carry.z_H),
+            z_L=torch.where(reset_flag.view(-1, 1, 1), L_init, carry.z_L),
         )
 
     def latent_step(
