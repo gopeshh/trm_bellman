@@ -1,0 +1,42 @@
+# Practical UPI-TRM baseline for Sudoku (K=3)
+# A bit less "theory-pure", but much more likely to move quickly.
+
+# Discount / horizons
+gamma: 0.99
+K: 3                 # small K-step horizon for a tighter contraction than K=1
+inner_unroll_n: 4    # same as paper baseline
+max_edits: 81        # one full-grid worth of edits (you can bump to 120 later)
+
+# Optimization
+value_lr: 3e-4       # close to RLConfig defaults – much faster learning
+policy_lr: 3e-4
+entropy_coef: 0.01
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 10.0
+advantage_clip: 10.0
+policy_epsilon: 0.05  # a bit of extra exploration over the CPI mixture
+
+# Replay / data
+batch_size: 128
+replay_capacity: 100000   # RLConfig default; you can leave it out if you like
+
+# Training loop
+num_train_steps: 20000
+rollout_episodes_per_step: 4
+
+# Lipschitz / contraction dials
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 1.0          # keep V head relatively smooth in z to match bounds
+
+# Theory toggles
+exact_k_step_targets: false  # use gamma^steps_taken; less brittle with truncated episodes
+centered_advantage: true
+distill_mixture_policy: true
+
+# CPI mixture
+mixture_alpha: 0.05     # faster than 0.01 but still conservative
+trust_region_kl: 0.01   # unused right now, but harmless to leave as default
+
+

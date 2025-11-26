@@ -1,15 +1,24 @@
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List, Dict, Optional, Any
 from dataclasses import dataclass
 import math
 import torch
 import copy
 import torch.nn.functional as F
 from torch import nn
+from torch.distributions import Categorical
 from pydantic import BaseModel
-import random
+
 from models.common import trunc_normal_init_
-from models.layers import rms_norm, LinearSwish, SwiGLU, Attention, RotaryEmbedding, CosSin, CastedEmbedding, CastedLinear
+from models.layers import rms_norm, SwiGLU, Attention, RotaryEmbedding, CosSin, CastedEmbedding, CastedLinear
 from models.sparse_embedding import CastedSparseEmbedding
+from models.value_head import LatentValueHead
+from models.edit_policy import EditPolicyHead
+from utils.lipschitz import (
+    apply_spectral_norm_to_trm,
+    apply_spectral_norm_to_value_head,
+    enforce_global_contraction,
+    enforce_global_contraction_on_value_head,
+)
 
 IGNORE_LABEL_ID = -100
 
@@ -61,6 +70,16 @@ class TinyRecursiveReasoningModel_ACTV1Config(BaseModel):
     mlp_t: bool = False # use mlp on L instead of transformer
     puzzle_emb_len: int = 16 # if non-zero, its specified to this value
     no_ACT_continue: bool =  True # No continue ACT loss, only use the sigmoid of the halt which makes much more sense
+
+    # RL / value-head / contraction dials (defaults keep them OFF)
+    rl_enable_value_head: bool = False
+    rl_enable_contraction: bool = False
+    rl_value_hidden_dim: int = 256
+    rl_target_Lz: float = 0.9
+    rl_target_Lv: float = 1.0
+    rl_enable_policy_head: bool = False
+    rl_num_actions: int = 0   # total number of discrete actions; last index is STOP
+    rl_enable_z_init_encoder: bool = False  # If True, use (x,y)-dependent initialization instead of global H_init/L_init
 
 class TinyRecursiveReasoningModel_ACTV1Block(nn.Module):
     def __init__(self, config: TinyRecursiveReasoningModel_ACTV1Config) -> None:
@@ -159,6 +178,17 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
             self.q_head.weight.zero_()
             self.q_head.bias.fill_(-5)  # type: ignore
 
+    def build_seq_info(self) -> Dict[str, Optional[CosSin]]:
+        return dict(
+            cos_sin=self.rotary_emb() if hasattr(self, "rotary_emb") else None,
+        )
+
+    def build_latent_context(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        return {
+            "seq_info": self.build_seq_info(),
+            "input_embeddings": self._input_embeddings(batch["inputs"], batch["puzzle_identifiers"]),
+        }
+
     def _input_embeddings(self, input: torch.Tensor, puzzle_identifiers: torch.Tensor):
         # Token embedding
         embedding = self.embed_tokens(input.to(torch.int32))
@@ -181,45 +211,110 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
         # Scale
         return self.embed_scale * embedding
 
-    def empty_carry(self, batch_size: int):
+    def empty_carry(self, batch_size: int, device: Optional[torch.device] = None):
+        device = device or self.H_init.device
         return TinyRecursiveReasoningModel_ACTV1InnerCarry(
-            z_H=torch.empty(batch_size, self.config.seq_len + self.puzzle_emb_len, self.config.hidden_size, dtype=self.forward_dtype),
-            z_L=torch.empty(batch_size, self.config.seq_len + self.puzzle_emb_len, self.config.hidden_size, dtype=self.forward_dtype),
+            z_H=torch.empty(
+                batch_size,
+                self.config.seq_len + self.puzzle_emb_len,
+                self.config.hidden_size,
+                dtype=self.forward_dtype,
+                device=device,
+            ),
+            z_L=torch.empty(
+                batch_size,
+                self.config.seq_len + self.puzzle_emb_len,
+                self.config.hidden_size,
+                dtype=self.forward_dtype,
+                device=device,
+            ),
         )
-        
+
     def reset_carry(self, reset_flag: torch.Tensor, carry: TinyRecursiveReasoningModel_ACTV1InnerCarry):
+        # Use the carry's device to ensure consistency with input batch
+        device = carry.z_H.device
+        reset_flag = reset_flag.to(device)
+        H_init = self.H_init.to(device)
+        L_init = self.L_init.to(device)
         return TinyRecursiveReasoningModel_ACTV1InnerCarry(
-            z_H=torch.where(reset_flag.view(-1, 1, 1), self.H_init, carry.z_H),
-            z_L=torch.where(reset_flag.view(-1, 1, 1), self.L_init, carry.z_L),
+            z_H=torch.where(reset_flag.view(-1, 1, 1), H_init, carry.z_H),
+            z_L=torch.where(reset_flag.view(-1, 1, 1), L_init, carry.z_L),
         )
 
-    def forward(self, carry: TinyRecursiveReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        seq_info = dict(
-            cos_sin=self.rotary_emb() if hasattr(self, "rotary_emb") else None,
-        )
-
-        # Input encoding
-        input_embeddings = self._input_embeddings(batch["inputs"], batch["puzzle_identifiers"])
-
-        # Forward iterations
-        it = 0
+    def latent_step(
+        self,
+        carry: TinyRecursiveReasoningModel_ACTV1InnerCarry,
+        input_embeddings: torch.Tensor,
+        seq_info: Dict[str, Optional[CosSin]],
+    ) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
         z_H, z_L = carry.z_H, carry.z_L
-        # H_cycles-1 without grad
-        with torch.no_grad():
-            for _H_step in range(self.config.H_cycles-1):
-                for _L_step in range(self.config.L_cycles):
-                    z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
-                z_H = self.L_level(z_H, z_L, **seq_info)
-        # 1 with grad
         for _L_step in range(self.config.L_cycles):
             z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
         z_H = self.L_level(z_H, z_L, **seq_info)
+        return TinyRecursiveReasoningModel_ACTV1InnerCarry(z_H=z_H, z_L=z_L)
+
+    def forward(self, carry: TinyRecursiveReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        latent_context = self.build_latent_context(batch)
+        input_embeddings = latent_context["input_embeddings"]
+        seq_info = latent_context["seq_info"]
+
+        z = carry
+        # H_cycles-1 without grad
+        with torch.no_grad():
+            for _H_step in range(self.config.H_cycles - 1):
+                z = self.latent_step(z, input_embeddings, seq_info)
+        # 1 with grad
+        z = self.latent_step(z, input_embeddings, seq_info)
+        z_H, z_L = z.z_H, z.z_L
 
         # LM Outputs
         new_carry = TinyRecursiveReasoningModel_ACTV1InnerCarry(z_H=z_H.detach(), z_L=z_L.detach())  # New carry no grad
         output = self.lm_head(z_H)[:, self.puzzle_emb_len:]
         q_logits = self.q_head(z_H[:, 0]).to(torch.float32) # Q-head; uses the first puzzle_emb position
         return new_carry, output, (q_logits[..., 0], q_logits[..., 1])
+
+
+class ZInitEncoder(nn.Module):
+    """
+    Encoder network that produces z^(0) from (x, y) embeddings.
+    
+    This implements the z_init(x, y) function from the paper (Section 4),
+    allowing the initial latent state to depend on the current instance and plan.
+    """
+    
+    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, seq_len: int):
+        super().__init__()
+        self.seq_len = seq_len
+        self.output_dim = output_dim
+        # MLP that maps pooled (x, y) embeddings to z^(0)
+        self.mlp = nn.Sequential(
+            nn.Linear(input_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, seq_len * output_dim),
+        )
+        
+        # Initialize to small values so initial behavior is close to global init
+        with torch.no_grad():
+            for layer in self.mlp:
+                if isinstance(layer, nn.Linear):
+                    nn.init.normal_(layer.weight, std=0.01)
+                    if layer.bias is not None:
+                        nn.init.zeros_(layer.bias)
+    
+    def forward(self, x_embed: torch.Tensor, y_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x_embed: [B, input_dim] pooled input embedding
+            y_embed: [B, input_dim] pooled plan embedding
+        
+        Returns:
+            z_init: [B, seq_len, output_dim] initial latent state
+        """
+        combined = torch.cat([x_embed, y_embed], dim=-1)  # [B, input_dim * 2]
+        out = self.mlp(combined)  # [B, seq_len * output_dim]
+        return out.view(-1, self.seq_len, self.output_dim)
 
 
 class TinyRecursiveReasoningModel_ACTV1(nn.Module):
@@ -229,6 +324,52 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         super().__init__()
         self.config = TinyRecursiveReasoningModel_ACTV1Config(**config_dict)
         self.inner = TinyRecursiveReasoningModel_ACTV1_Inner(self.config)
+        self.z_dim = self.config.hidden_size
+        self.x_embed_dim = self.config.hidden_size
+        self.y_embed_dim = self.config.hidden_size  # pooled representation of y
+        self.plan_embed_dim = self.config.hidden_size
+        self.xy_embed_dim = self.x_embed_dim + self.plan_embed_dim
+
+        if self.config.rl_enable_value_head:
+            self.value_head = LatentValueHead(
+                z_dim=self.z_dim,
+                x_dim=self.xy_embed_dim,
+                hidden_dim=self.config.rl_value_hidden_dim,
+            )
+        else:
+            self.value_head = None
+
+        if self.config.rl_enable_policy_head:
+            if self.config.rl_num_actions <= 0:
+                raise ValueError("rl_num_actions must be > 0 when rl_enable_policy_head=True")
+            self.edit_policy = EditPolicyHead(
+                latent_dim=self.z_dim,
+                x_embed_dim=self.x_embed_dim,
+                y_embed_dim=self.y_embed_dim,
+                action_dim=self.config.rl_num_actions,
+            )
+        else:
+            self.edit_policy = None
+
+        # Optional (x,y)-dependent initialization encoder
+        if getattr(self.config, "rl_enable_z_init_encoder", False):
+            puzzle_emb_len = self.inner.puzzle_emb_len
+            total_seq_len = self.config.seq_len + puzzle_emb_len
+            self.z_init_encoder = ZInitEncoder(
+                input_dim=self.x_embed_dim,
+                hidden_dim=self.config.rl_value_hidden_dim,
+                output_dim=self.z_dim,
+                seq_len=total_seq_len,
+            )
+        else:
+            self.z_init_encoder = None
+
+        if self.config.rl_enable_contraction:
+            apply_spectral_norm_to_trm(self.inner)
+            enforce_global_contraction(self.inner, self.config.rl_target_Lz)
+            if self.value_head is not None:
+                apply_spectral_norm_to_value_head(self.value_head)
+                enforce_global_contraction_on_value_head(self.value_head, self.config.rl_target_Lv)
 
     @property
     def puzzle_emb(self):
@@ -236,16 +377,257 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
 
     def initial_carry(self, batch: Dict[str, torch.Tensor]):
         batch_size = batch["inputs"].shape[0]
+        device = batch["inputs"].device
 
         return TinyRecursiveReasoningModel_ACTV1Carry(
-            inner_carry=self.inner.empty_carry(batch_size),  # Empty is expected, it will be reseted in first pass as all sequences are halted.
+            inner_carry=self.inner.empty_carry(batch_size, device=device),  # Empty is expected, it will be reseted in first pass as all sequences are halted.
             
-            steps=torch.zeros((batch_size, ), dtype=torch.int32),
-            halted=torch.ones((batch_size, ), dtype=torch.bool),  # Default to halted
+            steps=torch.zeros((batch_size, ), dtype=torch.int32, device=device),
+            halted=torch.ones((batch_size, ), dtype=torch.bool, device=device),  # Default to halted
             
             current_data={k: torch.empty_like(v) for k, v in batch.items()}
         )
+
+    def _coerce_plan_tensor(self, y: Any, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+        inputs = batch["inputs"]
+        device = inputs.device
+        if isinstance(y, dict):
+            plan = y.get("inputs")
+        else:
+            plan = y
+        if plan is None:
+            raise ValueError("Plan tensor `y` must be provided.")
+        if not torch.is_tensor(plan):
+            plan_tensor = torch.as_tensor(plan, device=device)
+        else:
+            plan_tensor = plan.to(device)
+        if plan_tensor.ndim == inputs.ndim - 1:
+            plan_tensor = plan_tensor.unsqueeze(0)
+        if plan_tensor.shape[0] != inputs.shape[0]:
+            raise ValueError(
+                f"Plan batch dimension {plan_tensor.shape[0]} != input batch {inputs.shape[0]}"
+            )
+        if plan_tensor.shape[1:] != inputs.shape[1:]:
+            plan_tensor = plan_tensor.view_as(inputs)
+        return plan_tensor.to(dtype=inputs.dtype)
+
+    def encode_plan(self, y: torch.Tensor, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Encode the current plan y using the same embedding path as inputs.
+        """
+        plan_tensor = batch.get("plan")
+        if plan_tensor is None:
+            plan_tensor = self._coerce_plan_tensor(y, batch)
+        return self.inner._input_embeddings(plan_tensor, batch["puzzle_identifiers"])
+
+    def _build_latent_context_with_plan(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        context = self.inner.build_latent_context(batch)
+        plan_embeddings = self.encode_plan(batch["plan"], batch)
+        if plan_embeddings.shape != context["input_embeddings"].shape:
+            raise ValueError(
+                "Plan embeddings must match input embeddings shape for latent updates."
+            )
+        context["plan_embeddings"] = plan_embeddings
+        context["input_embeddings_with_plan"] = context["input_embeddings"] + plan_embeddings
+        return context
+
+    def _pool_embedding(self, embeddings: torch.Tensor) -> torch.Tensor:
+        if embeddings.dim() == 2:
+            return embeddings
+        if embeddings.dim() == 3:
+            return embeddings.mean(dim=1)
+        return embeddings.view(embeddings.shape[0], -1)
+
+    def _standardize_latent_batch(self, x: Any, y: Any) -> Dict[str, torch.Tensor]:
+        """
+        Normalize the latent helper inputs to the batch dict format expected by the inner model.
+        """
+        if not isinstance(x, dict):
+            raise TypeError("Expected `x` to be a batch dict containing `inputs` and `puzzle_identifiers`.")
+        if "inputs" not in x or "puzzle_identifiers" not in x:
+            missing = {"inputs", "puzzle_identifiers"} - set(x.keys())
+            raise KeyError(f"Missing required keys for latent helpers: {missing}.")
+        batch = dict(x)
+        batch["plan"] = self._coerce_plan_tensor(y, batch)
+        return batch
+
+    def _resolve_latent_context(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        """
+        Returns cached (or freshly computed) latent context for update_latent-style calls.
+        """
+        context = batch.get("_latent_context")
+        if context is None:
+            context = self._build_latent_context_with_plan(batch)
+            batch["_latent_context"] = context
+        elif "input_embeddings_with_plan" not in context:
+            context = self._build_latent_context_with_plan(batch)
+            batch["_latent_context"] = context
+        return context
+
+    def init_latent(self, x: Any, y: Any) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
+        """
+        Initialize z^(0) from (x, y).
+
+        If z_init_encoder is enabled (rl_enable_z_init_encoder=True), this produces
+        an (x,y)-dependent initialization as described in Section 4 of the paper:
+            z^(0) = z_init(x, y)
         
+        Otherwise, uses the learned global initialization (H_init, L_init) that does
+        not depend explicitly on (x, y); the dependence enters through the first
+        latent_step via the input + plan embeddings.
+        """
+        batch = self._standardize_latent_batch(x, y)
+        batch_size = batch["inputs"].shape[0]
+        device = batch["inputs"].device
+        
+        if self.z_init_encoder is not None:
+            # Use (x, y)-dependent initialization
+            context = self._build_latent_context_with_plan(batch)
+            input_embeddings = context["input_embeddings"]
+            plan_embeddings = context["plan_embeddings"]
+            x_embed = self._pool_embedding(input_embeddings)
+            y_embed = self._pool_embedding(plan_embeddings)
+            
+            # Get encoded initial latent
+            z_init_encoded = self.z_init_encoder(x_embed, y_embed)  # [B, seq_len, hidden_size]
+            z_init_encoded = z_init_encoded.to(device=device, dtype=self.inner.forward_dtype)
+            
+            # Add global initialization as a residual for stability
+            # Use batch device to ensure consistency with the non-encoder path
+            global_H = self.inner.H_init.unsqueeze(0).expand(batch_size, -1, -1).to(device)
+            global_L = self.inner.L_init.unsqueeze(0).expand(batch_size, -1, -1).to(device)
+            
+            return TinyRecursiveReasoningModel_ACTV1InnerCarry(
+                z_H=global_H + z_init_encoded,
+                z_L=global_L + z_init_encoded,
+            )
+        else:
+            # Use global initialization
+            empty_carry = self.inner.empty_carry(batch_size, device=device)
+            reset_flag = torch.ones(batch_size, dtype=torch.bool, device=device)
+            return self.inner.reset_carry(reset_flag, empty_carry)
+
+    def update_latent(
+        self,
+        z: TinyRecursiveReasoningModel_ACTV1InnerCarry,
+        y: Any,
+        x: Any,
+    ) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
+        """
+        One application of the inner map f_theta(z, y, x) -> z_next.
+        """
+        batch = self._standardize_latent_batch(x, y)
+        context = self._resolve_latent_context(batch)
+        input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+        return self.inner.latent_step(z, input_embeds, context["seq_info"])
+
+    def unroll_latent(
+        self,
+        x: Any,
+        y: Any,
+        n: int,
+    ) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, List[TinyRecursiveReasoningModel_ACTV1InnerCarry]]:
+        """
+        Run the inner recursion for n steps starting from z^(0).
+        """
+        # Initialize latent state from (x, y)
+        z = self.init_latent(x, y)
+        zs: List[TinyRecursiveReasoningModel_ACTV1InnerCarry] = [z]
+        
+        # Pre-compute latent context once for efficiency
+        batch = self._standardize_latent_batch(x, y)
+        batch["_latent_context"] = self._build_latent_context_with_plan(batch)
+        
+        for _ in range(n):
+            # Pass pre-standardized batch directly to inner latent step to avoid
+            # redundant standardization while preserving cached context
+            context = self._resolve_latent_context(batch)
+            input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+            z = self.inner.latent_step(z, input_embeds, context["seq_info"])
+            zs.append(z)
+        return z, zs
+
+    def eval_latent(self, x: Any, y: Any, n: int) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
+        """
+        Convenience wrapper used by RL code. Runs unroll_latent and returns only z^(n).
+        """
+        z_n, _ = self.unroll_latent(x, y, n)
+        return z_n
+
+    def used_value(self, x: Dict[str, torch.Tensor], y: Any, n: int) -> torch.Tensor:
+        """
+        Compute U_n(s) = V_ψ(z^(n)(s), x) for a batch, using the episodic latent variant:
+
+        - x: batch dict with at least ["inputs", "puzzle_identifiers"]
+        - y: plan tensor (same batch size and shape as `inputs`), used to build plan embeddings.
+        - n: number of inner latent steps
+
+        This function reinitializes z^(0) from (x, y) and applies the inner map
+        f_θ n times; it does not reuse the ACT carry from the supervised TRM forward.
+        """
+        # Note: In the paper we write V_ψ(z, x) and treat x as an "instance embedding".
+        # Here, we fold both the input instance and the current plan y into a single
+        # embedding `combined_embed = concat(x_embed, y_embed)` and feed that to the
+        # value head. All theoretical bounds only depend on the Lipschitz constant of
+        # V_ψ w.r.t. z, so this extra dependence on y is harmless for the analysis.
+        if self.value_head is None:
+            raise RuntimeError("Value head is not enabled; set rl_enable_value_head=True in the config.")
+
+        # 1) Run episodic latent unrolling to get z^(n)
+        z_n, _ = self.unroll_latent(x, y, n)
+        z_vec = z_n.z_H.mean(dim=1)
+
+        # 2) Build a fresh latent context to obtain input embeddings and summarize x
+        batch = self._standardize_latent_batch(x, y)
+        latent_context = self._build_latent_context_with_plan(batch)
+        input_embeddings = latent_context["input_embeddings"]
+        plan_embeddings = latent_context["plan_embeddings"]
+        x_embed = self._pool_embedding(input_embeddings)
+        y_embed = self._pool_embedding(plan_embeddings)
+        combined_embed = torch.cat([x_embed, y_embed], dim=-1)
+
+        # 3) Apply value head
+        return self.value_head(z_vec, combined_embed)
+
+    def policy_dist(
+        self,
+        x: Dict[str, torch.Tensor],
+        y: torch.Tensor,
+        n: int,
+        action_mask: Optional[torch.Tensor] = None,
+    ) -> Categorical:
+        """
+        Produce a Categorical distribution over edit actions given (x, y).
+
+        This uses the episodic latent evaluator: it reinitializes z^(0) from (x, y),
+        unrolls the inner recursion for n steps to obtain z^(n), and then queries the
+        edit-policy head on (z^(n), x_embed, y_embed).
+
+        - x: batch dict with at least ["inputs", "puzzle_identifiers"]
+        - y: plan tensor (same batch size), currently assumed to have shape compatible with inputs.
+        - n: number of inner latent steps for the evaluator.
+        - action_mask: optional [B, action_dim] boolean mask.
+        """
+
+        if self.edit_policy is None:
+            raise RuntimeError(
+                "Policy head is not enabled; set rl_enable_policy_head=True and rl_num_actions>0 in the config."
+            )
+
+        # 1) Get z^(n) via episodic latent unrolling
+        z_n, _ = self.unroll_latent(x, y, n)
+        z_vec = z_n.z_H.mean(dim=1)
+
+        # 2) Summarize x via latent context embeddings
+        batch = self._standardize_latent_batch(x, y)
+        latent_context = self._build_latent_context_with_plan(batch)
+        input_embeddings = latent_context["input_embeddings"]
+        plan_embeddings = latent_context["plan_embeddings"]
+        x_embed = self._pool_embedding(input_embeddings)
+        y_embed = self._pool_embedding(plan_embeddings)
+
+        return self.edit_policy(z_vec, x_embed, y_embed, action_mask=action_mask)
+
     def forward(self, carry: TinyRecursiveReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
 
         # Update data, carry (removing halted sequences)
