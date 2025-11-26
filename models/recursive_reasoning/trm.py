@@ -486,7 +486,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             
             # Get encoded initial latent
             z_init_encoded = self.z_init_encoder(x_embed, y_embed)  # [B, seq_len, hidden_size]
-            z_init_encoded = z_init_encoded.to(self.inner.forward_dtype)
+            z_init_encoded = z_init_encoded.to(device=self.inner.H_init.device, dtype=self.inner.forward_dtype)
             
             # Add global initialization as a residual for stability
             global_H = self.inner.H_init.unsqueeze(0).expand(batch_size, -1, -1)

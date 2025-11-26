@@ -62,14 +62,14 @@ We provide multiple configurations for training UPI-TRM on Sudoku puzzles with v
 ./scripts/run_sudoku_rl.sh
 ```
 
-This uses the default dataset at `data/sudoku-extreme-1k-aug-1000/train` with the baseline `configs/rl_sudoku_k1.yaml` config.
+This uses the default dataset at `data/sudoku-extreme-1k-aug-1000` with the baseline `configs/rl_sudoku_k1.yaml` config.
 
 #### Manual Commands with Different Configs
 
 **Baseline K=1 (simple 1-step TD):**
 ```bash
 python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
     --config configs/rl_sudoku_k1.yaml \
     --seed 42
 ```
@@ -77,7 +77,7 @@ python upi_trm_train.py \
 **Theory-exact K=1 (all paper features enabled):**
 ```bash
 python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
     --config configs/rl_sudoku_k1_theory_exact.yaml \
     --seed 42
 ```
@@ -85,7 +85,7 @@ python upi_trm_train.py \
 **Practical K=3 baseline (faster learning):**
 ```bash
 python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
     --config configs/rl_sudoku_k3_baseline.yaml \
     --seed 42
 ```
@@ -93,7 +93,7 @@ python upi_trm_train.py \
 **K=5 multi-step unrolled (theory-exact):**
 ```bash
 python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
     --config configs/rl_sudoku_k5_theory_exact.yaml \
     --seed 42
 ```
@@ -101,7 +101,7 @@ python upi_trm_train.py \
 **Full theory config with GAE + all dials:**
 ```bash
 python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
     --config configs/ablations/upi_trm_full_theory.yaml \
     --seed 42
 ```
@@ -159,7 +159,7 @@ To track the paper's theoretical quantities (C_z, L_z, L_v, Bellman residual, un
 
 ```bash
 python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000/train \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
     --config configs/ablations/upi_trm_full_theory.yaml \
     --seed 42
 ```

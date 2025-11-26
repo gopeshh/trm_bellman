@@ -156,7 +156,7 @@ def compute_gae_trajectory(
     gae = 0.0
 
     # Append last_value for bootstrapping
-    values_extended = torch.cat([values, torch.tensor([last_value], device=values.device)])
+    values_extended = torch.cat([values, torch.tensor([last_value], device=values.device, dtype=values.dtype)])
 
     for t in reversed(range(T)):
         mask = 1.0 - dones[t].float()
@@ -279,12 +279,10 @@ class UPITrmTrainer:
             self.old_policy_distill_opt = torch.optim.Adam(old_policy_params, lr=rl_cfg.policy_lr)
         self._next_episode_id: int = 0
 
-        if getattr(self.rl_cfg, "trust_region_kl", 0.0) not in (0.0, None):
-            print(
-                "[warning] RLConfig.trust_region_kl is set, but no KL-based trust-region update is implemented yet. "
-                "The current algorithm uses CPI-style mixture updates controlled by mixture_alpha (with optional "
-                "mixture distillation), as discussed in the paper."
-            )
+        # Adaptive KL coefficient for trust-region updates (PPO-style)
+        # This coefficient is adjusted based on the KL divergence from old to new policy
+        self._kl_coef: float = 1.0
+        self._kl_target: float = getattr(self.rl_cfg, "trust_region_kl", 0.01)
 
     def _config_to_dict(self, config: Any) -> Dict[str, Any]:
         if hasattr(config, "model_dump"):
@@ -370,6 +368,27 @@ class UPITrmTrainer:
                         raise AssertionError(
                             f"_sync_policy_old_towards_candidate unexpectedly modified non-edit parameter `{name}`"
                         )
+
+    def _update_kl_coef(self, kl_div: float) -> None:
+        """
+        Adaptively update the KL penalty coefficient based on observed KL divergence.
+        
+        This implements an adaptive scheme similar to PPO's adaptive KL penalty:
+        - If KL > 2 * target: increase coef by 1.5x (policy is changing too much)
+        - If KL < target / 2: decrease coef by 0.5x (policy is changing too little, can be more aggressive)
+        - Otherwise: keep coef stable
+        
+        The coefficient is clamped to [0.01, 100] to prevent extreme values.
+        """
+        target = self._kl_target
+        
+        if kl_div > 2.0 * target:
+            # KL too high - increase penalty to constrain policy changes
+            self._kl_coef = min(self._kl_coef * 1.5, 100.0)
+        elif kl_div < target / 2.0:
+            # KL too low - decrease penalty to allow more exploration
+            self._kl_coef = max(self._kl_coef / 1.5, 0.01)
+        # Otherwise keep coefficient stable
 
     def _freeze_policy_backbone(self) -> None:
         """
@@ -746,7 +765,19 @@ class UPITrmTrainer:
         - Centered advantage estimator (centered_advantage=True)
         - KL trust-region constraint (enable_kl_trust_region=True)
         
-        Returns dict with loss and optional KL divergence.
+        When enable_kl_trust_region=True, this implements an adaptive KL penalty
+        similar to PPO's adaptive penalty scheme:
+        - Adds a penalty term: kl_coef * KL(old_policy || new_policy) to the loss
+        - Adaptively adjusts kl_coef based on observed KL vs target (trust_region_kl):
+          * KL > 2*target: increase coef by 1.5x
+          * KL < target/2: decrease coef by 1/1.5x
+        - Early stops (skips gradient step) if KL > 1.5*target
+        
+        Returns dict with:
+        - loss_policy: policy loss value
+        - policy_kl: KL divergence (if enable_kl_trust_region=True)
+        - kl_coef: current adaptive KL coefficient (if enable_kl_trust_region=True)
+        - kl_early_stop: 1.0 if gradient step was skipped due to high KL (optional)
         """
 
         if len(self.replay) < self.rl_cfg.batch_size:
@@ -795,10 +826,12 @@ class UPITrmTrainer:
 
         # Get old policy distribution for KL computation
         kl_div = None
-        if getattr(self.rl_cfg, "enable_kl_trust_region", False):
+        enable_kl_trust_region = getattr(self.rl_cfg, "enable_kl_trust_region", False)
+        if enable_kl_trust_region:
             with torch.no_grad():
                 old_dist = self.policy_model_old.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
                 old_log_probs = old_dist.logits.log_softmax(dim=-1)
+                old_probs = old_log_probs.exp()
 
         dist = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
         log_prob = dist.log_prob(actions)
@@ -806,22 +839,38 @@ class UPITrmTrainer:
 
         loss_policy = -(log_prob * adv.detach()).mean() - self.rl_cfg.entropy_coef * entropy
 
-        # Add KL penalty if trust-region is enabled
-        if getattr(self.rl_cfg, "enable_kl_trust_region", False):
+        # Add adaptive KL penalty if trust-region is enabled (PPO/TRPO-style)
+        if enable_kl_trust_region:
             new_log_probs = dist.logits.log_softmax(dim=-1)
             # KL(old || new) = sum(old_probs * (log_old - log_new))
-            old_probs = old_log_probs.exp()
             kl_div = (old_probs * (old_log_probs - new_log_probs)).sum(dim=-1).mean()
-            trust_region_kl = getattr(self.rl_cfg, "trust_region_kl", 0.01)
-            # Add KL penalty (adaptive coefficient based on distance from target)
-            kl_coef = 1.0 if kl_div > trust_region_kl else 0.5
-            loss_policy = loss_policy + kl_coef * kl_div
+            
+            # Add adaptive KL penalty to policy loss
+            loss_policy = loss_policy + self._kl_coef * kl_div
+            
+            # Early stopping: if KL exceeds 1.5x target, skip gradient step
+            # This provides a hard constraint on policy change
+            kl_val = kl_div.item()
+            if kl_val > 1.5 * self._kl_target:
+                # Skip this gradient step entirely - KL too large
+                self._update_kl_coef(kl_val)
+                result = {
+                    "loss_policy": float(loss_policy.item()),
+                    "policy_kl": kl_val,
+                    "kl_coef": self._kl_coef,
+                    "kl_early_stop": 1.0,
+                }
+                return result
 
         loss_policy.backward()
         policy_grad_clip = getattr(self.rl_cfg, "policy_grad_clip", None)
         if policy_grad_clip is not None and policy_grad_clip > 0 and self._policy_params:
             nn_utils.clip_grad_norm_(self._policy_params, policy_grad_clip)
         self.policy_opt.step()
+        
+        # Update adaptive KL coefficient after successful step
+        if enable_kl_trust_region and kl_div is not None:
+            self._update_kl_coef(kl_div.item())
         
         distill_enabled = getattr(self.rl_cfg, "distill_mixture_policy", False)
         if distill_enabled and self.old_policy_distill_opt is not None:
@@ -855,6 +904,7 @@ class UPITrmTrainer:
         result = {"loss_policy": float(loss_policy.item())}
         if kl_div is not None:
             result["policy_kl"] = float(kl_div.item())
+            result["kl_coef"] = self._kl_coef
         return result
 
     def train_step(self) -> Dict[str, float]:
@@ -907,9 +957,10 @@ class UPITrmTrainer:
         metrics.update(debug_metrics)
         metrics.update(theory_metrics)
         
-        # Include policy KL if present
-        if "policy_kl" in policy_result:
-            metrics["policy_kl"] = policy_result["policy_kl"]
+        # Include policy KL metrics if present (from KL trust region)
+        for key in ("policy_kl", "kl_coef", "kl_early_stop"):
+            if key in policy_result:
+                metrics[key] = policy_result[key]
         
         # Reset termination stats for the next logging window
         self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}
