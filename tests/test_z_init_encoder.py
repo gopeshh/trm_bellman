@@ -154,11 +154,12 @@ def test_used_value_works_with_z_init_encoder():
     x_batch = _dummy_batch(cfg["batch_size"], cfg["seq_len"], cfg["vocab_size"])
     y_batch = torch.zeros(cfg["batch_size"], cfg["seq_len"], dtype=torch.long)
 
-    values = model.used_value(x_batch, y_batch, n=2)
+    values, z_n = model.used_value(x_batch, y_batch, n=2)
 
     assert values.shape == (cfg["batch_size"],)
     assert not torch.isnan(values).any()
     assert not torch.isinf(values).any()
+    assert z_n is not None  # Check that z is returned
 
 
 def test_unroll_latent_works_with_z_init_encoder():

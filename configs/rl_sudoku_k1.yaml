@@ -6,21 +6,22 @@ K: 1
 inner_unroll_n: 4
 max_edits: 120
 num_train_steps: 20000
-batch_size: 128
-rollout_episodes_per_step: 6
+batch_size: 64  # Reduced for faster iterations
+rollout_episodes_per_step: 4  # Reduced for faster iterations
 mixture_alpha: 0.01
-entropy_coef: 0.02
-value_lr: 0.00005
-policy_lr: 0.0001
+entropy_coef: 0.5  # High entropy to prevent policy collapse to STOP
+value_lr: 0.00001   # Reduced 5x for stability
+policy_lr: 0.0001   # Increased to help policy learn faster
 enable_contraction: true
 target_Lz: 0.9
 target_Lv: 5.0
 log_interval: 100
 eval_interval: 100
 eval_num_episodes: 100
-value_grad_clip: 2.0
-policy_grad_clip: 0.25
-value_target_clip: 2.0
-advantage_clip: 2.0
-policy_epsilon: 0.05
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 50.0   # For rewards in [0, 10] with gamma=0.99
+advantage_clip: 10.0      # For rewards in [0, 10]
+policy_epsilon: 0.3   # High exploration to force trying edits
+target_ema_tau: 0.999  # Slower target network updates for stability
 

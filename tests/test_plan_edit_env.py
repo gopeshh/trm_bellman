@@ -99,7 +99,9 @@ def test_plan_edit_env_terminates_when_solved_threshold_met():
 
     phi_old = solved_checker(x, y)
     phi_new = solved_checker(x, y_next)
-    expected_reward = phi_new + cfg.gamma * phi_new - phi_old
+    # Terminal reward with fixed potential shaping: r = phi_new - phi_old
+    # (Removed the gamma * phi_new term that was double-counting)
+    expected_reward = phi_new - phi_old
     assert abs(reward - expected_reward) < 1e-6
 
 

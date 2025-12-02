@@ -15,10 +15,10 @@ policy_lr: 1e-4
 enable_contraction: true
 target_Lz: 0.9
 target_Lv: 5.0
-value_grad_clip: 2.0
-policy_grad_clip: 0.25
-value_target_clip: 2.0
-advantage_clip: 2.0
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 200.0  # Scaled for 0-100 reward range
+advantage_clip: 50.0      # Scaled for 0-100 reward range
 policy_epsilon: 0.05
 
 # Theory-exact features (matching the paper)

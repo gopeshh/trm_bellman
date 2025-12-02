@@ -9,6 +9,11 @@ class RLConfig(BaseModel):
     K: int = 5  # K-step horizon
     inner_unroll_n: int = 4  # n for U_n(s)
     max_edits: int = 16
+    
+    # Latent z mode
+    # True (default): z is reinitialized from (x, y) at every step (episodic)
+    # False: z is initialized once per episode and carried/updated across steps (persistent)
+    episodic_latent: bool = True
 
     # Target network EMA
     target_ema_tau: float = 0.995

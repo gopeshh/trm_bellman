@@ -232,6 +232,12 @@ class UPITrmTrainer:
 
         self.replay = ReplayBuffer(capacity=rl_cfg.replay_capacity)
         self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}
+        
+        # Debug tracking for RL behavior analysis
+        self._debug_episode_lengths: List[int] = []
+        self._debug_episode_returns: List[float] = []
+        self._debug_stop_probs: List[float] = []
+        self._debug_score_changes: List[float] = []
 
         self.target_model = TinyRecursiveReasoningModel_ACTV1(self._config_to_dict(self.model.config)).to(device)
         self.target_model.eval()
@@ -303,7 +309,7 @@ class UPITrmTrainer:
             for p, p_targ in zip(self.model.parameters(), self.target_model.parameters()):
                 p_targ.data.mul_(tau).add_(p.data, alpha=1 - tau)
 
-    def _mixed_policy_dist(self, x_batch, y_batch, n: int):
+    def _mixed_policy_dist(self, x_batch, y_batch, n: int, action_mask: Optional[torch.Tensor] = None, z=None):
         """
         Return the behavior policy distribution used for data collection.
         Mathematically, this is intended to correspond to a mixture policy
@@ -313,11 +319,19 @@ class UPITrmTrainer:
         via parameter interpolation in `_sync_policy_old_towards_candidate`, so
         its action distribution is only an approximation of this mixture unless
         `distill_mixture_policy=True`, which triggers an explicit KL distillation.
+        
+        Args:
+            action_mask: Optional [B, action_dim] or [action_dim] boolean mask.
+                         True = valid action, False = invalid (will be masked out).
+            z: Optional latent state for persistent mode. If None, uses episodic mode.
+            
+        Returns:
+            Tuple of (distribution, z_n) where z_n is the updated latent state.
         """
 
         alpha = self.rl_cfg.mixture_alpha
-        dist_old = self.policy_model_old.policy_dist(x_batch, y_batch, n=n)
-        dist_new = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=n)
+        dist_old, z_old = self.policy_model_old.policy_dist(x_batch, y_batch, n=n, action_mask=action_mask, z=z)
+        dist_new, z_new = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=n, action_mask=action_mask, z=z)
 
         probs_old = dist_old.probs
         probs_new = dist_new.probs
@@ -326,10 +340,20 @@ class UPITrmTrainer:
         eps = getattr(self.rl_cfg, "policy_epsilon", 0.0)
         if eps > 0.0:
             num_actions = probs_mix.shape[-1]
-            uniform = torch.full_like(probs_mix, 1.0 / num_actions)
+            # For epsilon-greedy, only consider valid actions for uniform exploration
+            if action_mask is not None:
+                # Expand mask to batch size if needed
+                if action_mask.dim() == 1:
+                    action_mask = action_mask.unsqueeze(0).expand(probs_mix.shape[0], -1)
+                # Uniform over valid actions only
+                valid_count = action_mask.float().sum(dim=-1, keepdim=True).clamp(min=1)
+                uniform = action_mask.float() / valid_count
+            else:
+                uniform = torch.full_like(probs_mix, 1.0 / num_actions)
             probs_mix = (1.0 - eps) * probs_mix + eps * uniform
 
-        return torch.distributions.Categorical(probs=probs_mix)
+        # Return both distribution and updated z (use candidate's z for persistent mode)
+        return torch.distributions.Categorical(probs=probs_mix), z_new
 
     def _sync_policy_old_towards_candidate(self) -> None:
         """
@@ -456,8 +480,8 @@ class UPITrmTrainer:
         if torch.equal(y_shuffled, y_batch):
             return
         with torch.no_grad():
-            v_orig = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
-            v_perm = self.model.used_value(x_batch, y_shuffled, n=self.rl_cfg.inner_unroll_n)
+            v_orig, _ = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+            v_perm, _ = self.model.used_value(x_batch, y_shuffled, n=self.rl_cfg.inner_unroll_n)
         if torch.allclose(v_orig, v_perm, atol=1e-5, rtol=1e-4):
             raise AssertionError("used_value outputs are invariant to plan changes in debug mode.")
 
@@ -498,6 +522,10 @@ class UPITrmTrainer:
         """
         Run a single episode in the plan-space env using the current policy_dist,
         store transitions in replay buffer.
+        
+        Supports two latent modes (controlled by rl_cfg.episodic_latent):
+        - episodic (default): z is reinitialized from (x, y) at every step
+        - persistent: z is initialized once per episode and carried across steps
         """
 
         self.model.eval()
@@ -508,17 +536,66 @@ class UPITrmTrainer:
         done = False
         edit_budget = min(self.rl_cfg.max_edits, self.env_config.max_edits)
         last_info: Optional[Dict[str, Any]] = None
+        
+        # Debug tracking
+        episode_rewards = []
+        episode_actions = []
+        initial_score = None
+        stop_action_id = self.env.stop_action_id
+        
+        # Persistent latent mode: initialize z once at episode start
+        episodic_latent = getattr(self.rl_cfg, "episodic_latent", True)
+        z = None  # In episodic mode, z stays None and is reinitialized each step
+        if not episodic_latent:
+            # Initialize z from (x, y) for persistent mode
+            batched = self._state_is_batched(x)
+            batch_x = self._prepare_batch_x(x, batched=batched)
+            batch_y = self._prepare_plan(y, batched=batched)
+            z = self.model.init_latent(batch_x, batch_y)
+        
+        # Debug: check action mask on first episode
+        if self._next_episode_id == 0:
+            mask = self.env.get_action_mask()
+            if mask is not None:
+                valid_count = mask.sum().item()
+                print(f"[DEBUG] Action mask: {valid_count} valid actions out of {len(mask)} total")
+            print(f"[DEBUG] Latent mode: {'episodic' if episodic_latent else 'persistent'}")
 
         while not done and self.env.step_count < edit_budget:
             batched = self._state_is_batched(x)
             batch_x = self._prepare_batch_x(x, batched=batched)
             batch_y = self._prepare_plan(y, batched=batched)
+            
+            # Get action mask to prevent editing "given" cells
+            action_mask = self.env.get_action_mask()
+            if action_mask is not None:
+                action_mask = action_mask.to(self.device)
 
-            dist = self._mixed_policy_dist(batch_x, batch_y, n=self.rl_cfg.inner_unroll_n)
+            dist, z = self._mixed_policy_dist(batch_x, batch_y, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask, z=z)
             action = dist.sample().squeeze()  # Ensure scalar (0-D) tensor for single-state sampling
+            
+            # Track STOP probability for debugging
+            if t == 0 and stop_action_id is not None:
+                probs = dist.probs
+                stop_prob = probs[0, stop_action_id].item() if probs.dim() > 1 else probs[stop_action_id].item()
+                self._debug_stop_probs.append(stop_prob)
+                
+                # Debug: on first episode, print full probability info
+                if self._next_episode_id == 0:
+                    if probs.dim() > 1:
+                        probs = probs[0]
+                    edit_probs = probs[:-1].sum().item()
+                    print(f"[DEBUG] Step 0 probs: STOP={stop_prob:.6f}, edits={edit_probs:.6f}")
+                    print(f"[DEBUG] Top 5 action probs: {probs.topk(5)}")
 
             (x_next, y_next), reward, done, info = self.env.step(action.item())
             last_info = info
+            
+            # Track for debugging
+            if t == 0 and info.get("phi_old") is not None:
+                initial_score = info["phi_old"]
+            episode_rewards.append(reward)
+            episode_actions.append(action.item())
 
             transition = Transition(
                 x=self._clone_state(x),
@@ -537,10 +614,17 @@ class UPITrmTrainer:
             t += 1
 
         self._next_episode_id += 1
+        
+        # Track episode stats
+        self._debug_episode_lengths.append(t)
+        self._debug_episode_returns.append(sum(episode_rewards))
         if last_info is not None:
             reason = last_info.get("done_reason")
             if reason in self.term_stats:
                 self.term_stats[reason] += 1
+            final_score = last_info.get("phi_new", initial_score)
+            if initial_score is not None and final_score is not None:
+                self._debug_score_changes.append(final_score - initial_score)
 
     def _prepare_batch_x(self, x: Dict[str, torch.Tensor], batched: bool) -> Dict[str, torch.Tensor]:
         """Delegate to shared batch_utils.prepare_batch_x."""
@@ -703,11 +787,11 @@ class UPITrmTrainer:
             self.value_opt.zero_grad()
 
             with torch.no_grad():
-                v_next = self.target_model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
+                v_next, _ = self.target_model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
                 mask = (~dones).float()
                 v_next = v_next * mask
 
-            v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+            v_s, _ = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
             td_target = rewards + self.rl_cfg.gamma * v_next
             value_clip = getattr(self.rl_cfg, "value_target_clip", None)
             if value_clip is not None and value_clip > 0:
@@ -733,7 +817,7 @@ class UPITrmTrainer:
                 gamma = self.rl_cfg.gamma
                 K = self.rl_cfg.K
 
-                v_K = self.target_model.used_value(xK_batch, yK_batch, n=self.rl_cfg.inner_unroll_n)
+                v_K, _ = self.target_model.used_value(xK_batch, yK_batch, n=self.rl_cfg.inner_unroll_n)
                 G_K = compute_k_step_bootstrapped_target(
                     rewards_K=rewards_K,
                     dones_K=dones_K,
@@ -744,7 +828,7 @@ class UPITrmTrainer:
                     exact_k_step_targets=bool(getattr(self.rl_cfg, "exact_k_step_targets", False)),
                 )
 
-            v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+            v_s, _ = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
             value_clip = getattr(self.rl_cfg, "value_target_clip", None)
             if value_clip is not None and value_clip > 0:
                 G_K = G_K.clamp(-value_clip, value_clip)
@@ -799,8 +883,8 @@ class UPITrmTrainer:
         self.policy_opt.zero_grad()
 
         with torch.no_grad():
-            v_s = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
-            v_next = self.model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
+            v_s, _ = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+            v_next, _ = self.model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
             mask = (~dones).float()
             v_next_masked = v_next * mask
             gamma = self.rl_cfg.gamma
@@ -834,11 +918,11 @@ class UPITrmTrainer:
         enable_kl_trust_region = getattr(self.rl_cfg, "enable_kl_trust_region", False)
         if enable_kl_trust_region:
             with torch.no_grad():
-                old_dist = self.policy_model_old.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+                old_dist, _ = self.policy_model_old.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
                 old_log_probs = old_dist.logits.log_softmax(dim=-1)
                 old_probs = old_log_probs.exp()
 
-        dist = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+        dist, _ = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
         log_prob = dist.log_prob(actions)
         entropy = dist.entropy().mean()
 
@@ -889,7 +973,7 @@ class UPITrmTrainer:
 
                 self.policy_model_old.train()
                 self.old_policy_distill_opt.zero_grad()
-                old_dist = self.policy_model_old.policy_dist(x_d, y_d, n=self.rl_cfg.inner_unroll_n)
+                old_dist, _ = self.policy_model_old.policy_dist(x_d, y_d, n=self.rl_cfg.inner_unroll_n)
                 log_probs_old = old_dist.logits.log_softmax(dim=-1)
                 kl = (
                     target_probs
@@ -935,8 +1019,8 @@ class UPITrmTrainer:
             with torch.no_grad():
                 transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
                 x_b, y_b, x_next_b, y_next_b, _, rewards_b, dones_b = self._stack_batch(transitions)
-                v_s = self.model.used_value(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
-                v_next = self.model.used_value(x_next_b, y_next_b, n=self.rl_cfg.inner_unroll_n)
+                v_s, _ = self.model.used_value(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
+                v_next, _ = self.model.used_value(x_next_b, y_next_b, n=self.rl_cfg.inner_unroll_n)
                 mask = (~dones_b).float()
                 td_target = rewards_b + self.rl_cfg.gamma * v_next * mask
                 adv = td_target - v_s
@@ -971,6 +1055,73 @@ class UPITrmTrainer:
         self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}
         
         return metrics
+
+    def get_debug_stats(self) -> Dict[str, float]:
+        """
+        Get debug statistics about RL behavior.
+        Call this periodically to understand what the agent is doing.
+        """
+        stats = {}
+        
+        if self._debug_episode_lengths:
+            stats["avg_episode_length"] = sum(self._debug_episode_lengths) / len(self._debug_episode_lengths)
+            stats["min_episode_length"] = min(self._debug_episode_lengths)
+            stats["max_episode_length"] = max(self._debug_episode_lengths)
+        
+        if self._debug_episode_returns:
+            stats["avg_episode_return"] = sum(self._debug_episode_returns) / len(self._debug_episode_returns)
+            stats["min_episode_return"] = min(self._debug_episode_returns)
+            stats["max_episode_return"] = max(self._debug_episode_returns)
+        
+        if self._debug_stop_probs:
+            stats["avg_stop_prob"] = sum(self._debug_stop_probs) / len(self._debug_stop_probs)
+            stats["min_stop_prob"] = min(self._debug_stop_probs)
+            stats["max_stop_prob"] = max(self._debug_stop_probs)
+        
+        if self._debug_score_changes:
+            stats["avg_score_change"] = sum(self._debug_score_changes) / len(self._debug_score_changes)
+            stats["min_score_change"] = min(self._debug_score_changes)
+            stats["max_score_change"] = max(self._debug_score_changes)
+        
+        return stats
+    
+    def clear_debug_stats(self) -> None:
+        """Clear accumulated debug statistics."""
+        self._debug_episode_lengths.clear()
+        self._debug_episode_returns.clear()
+        self._debug_stop_probs.clear()
+        self._debug_score_changes.clear()
+    
+    def print_debug_stats(self) -> None:
+        """Print a summary of debug statistics."""
+        stats = self.get_debug_stats()
+        if not stats:
+            print("[DEBUG] No episode data collected yet")
+            return
+        
+        print("\n" + "="*60)
+        print("RL DEBUG STATISTICS")
+        print("="*60)
+        
+        if "avg_episode_length" in stats:
+            print(f"Episode Length: avg={stats['avg_episode_length']:.1f}, "
+                  f"min={stats['min_episode_length']}, max={stats['max_episode_length']}")
+        
+        if "avg_episode_return" in stats:
+            print(f"Episode Return: avg={stats['avg_episode_return']:.3f}, "
+                  f"min={stats['min_episode_return']:.3f}, max={stats['max_episode_return']:.3f}")
+        
+        if "avg_stop_prob" in stats:
+            print(f"STOP Probability (step 0): avg={stats['avg_stop_prob']:.3f}, "
+                  f"min={stats['min_stop_prob']:.3f}, max={stats['max_stop_prob']:.3f}")
+        
+        if "avg_score_change" in stats:
+            print(f"Score Change: avg={stats['avg_score_change']:.4f}, "
+                  f"min={stats['min_score_change']:.4f}, max={stats['max_score_change']:.4f}")
+        
+        print(f"Termination: stop={self.term_stats['stop']}, "
+              f"solved={self.term_stats['solved']}, budget={self.term_stats['budget']}")
+        print("="*60 + "\n")
 
     def _compute_theory_metrics(self) -> Dict[str, float]:
         """
@@ -1016,8 +1167,8 @@ class UPITrmTrainer:
                     metrics["unrolling_term"] = unrolling_term
                 
                 # Compute Bellman residual
-                v_s = self.model.used_value(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
-                v_next = self.model.used_value(x_next_b, y_next_b, n=self.rl_cfg.inner_unroll_n)
+                v_s, _ = self.model.used_value(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
+                v_next, _ = self.model.used_value(x_next_b, y_next_b, n=self.rl_cfg.inner_unroll_n)
                 residual_metrics = compute_empirical_bellman_residual(
                     v_s, rewards_b, v_next, dones_b, self.rl_cfg.gamma
                 )

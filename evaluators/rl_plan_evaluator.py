@@ -59,8 +59,13 @@ def evaluate_plan_policy_with_scores(
                 batched = state_is_batched(x)
                 batch_x = prepare_batch_x(x, device=device, batched=batched)
                 plan = prepare_plan(y, device=device, batched=batched)
+                
+                # Get action mask to prevent editing "given" cells
+                action_mask = env.get_action_mask()
+                if action_mask is not None:
+                    action_mask = action_mask.to(device)
 
-                dist = model.policy_dist(batch_x, plan, n=inner_unroll_n)
+                dist, _ = model.policy_dist(batch_x, plan, n=inner_unroll_n, action_mask=action_mask)
                 action = dist.sample().item()
 
                 (x_next, y_next), _, done, _ = env.step(action)

@@ -18,10 +18,10 @@ target_Lv: 5.0
 log_interval: 100
 eval_interval: 100
 eval_num_episodes: 100
-value_grad_clip: 2.0
-policy_grad_clip: 0.5
-value_target_clip: 5.0
-advantage_clip: 5.0
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 200.0  # Scaled for 0-100 reward range
+advantage_clip: 50.0      # Scaled for 0-100 reward range
 policy_epsilon: 0.05
 
 # Theory-exact features (matching the paper)

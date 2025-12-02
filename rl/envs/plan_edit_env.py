@@ -41,6 +41,11 @@ class PlanEditEnv:
         self.x: Any = None
         self.y: Any = None
         self.done: bool = False
+        
+        # Store original inputs to identify "given" cells that shouldn't be edited
+        self._original_inputs: Optional[torch.Tensor] = None
+        self._action_mask: Optional[torch.Tensor] = None
+        self._stop_penalty: float = 0.0  # Penalty for early stopping
 
         # Action space: caller is responsible for interpreting action indices.
         # We require STOP to be the last action index by convention.
@@ -83,7 +88,68 @@ class PlanEditEnv:
 
         self.step_count = 0
         self.done = False
+        
+        # Compute action mask to protect "given" cells (non-zero in original inputs)
+        self._compute_action_mask()
+        
         return self.x, self.y
+    
+    def _compute_action_mask(self) -> None:
+        """
+        Compute action mask to prevent editing "given" cells.
+        For Sudoku: given cells are non-zero in the original inputs.
+        
+        Action space: [pos * vocab_size + tok for all pos, tok] + [STOP]
+        Mask is True for valid actions, False for invalid.
+        """
+        if self.vocab_size is None or self.stop_action_id is None:
+            self._action_mask = None
+            self._original_inputs = None
+            return
+            
+        # Get original inputs
+        if isinstance(self.x, dict):
+            inputs = self.x.get("inputs")
+        else:
+            inputs = self.x
+            
+        if inputs is None:
+            self._action_mask = None
+            self._original_inputs = None
+            return
+            
+        if not torch.is_tensor(inputs):
+            inputs = torch.as_tensor(inputs)
+        
+        self._original_inputs = inputs.clone()
+        flat_inputs = inputs.reshape(-1)
+        num_positions = flat_inputs.numel()
+        num_actions = self.stop_action_id + 1  # Total actions including STOP
+        
+        # Start with all actions valid
+        mask = torch.ones(num_actions, dtype=torch.bool)
+        
+        # Mask out all tokens for "given" positions
+        # In Sudoku encoding: 1 = empty cell, values > 1 = given clues
+        for pos in range(num_positions):
+            cell_value = flat_inputs[pos].item()
+            if cell_value > 1:  # This is a given cell (not empty)
+                # Block all edit actions for this position
+                start_action = pos * self.vocab_size
+                end_action = start_action + self.vocab_size
+                mask[start_action:end_action] = False
+        
+        # STOP action is always valid
+        mask[self.stop_action_id] = True
+        
+        self._action_mask = mask
+    
+    def get_action_mask(self) -> Optional[torch.Tensor]:
+        """
+        Return the current action mask. True = valid action, False = invalid.
+        Returns None if mask hasn't been computed (e.g., vocab_size not set).
+        """
+        return self._action_mask
 
     def _standardize_state(self, sample: Any) -> Any:
         """
@@ -189,7 +255,15 @@ class PlanEditEnv:
             done = True
             done_reason = "stop"
             terminated_by_stop = True
+            # Penalize early stopping to encourage exploration
+            # Only penalize if stopped very early (within first 10 steps)
+            if self.step_count <= 10:
+                self._stop_penalty = -1.0  # Penalty for stopping too early
+            else:
+                self._stop_penalty = 0.0
         else:
+            # Non-stop action: apply edit
+            self._stop_penalty = 0.0
             y_next = self.apply_edit(self.y, action, self.x)
             done = False
 
@@ -225,14 +299,26 @@ class PlanEditEnv:
             done_reason = "budget"
             terminated_by_budget = True
 
-        # Base reward from checker: only on terminal step
-        r_base = float(phi_new) if done and phi_new is not None else 0.0
-
-        # Potential-based shaping
+        # Reward shaping based on checker score improvement
+        # We use pure difference shaping (NOT potential-based with gamma discount)
+        # to avoid penalizing the agent for taking time to solve.
         if self.config.reward_shaping:
             assert phi_old is not None and phi_new is not None
-            r = r_base + self.config.gamma * phi_new - phi_old
+            # Reward = improvement in checker score
+            # This encourages edits that improve the score, neutral for no change
+            r = phi_new - phi_old
+            
+            # Add tiny exploration bonus for making edits (not STOP)
+            # Keep it very small so actual score improvement dominates
+            if not terminated_by_stop and not done:
+                r += 0.01  # Tiny bonus - just to break ties, score improvement should dominate
+            
+            # Add penalty for early stopping (to break STOP-only behavior)
+            if hasattr(self, '_stop_penalty'):
+                r += self._stop_penalty
         else:
+            # No shaping: only reward on terminal step
+            r_base = float(phi_new) if done and phi_new is not None else 0.0
             r = r_base
 
         info = {

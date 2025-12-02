@@ -56,7 +56,9 @@ def test_reward_shaping_matches_potential_form():
     phi_old = scalar_checker(x, old_y)
     phi_new = scalar_checker(x, y_next)
     base_reward = 0.0
-    expected = base_reward + cfg.gamma * phi_new - phi_old
+    edit_bonus = 0.01  # Tiny bonus for making an edit (not STOP)
+    # Reward shaping: phi_new - phi_old (without gamma scaling for non-terminal)
+    expected = base_reward + phi_new - phi_old + edit_bonus
 
     assert not done
     assert abs(reward - expected) < 1e-6

@@ -1,0 +1,33 @@
+# UPI-TRM configuration for Sudoku (K=1) with PERSISTENT latent z
+# In persistent mode, z is initialized once per episode and carried across steps.
+# Compare with rl_sudoku_k1.yaml (episodic mode) to see the effect.
+
+gamma: 0.99
+K: 1
+inner_unroll_n: 4
+max_edits: 120
+num_train_steps: 20000
+batch_size: 64
+rollout_episodes_per_step: 4
+mixture_alpha: 0.01
+entropy_coef: 0.5
+value_lr: 0.00001
+policy_lr: 0.0001
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 5.0
+log_interval: 100
+eval_interval: 100
+eval_num_episodes: 100
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 50.0
+advantage_clip: 10.0
+policy_epsilon: 0.3
+target_ema_tau: 0.999
+
+# === KEY DIFFERENCE: Persistent latent mode ===
+# When false, z is initialized once per episode and carried/updated across steps
+# (instead of being reinitialized from (x, y) at every step)
+episodic_latent: false
+

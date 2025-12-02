@@ -554,27 +554,54 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         z_n, _ = self.unroll_latent(x, y, n)
         return z_n
 
-    def used_value(self, x: Dict[str, torch.Tensor], y: Any, n: int) -> torch.Tensor:
+    def continue_latent(
+        self,
+        z: TinyRecursiveReasoningModel_ACTV1InnerCarry,
+        x: Any,
+        y: Any,
+        n: int,
+    ) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, List[TinyRecursiveReasoningModel_ACTV1InnerCarry]]:
         """
-        Compute U_n(s) = V_ψ(z^(n)(s), x) for a batch, using the episodic latent variant:
+        Continue latent unrolling from an existing z (for persistent latent mode).
+        Unlike unroll_latent which reinitializes z, this continues from the provided z.
+        """
+        batch = self._standardize_latent_batch(x, y)
+        zs = []
+        for _ in range(n):
+            context = self._resolve_latent_context(batch)
+            input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+            z = self.inner.latent_step(z, input_embeds, context["seq_info"])
+            zs.append(z)
+        return z, zs
+
+    def used_value(
+        self,
+        x: Dict[str, torch.Tensor],
+        y: Any,
+        n: int,
+        z: Optional[TinyRecursiveReasoningModel_ACTV1InnerCarry] = None,
+    ) -> Tuple[torch.Tensor, TinyRecursiveReasoningModel_ACTV1InnerCarry]:
+        """
+        Compute U_n(s) = V_ψ(z^(n)(s), x) for a batch.
 
         - x: batch dict with at least ["inputs", "puzzle_identifiers"]
         - y: plan tensor (same batch size and shape as `inputs`), used to build plan embeddings.
         - n: number of inner latent steps
+        - z: optional existing latent state (for persistent mode). If None, reinitializes z.
 
-        This function reinitializes z^(0) from (x, y) and applies the inner map
-        f_θ n times; it does not reuse the ACT carry from the supervised TRM forward.
+        Returns:
+            Tuple of (value, z_n) where z_n is the updated latent state after n steps.
         """
-        # Note: In the paper we write V_ψ(z, x) and treat x as an "instance embedding".
-        # Here, we fold both the input instance and the current plan y into a single
-        # embedding `combined_embed = concat(x_embed, y_embed)` and feed that to the
-        # value head. All theoretical bounds only depend on the Lipschitz constant of
-        # V_ψ w.r.t. z, so this extra dependence on y is harmless for the analysis.
         if self.value_head is None:
             raise RuntimeError("Value head is not enabled; set rl_enable_value_head=True in the config.")
 
-        # 1) Run episodic latent unrolling to get z^(n)
-        z_n, _ = self.unroll_latent(x, y, n)
+        # 1) Run latent unrolling to get z^(n)
+        if z is None:
+            # Episodic mode: reinitialize z from (x, y)
+            z_n, _ = self.unroll_latent(x, y, n)
+        else:
+            # Persistent mode: continue from existing z
+            z_n, _ = self.continue_latent(z, x, y, n)
         z_vec = z_n.z_H.mean(dim=1)
 
         # 2) Build a fresh latent context to obtain input embeddings and summarize x
@@ -586,8 +613,9 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         y_embed = self._pool_embedding(plan_embeddings)
         combined_embed = torch.cat([x_embed, y_embed], dim=-1)
 
-        # 3) Apply value head
-        return self.value_head(z_vec, combined_embed)
+        # 3) Apply value head and return both value and updated z
+        value = self.value_head(z_vec, combined_embed)
+        return value, z_n
 
     def policy_dist(
         self,
@@ -595,18 +623,19 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         y: torch.Tensor,
         n: int,
         action_mask: Optional[torch.Tensor] = None,
-    ) -> Categorical:
+        z: Optional[TinyRecursiveReasoningModel_ACTV1InnerCarry] = None,
+    ) -> Tuple[Categorical, TinyRecursiveReasoningModel_ACTV1InnerCarry]:
         """
         Produce a Categorical distribution over edit actions given (x, y).
-
-        This uses the episodic latent evaluator: it reinitializes z^(0) from (x, y),
-        unrolls the inner recursion for n steps to obtain z^(n), and then queries the
-        edit-policy head on (z^(n), x_embed, y_embed).
 
         - x: batch dict with at least ["inputs", "puzzle_identifiers"]
         - y: plan tensor (same batch size), currently assumed to have shape compatible with inputs.
         - n: number of inner latent steps for the evaluator.
         - action_mask: optional [B, action_dim] boolean mask.
+        - z: optional existing latent state (for persistent mode). If None, reinitializes z.
+
+        Returns:
+            Tuple of (distribution, z_n) where z_n is the updated latent state after n steps.
         """
 
         if self.edit_policy is None:
@@ -614,8 +643,13 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
                 "Policy head is not enabled; set rl_enable_policy_head=True and rl_num_actions>0 in the config."
             )
 
-        # 1) Get z^(n) via episodic latent unrolling
-        z_n, _ = self.unroll_latent(x, y, n)
+        # 1) Get z^(n) via latent unrolling
+        if z is None:
+            # Episodic mode: reinitialize z from (x, y)
+            z_n, _ = self.unroll_latent(x, y, n)
+        else:
+            # Persistent mode: continue from existing z
+            z_n, _ = self.continue_latent(z, x, y, n)
         z_vec = z_n.z_H.mean(dim=1)
 
         # 2) Summarize x via latent context embeddings
@@ -626,7 +660,8 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         x_embed = self._pool_embedding(input_embeddings)
         y_embed = self._pool_embedding(plan_embeddings)
 
-        return self.edit_policy(z_vec, x_embed, y_embed, action_mask=action_mask)
+        dist = self.edit_policy(z_vec, x_embed, y_embed, action_mask=action_mask)
+        return dist, z_n
 
     def forward(self, carry: TinyRecursiveReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
 

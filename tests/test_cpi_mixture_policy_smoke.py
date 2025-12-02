@@ -75,7 +75,7 @@ def test_cpi_mixture_policy_runs():
     x, y = env.reset()
     batch_x = trainer._prepare_batch_x(x, batched=False)
     batch_y = trainer._prepare_plan(y, batched=False)
-    dist = trainer._mixed_policy_dist(batch_x, batch_y, n=2)
+    dist, _ = trainer._mixed_policy_dist(batch_x, batch_y, n=2)
 
     probs = dist.probs
     assert probs.shape[-1] == model_cfg["rl_num_actions"]

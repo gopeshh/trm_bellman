@@ -23,15 +23,23 @@ class EditPolicyHead(nn.Module):
         y_embed_dim: int,
         action_dim: int,
         hidden_dim: int = 256,
+        stop_action_bias: float = -5.0,  # Negative bias to discourage STOP initially
     ):
         super().__init__()
 
         self.action_dim = action_dim
+        self.stop_action_bias = stop_action_bias
         self.mlp = nn.Sequential(
             nn.Linear(latent_dim + x_embed_dim + y_embed_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, action_dim),
         )
+        
+        # Initialize the last layer's bias to discourage STOP (last action)
+        # This ensures the policy starts by favoring edits over stopping
+        with torch.no_grad():
+            # Set negative bias for STOP action (last action)
+            self.mlp[-1].bias[-1] = stop_action_bias
 
     def forward(
         self,

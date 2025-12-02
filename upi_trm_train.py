@@ -1,3 +1,5 @@
+
+
 import argparse
 from typing import List, Optional, Tuple
 
@@ -35,7 +37,8 @@ def dummy_checker(x, y) -> float:
 
 def sudoku_checker(x, y) -> float:
     """
-    Returns the fraction of cells where the current plan matches the Sudoku solution (in [0, 1]).
+    Returns a scaled score for how many cells match the Sudoku solution.
+    Scaled to [0, 10] range to provide meaningful reward signal while keeping values bounded.
     Falls back to dummy_checker if no solution is attached to the sample.
     """
 
@@ -48,7 +51,7 @@ def sudoku_checker(x, y) -> float:
     if plan.shape != solution_tensor.shape:
         solution_tensor = solution_tensor.view_as(plan)
     matches = (plan == solution_tensor).to(torch.float32)
-    return float(matches.mean().item())
+    return float(matches.mean().item() * 10.0)  # Returns 0-10 range for meaningful rewards
 
 
 class DummyPuzzleDataset:
@@ -231,7 +234,7 @@ def main():
         gamma=rl_cfg.gamma,
         reward_shaping=True,
         vocab_size=vocab_size,
-        solved_threshold=1.0 if is_sudoku_checker else None,
+        solved_threshold=10.0 if is_sudoku_checker else None,  # Perfect score (10.0) terminates episode
     )
     env = PlanEditEnv(dataset=dataset, checker=checker_fn, config=env_cfg)
 
@@ -271,6 +274,12 @@ def main():
 
     model = TinyRecursiveReasoningModel_ACTV1(trm_cfg_dict)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Debug: verify policy head initialization
+    if model.edit_policy is not None:
+        stop_bias = model.edit_policy.mlp[-1].bias[-1].item()
+        print(f"[DEBUG] Policy head STOP bias: {stop_bias:.2f} (should be -5.0)")
+    
     trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
 
     if rl_cfg.use_tqdm and trange is not None:
@@ -305,6 +314,22 @@ def main():
                 step_iter.write(eval_msg)
             else:
                 print(eval_msg)
+            
+            # Print debug stats every eval interval
+            debug_stats = trainer.get_debug_stats()
+            if debug_stats:
+                debug_msg = (
+                    f"[step {step+1:05d}] DEBUG: "
+                    f"ep_len={debug_stats.get('avg_episode_length', 0):.1f} "
+                    f"ep_ret={debug_stats.get('avg_episode_return', 0):.3f} "
+                    f"stop_prob={debug_stats.get('avg_stop_prob', 0):.3f} "
+                    f"score_chg={debug_stats.get('avg_score_change', 0):.4f}"
+                )
+                if hasattr(step_iter, "write"):
+                    step_iter.write(debug_msg)
+                else:
+                    print(debug_msg)
+            trainer.clear_debug_stats()
 
 
 if __name__ == "__main__":
