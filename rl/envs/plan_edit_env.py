@@ -250,17 +250,15 @@ class PlanEditEnv:
 
         self.step_count += 1
         if action == self.stop_action_id:
-            # terminal, no edit
-            y_next = self.y
-            done = True
-            done_reason = "stop"
-            terminated_by_stop = True
-            # Penalize early stopping to encourage exploration
-            # Only penalize if stopped very early (within first 10 steps)
-            if self.step_count <= 10:
-                self._stop_penalty = -1.0  # Penalty for stopping too early
-            else:
-                self._stop_penalty = 0.0
+            # STOP action: treat as no-op and continue (don't actually stop)
+            # This prevents the STOP collapse issue where the policy learns
+            # to always stop immediately. For tasks like Sudoku, we want the
+            # agent to use all available edits.
+            y_next = self.y  # No change to plan
+            done = False     # Don't terminate
+            done_reason = None
+            terminated_by_stop = False
+            self._stop_penalty = -0.1  # Small penalty for wasting a step on STOP
         else:
             # Non-stop action: apply edit
             self._stop_penalty = 0.0
@@ -308,10 +306,17 @@ class PlanEditEnv:
             # This encourages edits that improve the score, neutral for no change
             r = phi_new - phi_old
             
-            # Add tiny exploration bonus for making edits (not STOP)
-            # Keep it very small so actual score improvement dominates
+            # Add tiny exploration bonus for making edits that actually change the plan.
+            # Only give bonus if the action modified y (not a no-op due to invalid action).
+            # Keep it very small so actual score improvement dominates.
             if not terminated_by_stop and not done:
-                r += 0.01  # Tiny bonus - just to break ties, score improvement should dominate
+                # Check if the action actually changed the plan
+                plan_changed = not torch.equal(
+                    y_next.view(-1) if torch.is_tensor(y_next) else torch.as_tensor(y_next).view(-1),
+                    self.y.view(-1) if torch.is_tensor(self.y) else torch.as_tensor(self.y).view(-1),
+                )
+                if plan_changed:
+                    r += 0.01  # Tiny bonus - just to break ties, score improvement should dominate
             
             # Add penalty for early stopping (to break STOP-only behavior)
             if hasattr(self, '_stop_penalty'):

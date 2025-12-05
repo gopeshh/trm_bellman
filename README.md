@@ -106,6 +106,26 @@ python upi_trm_train.py \
     --seed 42
 ```
 
+#### Stable Training with Persistent Latent (Recommended)
+Our most robust training setup uses **Persistent Latent Mode**, where the latent state $z$ is carried across steps within an episode, mimicking a Recurrent Neural Network (RNN). This mode is critical for stability on harder tasks.
+
+**Key Features:**
+- **Persistent Latent**: The thought vector $z$ is not reset at each step; it evolves as the agent modifies the plan.
+- **Disabled STOP**: The agent is forced to use the full budget (120 steps), preventing "early stop" collapse.
+- **High Entropy**: `entropy_coef: 0.1` ensures continuous exploration and prevents policy degradation.
+- **Constant LR**: Learning rate is kept constant to maintain plasticity.
+
+**Run the stable config:**
+```bash
+python upi_trm_train.py \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
+    --config configs/rl_sudoku_k1_persistent_z.yaml \
+    --seed 47 \
+    --train-steps 20000 \
+    --log-interval 100 \
+    --eval-interval 200
+```
+
 #### Available Sudoku Configs
 
 | Config | K | Theory Features | Description |

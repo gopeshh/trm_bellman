@@ -23,7 +23,9 @@ class EditPolicyHead(nn.Module):
         y_embed_dim: int,
         action_dim: int,
         hidden_dim: int = 256,
-        stop_action_bias: float = -5.0,  # Negative bias to discourage STOP initially
+        # STOP bias = 0 means uniform initialization.
+        # The policy must LEARN when to stop, not start with a bias.
+        stop_action_bias: float = 0.0,
     ):
         super().__init__()
 

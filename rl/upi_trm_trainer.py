@@ -289,6 +289,12 @@ class UPITrmTrainer:
         if old_policy_params:
             self.old_policy_distill_opt = torch.optim.Adam(old_policy_params, lr=rl_cfg.policy_lr)
         self._next_episode_id: int = 0
+        self._train_step_count: int = 0  # Track training steps for LR scheduling
+
+        # Learning rate schedulers
+        self.value_scheduler: Optional[torch.optim.lr_scheduler.LambdaLR] = None
+        self.policy_scheduler: Optional[torch.optim.lr_scheduler.LambdaLR] = None
+        self._setup_lr_schedulers()
 
         # Adaptive KL coefficient for trust-region updates (PPO-style)
         # This coefficient is adjusted based on the KL divergence from old to new policy
@@ -299,6 +305,63 @@ class UPITrmTrainer:
         if hasattr(config, "model_dump"):
             return config.model_dump()
         return config.dict()
+
+    def _setup_lr_schedulers(self) -> None:
+        """
+        Set up learning rate schedulers based on rl_cfg.lr_schedule.
+        Supports: "constant", "cosine", "linear"
+        """
+        schedule_type = getattr(self.rl_cfg, "lr_schedule", "constant")
+        warmup_steps = getattr(self.rl_cfg, "lr_warmup_steps", 500)
+        min_factor = getattr(self.rl_cfg, "lr_min_factor", 0.1)
+        total_steps = self.rl_cfg.num_train_steps
+
+        if schedule_type == "constant":
+            return  # No scheduler needed
+
+        def make_lr_lambda(warmup: int, total: int, min_lr_factor: float, schedule: str):
+            def lr_lambda(step: int) -> float:
+                # Warmup phase
+                if step < warmup:
+                    return (step + 1) / max(warmup, 1)
+                
+                # Decay phase
+                progress = (step - warmup) / max(total - warmup, 1)
+                progress = min(progress, 1.0)
+                
+                if schedule == "cosine":
+                    # Cosine annealing from 1.0 to min_lr_factor
+                    cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
+                    return min_lr_factor + (1 - min_lr_factor) * cosine_decay
+                elif schedule == "linear":
+                    # Linear decay from 1.0 to min_lr_factor
+                    return 1.0 - progress * (1 - min_lr_factor)
+                else:
+                    return 1.0
+            return lr_lambda
+
+        lr_lambda = make_lr_lambda(warmup_steps, total_steps, min_factor, schedule_type)
+        
+        self.value_scheduler = torch.optim.lr_scheduler.LambdaLR(
+            self.value_opt, lr_lambda=lr_lambda
+        )
+        self.policy_scheduler = torch.optim.lr_scheduler.LambdaLR(
+            self.policy_opt, lr_lambda=lr_lambda
+        )
+
+    def _step_lr_schedulers(self) -> None:
+        """Step the learning rate schedulers after each training step."""
+        if self.value_scheduler is not None:
+            self.value_scheduler.step()
+        if self.policy_scheduler is not None:
+            self.policy_scheduler.step()
+
+    def get_current_lr(self) -> Dict[str, float]:
+        """Get current learning rates for logging."""
+        return {
+            "value_lr": self.value_opt.param_groups[0]["lr"],
+            "policy_lr": self.policy_opt.param_groups[0]["lr"],
+        }
 
     def _hard_update_target(self) -> None:
         self.target_model.load_state_dict(self.model.state_dict())
@@ -331,7 +394,18 @@ class UPITrmTrainer:
 
         alpha = self.rl_cfg.mixture_alpha
         dist_old, z_old = self.policy_model_old.policy_dist(x_batch, y_batch, n=n, action_mask=action_mask, z=z)
-        dist_new, z_new = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=n, action_mask=action_mask, z=z)
+        
+        if z is not None:
+            # Persistent mode: evaluate candidate at the same final latent state z_old
+            # to ensure both policies produce distributions at the same state for proper
+            # mixture semantics. Use n=0 to avoid running additional latent steps.
+            dist_new, _ = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=0, action_mask=action_mask, z=z_old)
+            # Use z_old as the updated latent (follows old policy's trajectory which
+            # dominates the mixture with weight 1-alpha)
+            z_new = z_old
+        else:
+            # Episodic mode: both models initialize fresh (no shared latent trajectory)
+            dist_new, z_new = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=n, action_mask=action_mask, z=z)
 
         probs_old = dist_old.probs
         probs_new = dist_new.probs
@@ -571,7 +645,11 @@ class UPITrmTrainer:
             if action_mask is not None:
                 action_mask = action_mask.to(self.device)
 
-            dist, z = self._mixed_policy_dist(batch_x, batch_y, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask, z=z)
+            dist, z_new = self._mixed_policy_dist(batch_x, batch_y, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask, z=z)
+            # Only update z in persistent mode; in episodic mode z stays None
+            # so it's reinitialized from (x, y) at every step
+            if not episodic_latent:
+                z = z_new
             action = dist.sample().squeeze()  # Ensure scalar (0-D) tensor for single-state sampling
             
             # Track STOP probability for debugging
@@ -968,7 +1046,7 @@ class UPITrmTrainer:
                 transitions = self.replay.sample_batch(num_distill)
                 x_d, y_d, _, _, _, _, _ = self._stack_batch(transitions)
                 with torch.no_grad():
-                    mixed_dist = self._mixed_policy_dist(x_d, y_d, n=self.rl_cfg.inner_unroll_n)
+                    mixed_dist, _ = self._mixed_policy_dist(x_d, y_d, n=self.rl_cfg.inner_unroll_n)
                     target_probs = mixed_dist.probs.detach()
 
                 self.policy_model_old.train()
@@ -1050,6 +1128,11 @@ class UPITrmTrainer:
         for key in ("policy_kl", "kl_coef", "kl_early_stop"):
             if key in policy_result:
                 metrics[key] = policy_result[key]
+        
+        # Step learning rate schedulers and log current LRs
+        self._train_step_count += 1
+        self._step_lr_schedulers()
+        metrics.update(self.get_current_lr())
         
         # Reset termination stats for the next logging window
         self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}

@@ -278,7 +278,7 @@ def main():
     # Debug: verify policy head initialization
     if model.edit_policy is not None:
         stop_bias = model.edit_policy.mlp[-1].bias[-1].item()
-        print(f"[DEBUG] Policy head STOP bias: {stop_bias:.2f} (should be -5.0)")
+        print(f"[DEBUG] Policy head STOP bias: {stop_bias:.2f} (should be 0.0 for uniform init)")
     
     trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
 

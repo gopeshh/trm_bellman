@@ -41,6 +41,11 @@ class RLConfig(BaseModel):
     value_target_clip: Optional[float] = 10.0
     advantage_clip: Optional[float] = 10.0
     policy_epsilon: float = 0.0
+    
+    # Learning rate scheduling
+    lr_schedule: str = "cosine"  # "constant", "cosine", "linear"
+    lr_warmup_steps: int = 500  # warmup steps before decay starts
+    lr_min_factor: float = 0.1  # minimum LR as fraction of initial (e.g., 0.1 = 10% of initial)
 
     # Lipschitz / contraction controls
     enable_contraction: bool = True

@@ -234,8 +234,10 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
         # Use the carry's device to ensure consistency with input batch
         device = carry.z_H.device
         reset_flag = reset_flag.to(device)
-        H_init = self.H_init.to(device)
-        L_init = self.L_init.to(device)
+        # H_init/L_init are [hidden_size], need to unsqueeze to [1, 1, hidden_size]
+        # for proper broadcasting with carry.z_H/z_L which are [batch_size, seq_len, hidden_size]
+        H_init = self.H_init.unsqueeze(0).unsqueeze(0).to(device)
+        L_init = self.L_init.unsqueeze(0).unsqueeze(0).to(device)
         return TinyRecursiveReasoningModel_ACTV1InnerCarry(
             z_H=torch.where(reset_flag.view(-1, 1, 1), H_init, carry.z_H),
             z_L=torch.where(reset_flag.view(-1, 1, 1), L_init, carry.z_L),
@@ -494,8 +496,10 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             
             # Add global initialization as a residual for stability
             # Use batch device to ensure consistency with the non-encoder path
-            global_H = self.inner.H_init.unsqueeze(0).expand(batch_size, -1, -1).to(device)
-            global_L = self.inner.L_init.unsqueeze(0).expand(batch_size, -1, -1).to(device)
+            # H_init/L_init are [hidden_size], need to expand to [batch_size, seq_len, hidden_size]
+            seq_len = z_init_encoded.shape[1]
+            global_H = self.inner.H_init.unsqueeze(0).unsqueeze(0).expand(batch_size, seq_len, -1).to(device)
+            global_L = self.inner.L_init.unsqueeze(0).unsqueeze(0).expand(batch_size, seq_len, -1).to(device)
             
             return TinyRecursiveReasoningModel_ACTV1InnerCarry(
                 z_H=global_H + z_init_encoded,
