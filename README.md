@@ -12,7 +12,7 @@ This repository extends the Tiny Recursive Model (TRM) codebase with a plan-spac
 - `upi_trm_train.py` – main entry point that wires the TRM, env, dummy dataset, and trainer together.
 - `evaluators/rl_plan_evaluator.py` – helpers to measure strict success rate and mean checker score for a trained plan policy.
 - `tests/` – smoke tests and unit tests for heads, TD targets, CPI mixture, logging, and evaluator glue.
-- `scripts/` – ready-to-run helpers: `run_rl_dummy.sh`, `run_tests.sh`, `run_k_step_experiment.sh`.
+- `scripts/` – ready-to-run helpers: `run_rl_dummy.sh`, `run_tests.sh`, `run_k_step_experiment.sh`, `run_sudoku_rl_full.sh`.
 
 ## Installation
 ```bash
@@ -56,15 +56,56 @@ This uses the in-memory `DummyPuzzleDataset`, collects short plan-edit episodes,
 
 We provide multiple configurations for training UPI-TRM on Sudoku puzzles with varying theory-exactness and K-step horizons.
 
-#### Quick Start (using the provided script)
+#### 4×4 Sudoku (Recommended Starting Point)
 
+For development, debugging, and curriculum learning, we recommend starting with 4×4 Sudoku:
+
+```bash
+# Ultra-easy: only 1-4 empty cells (fastest convergence)
+python upi_trm_train.py \
+    --dataset-paths data/sudoku-4x4-ultra-easy \
+    --config configs/rl_sudoku_4x4_ultra_easy.yaml \
+    --seed 42
+
+# Full-featured with puzzle embeddings
+./scripts/run_sudoku_rl_full.sh 4x4
+```
+
+The 4×4 puzzles are ideal because:
+- **Smaller action space**: 16 cells × 5 tokens = 80 edit actions (vs. ~800 for 9×9)
+- **Faster episodes**: Max 16 edits needed (vs. 81 for 9×9)
+- **Easier debugging**: Can visually verify solutions
+
+#### Full-Featured Training Script
+
+For production training with all features (puzzle embeddings, checkpointing, WandB):
+
+```bash
+# 4×4 with puzzle embeddings and WandB logging
+./scripts/run_sudoku_rl_full.sh 4x4
+
+# 9×9 extreme difficulty
+./scripts/run_sudoku_rl_full.sh extreme
+
+# Fine-tune from pretrained checkpoint
+./scripts/run_sudoku_rl_full.sh /path/to/checkpoint.pt
+```
+
+Environment variables for customization:
+```bash
+HIDDEN_SIZE=128 PUZZLE_EMB_NDIM=128 TRAIN_STEPS=20000 ./scripts/run_sudoku_rl_full.sh 4x4
+```
+
+#### 9×9 Sudoku (Extreme Difficulty)
+
+**Quick start:**
 ```bash
 ./scripts/run_sudoku_rl.sh
 ```
 
 This uses the default dataset at `data/sudoku-extreme-1k-aug-1000` with the baseline `configs/rl_sudoku_k1.yaml` config.
 
-#### Manual Commands with Different Configs
+#### Manual Commands with Different 9×9 Configs
 
 **Baseline K=1 (simple 1-step TD):**
 ```bash
@@ -128,6 +169,8 @@ python upi_trm_train.py \
 
 #### Available Sudoku Configs
 
+**9×9 Sudoku (Extreme difficulty):**
+
 | Config | K | Theory Features | Description |
 |--------|---|-----------------|-------------|
 | `rl_sudoku_k1.yaml` | 1 | Baseline | Simple 1-step TD, conservative α=0.01 |
@@ -136,12 +179,21 @@ python upi_trm_train.py \
 | `rl_sudoku_k5_theory_exact.yaml` | 5 | All ON | Multi-step unrolled with theory features |
 | `ablations/upi_trm_full_theory.yaml` | 5 | All + GAE | Full paper implementation with λ-returns |
 
+**4×4 Sudoku (Curriculum learning / debugging):**
+
+| Config | Reward | Description |
+|--------|--------|-------------|
+| `rl_sudoku_4x4_ultra_easy.yaml` | Shaped | Only 1-4 empty cells, easiest starting point |
+| `rl_sudoku_4x4_full_features.yaml` | Shaped | All features: puzzle embeddings, persistent z |
+| `rl_sudoku_4x4_sparse.yaml` | Sparse | Terminal-only rewards, harder credit assignment |
+
 #### Theory-Exact Features Explained
 
 - **`exact_k_step_targets`**: Uses fixed-horizon γ^K bootstrap for T_K^π operator (vs. γ^steps_taken)
-- **`centered_advantage`**: Batch-centered advantage estimator (Assumption 5.7 in paper)
-- **`distill_mixture_policy`**: Distills CPI mixture π_new = (1-α)π_old + απ_candidate back into network
-- **`use_gae`**: Enables GAE (λ-returns) for variance reduction (Section 6.2)
+- **`exact_baseline_summation`**: Computes E_{a~π}[Q̂(s,a)] via exact summation for O(α·ε_A) bound (Theorem 5.9 - KEY CONTRIBUTION)
+- **`batch_centered_advantage`**: Batch-level mean subtraction (heuristic for variance reduction - NOT the exact centering from Theorem 5.9)
+- **`distill_mixture_policy`**: Distills CPI mixture back into network (WARNING: NOT covered by theory - Section 6.5)
+- **`use_gae`**: Enables GAE (λ-returns) for variance reduction (practical heuristic)
 
 #### CLI Options
 
@@ -149,15 +201,39 @@ python upi_trm_train.py \
 python upi_trm_train.py --help
 ```
 
-Key flags:
+**Core flags:**
 - `--dataset-paths`: Path(s) to Sudoku dataset directories
 - `--config`: YAML config file for RLConfig overrides
 - `--train-steps`: Number of training steps (overrides config)
 - `--batch-size`: Mini-batch size (overrides config)
 - `--max-edits`: Max edits per episode
 - `--seed`: Random seed for reproducibility
-- `--no-tqdm`: Disable progress bar (useful for logging to files)
+- `--tqdm`: Enable progress bar (disabled by default for cleaner log output)
 - `--debug-checks`: Enable debug assertions and verbose logging
+
+**Model architecture (match pretrained model if loading):**
+- `--hidden-size`: Hidden dimension of TRM (default: 64, pretrained often use 128)
+- `--h-cycles`: Number of H (outer) cycles
+- `--l-cycles`: Number of L (inner) cycles  
+- `--l-layers`: Number of transformer layers
+
+**Puzzle embeddings (per-instance learnable vectors):**
+- `--puzzle-emb-ndim`: Embedding dimension (0 to disable, typically hidden_size)
+- `--puzzle-emb-len`: Embedding sequence length (default: 16)
+- `--puzzle-emb-lr`: Learning rate for embeddings (uses SignSGD)
+- `--puzzle-emb-weight-decay`: Weight decay for embeddings
+
+**Checkpointing:**
+- `--load-checkpoint`: Path to pretrained checkpoint to initialize from
+- `--resume-checkpoint`: Path to RL checkpoint to resume training
+- `--checkpoint-dir`: Directory to save checkpoints
+- `--save-interval`: Save checkpoint every N steps (0 to disable)
+
+**WandB logging:**
+- `--wandb-project`: Project name (default: UPI-TRM-RL)
+- `--wandb-run-name`: Run name (auto-generated if not set)
+- `--wandb-offline`: Run in offline mode (no cloud sync)
+- `--no-wandb`: Disable WandB entirely
 
 #### Smoke Testing Without a Dataset
 
@@ -252,6 +328,7 @@ print(f"Mean checker score: {mean_score:.3f} | Success rate: {success_rate:.3f}"
 - `./scripts/run_rl_dummy.sh` – ~200 training steps with batch size 16.
 - `./scripts/run_tests.sh` – convenience wrapper around `pytest -v` (forwards extra CLI args).
 - `./scripts/run_k_step_experiment.sh` – same as the dummy run but intended for adjusting `RLConfig.K` between launches.
+- `./scripts/run_sudoku_rl_full.sh` – full-featured training with puzzle embeddings, checkpointing, and WandB.
 
 ---
 
@@ -310,8 +387,13 @@ python -m dataset.build_arc_dataset \
 
 ## Note: You cannot train on both ARC-AGI-1 and ARC-AGI-2 and evaluate them both because ARC-AGI-2 training data contains some ARC-AGI-1 eval data
 
-# Sudoku-Extreme
+# Sudoku-Extreme (9x9)
 python dataset/build_sudoku_dataset.py --output-dir data/sudoku-extreme-1k-aug-1000  --subsample-size 1000 --num-aug 1000  # 1000 examples, 1000 augments
+
+# Sudoku 4x4 (for curriculum learning / debugging)
+python dataset/build_4x4_sudoku.py --output-dir data/sudoku-4x4 --num-puzzles 1000
+# For ultra-easy (mostly easy puzzles with 8-10 clues):
+python dataset/build_4x4_sudoku.py --output-dir data/sudoku-4x4-ultra-easy --num-easy 500 --num-medium 0 --num-hard 0
 
 # Maze-Hard
 python dataset/build_maze_dataset.py # 1000 examples, 8 augments

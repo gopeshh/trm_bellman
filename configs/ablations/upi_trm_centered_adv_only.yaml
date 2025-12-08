@@ -16,8 +16,9 @@ enable_contraction: true
 target_Lz: 0.9
 target_Lv: 5.0
 
-# Enable only centered advantage
+# Enable only batch-centered advantage (heuristic for variance reduction)
+# NOTE: This is NOT the exact centering from Theorem 5.9
 exact_k_step_targets: false
-centered_advantage: true
+batch_centered_advantage: true
 distill_mixture_policy: false
 

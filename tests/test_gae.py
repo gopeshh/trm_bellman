@@ -4,7 +4,7 @@ This corresponds to the optional λ-returns mentioned in Section 6.2 of the pape
 """
 import torch
 
-from rl.upi_trm_trainer import compute_gae, compute_gae_trajectory
+from rl.value_targets import compute_gae, compute_gae_trajectory
 
 
 def test_gae_single_step_equals_td_error():

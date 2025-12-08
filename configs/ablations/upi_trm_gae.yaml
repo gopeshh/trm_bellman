@@ -22,6 +22,6 @@ gae_lambda: 0.95
 
 # Disable other theory-exact features
 exact_k_step_targets: false
-centered_advantage: false
+batch_centered_advantage: false
 distill_mixture_policy: false
 

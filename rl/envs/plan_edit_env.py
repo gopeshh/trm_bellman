@@ -1,18 +1,54 @@
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING
 
 import torch
+
+if TYPE_CHECKING:
+    from rl.task_config import TaskConfig
 
 
 @dataclass
 class PlanEditEnvConfig:
+    """
+    Configuration for the plan-space edit environment.
+    
+    Attributes:
+        max_edits: Maximum number of edit steps per episode
+        gamma: Discount factor (used for potential-based reward shaping)
+        reward_shaping: If True, use potential-based reward shaping
+        task_type: Task identifier (e.g., "sudoku", "arc", "maze")
+        vocab_size: Number of discrete tokens per cell
+        solved_threshold: Checker score that triggers episode termination
+        stop_action_mode: How STOP action behaves ("terminal", "noop", "disabled")
+        stop_action_penalty: Penalty for choosing STOP in "noop" mode
+        
+        RUSH-TO-FAIL MITIGATION (Paper Remark 2.6):
+        fail_terminal_reward: Terminal reward for failing (not solving) the puzzle.
+            Set to a sufficiently negative value (e.g., -C_max) to prevent the
+            agent from "rushing to fail" under potential-based shaping.
+            
+            Theory: With Φ(s_abs) = C_max and shaping r = γΦ(s') - Φ(s),
+            the condition r_term_fail ≤ -γC_max ensures that failing from
+            any state yields non-positive total reward.
+            
+            Default is 0.0 (no extra penalty), which may allow rush-to-fail
+            in some edge cases. Set to -C_max for theory alignment.
+            
+        solve_terminal_reward: Terminal reward bonus for solving the puzzle.
+            Default is 0.0 (rely on shaping). Can be positive for extra incentive.
+    """
     max_edits: int
     gamma: float
     reward_shaping: bool = True
-    # Optional task type for future specialization (e.g., "sudoku", "arc", "maze")
     task_type: Optional[str] = None
-    vocab_size: Optional[int] = None  # number of discrete plan tokens
-    solved_threshold: Optional[float] = None  # checker score that auto-terminates when reached
+    vocab_size: Optional[int] = None
+    solved_threshold: Optional[float] = None
+    # STOP action behavior (inherited from RLConfig)
+    stop_action_mode: str = "noop"  # "terminal", "noop", "disabled"
+    stop_action_penalty: float = -0.1
+    # Terminal rewards (Paper Remark 2.6: rush-to-fail mitigation)
+    fail_terminal_reward: float = 0.0   # Set to -C_max for theory alignment
+    solve_terminal_reward: float = 0.0  # Optional bonus for solving
 
 
 class PlanEditEnv:
@@ -21,6 +57,34 @@ class PlanEditEnv:
       - State: (x, y), where x is an instance and y is a plan / candidate solution.
       - Actions: edit actions over y plus a special STOP action.
       - Reward: derived from a checker c(x, y) with potential-based shaping.
+      
+    STOP Action Modes:
+      - "terminal": STOP ends the episode immediately (standard RL)
+      - "noop": STOP is treated as no-op, episode continues (prevents STOP collapse)
+      - "disabled": STOP action is masked out and cannot be selected
+    
+    STOP + REWARD SHAPING INTERACTION (Issue 7):
+        In stop_action_mode="noop" with reward_shaping=True, STOP yields:
+            r = stop_action_penalty + (γ * Φ(y) - Φ(y))
+              = stop_action_penalty + (γ - 1) * Φ(y)
+        
+        Since γ < 1, the term (γ - 1) * Φ(y) is NEGATIVE when Φ(y) > 0.
+        Near high-scoring states (large Φ), STOP is strongly penalized.
+        This is intentional: it discourages stopping when progress is possible.
+    
+    DEVIATION FROM PAPER (Issue 6 - Absorbing State):
+        The ICML paper defines an explicit absorbing state s_abs with potential
+        Φ(s_abs) = C_max. Terminal transitions get:
+            r = r_term(x, y) + γ * C_max - c(x, y)
+        
+        This implementation does NOT model an explicit s_abs node. Instead:
+        - Episodes halt directly at the final plan (x, y_final)
+        - phi_new = checker(x, y_final) as usual (no separate C_max)
+        - Terminal rewards are controlled by fail_terminal_reward and
+          solve_terminal_reward in PlanEditEnvConfig
+        
+        This is behaviorally equivalent for most experiments, but readers
+        comparing code to paper notation should note the difference.
     """
 
     def __init__(
@@ -28,10 +92,12 @@ class PlanEditEnv:
         dataset: Any,
         checker: Callable[[Any, Any], float],
         config: PlanEditEnvConfig,
+        task_config: Optional["TaskConfig"] = None,
     ):
         self.dataset = dataset
         self.checker = checker
         self.config = config
+        self.task_config = task_config  # Optional task-specific config
 
         self.vocab_size: Optional[int] = config.vocab_size
         if self.vocab_size is None:
@@ -50,6 +116,10 @@ class PlanEditEnv:
         # Action space: caller is responsible for interpreting action indices.
         # We require STOP to be the last action index by convention.
         self.stop_action_id: Optional[int] = None
+        
+        # STOP action behavior
+        self._stop_mode = getattr(config, "stop_action_mode", "noop")
+        self._stop_penalty_value = getattr(config, "stop_action_penalty", -0.1)
 
     def set_stop_action_id(self, stop_id: int) -> None:
         """
@@ -78,13 +148,16 @@ class PlanEditEnv:
             if "initial_plan" in sample:
                 self.y = self._standardize_plan(sample["initial_plan"])
             else:
-                # Default: trivial zero plan with same shape as inputs
+                # Default: initialize plan from inputs (copy clues).
+                # If we used ones_like(inputs), we'd start with a blank grid (all empty),
+                # forcing the agent to memorize/copy clues from x to y.
+                # Copying inputs ensures we start with the clues pre-filled.
                 inputs = self.x["inputs"]
-                self.y = torch.zeros_like(inputs)
+                self.y = inputs.clone()
         else:
-            # Fallback: treat sample as x and create a trivial zero plan
+            # Fallback: treat sample as x and create a trivial plan with empty cells
             self.x = sample
-            self.y = torch.zeros_like(sample)
+            self.y = torch.ones_like(sample)
 
         self.step_count = 0
         self.done = False
@@ -97,7 +170,10 @@ class PlanEditEnv:
     def _compute_action_mask(self) -> None:
         """
         Compute action mask to prevent editing "given" cells.
-        For Sudoku: given cells are non-zero in the original inputs.
+        
+        If a TaskConfig is provided, it will be used to determine which cells
+        are "given" (non-editable). Otherwise, falls back to Sudoku-style logic
+        where cells with value > 1 are considered given.
         
         Action space: [pos * vocab_size + tok for all pos, tok] + [STOP]
         Mask is True for valid actions, False for invalid.
@@ -122,25 +198,37 @@ class PlanEditEnv:
             inputs = torch.as_tensor(inputs)
         
         self._original_inputs = inputs.clone()
-        flat_inputs = inputs.reshape(-1)
-        num_positions = flat_inputs.numel()
-        num_actions = self.stop_action_id + 1  # Total actions including STOP
         
-        # Start with all actions valid
-        mask = torch.ones(num_actions, dtype=torch.bool)
+        # Use TaskConfig if available, otherwise fall back to default behavior
+        if self.task_config is not None:
+            mask = self.task_config.compute_action_mask(
+                inputs, self.vocab_size, self.stop_action_id
+            )
+        else:
+            # Default Sudoku-style logic
+            flat_inputs = inputs.reshape(-1)
+            num_positions = flat_inputs.numel()
+            num_actions = self.stop_action_id + 1
+            
+            mask = torch.ones(num_actions, dtype=torch.bool)
+            
+            # Mask out all tokens for "given" positions
+            # In Sudoku encoding: 1 = empty cell, values > 1 = given clues
+            for pos in range(num_positions):
+                cell_value = flat_inputs[pos].item()
+                if cell_value > 1:  # This is a given cell (not empty)
+                    start_action = pos * self.vocab_size
+                    end_action = start_action + self.vocab_size
+                    mask[start_action:end_action] = False
+            
+            # STOP action is always valid (will be handled below)
+            mask[self.stop_action_id] = True
         
-        # Mask out all tokens for "given" positions
-        # In Sudoku encoding: 1 = empty cell, values > 1 = given clues
-        for pos in range(num_positions):
-            cell_value = flat_inputs[pos].item()
-            if cell_value > 1:  # This is a given cell (not empty)
-                # Block all edit actions for this position
-                start_action = pos * self.vocab_size
-                end_action = start_action + self.vocab_size
-                mask[start_action:end_action] = False
-        
-        # STOP action is always valid
-        mask[self.stop_action_id] = True
+        # Handle STOP action based on mode
+        if self._stop_mode == "disabled":
+            mask[self.stop_action_id] = False
+        else:
+            mask[self.stop_action_id] = True
         
         self._action_mask = mask
     
@@ -153,14 +241,23 @@ class PlanEditEnv:
 
     @staticmethod
     def compute_batch_action_mask(
-        inputs: torch.Tensor, vocab_size: int, stop_action_id: int
+        inputs: torch.Tensor,
+        vocab_size: int,
+        stop_action_id: int,
+        stop_mode: str = "noop",
     ) -> torch.Tensor:
         """
         Compute action masks for a batch of inputs preventing edits to 'given' cells.
-        inputs: [B, ...] tensor of tokens.
-        vocab_size: number of tokens per position.
-        stop_action_id: index of the STOP action (assumed to be outside edit range or handled).
-        Returns: [B, num_actions] boolean mask (True=valid).
+        
+        Args:
+            inputs: [B, ...] tensor of tokens.
+            vocab_size: number of tokens per position.
+            stop_action_id: index of the STOP action.
+            stop_mode: One of "terminal", "noop", or "disabled". When "disabled",
+                STOP action is masked out and not available to the policy.
+                
+        Returns:
+            [B, num_actions] boolean mask (True=valid).
         """
         if inputs.dim() == 1:
             inputs = inputs.unsqueeze(0)
@@ -195,9 +292,14 @@ class PlanEditEnv:
         limit = min(num_actions, num_edit_actions)
         mask[:, :limit] = edits_mask[:, :limit]
         
-        # Ensure STOP is always valid
+        # Handle STOP action based on mode
         if stop_action_id < num_actions:
-            mask[:, stop_action_id] = True
+            if stop_mode == "disabled":
+                # STOP completely disabled: keep masked out
+                mask[:, stop_action_id] = False
+            else:
+                # "terminal" or "noop": STOP is a valid action
+                mask[:, stop_action_id] = True
             
         return mask
 
@@ -241,6 +343,85 @@ class PlanEditEnv:
             return None
         max_token = int(torch.max(tokens).item())
         return max_token + 1
+
+    def compute_transition_reward(
+        self,
+        phi_old: float,
+        phi_new: float,
+        is_stop_action: bool,
+        is_terminal: bool,
+        is_solved: bool,
+    ) -> float:
+        """
+        Compute the reward for a transition given potential values.
+        
+        This is the canonical reward computation shared by:
+        - step() for actual environment transitions
+        - compute_exact_baseline_summation() for theory-exact Q estimation
+        
+        Implements Paper Eq. 4: r = r_0 + γ·Φ(s') - Φ(s) when reward_shaping=True.
+        
+        RUSH-TO-FAIL MITIGATION (Paper Remark 2.6):
+            Terminal transitions receive r_0 based on outcome:
+            - Solved: r_0 = solve_terminal_reward (default 0)
+            - Failed: r_0 = fail_terminal_reward (set to -C_max for theory)
+            
+            The condition r_term_fail ≤ -γC_max guarantees that failing from
+            any state yields non-positive total reward, preventing "rush to fail".
+        
+        Args:
+            phi_old: Checker score Φ(s) = c(x, y_old)
+            phi_new: Checker score Φ(s') = c(x, y_new)
+            is_stop_action: Whether the action was STOP
+            is_terminal: Whether this transition ends the episode
+            is_solved: Whether the puzzle was solved (phi_new >= solved_threshold)
+            
+        Returns:
+            Reward value matching the environment's reward semantics.
+            
+        Notes:
+            - In stop_action_mode="noop" with reward_shaping=True, STOP yields:
+              r = stop_action_penalty + (gamma * phi(y) - phi(y))
+                = stop_action_penalty + (gamma - 1) * phi(y)
+              so it is strongly penalized near high-scoring states.
+        """
+        gamma = self.config.gamma
+        
+        # Compute STOP penalty (only applies in noop/disabled modes)
+        stop_penalty = 0.0
+        if is_stop_action and self._stop_mode != "terminal":
+            stop_penalty = self._stop_penalty_value
+        
+        # Compute terminal reward r_0 (Paper Remark 2.6)
+        r_0 = 0.0
+        if is_terminal:
+            if is_solved:
+                r_0 = getattr(self.config, "solve_terminal_reward", 0.0)
+            else:
+                # Failed termination (budget exhausted, STOP with terminal mode, etc.)
+                # Set to negative value to prevent "rush to fail"
+                r_0 = getattr(self.config, "fail_terminal_reward", 0.0)
+        
+        if self.config.reward_shaping:
+            # Potential-based shaping: r = r_0 + γ·Φ(s') - Φ(s)
+            r = r_0 + gamma * phi_new - phi_old + stop_penalty
+        else:
+            # Sparse reward: only terminal states get checker score + terminal bonus
+            if is_terminal:
+                r = phi_new + r_0 + stop_penalty
+            else:
+                r = stop_penalty  # Only STOP penalty if any
+        
+        return r
+    
+    def is_stop_terminal(self) -> bool:
+        """
+        Returns True if STOP action terminates the episode.
+        
+        Used by compute_exact_baseline_summation to determine whether to
+        bootstrap from V(s') or treat STOP as absorbing.
+        """
+        return self._stop_mode == "terminal"
 
     def apply_edit(self, y: Any, action: int, x: Any) -> Any:
         """
@@ -286,8 +467,13 @@ class PlanEditEnv:
     def step(self, action: int):
         """
         Take a discrete action in the plan-space MDP.
-        - action == stop_action_id: terminate without changing y.
-        - otherwise: apply edit and continue until max_edits or checker termination.
+        
+        STOP action behavior depends on config.stop_action_mode:
+        - "terminal": STOP ends the episode immediately
+        - "noop": STOP is a no-op (plan unchanged), episode continues
+        - "disabled": STOP should have been masked, but if received, treated as noop
+        
+        Non-STOP actions apply edits until max_edits or checker termination.
         """
 
         assert self.stop_action_id is not None, "stop_action_id must be set before calling step()"
@@ -299,16 +485,23 @@ class PlanEditEnv:
         terminated_by_solved = False
 
         self.step_count += 1
+        
         if action == self.stop_action_id:
-            # STOP action: treat as no-op and continue (don't actually stop)
-            # This prevents the STOP collapse issue where the policy learns
-            # to always stop immediately. For tasks like Sudoku, we want the
-            # agent to use all available edits.
-            y_next = self.y  # No change to plan
-            done = False     # Don't terminate
-            done_reason = None
-            terminated_by_stop = True # Flag that STOP was chosen (even if we don't terminate)
-            self._stop_penalty = -0.1  # Small penalty for wasting a step on STOP
+            terminated_by_stop = True
+            
+            if self._stop_mode == "terminal":
+                # Standard RL: STOP terminates the episode
+                y_next = self.y
+                done = True
+                done_reason = "stop"
+                self._stop_penalty = 0.0
+            else:
+                # "noop" or "disabled": STOP is a no-op, episode continues
+                # This prevents STOP collapse where policy learns to always stop
+                y_next = self.y
+                done = False
+                done_reason = None
+                self._stop_penalty = self._stop_penalty_value
         else:
             # Non-stop action: apply edit
             self._stop_penalty = 0.0
@@ -347,34 +540,26 @@ class PlanEditEnv:
             done_reason = "budget"
             terminated_by_budget = True
 
-        # Reward shaping based on checker score improvement
-        # We use pure difference shaping (NOT potential-based with gamma discount)
-        # to avoid penalizing the agent for taking time to solve.
+        # Compute reward using shared helper (ensures consistency with exact baseline)
+        # See compute_transition_reward() for the full reward semantics.
         if self.config.reward_shaping:
             assert phi_old is not None and phi_new is not None
-            # Reward = improvement in checker score
-            # This encourages edits that improve the score, neutral for no change
-            r = phi_new - phi_old
-            
-            # Add tiny exploration bonus for making edits that actually change the plan.
-            # Only give bonus if the action modified y (not a no-op due to invalid action).
-            # Keep it very small so actual score improvement dominates.
-            if not terminated_by_stop and not done:
-                # Check if the action actually changed the plan
-                plan_changed = not torch.equal(
-                    y_next.view(-1) if torch.is_tensor(y_next) else torch.as_tensor(y_next).view(-1),
-                    self.y.view(-1) if torch.is_tensor(self.y) else torch.as_tensor(self.y).view(-1),
-                )
-                if plan_changed:
-                    r += 0.01  # Tiny bonus - just to break ties, score improvement should dominate
-            
-            # Add penalty for early stopping (to break STOP-only behavior)
-            if hasattr(self, '_stop_penalty'):
-                r += self._stop_penalty
+            r = self.compute_transition_reward(
+                phi_old=phi_old,
+                phi_new=phi_new,
+                is_stop_action=terminated_by_stop,
+                is_terminal=done,
+                is_solved=terminated_by_solved,
+            )
         else:
             # No shaping: only reward on terminal step
-            r_base = float(phi_new) if done and phi_new is not None else 0.0
-            r = r_base
+            r = self.compute_transition_reward(
+                phi_old=phi_old if phi_old is not None else 0.0,
+                phi_new=phi_new if phi_new is not None else 0.0,
+                is_stop_action=terminated_by_stop,
+                is_terminal=done,
+                is_solved=terminated_by_solved,
+            )
 
         info = {
             "done_reason": done_reason,

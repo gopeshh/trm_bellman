@@ -14,9 +14,21 @@ def evaluate_plan_policy_with_scores(
     env_cfg: PlanEditEnvConfig,
     num_episodes: int = 100,
     inner_unroll_n: Optional[int] = None,
+    episodic_latent: bool = True,
 ) -> Tuple[float, float]:
     """
     Evaluate a TRM + policy head in plan space on a given dataset.
+    
+    Args:
+        model: TRM model with policy head
+        dataset: Dataset providing puzzle instances
+        checker: Function (x, y) -> score
+        env_cfg: Environment configuration
+        num_episodes: Number of evaluation episodes
+        inner_unroll_n: Number of latent unrolling steps (default: 4)
+        episodic_latent: If True (default), reinitialize z from (x,y) at every step.
+            If False (persistent mode), initialize z once per episode and carry it
+            forward across steps, allowing the model to accumulate information.
 
     Returns:
         (mean_checker_score, success_rate)
@@ -48,12 +60,35 @@ def evaluate_plan_policy_with_scores(
             x, y = env.reset(idx=episode_idx % dataset_size)
             done = False
 
-            optimal_plan = x.get("solution")
-            if optimal_plan is None:
-                optimal_plan = x.get("inputs")
-            if optimal_plan is None:
-                raise KeyError("Environment state must include `solution` or `inputs` for reward reference.")
-            episode_max_reward = float(checker(x, optimal_plan))
+            # Get the optimal solution for computing max reward
+            # Priority: "solution" > "labels" (both represent the solved state)
+            # DO NOT fall back to "inputs" - those are puzzle clues, not solutions!
+            # Note: x may be a dict or a raw tensor depending on dataset format
+            if isinstance(x, dict):
+                optimal_plan = x.get("solution")
+                if optimal_plan is None:
+                    optimal_plan = x.get("labels")  # Common alternative name in supervised datasets
+            else:
+                # x is not a dict (e.g., raw tensor from simple datasets)
+                optimal_plan = None
+            
+            if optimal_plan is not None:
+                episode_max_reward = float(checker(x, optimal_plan))
+            else:
+                # No solution available - cannot compute meaningful success rate
+                # Set max_reward to None to skip success counting for this episode
+                episode_max_reward = None
+
+            # === Persistent latent mode ===
+            # In persistent mode, z is initialized once per episode and carried forward.
+            # In episodic mode, z=None causes policy_dist to reinitialize from (x,y) each step.
+            z = None
+            if not episodic_latent:
+                # Initialize z from (x, y) at episode start
+                batched = state_is_batched(x)
+                batch_x = prepare_batch_x(x, device=device, batched=batched)
+                plan = prepare_plan(y, device=device, batched=batched)
+                z = model.init_latent(batch_x, plan)
 
             for _ in range(env_cfg.max_edits):
                 batched = state_is_batched(x)
@@ -65,8 +100,13 @@ def evaluate_plan_policy_with_scores(
                 if action_mask is not None:
                     action_mask = action_mask.to(device)
 
-                dist, _ = model.policy_dist(batch_x, plan, n=inner_unroll_n, action_mask=action_mask)
+                # Pass z for persistent mode; z=None for episodic mode (reinitializes each step)
+                dist, z_new = model.policy_dist(batch_x, plan, n=inner_unroll_n, action_mask=action_mask, z=z)
                 action = dist.sample().item()
+                
+                # Carry forward the updated latent in persistent mode
+                if not episodic_latent:
+                    z = z_new
 
                 (x_next, y_next), _, done, _ = env.step(action)
                 x, y = x_next, y_next
@@ -77,7 +117,9 @@ def evaluate_plan_policy_with_scores(
             final_score = float(checker(x, y))
             total_score += final_score
             episodes_ran += 1
-            if abs(final_score - episode_max_reward) < 1e-6:
+            
+            # Only count as solved if we have a valid max reward to compare against
+            if episode_max_reward is not None and abs(final_score - episode_max_reward) < 1e-6:
                 num_solved += 1
 
     mean_score = total_score / float(max(episodes_ran, 1))
@@ -92,9 +134,14 @@ def evaluate_plan_policy(
     env_cfg: PlanEditEnvConfig,
     num_episodes: int = 100,
     inner_unroll_n: Optional[int] = None,
+    episodic_latent: bool = True,
 ) -> float:
     """
     Backwards-compatible wrapper that only returns the strict success rate.
+    
+    Args:
+        episodic_latent: If True (default), reinitialize z each step.
+            If False (persistent mode), carry z forward across steps.
     """
 
     _, success_rate = evaluate_plan_policy_with_scores(
@@ -104,6 +151,7 @@ def evaluate_plan_policy(
         env_cfg=env_cfg,
         num_episodes=num_episodes,
         inner_unroll_n=inner_unroll_n,
+        episodic_latent=episodic_latent,
     )
     return success_rate
 

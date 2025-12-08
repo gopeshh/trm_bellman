@@ -214,8 +214,9 @@ The RL extension is controlled via an `RLConfig` (or similar) nested in the main
   - `rl.gae_lambda`: float – GAE λ parameter (0 = TD, 1 = Monte Carlo).
 - **Theory-exact toggles**
   - `rl.exact_k_step_targets`: bool – use fixed-horizon γ^K bootstrap.
-  - `rl.centered_advantage`: bool – center advantages (Assumption 5.7).
-  - `rl.distill_mixture_policy`: bool – distill CPI mixture back into network.
+  - `rl.exact_baseline_summation`: bool – exact per-state centering via summation (Theorem 5.9 KEY).
+  - `rl.batch_centered_advantage`: bool – batch-level mean subtraction (heuristic, NOT theory-exact).
+  - `rl.distill_mixture_policy`: bool – distill CPI mixture back into network (NOT covered by theory).
 - **Optimization and replay**
   - `rl.value_lr`: float – learning rate for value + latent evaluator.
   - `rl.policy_lr`: float – learning rate for policy parameters.

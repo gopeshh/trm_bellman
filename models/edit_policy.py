@@ -52,12 +52,27 @@ class EditPolicyHead(nn.Module):
     ) -> Categorical:
         """
         Returns a Categorical over actions.
-        - action_mask: optional boolean mask [B, action_dim] where False entries are invalid.
+        - action_mask: optional boolean mask. Supports both:
+            - 1D [action_dim]: same mask applied to all batch elements (broadcasted)
+            - 2D [B, action_dim]: per-batch-element masks
         """
 
-        logits = self.mlp(torch.cat([z_vec, x_embed, y_embed], dim=-1))
+        logits = self.mlp(torch.cat([z_vec, x_embed, y_embed], dim=-1))  # [B, action_dim]
         if action_mask is not None:
+            # Normalize mask to 2D [B, action_dim] for consistent handling
+            if action_mask.dim() == 1:
+                # 1D mask [action_dim] -> broadcast to [B, action_dim]
+                action_mask = action_mask.unsqueeze(0).expand_as(logits)
+            
             # mask out invalid actions
             logits = logits.masked_fill(~action_mask, float("-inf"))
+            
+            # Defensive check: if ALL actions are masked (shouldn't happen in practice
+            # because STOP is always available), fall back to uniform to avoid NaN.
+            # This prevents softmax([-inf, -inf, ...]) = NaN.
+            all_masked = ~action_mask.any(dim=-1, keepdim=True)  # [B, 1]
+            if all_masked.any():
+                # Replace with uniform logits (zeros) for fully-masked rows
+                logits = torch.where(all_masked.expand_as(logits), torch.zeros_like(logits), logits)
         return Categorical(logits=logits)
 

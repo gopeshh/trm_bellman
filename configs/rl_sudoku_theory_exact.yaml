@@ -1,0 +1,82 @@
+# =============================================================================
+# THEORY-EXACT UPI-TRM Configuration
+# =============================================================================
+# This configuration enables ALL features required for full theoretical guarantees
+# as described in the ICML 2026 paper.
+#
+# Use this config when you want maximum alignment with the paper's theory.
+# Note: Some features (exact_baseline_summation) are computationally expensive.
+#
+# Paper sections covered:
+#   - Assumption 4.1: Forward-invariant projection (latent_ball_radius)
+#   - Assumption 4.2: Contraction (enable_contraction, target_Lz < 1)
+#   - Theorem 5.9: Exact baseline for O(α·ε_A) bound
+#   - Section 5.3: CPI mixture updates (mixture_alpha)
+#   - Section 5.1: K-step targets (exact_k_step_targets)
+# =============================================================================
+
+# === Core MDP settings ===
+gamma: 0.99
+K: 5  # K-step horizon (Proposition 5.1)
+inner_unroll_n: 6  # n for U_n(s) - more steps = tighter unrolling bound
+max_edits: 120
+num_train_steps: 20000
+batch_size: 64
+rollout_episodes_per_step: 4
+
+# === Forward-invariant projection (Assumption 4.1, CRITICAL) ===
+# Paper Eq. 14: z ← z · min(1, R/||z||)
+# This ensures z ∈ Z_inv for contraction guarantees
+latent_ball_radius: 10.0  # REQUIRED for theory
+
+# === Contraction (Assumption 4.2, CRITICAL) ===
+enable_contraction: true
+target_Lz: 0.85  # L_z < 1 strictly required
+target_Lv: 2.0   # L_V for value head
+
+# === Exact baseline (Theorem 5.9, KEY CONTRIBUTION) ===
+# Enables O(α·ε_A) bound instead of naive O(ε_A/(1-γ))
+# Computationally expensive but tractable for Sudoku (~800 actions)
+exact_baseline_summation: true  # REQUIRED for tight bounds
+
+# === K-step targets (Section 5.1) ===
+# Use fixed-horizon γ^K bootstrap for T_K^π operator
+exact_k_step_targets: true
+
+# === Batch-level advantage centering (heuristic) ===
+# NOTE: This is NOT the exact centering from Theorem 5.9.
+# Theorem 5.9's E_{a~π}[Â(s,a)] = 0 per state requires exact_baseline_summation=True
+batch_centered_advantage: true  # Batch mean subtraction (variance reduction heuristic)
+
+# === CPI mixture (Section 5.3) ===
+mixture_alpha: 0.05  # Conservative: smaller α = safer updates
+distill_mixture_policy: false  # NOT covered by theory (Section 6.5)
+
+# === Trust region (optional additional safety) ===
+enable_kl_trust_region: false  # Can enable for extra stability
+
+# === Learning rates (conservative for stability) ===
+value_lr: 5e-5
+policy_lr: 1e-4
+entropy_coef: 0.02
+
+# === Gradient clipping ===
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 100.0
+advantage_clip: 20.0
+
+# === STOP action ===
+stop_action_mode: noop  # Prevents STOP collapse
+stop_action_penalty: -0.1
+
+# === Logging ===
+log_interval: 100
+eval_interval: 200
+eval_num_episodes: 100
+
+# === Theory metrics tracking ===
+track_theory_metrics: true  # Monitor C_z, L_z, L_v, unrolling term
+track_drift_metrics: false  # Only for persistent latent mode
+track_plan_change: true
+

@@ -1,21 +1,195 @@
 
-
 import argparse
-from typing import List, Optional, Tuple
+import os
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+import torch.nn as nn
 
 try:
     from tqdm import trange
 except ImportError:  # pragma: no cover
     trange = None
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    wandb = None
+    WANDB_AVAILABLE = False
+
 from puzzle_dataset import PuzzleDataset, PuzzleDatasetConfig  # type: ignore
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+from models.sparse_embedding import CastedSparseEmbeddingSignSGD_Distributed
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.upi_trm_trainer import UPITrmTrainer
 from utils.seeding import set_global_seed
+
+
+# =============================================================================
+# Checkpoint Loading/Saving (aligned with pretrain.py)
+# =============================================================================
+
+def load_checkpoint(
+    model: nn.Module,
+    checkpoint_path: str,
+    device: str = None,
+    strict: bool = False,
+) -> Dict[str, Any]:
+    """
+    Load model weights from a pretrained checkpoint.
+    
+    Handles puzzle embedding resizing if shapes don't match.
+    
+    Args:
+        model: The TRM model to load weights into
+        checkpoint_path: Path to the checkpoint file
+        device: Target device (auto-detected if None)
+        strict: If True, raise error on missing/unexpected keys
+        
+    Returns:
+        Dict with loading info (missing_keys, unexpected_keys, etc.)
+    """
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    print(f"[Checkpoint] Loading from {checkpoint_path} to {device}")
+    state_dict = torch.load(checkpoint_path, map_location=device)
+    
+    # Handle torch.compile wrapper naming
+    # Pretrained models may have "_orig_mod." prefix from torch.compile
+    cleaned_state_dict = {}
+    for key, value in state_dict.items():
+        # Remove _orig_mod. prefix if present
+        clean_key = key.replace("_orig_mod.", "")
+        # Also handle model.inner -> inner mapping for wrapped models
+        if clean_key.startswith("model."):
+            clean_key = clean_key[6:]  # Remove "model." prefix
+        cleaned_state_dict[clean_key] = value
+    
+    # Handle puzzle embedding size mismatch
+    puzzle_emb_key = "inner.puzzle_emb.weights"
+    if puzzle_emb_key in cleaned_state_dict:
+        loaded_emb = cleaned_state_dict[puzzle_emb_key]
+        if hasattr(model, "inner") and hasattr(model.inner, "puzzle_emb"):
+            expected_shape = model.inner.puzzle_emb.weights.shape
+            if loaded_emb.shape != expected_shape:
+                print(f"[Checkpoint] Resizing puzzle embeddings: {loaded_emb.shape} -> {expected_shape}")
+                # Resize by averaging existing embeddings
+                if loaded_emb.shape[1] == expected_shape[1]:
+                    # Same embedding dim, different num identifiers
+                    if loaded_emb.shape[0] < expected_shape[0]:
+                        # Expand by replicating mean
+                        mean_emb = loaded_emb.mean(dim=0, keepdim=True)
+                        cleaned_state_dict[puzzle_emb_key] = mean_emb.expand(expected_shape).contiguous()
+                    else:
+                        # Truncate
+                        cleaned_state_dict[puzzle_emb_key] = loaded_emb[:expected_shape[0]]
+                else:
+                    # Different dims - reinitialize
+                    print(f"[Checkpoint] Puzzle embedding dim mismatch, reinitializing")
+                    del cleaned_state_dict[puzzle_emb_key]
+    
+    # Skip RL heads if loading from supervised checkpoint (they won't exist)
+    # Filter out keys that don't exist in the model
+    model_keys = set(dict(model.named_parameters()).keys()) | set(dict(model.named_buffers()).keys())
+    filtered_state_dict = {}
+    skipped_keys = []
+    for key, value in cleaned_state_dict.items():
+        if key in model_keys or any(key.startswith(mk.rsplit(".", 1)[0]) for mk in model_keys):
+            filtered_state_dict[key] = value
+        else:
+            skipped_keys.append(key)
+    
+    if skipped_keys:
+        print(f"[Checkpoint] Skipped {len(skipped_keys)} keys not in model: {skipped_keys[:5]}...")
+    
+    # Load with strict=False to allow missing RL heads
+    result = model.load_state_dict(filtered_state_dict, strict=strict)
+    
+    print(f"[Checkpoint] Loaded successfully")
+    if result.missing_keys:
+        print(f"[Checkpoint] Missing keys (will use random init): {result.missing_keys[:10]}...")
+    if result.unexpected_keys:
+        print(f"[Checkpoint] Unexpected keys (ignored): {result.unexpected_keys[:10]}...")
+    
+    return {"missing_keys": result.missing_keys, "unexpected_keys": result.unexpected_keys}
+
+
+def save_checkpoint(
+    model: nn.Module,
+    trainer: "UPITrmTrainer",
+    step: int,
+    checkpoint_dir: str,
+    puzzle_emb_optimizer: Optional[torch.optim.Optimizer] = None,
+) -> str:
+    """
+    Save full training state for resumable RL training.
+    
+    Args:
+        model: The TRM model
+        trainer: UPITrmTrainer instance (for optimizers)
+        step: Current training step
+        checkpoint_dir: Directory to save checkpoints
+        puzzle_emb_optimizer: Optional optimizer for puzzle embeddings
+        
+    Returns:
+        Path to saved checkpoint
+    """
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    checkpoint = {
+        "step": step,
+        "model_state_dict": model.state_dict(),
+        "value_optimizer_state_dict": trainer.value_opt.state_dict(),
+        "policy_optimizer_state_dict": trainer.policy_opt.state_dict(),
+    }
+    
+    if puzzle_emb_optimizer is not None:
+        checkpoint["puzzle_emb_optimizer_state_dict"] = puzzle_emb_optimizer.state_dict()
+    
+    # Save replay buffer size (not contents, too large)
+    checkpoint["replay_buffer_size"] = len(trainer.replay)
+    
+    path = os.path.join(checkpoint_dir, f"rl_checkpoint_step_{step}.pt")
+    torch.save(checkpoint, path)
+    print(f"[Checkpoint] Saved to {path}")
+    
+    # Also save just the model weights for easy loading
+    model_path = os.path.join(checkpoint_dir, f"model_step_{step}.pt")
+    torch.save(model.state_dict(), model_path)
+    
+    return path
+
+
+def resume_from_checkpoint(
+    checkpoint_path: str,
+    model: nn.Module,
+    trainer: "UPITrmTrainer",
+    device: str,
+    puzzle_emb_optimizer: Optional[torch.optim.Optimizer] = None,
+) -> int:
+    """
+    Resume RL training from a saved checkpoint.
+    
+    Returns:
+        Starting step number
+    """
+    print(f"[Checkpoint] Resuming from {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    model.load_state_dict(checkpoint["model_state_dict"])
+    trainer.value_opt.load_state_dict(checkpoint["value_optimizer_state_dict"])
+    trainer.policy_opt.load_state_dict(checkpoint["policy_optimizer_state_dict"])
+    
+    if puzzle_emb_optimizer is not None and "puzzle_emb_optimizer_state_dict" in checkpoint:
+        puzzle_emb_optimizer.load_state_dict(checkpoint["puzzle_emb_optimizer_state_dict"])
+    
+    start_step = checkpoint["step"]
+    print(f"[Checkpoint] Resumed from step {start_step}")
+    
+    return start_step
 
 
 def _to_plan_tensor(value):
@@ -173,7 +347,7 @@ def parse_args():
     parser.add_argument("--log-interval", type=int, default=10, help="Logging interval in train steps.")
     parser.add_argument("--eval-interval", type=int, default=50, help="Evaluation interval in train steps.")
     parser.add_argument("--eval-episodes", type=int, default=50, help="Number of episodes per evaluation call.")
-    parser.add_argument("--no-tqdm", action="store_true", help="Disable tqdm progress bar.")
+    parser.add_argument("--tqdm", action="store_true", help="Enable tqdm progress bar (disabled by default).")
     parser.add_argument("--seed", type=int, default=None, help="Optional global random seed.")
     parser.add_argument("--debug-checks", action="store_true", help="Enable additional debug assertions/prints.")
     parser.add_argument(
@@ -181,6 +355,109 @@ def parse_args():
         type=str,
         default=None,
         help="Optional path to YAML config overriding RLConfig defaults.",
+    )
+    # WandB arguments
+    parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="UPI-TRM-RL",
+        help="WandB project name (default: UPI-TRM-RL).",
+    )
+    parser.add_argument(
+        "--wandb-run-name",
+        type=str,
+        default=None,
+        help="WandB run name (auto-generated if not specified).",
+    )
+    parser.add_argument(
+        "--wandb-offline",
+        action="store_true",
+        help="Run WandB in offline mode (no cloud sync).",
+    )
+    parser.add_argument(
+        "--wandb",
+        action="store_true",
+        help="Enable WandB logging (disabled by default).",
+    )
+    parser.add_argument(
+        "--no-wandb",
+        action="store_true",
+        help="Disable WandB logging (deprecated, WandB is now disabled by default).",
+    )
+    # Checkpoint arguments
+    parser.add_argument(
+        "--load-checkpoint",
+        type=str,
+        default=None,
+        help="Path to pretrained checkpoint to load (e.g., from supervised pretraining).",
+    )
+    parser.add_argument(
+        "--resume-checkpoint",
+        type=str,
+        default=None,
+        help="Path to RL checkpoint to resume training from.",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default=None,
+        help="Directory to save checkpoints (default: checkpoints/<run_name>).",
+    )
+    parser.add_argument(
+        "--save-interval",
+        type=int,
+        default=1000,
+        help="Save checkpoint every N steps (0 to disable).",
+    )
+    # Model architecture arguments (to match pretrained model)
+    parser.add_argument(
+        "--hidden-size",
+        type=int,
+        default=64,
+        help="Hidden dimension of TRM (default: 64, pretrained models often use 128).",
+    )
+    parser.add_argument(
+        "--h-cycles",
+        type=int,
+        default=2,
+        help="Number of H (outer) cycles in TRM.",
+    )
+    parser.add_argument(
+        "--l-cycles",
+        type=int,
+        default=2,
+        help="Number of L (inner) cycles in TRM.",
+    )
+    parser.add_argument(
+        "--l-layers",
+        type=int,
+        default=1,
+        help="Number of transformer layers in L-level.",
+    )
+    # Puzzle embedding arguments (NEW - closes the gap with pretrain.py)
+    parser.add_argument(
+        "--puzzle-emb-ndim",
+        type=int,
+        default=0,
+        help="Dimension of per-puzzle learnable embeddings (0 to disable, typically hidden_size).",
+    )
+    parser.add_argument(
+        "--puzzle-emb-len",
+        type=int,
+        default=16,
+        help="Length of puzzle embedding sequence (default: 16).",
+    )
+    parser.add_argument(
+        "--puzzle-emb-lr",
+        type=float,
+        default=1e-2,
+        help="Learning rate for puzzle embeddings (uses SignSGD, default: 1e-2).",
+    )
+    parser.add_argument(
+        "--puzzle-emb-weight-decay",
+        type=float,
+        default=0.1,
+        help="Weight decay for puzzle embeddings (default: 0.1).",
     )
     return parser.parse_args()
 
@@ -199,7 +476,7 @@ def main():
         log_interval=args.log_interval,
         eval_interval=args.eval_interval,
         eval_num_episodes=args.eval_episodes,
-        use_tqdm=not args.no_tqdm,
+        use_tqdm=args.tqdm,
         debug_checks=args.debug_checks,
     )
 
@@ -232,29 +509,56 @@ def main():
     env_cfg = PlanEditEnvConfig(
         max_edits=rl_cfg.max_edits,
         gamma=rl_cfg.gamma,
-        reward_shaping=True,
+        reward_shaping=rl_cfg.reward_shaping,
         vocab_size=vocab_size,
-        solved_threshold=10.0 if is_sudoku_checker else None,  # Perfect score (10.0) terminates episode
+        solved_threshold=rl_cfg.solved_threshold if is_sudoku_checker else None,
+        task_type=getattr(rl_cfg, "task_name", "sudoku"),
+        # STOP action behavior from RLConfig
+        stop_action_mode=getattr(rl_cfg, "stop_action_mode", "noop"),
+        stop_action_penalty=getattr(rl_cfg, "stop_action_penalty", -0.1),
+        # Terminal rewards (Paper Remark 2.6: rush-to-fail mitigation)
+        fail_terminal_reward=getattr(rl_cfg, "fail_terminal_reward", 0.0),
+        solve_terminal_reward=getattr(rl_cfg, "solve_terminal_reward", 0.0),
     )
-    env = PlanEditEnv(dataset=dataset, checker=checker_fn, config=env_cfg)
+    
+    # Optionally use task-specific configuration
+    task_config = None
+    try:
+        from rl.task_config import get_task_config
+        task_name = getattr(rl_cfg, "task_name", "sudoku")
+        if is_sudoku_checker:
+            task_config = get_task_config("sudoku")
+        elif checker_fn is dummy_checker:
+            task_config = get_task_config("dummy")
+    except ImportError:
+        pass  # task_config module not available
+    
+    env = PlanEditEnv(dataset=dataset, checker=checker_fn, config=env_cfg, task_config=task_config)
 
     num_edit_actions = seq_len * vocab_size
     rl_num_actions = num_edit_actions + 1  # STOP action appended at the end
     env.set_stop_action_id(stop_id=rl_num_actions - 1)
 
+    # === Model Configuration ===
+    # Use CLI args for architecture (allows matching pretrained model)
+    hidden_size = args.hidden_size
+    puzzle_emb_ndim = args.puzzle_emb_ndim
+    puzzle_emb_len = args.puzzle_emb_len if puzzle_emb_ndim > 0 else 0
+    
     trm_cfg_dict = dict(
         batch_size=rl_cfg.batch_size,
         seq_len=seq_len,
-        puzzle_emb_ndim=0,
+        puzzle_emb_ndim=puzzle_emb_ndim,  # NEW: Per-puzzle learnable embeddings
+        puzzle_emb_len=puzzle_emb_len,     # NEW: Embedding sequence length
         num_puzzle_identifiers=max(num_identifiers, rl_cfg.batch_size),
         vocab_size=vocab_size,
-        H_cycles=2,
-        L_cycles=2,
+        H_cycles=args.h_cycles,
+        L_cycles=args.l_cycles,
         H_layers=0,
-        L_layers=1,
-        hidden_size=64,
+        L_layers=args.l_layers,
+        hidden_size=hidden_size,
         expansion=2.0,
-        num_heads=4,
+        num_heads=max(4, hidden_size // 16),  # Scale heads with hidden size
         pos_encodings="rope",
         rms_norm_eps=1e-5,
         rope_theta=10000.0,
@@ -262,7 +566,6 @@ def main():
         halt_exploration_prob=0.0,
         forward_dtype="float32",
         mlp_t=False,
-        puzzle_emb_len=0,
         no_ACT_continue=True,
         rl_enable_value_head=True,
         rl_enable_contraction=rl_cfg.enable_contraction,
@@ -270,25 +573,175 @@ def main():
         rl_target_Lv=rl_cfg.target_Lv,
         rl_enable_policy_head=True,
         rl_num_actions=rl_num_actions,
+        # Forward-invariant projection (Assumption 4.1)
+        rl_latent_ball_radius=getattr(rl_cfg, "latent_ball_radius", 0.0),
     )
 
     model = TinyRecursiveReasoningModel_ACTV1(trm_cfg_dict)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # === Load pretrained checkpoint if provided ===
+    if args.load_checkpoint is not None:
+        load_checkpoint(model, args.load_checkpoint, device=str(device), strict=False)
     
     # Debug: verify policy head initialization
     if model.edit_policy is not None:
         stop_bias = model.edit_policy.mlp[-1].bias[-1].item()
         print(f"[DEBUG] Policy head STOP bias: {stop_bias:.2f} (should be 0.0 for uniform init)")
     
-    trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
-
-    if rl_cfg.use_tqdm and trange is not None:
-        step_iter = trange(rl_cfg.num_train_steps, desc="UPI-TRM RL training")
+    # Log puzzle embedding status
+    if puzzle_emb_ndim > 0:
+        print(f"[INFO] Puzzle embeddings ENABLED: dim={puzzle_emb_ndim}, len={puzzle_emb_len}")
+        print(f"[INFO] Puzzle embedding LR: {args.puzzle_emb_lr}, weight_decay: {args.puzzle_emb_weight_decay}")
     else:
-        step_iter = range(rl_cfg.num_train_steps)
+        print("[INFO] Puzzle embeddings DISABLED (set --puzzle-emb-ndim > 0 to enable)")
+    
+    trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
+    
+    # === Setup puzzle embedding optimizer (separate from main optimizer) ===
+    puzzle_emb_optimizer = None
+    if puzzle_emb_ndim > 0 and hasattr(model, "inner") and hasattr(model.inner, "puzzle_emb"):
+        # Use SignSGD for sparse puzzle embeddings (same as pretrain.py)
+        puzzle_emb_optimizer = CastedSparseEmbeddingSignSGD_Distributed(
+            model.inner.puzzle_emb.buffers(),
+            lr=args.puzzle_emb_lr,
+            weight_decay=args.puzzle_emb_weight_decay,
+            world_size=1,  # Single GPU for now
+        )
+        print(f"[INFO] Puzzle embedding optimizer: SignSGD (lr={args.puzzle_emb_lr})")
+    
+    # === Resume from RL checkpoint if provided ===
+    start_step = 0
+    if args.resume_checkpoint is not None:
+        start_step = resume_from_checkpoint(
+            args.resume_checkpoint, model, trainer, str(device), puzzle_emb_optimizer
+        )
+    
+    # === Setup checkpoint directory ===
+    checkpoint_dir = args.checkpoint_dir
+    if checkpoint_dir is None and args.save_interval > 0:
+        dataset_name = "dummy"
+        if args.dataset_paths:
+            dataset_name = os.path.basename(args.dataset_paths[0])
+        checkpoint_dir = os.path.join("checkpoints", f"rl_{dataset_name}_seed{args.seed or 0}")
+        print(f"[INFO] Checkpoint directory: {checkpoint_dir}")
+    
+    # === Set checker function for exact baseline computation (Theorem 5.9) ===
+    # When exact_baseline_summation=True, the trainer uses this to compute
+    # E_{a ~ π}[Q̂(s,a)] via exact summation over all discrete actions,
+    # enabling the O(α·ε_A) bound instead of naive O(ε_A).
+    trainer.set_checker_fn(checker_fn)
+    
+    # === Validate theory alignment and show warnings ===
+    print("\n" + "="*60)
+    print("UPI-TRM THEORY ALIGNMENT CHECK")
+    print("="*60)
+    validation = rl_cfg.validate_theory_alignment(warn=False)  # Get results without duplicate warnings
+    
+    if validation["theory_aligned"]:
+        print("✓ Configuration aligns with theoretical guarantees")
+    else:
+        print("⚠ Configuration has theory gaps:")
+        for issue in validation["issues"]:
+            print(f"  • {issue}")
+    
+    print(f"\nTheory status:")
+    print(f"  Forward-invariant projection: {'✓' if validation['forward_invariant'] else '✗'}")
+    print(f"  Contraction enforced (L_z < 1): {'✓' if validation['contraction_enforced'] else '✗'}")
+    print(f"  Exact baseline (Thm 5.9): {'✓' if validation['exact_baseline'] else '✗'}")
+    print(f"  Distillation (not in theory): {'✗ ENABLED' if validation['distillation_used'] else '✓ disabled'}")
+    print(f"\nIs theory-exact: {rl_cfg.is_theory_exact()}")
+    print("="*60 + "\n")
+    
+    # Log additional configuration settings
+    stop_mode = getattr(rl_cfg, "stop_action_mode", "noop")
+    print(f"[INFO] STOP action mode: {stop_mode}")
+    if getattr(rl_cfg, "exact_baseline_summation", False):
+        print("[INFO] Using EXACT baseline summation (Theorem 5.9 O(α·ε_A) bound)")
+    if getattr(rl_cfg, "latent_ball_radius", 0.0) > 0:
+        print(f"[INFO] Forward-invariant projection enabled (R={rl_cfg.latent_ball_radius})")
+    if getattr(rl_cfg, "track_drift_metrics", False):
+        print("[INFO] Drift tracking enabled (Lemma 4.4)")
+    if getattr(rl_cfg, "compute_value_of_memory", False):
+        print("[INFO] Value-of-memory computation enabled (Section 5.4)")
 
-    for step in step_iter:
+    # === Initialize WandB (disabled by default, enable with --wandb) ===
+    use_wandb = WANDB_AVAILABLE and args.wandb and not args.no_wandb
+    if use_wandb:
+        # Set offline mode if requested
+        if args.wandb_offline:
+            os.environ["WANDB_MODE"] = "offline"
+        
+        # Generate run name if not provided
+        run_name = args.wandb_run_name
+        if run_name is None:
+            dataset_name = "dummy"
+            if args.dataset_paths:
+                dataset_name = os.path.basename(args.dataset_paths[0])
+            run_name = f"{dataset_name}-K{rl_cfg.K}-seed{args.seed or 0}"
+        
+        # Prepare config dict for WandB
+        wandb_config = rl_cfg.model_dump() if hasattr(rl_cfg, "model_dump") else rl_cfg.dict()
+        wandb_config.update({
+            "dataset_paths": args.dataset_paths,
+            "seq_len": seq_len,
+            "vocab_size": vocab_size,
+            "num_identifiers": num_identifiers,
+            "num_actions": rl_num_actions,
+            "device": str(device),
+            "theory_exact": rl_cfg.is_theory_exact(),
+            # Model architecture
+            "hidden_size": hidden_size,
+            "h_cycles": args.h_cycles,
+            "l_cycles": args.l_cycles,
+            "l_layers": args.l_layers,
+            # Puzzle embeddings (NEW)
+            "puzzle_emb_ndim": puzzle_emb_ndim,
+            "puzzle_emb_len": puzzle_emb_len,
+            "puzzle_emb_lr": args.puzzle_emb_lr,
+            "puzzle_emb_weight_decay": args.puzzle_emb_weight_decay,
+            # Checkpointing
+            "load_checkpoint": args.load_checkpoint,
+            "resume_checkpoint": args.resume_checkpoint,
+        })
+        
+        # Initialize WandB
+        wandb.init(
+            project=args.wandb_project,
+            name=run_name,
+            config=wandb_config,
+            settings=wandb.Settings(_disable_stats=True),
+        )
+        
+        # Log model info
+        num_params = sum(p.numel() for p in model.parameters())
+        wandb.log({"model/num_params": num_params}, step=0)
+        print(f"[WandB] Initialized: project={args.wandb_project}, run={run_name}")
+        print(f"[WandB] Model parameters: {num_params:,}")
+    else:
+        if args.wandb and not WANDB_AVAILABLE:
+            print("[WandB] Requested but not available (install with: pip install wandb)")
+        elif not args.wandb:
+            print("[WandB] Disabled by default (enable with: --wandb)")
+
+    # === Training loop with puzzle embedding updates and checkpointing ===
+    total_steps = rl_cfg.num_train_steps
+    remaining_steps = total_steps - start_step
+    
+    if rl_cfg.use_tqdm and trange is not None:
+        step_iter = trange(remaining_steps, desc="UPI-TRM RL training", initial=start_step, total=total_steps)
+    else:
+        step_iter = range(remaining_steps)
+
+    for local_step in step_iter:
+        step = start_step + local_step
         metrics = trainer.train_step()
+        
+        # === Step puzzle embedding optimizer ===
+        if puzzle_emb_optimizer is not None:
+            puzzle_emb_optimizer.step()
+            puzzle_emb_optimizer.zero_grad()
+        
         if (step + 1) % rl_cfg.log_interval == 0:
             msg = (
                 f"[step {step+1:05d}] value_loss={metrics['loss_value']:.6f} "
@@ -298,6 +751,37 @@ def main():
                 step_iter.write(msg)
             else:
                 print(msg)
+            
+            # === WandB: Log training metrics ===
+            if use_wandb:
+                wandb_metrics = {
+                    "train/loss_value": metrics["loss_value"],
+                    "train/loss_policy": metrics["loss_policy"],
+                    "train/term_stop": metrics.get("term_stop", 0),
+                    "train/term_solved": metrics.get("term_solved", 0),
+                    "train/term_budget": metrics.get("term_budget", 0),
+                }
+                # Add learning rates if available
+                if "value_lr" in metrics:
+                    wandb_metrics["train/lr_value"] = metrics["value_lr"]
+                if "policy_lr" in metrics:
+                    wandb_metrics["train/lr_policy"] = metrics["policy_lr"]
+                # Add KL metrics if using trust region
+                if "policy_kl" in metrics:
+                    wandb_metrics["train/policy_kl"] = metrics["policy_kl"]
+                if "kl_coef" in metrics:
+                    wandb_metrics["train/kl_coef"] = metrics["kl_coef"]
+                # Add theory metrics if tracked
+                for key in ["hat_Cz", "hat_Lz", "hat_Lv", "unrolling_term",
+                            "bellman_residual_mean", "bellman_residual_max",
+                            "drift_mean", "drift_max", "plan_change_mean"]:
+                    if key in metrics:
+                        wandb_metrics[f"theory/{key}"] = metrics[key]
+                # Add debug metrics if present
+                for key in ["value_mean", "value_std", "adv_mean", "adv_std"]:
+                    if key in metrics:
+                        wandb_metrics[f"debug/{key}"] = metrics[key]
+                wandb.log(wandb_metrics, step=step + 1)
 
         if (step + 1) % rl_cfg.eval_interval == 0:
             eval_metrics = trainer.evaluate_policy_metrics(
@@ -315,6 +799,13 @@ def main():
             else:
                 print(eval_msg)
             
+            # === WandB: Log evaluation metrics ===
+            if use_wandb:
+                wandb.log({
+                    "eval/success_rate": eval_metrics["success_rate"],
+                    "eval/mean_score": eval_metrics["mean_score"],
+                }, step=step + 1)
+            
             # Print debug stats every eval interval
             debug_stats = trainer.get_debug_stats()
             if debug_stats:
@@ -329,7 +820,28 @@ def main():
                     step_iter.write(debug_msg)
                 else:
                     print(debug_msg)
+                
+                # === WandB: Log debug stats ===
+                if use_wandb:
+                    wandb_debug = {}
+                    for key, value in debug_stats.items():
+                        wandb_debug[f"debug/{key}"] = value
+                    wandb.log(wandb_debug, step=step + 1)
+            
             trainer.clear_debug_stats()
+        
+        # === Save checkpoint periodically ===
+        if args.save_interval > 0 and checkpoint_dir is not None and (step + 1) % args.save_interval == 0:
+            save_checkpoint(model, trainer, step + 1, checkpoint_dir, puzzle_emb_optimizer)
+    
+    # === Save final checkpoint ===
+    if args.save_interval > 0 and checkpoint_dir is not None:
+        save_checkpoint(model, trainer, total_steps, checkpoint_dir, puzzle_emb_optimizer)
+    
+    # === WandB: Finish logging ===
+    if use_wandb:
+        wandb.finish()
+        print("[WandB] Run finished successfully")
 
 
 if __name__ == "__main__":

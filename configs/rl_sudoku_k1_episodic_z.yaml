@@ -25,7 +25,7 @@ value_target_clip: 100.0
 advantage_clip: 20.0
 policy_epsilon: 0.1
 target_ema_tau: 0.995
-centered_advantage: true
+batch_centered_advantage: true  # Heuristic for variance reduction
 
 # === KEY DIFFERENCE: Episodic latent mode ===
 # When true, z is reinitialized from (x, y) at every step

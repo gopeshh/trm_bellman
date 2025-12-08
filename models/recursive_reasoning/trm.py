@@ -71,15 +71,44 @@ class TinyRecursiveReasoningModel_ACTV1Config(BaseModel):
     puzzle_emb_len: int = 16 # if non-zero, its specified to this value
     no_ACT_continue: bool =  True # No continue ACT loss, only use the sigmoid of the halt which makes much more sense
 
-    # RL / value-head / contraction dials (defaults keep them OFF)
-    rl_enable_value_head: bool = False
-    rl_enable_contraction: bool = False
-    rl_value_hidden_dim: int = 256
-    rl_target_Lz: float = 0.9
-    rl_target_Lv: float = 1.0
-    rl_enable_policy_head: bool = False
-    rl_num_actions: int = 0   # total number of discrete actions; last index is STOP
-    rl_enable_z_init_encoder: bool = False  # If True, use (x,y)-dependent initialization instead of global H_init/L_init
+    # ==========================================================================
+    # RL-SPECIFIC CONFIGURATION (UPI-TRM Extension)
+    # ==========================================================================
+    # 
+    # IMPORTANT: These flags should be LEFT AS FALSE for vanilla TRM experiments
+    # (supervised pretraining). They are ONLY meant for the UPI-TRM RL integration.
+    # 
+    # When any rl_enable_* flag is True, the model gains extra parameters
+    # (value head, policy head, etc.) that will be trained during RL but
+    # should NOT be present during vanilla supervised TRM pretraining.
+    # 
+    # For vanilla TRM (supervised):
+    #   - rl_enable_value_head = False
+    #   - rl_enable_policy_head = False  
+    #   - rl_enable_contraction = False
+    #   - rl_enable_z_init_encoder = False
+    # 
+    # For UPI-TRM (RL):
+    #   - rl_enable_value_head = True (adds LatentValueHead for V_ψ)
+    #   - rl_enable_policy_head = True (adds EditPolicyHead for π_θ)
+    #   - rl_enable_contraction = True (for Assumption 3.2 guarantees)
+    #   - Set rl_num_actions to the discrete action space size
+    # ==========================================================================
+    
+    rl_enable_value_head: bool = False  # Add V_ψ(z, x) value head
+    rl_enable_contraction: bool = False  # Apply spectral norm + contraction scaling
+    rl_value_hidden_dim: int = 256  # Hidden dimension of value head MLP
+    rl_target_Lz: float = 0.9  # Target contraction factor L_z < 1 (Assumption 3.2)
+    rl_target_Lv: float = 1.0  # Target Lipschitz of value head w.r.t. z
+    rl_enable_policy_head: bool = False  # Add edit policy head π_θ(a|s)
+    rl_num_actions: int = 0   # Total discrete actions; must be > 0 if policy head enabled
+    rl_enable_z_init_encoder: bool = False  # Use (x,y)-dependent z initialization
+    
+    # === Forward-invariant region (Assumption 4.1 in paper) ===
+    # If > 0, project latent z to ball of this radius after each latent_step
+    # Ensures z ∈ Z_inv = {z : ||z|| ≤ R} for contraction guarantees
+    # Paper Eq. 14: z ← z · min(1, R/||z||)
+    rl_latent_ball_radius: float = 0.0  # 0 = disabled
 
 class TinyRecursiveReasoningModel_ACTV1Block(nn.Module):
     def __init__(self, config: TinyRecursiveReasoningModel_ACTV1Config) -> None:
@@ -253,7 +282,36 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
         for _L_step in range(self.config.L_cycles):
             z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
         z_H = self.L_level(z_H, z_L, **seq_info)
+        
+        # === Forward-invariant projection (Assumption 4.1, Eq. 14 in paper) ===
+        # Project z to ball of radius R: z ← z · min(1, R/||z||)
+        # This ensures z ∈ Z_inv = {z : ||z|| ≤ R} for contraction guarantees
+        R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
+        if R > 0.0:
+            z_H = self._project_to_ball(z_H, R)
+            z_L = self._project_to_ball(z_L, R)
+        
         return TinyRecursiveReasoningModel_ACTV1InnerCarry(z_H=z_H, z_L=z_L)
+    
+    def _project_to_ball(self, z: torch.Tensor, radius: float) -> torch.Tensor:
+        """
+        Project tensor z to ball of given radius (per-sample).
+        
+        Implements Eq. 14 from paper: z ← z · min(1, R/||z||)
+        This projection is 1-Lipschitz and preserves contraction properties.
+        
+        Args:
+            z: Tensor of shape [B, seq_len, hidden_size]
+            radius: Ball radius R > 0
+            
+        Returns:
+            Projected tensor with ||z||_2 ≤ radius for each sample
+        """
+        # Compute per-sample norm: [B, 1, 1] for broadcasting
+        z_norm = z.norm(p=2, dim=(1, 2), keepdim=True).clamp(min=1e-8)
+        # Scale factor: min(1, R/||z||)
+        scale = torch.clamp(radius / z_norm, max=1.0)
+        return z * scale
 
     def forward(self, carry: TinyRecursiveReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         latent_context = self.build_latent_context(batch)
@@ -366,7 +424,36 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         else:
             self.z_init_encoder = None
 
+        # === Spectral Normalization and Contraction (Assumption 3.2) ===
+        # 
+        # WARNING: Enabling rl_enable_contraction is NOT compatible with loading
+        # vanilla pretrained TRM weights without fine-tuning!
+        # 
+        # When enabled, this wraps all linear layers with spectral_norm and applies
+        # output scaling to enforce L_z < 1 (contraction). This substantially changes
+        # the network's behavior:
+        # - Spectral norm constrains each layer to ~1-Lipschitz
+        # - Output scaling compounds to achieve global contraction L_z ≈ target_Lz
+        # 
+        # If you load a checkpoint that was trained WITHOUT contraction:
+        # - The pretrained weights will be rescaled by the contraction factors
+        # - The original supervised performance will NOT be preserved
+        # - You must fine-tune the model with the new constraints
+        # 
+        # For theory alignment (Assumption 3.2), you MUST enable contraction.
+        # For practical RL that builds on pretrained TRM, consider:
+        # - Training with contraction from scratch, OR
+        # - Disabling contraction (loses theory guarantees but preserves pretrained behavior)
         if self.config.rl_enable_contraction:
+            import warnings
+            warnings.warn(
+                "rl_enable_contraction=True: Applying spectral normalization and "
+                "contraction scaling. This is REQUIRED for Assumption 3.2 (L_z < 1) "
+                "but will substantially modify network behavior. Pretrained weights "
+                "from vanilla TRM will be rescaled and may require fine-tuning.",
+                UserWarning,
+                stacklevel=2,
+            )
             apply_spectral_norm_to_trm(self.inner)
             enforce_global_contraction(self.inner, self.config.rl_target_Lz)
             if self.value_head is not None:

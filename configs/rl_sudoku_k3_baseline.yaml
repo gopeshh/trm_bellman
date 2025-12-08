@@ -32,8 +32,8 @@ target_Lv: 1.0          # keep V head relatively smooth in z to match bounds
 
 # Theory toggles
 exact_k_step_targets: false  # use gamma^steps_taken; less brittle with truncated episodes
-centered_advantage: true
-distill_mixture_policy: true
+batch_centered_advantage: true  # Heuristic for variance reduction
+distill_mixture_policy: true    # NOTE: Distillation not covered by theory, but useful in practice
 
 # CPI mixture
 mixture_alpha: 0.05     # faster than 0.01 but still conservative

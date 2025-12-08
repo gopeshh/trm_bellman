@@ -18,6 +18,6 @@ target_Lv: 5.0
 
 # Enable only exact K-step targets
 exact_k_step_targets: true
-centered_advantage: false
+batch_centered_advantage: false
 distill_mixture_policy: false
 

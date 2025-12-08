@@ -43,7 +43,7 @@ def prepare_batch_x(
     Normalize env state dictionaries into the TRM batch dict format.
     Ensures we always return tensors shaped as:
       inputs  -> [B, seq_len]
-      puzzle_identifiers -> [B]
+      puzzle_identifiers -> [B]  (1D, one identifier per batch element)
     """
     if not isinstance(x, dict):
         raise TypeError("Expected environment state x to be a dict with tensor entries.")
@@ -54,18 +54,56 @@ def prepare_batch_x(
         tensor = x[key]
         if not torch.is_tensor(tensor):
             tensor = torch.as_tensor(tensor)
-        if not batched:
+        
+        if key == "puzzle_identifiers":
+            # puzzle_identifiers must be 1D [B] - one identifier per sample
+            # CastedSparseEmbedding indexes directly with this tensor
             if tensor.ndim == 0:
+                # Scalar -> [1]
                 tensor = tensor.unsqueeze(0)
-            elif key == "inputs" and tensor.ndim == 1:
-                tensor = tensor.unsqueeze(0)
-        tensor = tensor.to(device)
-        if key == "inputs":
-            tensor = tensor.to(torch.long)
-        elif key == "puzzle_identifiers":
-            tensor = tensor.to(torch.long)
+            elif tensor.ndim == 1:
+                # Already 1D - if unbatched, ensure we have exactly one identifier
+                if not batched:
+                    tensor = tensor[:1]  # Take first identifier for single sample
+            elif tensor.ndim == 2:
+                # [B, N] -> [B] by taking first identifier per sample
+                tensor = tensor[:, 0]
+            else:
+                raise ValueError(f"puzzle_identifiers has unexpected ndim={tensor.ndim}, shape={tensor.shape}")
+        elif key == "inputs":
+            if not batched:
+                if tensor.ndim == 0:
+                    tensor = tensor.unsqueeze(0)
+                elif tensor.ndim == 1:
+                    tensor = tensor.unsqueeze(0)  # [seq_len] -> [1, seq_len]
+        
+        tensor = tensor.to(device).to(torch.long)
         batch[key] = tensor
     return batch
+
+
+def normalize_puzzle_id(pid: torch.Tensor) -> torch.Tensor:
+    """
+    Normalize a puzzle identifier tensor to a scalar tensor.
+    
+    Handles various input shapes:
+    - Scalar (0D) -> returns as-is
+    - 1D with single element -> squeezes to scalar
+    - 1D with multiple elements -> takes first element
+    - 2D -> squeezes and takes first element
+    
+    Args:
+        pid: Puzzle identifier tensor of any shape
+        
+    Returns:
+        Scalar tensor containing the puzzle identifier
+    """
+    if pid.dim() > 0:
+        pid = pid.squeeze()
+    if pid.dim() == 0:
+        return pid
+    # Multi-element tensor: take first element
+    return pid[0] if pid.numel() > 1 else pid
 
 
 def prepare_plan(

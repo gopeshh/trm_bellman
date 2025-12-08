@@ -1,3 +1,4 @@
+import logging
 from typing import Union
 
 import torch
@@ -6,6 +7,8 @@ import torch.distributed as dist
 from torch.optim.optimizer import Optimizer, ParamsT
 
 from models.common import trunc_normal_init_
+
+logger = logging.getLogger(__name__)
 
 
 class CastedSparseEmbedding(nn.Module):
@@ -29,8 +32,22 @@ class CastedSparseEmbedding(nn.Module):
         if not self.training:
             # Test mode, no gradient
             return self.weights[inputs].to(self.cast_to)
+        
+        actual_batch_size = inputs.shape[0]
+        expected_batch_size = self.local_weights.shape[0]
+        
+        if actual_batch_size != expected_batch_size:
+            # Batch size mismatch (common during rollouts with batch=1)
+            # Return embeddings directly without using local buffers
+            # Gradients won't be tracked, but rollouts use torch.no_grad() anyway
+            logger.debug(
+                "CastedSparseEmbedding batch size mismatch: got %d, expected %d. "
+                "Using direct embedding lookup (no gradient tracking).",
+                actual_batch_size, expected_batch_size
+            )
+            return self.weights[inputs].to(self.cast_to)
             
-        # Training mode, fill puzzle embedding from weights
+        # Training mode with matching batch size, fill puzzle embedding from weights
         with torch.no_grad():
             self.local_weights.copy_(self.weights[inputs])
             self.local_ids.copy_(inputs)

@@ -1,208 +1,41 @@
+import logging
 import math
-from collections import deque
-from dataclasses import dataclass
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+
+logger = logging.getLogger(__name__)
+
+# Numerical stability constant: minimum log probability to prevent -inf
+# exp(-20) ≈ 2e-9, effectively zero probability
+LOG_PROB_MIN = -20.0
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils as nn_utils
 
 from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
-from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan
+from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan, normalize_puzzle_id
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from rl.replay import ReplayBuffer, Transition
+from rl.value_targets import (
+    compute_k_step_bootstrapped_target,
+    compute_gae,
+    compute_empirical_bellman_residual,
+)
 from utils.lipschitz import (
     estimate_local_Lz,
     estimate_Cz,
     estimate_Lv,
     compute_unrolling_term_proxy,
+    # Theory-exact components (Sections 4.2, 5.4 of paper)
+    estimate_Cdrift,
+    estimate_plan_change,
+    compute_value_of_memory_residual,
+    compute_exact_baseline_summation,
+    compute_exact_advantage,
 )
-
-
-@dataclass
-class Transition:
-    x: Any
-    y: Any
-    action: torch.Tensor
-    reward: torch.Tensor
-    x_next: Any
-    y_next: Any
-    done: torch.Tensor
-    episode_id: int
-    timestep: int
-
-
-class ReplayBuffer:
-    def __init__(self, capacity: int):
-        self.storage: Deque[Transition] = deque(maxlen=capacity)
-
-    def add(self, transition: Transition) -> None:
-        self.storage.append(transition)
-
-    def __len__(self) -> int:
-        return len(self.storage)
-
-    def sample_batch(self, batch_size: int) -> List[Transition]:
-        assert len(self.storage) >= batch_size, "Not enough transitions in replay buffer"
-        indices = torch.randint(low=0, high=len(self.storage), size=(batch_size,)).tolist()
-        return [self.storage[i] for i in indices]
-
-
-def compute_k_step_bootstrapped_target(
-    rewards_K: torch.Tensor,
-    dones_K: torch.Tensor,
-    steps_taken: torch.Tensor,
-    v_K: torch.Tensor,
-    gamma: float,
-    K: int,
-    exact_k_step_targets: bool = False,
-) -> torch.Tensor:
-    """
-    Compute K-step bootstrapped targets with proper terminal masking.
-    """
-    batch_size = rewards_K.shape[0]
-
-    # Mask rewards beyond steps_taken for each sample (defensive against improper padding)
-    step_indices = torch.arange(K, device=rewards_K.device).unsqueeze(0)  # [1, K]
-    valid_mask = step_indices < steps_taken.unsqueeze(1)  # [batch_size, K]
-    rewards_K = rewards_K * valid_mask
-
-    gammas = rewards_K.new_tensor([gamma**k for k in range(K)])
-    reward_returns = (rewards_K * gammas).sum(dim=1)
-
-    if exact_k_step_targets:
-        bootstrap_factor = gamma**K
-    else:
-        bootstrap_factor = gamma ** steps_taken.float()
-
-    final_idx = (steps_taken - 1).clamp(min=0)
-    batch_indices = torch.arange(batch_size, device=rewards_K.device)
-    done_final = dones_K[batch_indices, final_idx]
-    # Do not bootstrap from terminal segments: if the segment hits done early,
-    # the true return is purely the discounted reward sum (V(s_terminal) = 0).
-    not_done_final = (~done_final).to(v_K.dtype)
-    v_K = v_K * not_done_final
-
-    return reward_returns + bootstrap_factor * v_K
-
-
-def compute_gae(
-    rewards: torch.Tensor,
-    values: torch.Tensor,
-    next_values: torch.Tensor,
-    dones: torch.Tensor,
-    gamma: float,
-    gae_lambda: float,
-) -> torch.Tensor:
-    """
-    Compute Generalized Advantage Estimation (GAE) for a batch of independent transitions.
-
-    This implements a single-step approximation of GAE(λ) from Schulman et al. (2016).
-    For independent transitions (not full trajectories), we compute:
-        A = δ * (1 + γλ(1-done))
-    where δ = r + γV(s') - V(s) is the TD error.
-
-    This approximation assumes the next advantage is approximately equal to the current
-    TD error, which provides a λ-weighted blend between TD(0) and a 2-step lookahead.
-    - When λ=0: Returns pure TD error (δ)
-    - When λ=1: Returns δ * (1 + γ) for non-terminal states (approximates 2-step return)
-
-    For proper multi-step GAE with full trajectory information, use compute_gae_trajectory.
-
-    Args:
-        rewards: [B] rewards for each transition
-        values: [B] V(s) for each starting state
-        next_values: [B] V(s') for each next state
-        dones: [B] boolean done flags
-        gamma: discount factor
-        gae_lambda: GAE λ parameter (0 = TD, 1 = Monte Carlo-like)
-
-    Returns:
-        advantages: [B] GAE-approximated advantages
-    """
-    mask = (~dones).float()
-    td_error = rewards + gamma * next_values * mask - values
-    
-    # For single transitions, we approximate the GAE recursion:
-    # A_t = δ_t + γλ * A_{t+1}
-    # By assuming A_{t+1} ≈ δ_t (the TD error is a reasonable proxy),
-    # we get: A_t ≈ δ_t * (1 + γλ) for non-terminal transitions.
-    # This provides meaningful λ-blending without requiring full trajectories.
-    gae_factor = 1.0 + gamma * gae_lambda * mask
-    return td_error * gae_factor
-
-
-def compute_gae_trajectory(
-    rewards: torch.Tensor,
-    values: torch.Tensor,
-    dones: torch.Tensor,
-    gamma: float,
-    gae_lambda: float,
-    last_value: float = 0.0,
-) -> torch.Tensor:
-    """
-    Compute GAE advantages for a full trajectory.
-
-    Args:
-        rewards: [T] rewards for each timestep
-        values: [T] V(s) for each state in trajectory
-        dones: [T] boolean done flags
-        gamma: discount factor
-        gae_lambda: GAE λ parameter
-        last_value: V(s_T) for the final state after trajectory
-
-    Returns:
-        advantages: [T] GAE advantages
-    """
-    T = len(rewards)
-    advantages = torch.zeros_like(rewards)
-    gae = 0.0
-
-    # Append last_value for bootstrapping
-    values_extended = torch.cat([values, torch.tensor([last_value], device=values.device, dtype=values.dtype)])
-
-    for t in reversed(range(T)):
-        mask = 1.0 - dones[t].float()
-        delta = rewards[t] + gamma * values_extended[t + 1] * mask - values[t]
-        gae = delta + gamma * gae_lambda * mask * gae
-        advantages[t] = gae
-
-    return advantages
-
-
-def compute_empirical_bellman_residual(
-    values: torch.Tensor,
-    rewards: torch.Tensor,
-    next_values: torch.Tensor,
-    dones: torch.Tensor,
-    gamma: float,
-) -> Dict[str, float]:
-    """
-    Compute empirical Bellman residual statistics for monitoring.
-
-    The Bellman residual is |V(s) - (r + γV(s'))|.
-
-    Args:
-        values: [B] V(s) predictions
-        rewards: [B] rewards
-        next_values: [B] V(s') predictions
-        dones: [B] done flags
-        gamma: discount factor
-
-    Returns:
-        Dictionary with residual statistics (mean, max, std)
-    """
-    mask = (~dones).float()
-    td_target = rewards + gamma * next_values * mask
-    residual = (values - td_target).abs()
-
-    return {
-        "bellman_residual_mean": float(residual.mean().item()),
-        "bellman_residual_max": float(residual.max().item()),
-        "bellman_residual_std": float(residual.std(unbiased=False).item()),
-    }
 
 
 class UPITrmTrainer:
@@ -238,6 +71,16 @@ class UPITrmTrainer:
         self._debug_episode_returns: List[float] = []
         self._debug_stop_probs: List[float] = []
         self._debug_score_changes: List[float] = []
+        
+        # === NEW: Theory-exact tracking (Sections 4.2, 5.4 of paper) ===
+        # Track drift for persistent latents (Lemma 4.4)
+        self._drift_values: List[float] = []
+        # Track plan changes Δy (Assumption 4.3)
+        self._plan_changes: List[float] = []
+        # Track value of memory (Remark 5.5)
+        self._value_of_memory: List[float] = []
+        # Store checker function reference for exact baseline computation
+        self._checker_fn = None  # Set by caller if using exact_baseline_summation
 
         self.target_model = TinyRecursiveReasoningModel_ACTV1(self._config_to_dict(self.model.config)).to(device)
         self.target_model.eval()
@@ -383,6 +226,13 @@ class UPITrmTrainer:
         its action distribution is only an approximation of this mixture unless
         `distill_mixture_policy=True`, which triggers an explicit KL distillation.
         
+        IMPORTANT INVARIANT: This function assumes that policy_model_old and
+        policy_model_candidate have **identical backbone weights** (all non-edit_policy
+        parameters). This ensures both policies compute embeddings and latent states
+        using the same representation, which is required for proper CPI mixture semantics.
+        The invariant is maintained by calling _sync_candidate_backbone_from_model()
+        at the start of each train_step() before any episode collection.
+        
         Args:
             action_mask: Optional [B, action_dim] or [action_dim] boolean mask.
                          True = valid action, False = invalid (will be masked out).
@@ -495,25 +345,37 @@ class UPITrmTrainer:
 
     def _freeze_policy_backbone(self) -> None:
         """
-        Only allow the edit-policy head parameters to receive policy-gradient updates.
+        Configure requires_grad for policy-gradient updates.
+        
+        - policy_model_candidate: Freeze backbone (non-edit_policy), only edit_policy trains.
+        - policy_model_old (when aliased to self.model): Do NOT freeze backbone because
+          self.model also serves as the value function (critic) which needs trainable
+          backbone params. Only ensure edit_policy is trainable.
+        
+        NOTE: value_params are collected from self.model BEFORE this method is called,
+        but that's intentional - we preserve requires_grad for value function params.
         """
 
-        # Candidate policy (actor)
+        # Candidate policy (actor): freeze everything except edit_policy head
         if self.policy_model_candidate.edit_policy is not None:
             for name, param in self.policy_model_candidate.named_parameters():
-                trainable = name.startswith("edit_policy")
-                param.requires_grad_(trainable)
+                is_policy_head = name.startswith("edit_policy")
+                param.requires_grad_(is_policy_head)
 
-        # Old policy model (deployed policy, aliased with self.model)
+        # Old/deployed policy model
         if self.policy_model_old.edit_policy is not None:
             for name, param in self.policy_model_old.named_parameters():
-                trainable = name.startswith("edit_policy")
+                is_policy_head = name.startswith("edit_policy")
                 if self.policy_model_old is self.model:
-                    # Preserve critic training while still documenting which params participate in policy gradients.
-                    if trainable:
+                    # CRITICAL: self.model is shared between value function and deployed policy.
+                    # Do NOT freeze backbone params - they're needed for value function training.
+                    # Only ensure edit_policy head is trainable for policy distillation.
+                    if is_policy_head:
                         param.requires_grad_(True)
+                    # Non-edit_policy params intentionally LEFT UNCHANGED (remain trainable for value fn)
                 else:
-                    param.requires_grad_(param.requires_grad and trainable)
+                    # Separate policy model: freeze backbone, only edit_policy trainable
+                    param.requires_grad_(param.requires_grad and is_policy_head)
 
     def _sync_candidate_backbone_from_model(self) -> None:
         """
@@ -674,6 +536,23 @@ class UPITrmTrainer:
                 initial_score = info["phi_old"]
             episode_rewards.append(reward)
             episode_actions.append(action.item())
+            
+            # === NEW: Track plan changes for two-timescale analysis (Assumption 4.3) ===
+            if getattr(self.rl_cfg, "track_plan_change", False):
+                y_tensor = self._prepare_plan(y, batched=False)
+                y_next_tensor = self._prepare_plan(y_next, batched=False)
+                plan_change = estimate_plan_change(y_tensor, y_next_tensor)
+                self._plan_changes.append(plan_change)
+            
+            # === NEW: Track drift for persistent latents (Lemma 4.4) ===
+            if not episodic_latent and getattr(self.rl_cfg, "track_drift_metrics", False) and z is not None:
+                batch_x_next = self._prepare_batch_x(x_next, batched=self._state_is_batched(x_next))
+                batch_y_next = self._prepare_plan(y_next, batched=self._state_is_batched(x_next))
+                drift = estimate_Cdrift(
+                    self.model, batch_x_next, batch_y_next, z, 
+                    n=self.rl_cfg.inner_unroll_n
+                )
+                self._drift_values.append(drift)
 
             transition = Transition(
                 x=self._clone_state(x),
@@ -721,11 +600,20 @@ class UPITrmTrainer:
         """
 
         inputs = torch.stack([t.x["inputs"] for t in transitions], dim=0).to(self.device)
-        puzzle_ids = torch.stack([t.x["puzzle_identifiers"] for t in transitions], dim=0).to(self.device)
+        # Ensure puzzle_ids is 1D [batch_size] for CastedSparseEmbedding
+        puzzle_ids = torch.stack(
+            [normalize_puzzle_id(t.x["puzzle_identifiers"]) for t in transitions], dim=0
+        ).to(self.device)
+        if puzzle_ids.dim() > 1:
+            puzzle_ids = puzzle_ids.squeeze(-1)
         x_batch = {"inputs": inputs, "puzzle_identifiers": puzzle_ids}
 
         inputs_next = torch.stack([t.x_next["inputs"] for t in transitions], dim=0).to(self.device)
-        puzzle_ids_next = torch.stack([t.x_next["puzzle_identifiers"] for t in transitions], dim=0).to(self.device)
+        puzzle_ids_next = torch.stack(
+            [normalize_puzzle_id(t.x_next["puzzle_identifiers"]) for t in transitions], dim=0
+        ).to(self.device)
+        if puzzle_ids_next.dim() > 1:
+            puzzle_ids_next = puzzle_ids_next.squeeze(-1)
         x_next_batch = {"inputs": inputs_next, "puzzle_identifiers": puzzle_ids_next}
 
         y_batch = torch.stack([self._plan_tensor(t.y) for t in transitions], dim=0).to(self.device)
@@ -807,7 +695,7 @@ class UPITrmTrainer:
         for batch_idx, start_idx in enumerate(indices):
             transition = storage[start_idx]
             start_inputs.append(transition.x["inputs"])
-            start_puzzle_ids.append(transition.x["puzzle_identifiers"])
+            start_puzzle_ids.append(normalize_puzzle_id(transition.x["puzzle_identifiers"]))
             start_plans.append(self._plan_tensor(transition.y))
 
             last_transition = transition
@@ -831,7 +719,7 @@ class UPITrmTrainer:
                 current_idx += 1
 
             end_inputs.append(last_transition.x_next["inputs"])
-            end_puzzle_ids.append(last_transition.x_next["puzzle_identifiers"])
+            end_puzzle_ids.append(normalize_puzzle_id(last_transition.x_next["puzzle_identifiers"]))
             end_plans.append(self._plan_tensor(last_transition.y_next))
             steps_taken[batch_idx] = steps
 
@@ -929,7 +817,7 @@ class UPITrmTrainer:
         """
         Perform one policy-gradient step with optional:
         - GAE advantage estimation (use_gae=True)
-        - Centered advantage estimator (centered_advantage=True)
+        - Batch-level advantage centering (batch_centered_advantage=True)
         - KL trust-region constraint (enable_kl_trust_region=True)
         
         When enable_kl_trust_region=True, this implements an adaptive KL penalty
@@ -960,7 +848,10 @@ class UPITrmTrainer:
         action_mask = None
         if self.env.vocab_size is not None and self.env.stop_action_id is not None:
             action_mask = PlanEditEnv.compute_batch_action_mask(
-                x_batch["inputs"], self.env.vocab_size, self.env.stop_action_id
+                x_batch["inputs"],
+                self.env.vocab_size,
+                self.env.stop_action_id,
+                stop_mode=self.env._stop_mode,
             )
 
         self.model.train()
@@ -968,31 +859,78 @@ class UPITrmTrainer:
         self.policy_opt.zero_grad()
 
         with torch.no_grad():
-            v_s, _ = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
-            v_next, _ = self.model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
-            mask = (~dones).float()
-            v_next_masked = v_next * mask
             gamma = self.rl_cfg.gamma
-
-            # Compute advantages (GAE or 1-step TD)
-            if getattr(self.rl_cfg, "use_gae", False):
-                gae_lambda = getattr(self.rl_cfg, "gae_lambda", 0.95)
-                adv = compute_gae(
-                    rewards=rewards,
-                    values=v_s,
-                    next_values=v_next,
-                    dones=dones,
+            
+            # === Exact baseline computation (Theorem 5.9) ===
+            # When exact_baseline_summation=True, compute E_{a ~ π}[Q̂(s,a)] via exact
+            # summation over ALL discrete actions. This enables the O(α·ε_A) bound
+            # instead of naive O(ε_A) - the key theoretical contribution.
+            #
+            # FAIL-FAST: If exact_baseline_summation=True but prerequisites are missing,
+            # raise an error instead of silently falling back. This prevents accidental
+            # misinterpretation of experimental runs as "theory-compatible".
+            use_exact_baseline = getattr(self.rl_cfg, "exact_baseline_summation", False)
+            
+            if use_exact_baseline:
+                # Validate prerequisites for exact baseline
+                if self._checker_fn is None:
+                    raise RuntimeError(
+                        "exact_baseline_summation=True requires a checker_fn to be set "
+                        "via trainer.set_checker_fn(). Got checker_fn=None. Either set the "
+                        "checker function or disable exact_baseline_summation in RLConfig."
+                    )
+                if self.env is None:
+                    raise RuntimeError(
+                        "exact_baseline_summation=True requires an env instance to be set. "
+                        "Got env=None. This indicates a configuration error in UPITrmTrainer."
+                    )
+                
+                # Exact advantage: Â(s,a) = Q̂(s,a) - E_{b~π}[Q̂(s,b)]
+                # This satisfies E_{a~π}[Â(s,a)] = 0 EXACTLY (not approximately)
+                #
+                # THEORY NOTE: In persistent-latent mode (episodic_latent=False), the Q-values
+                # computed here use a reset-latent critic (always fresh z_init). This is the
+                # "memoryless" approximation from Section 5.4, and any mismatch from true Q^π
+                # represents the "value of memory" residual (Remark 5.5). See the docstring
+                # of compute_exact_baseline_summation for details.
+                exact_baseline, q_all = compute_exact_baseline_summation(
+                    model=self.model,
+                    x_batch=x_batch,
+                    y_batch=y_batch,
+                    env=self.env,
+                    n=self.rl_cfg.inner_unroll_n,
                     gamma=gamma,
-                    gae_lambda=gae_lambda,
+                    checker_fn=self._checker_fn,
+                    action_mask=action_mask,
                 )
+                adv = compute_exact_advantage(q_all, exact_baseline, actions)
             else:
-                td_target = rewards + gamma * v_next_masked
-                adv = td_target - v_s
+                # Standard learned-baseline advantage (falls back to naive O(ε_A) bound)
+                v_s, _ = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+                v_next, _ = self.model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
+                mask = (~dones).float()
+                v_next_masked = v_next * mask
 
-            if getattr(self.rl_cfg, "centered_advantage", False):
-                # Optional: center the estimator so that E[Â] ≈ 0 under the sampled batch,
-                # matching the CPI analysis assumption up to sampling noise.
-                adv = adv - adv.mean()
+                # Compute advantages (GAE or 1-step TD)
+                if getattr(self.rl_cfg, "use_gae", False):
+                    gae_lambda = getattr(self.rl_cfg, "gae_lambda", 0.95)
+                    adv = compute_gae(
+                        rewards=rewards,
+                        values=v_s,
+                        next_values=v_next,
+                        dones=dones,
+                        gamma=gamma,
+                        gae_lambda=gae_lambda,
+                    )
+                else:
+                    td_target = rewards + gamma * v_next_masked
+                    adv = td_target - v_s
+
+                if getattr(self.rl_cfg, "batch_centered_advantage", False):
+                    # Batch-level centering: subtract mean across batch (HEURISTIC for variance reduction)
+                    # NOTE: This does NOT enable the O(α·ε_A) bound from Theorem 5.9.
+                    # For theory-exact centering, use exact_baseline_summation=True instead.
+                    adv = adv - adv.mean()
 
             adv_clip = getattr(self.rl_cfg, "advantage_clip", None)
             if adv_clip is not None and adv_clip > 0:
@@ -1009,9 +947,32 @@ class UPITrmTrainer:
 
         dist, _ = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask)
         log_prob = dist.log_prob(actions)
-        entropy = dist.entropy().mean()
+        
+        # Numerical stability: clamp log_prob to prevent -inf when action prob is 0
+        # This can happen if action mask changed between collection and training
+        log_prob = log_prob.clamp(min=LOG_PROB_MIN)
+        
+        entropy = dist.entropy()
+        # Handle NaN entropy (can happen with degenerate distributions)
+        nan_mask = torch.isnan(entropy)
+        if nan_mask.any():
+            nan_count = nan_mask.sum().item()
+            logger.warning(
+                "NaN entropy detected in %d/%d samples. Replacing with 0. "
+                "This may indicate degenerate action distributions.",
+                nan_count, entropy.numel()
+            )
+        entropy = torch.where(nan_mask, torch.zeros_like(entropy), entropy)
+        entropy = entropy.mean()
 
-        loss_policy = -(log_prob * adv.detach()).mean() - self.rl_cfg.entropy_coef * entropy
+        # Skip batch if advantages are all NaN (degenerate case)
+        if torch.isnan(adv).all():
+            return {"loss_policy": 0.0, "skipped_nan_adv": 1.0}
+        
+        # Replace NaN advantages with 0 (neutral gradient)
+        adv_clean = torch.where(torch.isnan(adv), torch.zeros_like(adv), adv)
+        
+        loss_policy = -(log_prob * adv_clean.detach()).mean() - self.rl_cfg.entropy_coef * entropy
 
         # Add adaptive KL penalty if trust-region is enabled (PPO/TRPO-style)
         if enable_kl_trust_region:
@@ -1046,8 +1007,34 @@ class UPITrmTrainer:
         if enable_kl_trust_region and kl_div is not None:
             self._update_kl_coef(kl_div.item())
         
+        # === Policy update modes (Issue 4 - CPI guarantee) ===
+        #
+        # The CPI bound requires a POLICY-SPACE mixture π_new = (1-α)π_old + α·π_candidate.
+        # The code supports three modes with different theory compatibility:
+        #
+        # 1. theory_exact_mixture=True (THEORY-COMPATIBLE):
+        #    - Do NOT update policy_model_old at all
+        #    - The behavior policy is always the explicit mixture from _mixed_policy_dist()
+        #    - Matches CPI theory exactly but requires evaluating two networks
+        #
+        # 2. distill_mixture_policy=True (HEURISTIC - Section 6.5):
+        #    - Distill the mixture into policy_model_old via KL minimization
+        #    - Introduces projection error NOT covered by theory
+        #
+        # 3. Default (HEURISTIC):
+        #    - Parameter-space interpolation: param.lerp_(candidate_param, α)
+        #    - NOT equivalent to policy-space mixture after softmax
+        #    - The CPI improvement guarantee does NOT strictly apply
+        
+        theory_exact_mixture = getattr(self.rl_cfg, "theory_exact_mixture", False)
         distill_enabled = getattr(self.rl_cfg, "distill_mixture_policy", False)
-        if distill_enabled and self.old_policy_distill_opt is not None:
+        
+        if theory_exact_mixture:
+            # Mode 1: Do NOT update policy_model_old - use explicit mixture for data collection
+            # This is the only mode where CPI bound strictly applies
+            pass
+        elif distill_enabled and self.old_policy_distill_opt is not None:
+            # Mode 2: Distill mixture into policy_model_old (heuristic, not theory-exact)
             num_distill = min(len(self.replay), self.rl_cfg.batch_size)
             if num_distill > 0:
                 transitions = self.replay.sample_batch(num_distill)
@@ -1057,7 +1044,10 @@ class UPITrmTrainer:
                 mask_d = None
                 if self.env.vocab_size is not None and self.env.stop_action_id is not None:
                     mask_d = PlanEditEnv.compute_batch_action_mask(
-                        x_d["inputs"], self.env.vocab_size, self.env.stop_action_id
+                        x_d["inputs"],
+                        self.env.vocab_size,
+                        self.env.stop_action_id,
+                        stop_mode=self.env._stop_mode,
                     )
 
                 with torch.no_grad():
@@ -1078,11 +1068,10 @@ class UPITrmTrainer:
                 if policy_grad_clip is not None and policy_grad_clip > 0 and self._old_policy_params:
                     nn_utils.clip_grad_norm_(self._old_policy_params, policy_grad_clip)
                 self.old_policy_distill_opt.step()
-        
-        if not distill_enabled or self.old_policy_distill_opt is None:
-            # Use parameter-space interpolation when:
-            # 1. Distillation is disabled, OR
-            # 2. Distillation is enabled but optimizer is missing (fallback)
+        else:
+            # Mode 3: Parameter-space interpolation (heuristic, not theory-exact)
+            # NOTE: This does NOT satisfy the CPI improvement guarantee because
+            # interpolating logits is not equivalent to mixing probabilities.
             self._sync_policy_old_towards_candidate()
 
         result = {"loss_policy": float(loss_policy.item())}
@@ -1094,7 +1083,21 @@ class UPITrmTrainer:
     def train_step(self) -> Dict[str, float]:
         """
         One outer training step: collect data, then run value and policy updates.
+        
+        Execution order matters for correctness:
+        1. Sync candidate backbone FIRST (ensures both policies use same latent representation)
+        2. Collect episodes (both policy_model_old and policy_model_candidate have same backbone)
+        3. Value update (modifies self.model backbone, temporarily desync'd with candidate)
+        4. Policy update (re-syncs candidate backbone at the start)
+        
+        The sync at step 1 is redundant with step 4's sync from the previous train_step,
+        but we include it explicitly for robustness and clarity.
         """
+        
+        # Ensure candidate backbone is synced before episode collection.
+        # This guarantees both policies operate on the same latent representation
+        # during _mixed_policy_dist(), which is required for proper CPI mixture semantics.
+        self._sync_candidate_backbone_from_model()
 
         for _ in range(self.rl_cfg.rollout_episodes_per_step):
             self.collect_episode()
@@ -1146,9 +1149,10 @@ class UPITrmTrainer:
             if key in policy_result:
                 metrics[key] = policy_result[key]
         
-        # Step learning rate schedulers and log current LRs
+        # Step learning rate schedulers only if optimization occurred
         self._train_step_count += 1
-        self._step_lr_schedulers()
+        if loss_val != 0.0:  # Only step when we actually did an optimizer step
+            self._step_lr_schedulers()
         metrics.update(self.get_current_lr())
         
         # Reset termination stats for the next logging window
@@ -1192,6 +1196,51 @@ class UPITrmTrainer:
         self._debug_stop_probs.clear()
         self._debug_score_changes.clear()
     
+    def clear_theory_stats(self) -> None:
+        """Clear accumulated theory tracking statistics (drift, plan changes, value of memory)."""
+        self._drift_values.clear()
+        self._plan_changes.clear()
+        self._value_of_memory.clear()
+    
+    def set_checker_fn(self, checker_fn) -> None:
+        """
+        Set the checker function for exact baseline computation (Theorem 5.9).
+        
+        When exact_baseline_summation=True, the trainer needs access to the checker
+        function to compute Q̂(s,a) = r(s,a,s') + γV(s') for all actions.
+        
+        Args:
+            checker_fn: Function (x, y) -> float returning checker score
+        """
+        self._checker_fn = checker_fn
+    
+    def get_theory_stats(self) -> Dict[str, float]:
+        """
+        Get current theory tracking statistics.
+        
+        Returns dict with:
+        - drift_mean/max: C_drift(n) statistics (for persistent latents)
+        - plan_change_mean/max: Δy_max statistics
+        - value_of_memory statistics (if tracked)
+        """
+        stats: Dict[str, float] = {}
+        
+        if self._drift_values:
+            stats["drift_mean"] = sum(self._drift_values) / len(self._drift_values)
+            stats["drift_max"] = max(self._drift_values)
+            stats["drift_count"] = len(self._drift_values)
+        
+        if self._plan_changes:
+            stats["plan_change_mean"] = sum(self._plan_changes) / len(self._plan_changes)
+            stats["plan_change_max"] = max(self._plan_changes)
+            stats["plan_change_count"] = len(self._plan_changes)
+        
+        if self._value_of_memory:
+            stats["value_of_memory_mean"] = sum(self._value_of_memory) / len(self._value_of_memory)
+            stats["value_of_memory_max"] = max(self._value_of_memory)
+        
+        return stats
+    
     def print_debug_stats(self) -> None:
         """Print a summary of debug statistics."""
         stats = self.get_debug_stats()
@@ -1226,11 +1275,22 @@ class UPITrmTrainer:
     def _compute_theory_metrics(self) -> Dict[str, float]:
         """
         Compute theory-related metrics from the paper:
-        - hat_Cz: Estimated C_z = max ||z^(1) - z^(0)||
+        
+        Section 4 (Contraction):
+        - hat_Cz: Estimated C_z = max ||z^(1) - z^(0)|| (Eq. 9)
         - hat_Lz: Estimated local Lipschitz constant of inner map
         - hat_Lv: Estimated Lipschitz constant of value head w.r.t. z
+        - unrolling_term: L_V * L_z^n * C_z / (1 - L_z) (Eq. 10)
+        
+        Section 4.2 (Two-timescale / Persistent latents):
+        - drift_mean/max: Empirical C_drift(n) from collected episodes
+        - plan_change_mean/max: Empirical Δy_max from collected episodes
+        
+        Section 5 (Bellman residual):
         - bellman_residual_*: Empirical Bellman residual statistics
-        - unrolling_term: L_V * L_z^n * C_z / (1 - L_z)
+        
+        Section 5.4 (Value of memory):
+        - value_of_memory_*: ||V_persistent - V_memoryless||
         """
         metrics: Dict[str, float] = {}
         
@@ -1239,7 +1299,8 @@ class UPITrmTrainer:
                 transitions = self.replay.sample_batch(min(self.rl_cfg.batch_size, len(self.replay)))
                 x_b, y_b, x_next_b, y_next_b, _, rewards_b, dones_b = self._stack_batch(transitions)
                 
-                # Estimate C_z
+                # === Section 4: Contraction metrics ===
+                # Estimate C_z (Eq. 9)
                 hat_Cz = estimate_Cz(self.model, x_b, y_b)
                 metrics["hat_Cz"] = hat_Cz
                 
@@ -1261,18 +1322,44 @@ class UPITrmTrainer:
                     hat_Lv = estimate_Lv(self.model.value_head, z_vec, combined_embed, num_samples=4)
                     metrics["hat_Lv"] = hat_Lv
                     
-                    # Compute unrolling term proxy
+                    # Compute unrolling term proxy (Eq. 10)
                     n = self.rl_cfg.inner_unroll_n
                     unrolling_term = compute_unrolling_term_proxy(hat_Lv, hat_Lz, hat_Cz, n)
                     metrics["unrolling_term"] = unrolling_term
                 
-                # Compute Bellman residual
+                # === Section 5: Bellman residual ===
                 v_s, _ = self.model.used_value(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
                 v_next, _ = self.model.used_value(x_next_b, y_next_b, n=self.rl_cfg.inner_unroll_n)
                 residual_metrics = compute_empirical_bellman_residual(
                     v_s, rewards_b, v_next, dones_b, self.rl_cfg.gamma
                 )
                 metrics.update(residual_metrics)
+                
+                # === Section 4.2: Two-timescale / Drift metrics (Lemma 4.4) ===
+                if self._drift_values:
+                    metrics["drift_mean"] = sum(self._drift_values) / len(self._drift_values)
+                    metrics["drift_max"] = max(self._drift_values)
+                    
+                # Plan change tracking (Assumption 4.3: Δy_max)
+                if self._plan_changes:
+                    metrics["plan_change_mean"] = sum(self._plan_changes) / len(self._plan_changes)
+                    metrics["plan_change_max"] = max(self._plan_changes)
+                
+                # === Section 5.4: Value of memory (Corollary 5.4, Remark 5.5) ===
+                if getattr(self.rl_cfg, "compute_value_of_memory", False):
+                    # Compute value of memory residual
+                    vom_metrics = compute_value_of_memory_residual(
+                        model=self.model,
+                        x_batch=x_b,
+                        y_batch=y_b,
+                        z_batch=None,  # Use fresh init for memoryless comparison
+                        n=self.rl_cfg.inner_unroll_n,
+                        rewards=rewards_b,
+                        next_values=v_next,
+                        dones=dones_b,
+                        gamma=self.rl_cfg.gamma,
+                    )
+                    metrics.update(vom_metrics)
                 
         except Exception as e:
             if self.debug_checks:
@@ -1283,7 +1370,10 @@ class UPITrmTrainer:
     def evaluate_policy_metrics(self, env_cfg: PlanEditEnvConfig, dataset: Any, checker: Any) -> Dict[str, float]:
         """
         Evaluate the deployed policy, returning both strict success rate and mean checker score.
+        
+        Note: Uses the same episodic_latent setting as training to ensure consistency.
         """
+        episodic_latent = getattr(self.rl_cfg, "episodic_latent", True)
 
         mean_score, success_rate = evaluate_plan_policy_with_scores(
             model=self.policy_model_old,
@@ -1292,6 +1382,7 @@ class UPITrmTrainer:
             env_cfg=env_cfg,
             num_episodes=self.rl_cfg.eval_num_episodes,
             inner_unroll_n=self.rl_cfg.inner_unroll_n,
+            episodic_latent=episodic_latent,
         )
 
         return {"mean_score": mean_score, "success_rate": success_rate}

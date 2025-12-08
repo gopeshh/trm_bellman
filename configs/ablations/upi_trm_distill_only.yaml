@@ -16,8 +16,8 @@ enable_contraction: true
 target_Lz: 0.9
 target_Lv: 5.0
 
-# Enable only distillation
+# Enable only distillation (NOTE: Not covered by theory!)
 exact_k_step_targets: false
-centered_advantage: false
+batch_centered_advantage: false
 distill_mixture_policy: true
 

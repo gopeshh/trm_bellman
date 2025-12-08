@@ -1,0 +1,38 @@
+# Ultra-easy 4x4 Sudoku: Only 1-4 empty cells
+# This is the simplest possible starting point for curriculum learning
+# Random solve chance: (1/4)^1 to (1/4)^4 = 25% to 0.4%
+
+gamma: 0.99
+K: 1
+inner_unroll_n: 4
+max_edits: 8          # Only need 1-4 edits, but allow some exploration
+num_train_steps: 5000
+batch_size: 128
+rollout_episodes_per_step: 8
+mixture_alpha: 0.1
+entropy_coef: 0.1
+value_lr: 0.0003
+policy_lr: 0.0003
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 5.0
+log_interval: 50
+eval_interval: 100
+eval_num_episodes: 50  # Smaller test set
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 50.0
+advantage_clip: 10.0
+policy_epsilon: 0.1
+target_ema_tau: 0.99
+batch_centered_advantage: true
+
+# Persistent latent for memory across steps
+episodic_latent: false
+
+# Use reward shaping - easier to learn with dense signal
+reward_shaping: true
+
+# STOP disabled
+stop_action_mode: disabled
+

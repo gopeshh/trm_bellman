@@ -25,7 +25,7 @@ value_target_clip: 100.0  # FIXED: Was 50, increased for accumulated rewards
 advantage_clip: 20.0      # FIXED: Was 10, increased for larger advantages
 policy_epsilon: 0.1       # FIXED: Was 0.3, too much random exploration
 target_ema_tau: 0.995     # FIXED: Was 0.999, faster target updates
-centered_advantage: true  # ADDED: Batch-center advantages for stability
+batch_centered_advantage: true  # Batch-level centering for variance reduction
 
 # === KEY DIFFERENCE: Persistent latent mode ===
 # When false, z is initialized once per episode and carried/updated across steps

@@ -43,8 +43,14 @@ class IncrementEnv(PlanEditEnv):
 
 
 def test_reward_shaping_matches_potential_form():
+    """
+    Test that reward shaping follows the potential-based formula from the paper (Eq. 4):
+        r(s, a, s') = r_0 + γ·Φ(s') - Φ(s)
+    where Φ(x, y) = c(x, y) is the checker score.
+    """
     dataset = ScalarPuzzleDataset()
-    cfg = PlanEditEnvConfig(max_edits=5, gamma=0.9, reward_shaping=True)
+    gamma = 0.9
+    cfg = PlanEditEnvConfig(max_edits=5, gamma=gamma, reward_shaping=True)
     env = IncrementEnv(dataset, scalar_checker, cfg)
     env.set_stop_action_id(stop_id=0)
 
@@ -55,11 +61,34 @@ def test_reward_shaping_matches_potential_form():
 
     phi_old = scalar_checker(x, old_y)
     phi_new = scalar_checker(x, y_next)
-    base_reward = 0.0
-    edit_bonus = 0.01  # Tiny bonus for making an edit (not STOP)
-    # Reward shaping: phi_new - phi_old (without gamma scaling for non-terminal)
-    expected = base_reward + phi_new - phi_old + edit_bonus
+    r_0 = 0.0  # Base reward for intermediate steps
+    
+    # Paper Eq. 4: r = r_0 + γ·Φ(s') - Φ(s)
+    # This is the correct potential-based shaping formula
+    expected = r_0 + gamma * phi_new - phi_old
 
     assert not done
-    assert abs(reward - expected) < 1e-6
+    assert abs(reward - expected) < 1e-6, f"Expected {expected}, got {reward}"
+
+
+def test_reward_shaping_with_different_gamma():
+    """Test that γ factor is properly applied in reward shaping."""
+    dataset = ScalarPuzzleDataset()
+    
+    # Test with different gamma values
+    for gamma in [0.5, 0.9, 0.99]:
+        cfg = PlanEditEnvConfig(max_edits=5, gamma=gamma, reward_shaping=True)
+        env = IncrementEnv(dataset, scalar_checker, cfg)
+        env.set_stop_action_id(stop_id=0)
+        
+        x, y = env.reset()
+        old_y = y.clone()
+        
+        (_, y_next), reward, done, _ = env.step(action=1)
+        
+        phi_old = scalar_checker(x, old_y)
+        phi_new = scalar_checker(x, y_next)
+        expected = gamma * phi_new - phi_old
+        
+        assert abs(reward - expected) < 1e-6, f"gamma={gamma}: Expected {expected}, got {reward}"
 

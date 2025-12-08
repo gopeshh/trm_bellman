@@ -17,7 +17,12 @@ target_Lz: 0.9
 target_Lv: 5.0
 
 # Theory-exact features
-exact_k_step_targets: true
-centered_advantage: true
-distill_mixture_policy: true
+exact_k_step_targets: true        # Use fixed-horizon γ^K bootstrap for T_K^π operator
+exact_baseline_summation: true    # KEY: Enables O(α·ε_A) bound from Theorem 5.9
+theory_exact_mixture: true        # Policy-space mixture (not param-space interpolation)
+batch_centered_advantage: true    # Heuristic (variance reduction)
+distill_mixture_policy: false     # DISABLED: Not covered by theory (Section 6.5)
+
+# Reward shaping (required for exact_baseline_summation)
+reward_shaping: true
 

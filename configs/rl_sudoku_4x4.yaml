@@ -1,0 +1,45 @@
+# 4x4 Sudoku - Simplest curriculum level
+# Grid: 4x4 = 16 cells, Digits: 1-4, Action space: 81 (vs 892 for 9x9)
+# Perfect for initial RL training and debugging!
+
+gamma: 0.99
+K: 1
+inner_unroll_n: 4
+max_edits: 16         # At most 16 cells to fill (usually 6-12)
+num_train_steps: 5000
+batch_size: 128
+rollout_episodes_per_step: 8
+mixture_alpha: 0.1    # Faster policy updates for simple task
+entropy_coef: 0.05
+value_lr: 0.0003      # Higher LR - simpler task
+policy_lr: 0.0003
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 5.0
+log_interval: 50
+eval_interval: 100
+eval_num_episodes: 100
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 100.0
+advantage_clip: 20.0
+policy_epsilon: 0.05
+target_ema_tau: 0.99
+batch_centered_advantage: true
+
+# === Persistent latent mode ===
+# Good for simple puzzles where memory helps
+episodic_latent: false
+
+# === Reward shaping ===
+reward_shaping: true
+
+# === STOP action disabled ===
+# Force the agent to make edits
+stop_action_mode: disabled
+
+# === Learning rate scheduling ===
+lr_schedule: constant
+lr_warmup_steps: 0
+lr_min_factor: 1.0
+

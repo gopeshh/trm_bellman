@@ -5,7 +5,8 @@ from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 
 class DummyDataset:
     def __init__(self):
-        # Single 1D "puzzle": x is a tensor [3], y is initialized to zeros
+        # Single 1D "puzzle": x is a tensor [3], y is initialized to ones (empty cells)
+        # In Sudoku encoding: 0 = PAD, 1 = empty cell, 2+ = digits
         self.data = [
             {"inputs": torch.tensor([1, 2, 3]), "puzzle_identifiers": torch.tensor([0])}
         ]
@@ -45,6 +46,17 @@ def solved_checker(x, y) -> float:
 
 
 def test_plan_edit_env_step_and_stop():
+    """
+    Test that:
+    1. Edit actions modify the plan correctly
+    2. STOP action does NOT terminate (prevents STOP collapse)
+    3. Episode terminates when max_edits is reached
+    4. After termination, further steps are not allowed
+    
+    Note: STOP was intentionally changed to NOT terminate the episode
+    to prevent the "STOP collapse" issue where the policy learns to
+    always stop immediately. The agent should use all available edits.
+    """
     dataset = DummyDataset()
     cfg = PlanEditEnvConfig(max_edits=3, gamma=0.99, reward_shaping=True, vocab_size=4)
     env = PlanEditEnv(dataset, dummy_checker, cfg)
@@ -56,19 +68,29 @@ def test_plan_edit_env_step_and_stop():
     assert env.step_count == 0
     assert env.done is False
 
-    # Take a non-stop action (edit position 1 -> token 2)
-    edit_action = 1 * cfg.vocab_size + 2
+    # Take a non-stop action (edit position 2 -> token 0)
+    # The plan starts as inputs.clone() = [1, 2, 3], so we edit position 2 from 3 to 0
+    edit_action = 2 * cfg.vocab_size + 0
     (x1, y1), r1, done1, _ = env.step(action=edit_action)
     assert env.step_count == 1
     assert done1 is False
-    assert torch.equal(y1, torch.tensor([0, 2, 0]))
+    # Plan is initialized from inputs [1, 2, 3], position 2 edited to 0
+    assert torch.equal(y1, torch.tensor([1, 2, 0]))
 
-    # Take STOP action
-    (x2, y2), r2, done2, _ = env.step(action=stop_id)
-    assert done2 is True
+    # Take STOP action - this now does NOT terminate (to prevent STOP collapse)
+    # Instead, it counts as a wasted step with a small penalty
+    (x2, y2), r2, done2, info2 = env.step(action=stop_id)
+    assert done2 is False, "STOP should not terminate (prevents STOP collapse)"
+    assert env.done is False
+    assert info2.get("terminated_by_stop") is True, "Should flag that STOP was chosen"
+    assert torch.equal(y2, y1), "Plan should be unchanged after STOP"
+    
+    # Episode terminates when max_edits (3) is reached
+    (x3, y3), r3, done3, _ = env.step(action=0)  # Step 3 -> terminates
+    assert done3 is True, "Should terminate at max_edits"
     assert env.done is True
 
-    # After STOP, further steps should not be allowed
+    # After termination, further steps should not be allowed
     try:
         env.step(action=0)
         assert False, "Expected an assertion when stepping after episode is done"
@@ -99,10 +121,11 @@ def test_plan_edit_env_terminates_when_solved_threshold_met():
 
     phi_old = solved_checker(x, y)
     phi_new = solved_checker(x, y_next)
-    # Terminal reward with fixed potential shaping: r = phi_new - phi_old
-    # (Removed the gamma * phi_new term that was double-counting)
-    expected_reward = phi_new - phi_old
-    assert abs(reward - expected_reward) < 1e-6
+    gamma = cfg.gamma
+    # Paper Eq. 4: r = r_0 + γ·Φ(s') - Φ(s)
+    # For terminal transitions, r_0 = 0 (no extra terminal bonus in this test)
+    expected_reward = gamma * phi_new - phi_old
+    assert abs(reward - expected_reward) < 1e-6, f"Expected {expected_reward}, got {reward}"
 
 
 def test_plan_edit_env_threshold_works_without_reward_shaping():
