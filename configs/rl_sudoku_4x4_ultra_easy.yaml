@@ -1,0 +1,50 @@
+# Ultra-easy 4x4 Sudoku: small number of empty cells.
+# RL config for UPI‑TRM on Sudoku 4x4 "ultra‑easy" split.
+
+# Discount + unroll
+gamma: 0.99
+K: 1
+inner_unroll_n: 4
+
+# Episode horizon (matches ep_len ≈ 8 in logs)
+max_edits: 8
+
+# Optimisation
+num_train_steps: 10000      # overridden if you pass --train-steps on CLI
+batch_size: 128
+rollout_episodes_per_step: 8
+
+value_lr: 0.0003
+policy_lr: 0.0003
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+
+# CPI / policy update control
+mixture_alpha: 0.05         # conservative CPI step; increase to 0.1 if learning is too slow
+policy_epsilon: 0.1
+target_ema_tau: 0.99
+
+# Regularisation / stabilisation
+entropy_coef: 0.05          # keep some exploration; lower once policy stabilises
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 5.0
+value_target_clip: 20.0     # tighter clip for small domain
+advantage_clip: 10.0
+batch_centered_advantage: true
+
+# Logging / evaluation
+log_interval: 50
+eval_interval: 100
+eval_num_episodes: 50
+
+# Latent / memory
+episodic_latent: false      # no cross-episode latent for this tiny task
+
+# Reward shaping
+reward_shaping: true
+solve_terminal_reward: 1.0
+fail_terminal_reward: -6.0  # matches your latest run; you can try 0.0 for debugging
+
+# STOP action configuration
+stop_action_mode: disabled

@@ -1,0 +1,40 @@
+# UPI-TRM configuration for Sudoku (K=1) with PERSISTENT latent z
+# In persistent mode, z is initialized once per episode and carried across steps.
+# Compare with rl_sudoku_k1.yaml (episodic mode) to see the effect.
+
+gamma: 0.99
+K: 1
+inner_unroll_n: 4
+max_edits: 120
+num_train_steps: 20000
+batch_size: 64
+rollout_episodes_per_step: 4
+mixture_alpha: 0.01
+entropy_coef: 0.1        # Higher entropy to prevent policy collapse (was 0.02)
+value_lr: 0.00003        # Lower LR for stability
+policy_lr: 0.00005       # Lower LR to prevent policy collapse
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 5.0
+log_interval: 100
+eval_interval: 100
+eval_num_episodes: 100
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 100.0  # FIXED: Was 50, increased for accumulated rewards
+advantage_clip: 20.0      # FIXED: Was 10, increased for larger advantages
+policy_epsilon: 0.1       # FIXED: Was 0.3, too much random exploration
+target_ema_tau: 0.995     # FIXED: Was 0.999, faster target updates
+batch_centered_advantage: true  # Batch-level centering for variance reduction
+
+# === KEY DIFFERENCE: Persistent latent mode ===
+# When false, z is initialized once per episode and carried/updated across steps
+# (instead of being reinitialized from (x, y) at every step)
+episodic_latent: false
+
+# === Learning rate scheduling ===
+# DISABLED: LR scheduling contributes to STOP collapse by making policy too deterministic
+lr_schedule: constant    # "constant", "cosine", "linear"
+lr_warmup_steps: 0       # no warmup needed for constant
+lr_min_factor: 1.0       # no decay
+

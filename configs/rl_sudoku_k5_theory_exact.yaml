@@ -1,0 +1,40 @@
+# Theory-exact UPI-TRM configuration for Sudoku (K=5)
+# This config uses multi-step unrolled policy iteration with theory-exact features
+
+gamma: 0.99
+K: 5  # 5-step unrolled horizon
+inner_unroll_n: 4
+max_edits: 120
+num_train_steps: 20000
+batch_size: 128
+rollout_episodes_per_step: 6
+mixture_alpha: 0.1  # Higher alpha for K>1 can be more stable
+entropy_coef: 0.02
+value_lr: 0.0001
+policy_lr: 0.0001
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 5.0
+log_interval: 100
+eval_interval: 100
+eval_num_episodes: 100
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 200.0  # Scaled for 0-100 reward range
+advantage_clip: 50.0      # Scaled for 0-100 reward range
+policy_epsilon: 0.05
+
+# Theory-exact features (matching the paper)
+exact_k_step_targets: true        # Use fixed-horizon γ^K bootstrap for T_K^π operator
+exact_baseline_summation: true    # KEY: Enables O(α·ε_A) bound from Theorem 5.9
+theory_exact_mixture: true        # Policy-space mixture (not param-space interpolation)
+batch_centered_advantage: true    # Batch-level centering (variance reduction heuristic)
+distill_mixture_policy: false     # DISABLED: Not covered by theory (Section 6.5)
+
+# Reward shaping (required for exact_baseline_summation)
+reward_shaping: true
+
+# Rush-to-fail mitigation (Paper Remark 2.6)
+# For 9x9 Sudoku with checker in [0, 81], set fail_terminal_reward ≤ -γ * 81 ≈ -80
+fail_terminal_reward: -100.0
+

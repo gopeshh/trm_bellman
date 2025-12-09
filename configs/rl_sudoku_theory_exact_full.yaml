@@ -1,0 +1,99 @@
+# UPI-TRM configuration with ALL theory-exact features enabled
+# This config matches the paper's theoretical guarantees as closely as possible
+#
+# Key features enabled:
+# 1. Exact baseline summation (Theorem 5.9) - O(α·ε_A) bound
+# 2. Forward-invariant projection (Assumption 4.1) - latent bounded in Z_inv
+# 3. Drift monitoring (Lemma 4.4) - track C_drift(n)
+# 4. Plan change tracking (Assumption 4.3) - track Δy_max
+# 5. Value of memory (Section 5.4) - compute ||V_persistent - V_memoryless||
+#
+# NOTE: exact_baseline_summation is computationally expensive!
+# It requires evaluating V(s') for ALL actions at each policy update.
+# For Sudoku with ~800 actions, this adds significant overhead.
+
+gamma: 0.99
+K: 5  # K-step horizon for bootstrapped targets
+inner_unroll_n: 6  # Higher n reduces unrolling bias L_z^n
+max_edits: 120
+num_train_steps: 10000
+batch_size: 32  # Smaller batch due to expensive exact baseline
+rollout_episodes_per_step: 2
+
+# === CPI mixture (Section 5.3) ===
+mixture_alpha: 0.05  # Conservative α for safe improvement
+enable_kl_trust_region: true
+trust_region_kl: 0.01
+
+# === Theory-exact toggles ===
+# CRITICAL: These enable the paper's theoretical guarantees
+exact_k_step_targets: true       # Fixed-horizon γ^K bootstrap
+batch_centered_advantage: true   # Batch-level centering (heuristic for variance reduction)
+# NOTE: True per-state centering comes from exact_baseline_summation=True (Theorem 5.9)
+distill_mixture_policy: false    # DISABLED: Not covered by theory (Section 6.5)
+theory_exact_mixture: true       # Policy-space mixture (not param-space interpolation)
+
+# === Theorem 5.9: Exact baseline ===
+# This enables O(α·ε_A) instead of naive O(ε_A)
+# WARNING: Computationally expensive!
+exact_baseline_summation: true
+
+# === Reward shaping (required for exact_baseline_summation) ===
+reward_shaping: true
+
+# === Rush-to-fail mitigation (Paper Remark 2.6) ===
+# Negative failure reward to prevent "rush to fail" under potential-based shaping.
+# For 9x9 Sudoku with checker in [0, 81], set fail_terminal_reward ≤ -γ * 81 ≈ -80
+fail_terminal_reward: -100.0
+
+# === Assumption 4.1: Forward-invariant region ===
+# Project latent z to ball of radius R after each update
+# This ensures z ∈ Z_inv = {z : ||z|| ≤ R}
+latent_ball_radius: 10.0
+
+# === Two-timescale monitoring (Section 4.2) ===
+# Track drift and plan changes for persistent-latent analysis
+track_drift_metrics: true
+track_plan_change: true
+
+# === Value of memory (Section 5.4) ===
+# Compute ||V_persistent - V_memoryless|| to measure "cost of amnesia"
+compute_value_of_memory: true
+
+# === Latent mode ===
+# For full theory validation, test both modes:
+# - episodic (reset z each step) - cleaner Markov property
+# - persistent (carry z) - matches original TRM
+episodic_latent: false  # Use persistent to test drift bounds
+
+# === Contraction ===
+enable_contraction: true
+target_Lz: 0.85  # Slightly lower for stronger contraction guarantee
+target_Lv: 1.5
+
+# === GAE ===
+use_gae: true
+gae_lambda: 0.95
+
+# === Optimization ===
+value_lr: 0.0001
+policy_lr: 0.0001
+entropy_coef: 0.05
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 50.0
+advantage_clip: 20.0
+policy_epsilon: 0.05
+
+# === LR schedule ===
+lr_schedule: cosine
+lr_warmup_steps: 500
+lr_min_factor: 0.1
+
+# === Logging ===
+log_interval: 50
+eval_interval: 200
+eval_num_episodes: 50
+track_theory_metrics: true
+debug_checks: true
+

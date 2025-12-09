@@ -1,0 +1,64 @@
+# ----------------------------
+# Python
+# ----------------------------
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.so
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ----------------------------
+# Torch / ML artifacts
+# ----------------------------
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+lightning_logs/
+wandb/
+tensorboard/
+runs/
+
+# ----------------------------
+# Project-specific
+# ----------------------------
+# Temporary outputs
+tmp/
+temp/
+outputs/
+logs/
+
+# Dataset artifacts
+data/
+datasets/
+*.zip
+artifact/*.zip
+*.tar
+*.tar.gz
+
+# ----------------------------
+# IDE / editor files
+# ----------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# MacOS
+.DS_Store
+
+# ----------------------------
+# Build artifacts
+# ----------------------------
+build/
+dist/
+*.egg-info/
+

@@ -1,0 +1,77 @@
+# Full-featured 4x4 Sudoku RL training config
+# Includes puzzle embeddings and all training features
+#
+# Usage:
+#   python upi_trm_train.py \
+#       --dataset-paths data/sudoku-4x4-ultra-easy \
+#       --config configs/rl_sudoku_4x4_full_features.yaml \
+#       --hidden-size 128 \
+#       --puzzle-emb-ndim 128 \
+#       --seed 42
+
+# === RL Hyperparameters ===
+gamma: 0.99
+K: 1                          # 1-step TD (stable)
+inner_unroll_n: 4             # Inner latent unrolling steps
+max_edits: 16                 # Max edits per episode
+num_train_steps: 10000        # Total training steps
+batch_size: 128               # Mini-batch size
+rollout_episodes_per_step: 4  # Episodes collected per step
+
+# === Policy/Value Optimization ===
+value_lr: 0.0003
+policy_lr: 0.0003
+entropy_coef: 0.05            # Encourage exploration
+mixture_alpha: 0.1            # CPI mixture coefficient
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+value_target_clip: 50.0
+advantage_clip: 10.0
+policy_epsilon: 0.05          # Epsilon-greedy exploration
+
+# === Contraction/Stability ===
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 5.0
+target_ema_tau: 0.995
+
+# === Advantage Estimation ===
+batch_centered_advantage: true
+use_gae: false                # Set true for GAE (λ-returns)
+gae_lambda: 0.95
+
+# === Latent Mode ===
+# false = persistent latent (RNN-like memory across steps)
+# true = episodic latent (reinitialize z each step)
+episodic_latent: false
+
+# === Rewards ===
+reward_shaping: true          # Potential-based shaping for dense signal
+
+# === STOP Action ===
+# "disabled" = mask out STOP (agent must use full budget)
+# "noop" = STOP does nothing (prevents STOP collapse)
+# "terminal" = STOP ends episode
+stop_action_mode: disabled
+stop_action_penalty: -0.1
+
+# === Learning Rate Schedule ===
+lr_schedule: cosine           # "constant", "cosine", "linear"
+lr_warmup_steps: 500
+lr_min_factor: 0.1
+
+# === Logging/Evaluation ===
+log_interval: 50
+eval_interval: 200
+eval_num_episodes: 50
+
+# === Theory-Exact Features (Optional) ===
+# Enable these for ICML paper theoretical guarantees
+exact_k_step_targets: false
+exact_baseline_summation: false    # Expensive but theory-exact
+distill_mixture_policy: false      # NOT covered by theory
+track_theory_metrics: false        # Log C_z, L_z, Bellman residual
+
+# === Forward-Invariant Projection (Assumption 4.1) ===
+latent_ball_radius: 10.0           # Project z to ball of radius R
+

@@ -127,22 +127,28 @@ def create_model(config: PretrainConfig, train_metadata: PuzzleDatasetMetadata, 
     model_cls = load_model_class(config.arch.name)
     loss_head_cls = load_model_class(config.arch.loss.name)
 
-    with torch.device("cuda"):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    with torch.device(device):
         model: nn.Module = model_cls(model_cfg)
         print(model)
         model = loss_head_cls(model, **config.arch.loss.__pydantic_extra__)  # type: ignore
         if "DISABLE_COMPILE" not in os.environ:
             model = torch.compile(model)  # type: ignore
 
-        # Load checkpoint
-        if rank == 0:
-            load_checkpoint(model, config)
+    # Explicitly move model to device (torch.device context only affects tensor creation,
+    # not model placement - especially important after torch.compile and checkpoint loading)
+    model = model.to(device)
 
-        # Broadcast parameters from rank 0
-        if world_size > 1:
-            with torch.no_grad():
-                for param in list(model.parameters()) + list(model.buffers()):
-                    dist.broadcast(param, src=0)
+    # Load checkpoint (pass device explicitly to avoid re-determination)
+    if rank == 0:
+        load_checkpoint(model, config, device=str(device))
+
+    # Broadcast parameters from rank 0
+    if world_size > 1:
+        with torch.no_grad():
+            for param in list(model.parameters()) + list(model.buffers()):
+                dist.broadcast(param, src=0)
 
     # Optimizers and lr
     if config.arch.puzzle_emb_ndim == 0:
@@ -233,20 +239,70 @@ def init_train_state(config: PretrainConfig, train_metadata: PuzzleDatasetMetada
 
 
 def save_train_state(config: PretrainConfig, train_state: TrainState):
-    # FIXME: Only saved model.
+    """
+    Save full training state including model weights, optimizer states, and training metadata.
+    This enables resuming training from a checkpoint.
+    """
     if config.checkpoint_path is None:
         return
 
     os.makedirs(config.checkpoint_path, exist_ok=True)
-    torch.save(train_state.model.state_dict(), os.path.join(config.checkpoint_path, f"step_{train_state.step}"))
+    
+    # Save model weights (backwards compatible)
+    model_path = os.path.join(config.checkpoint_path, f"step_{train_state.step}")
+    torch.save(train_state.model.state_dict(), model_path)
+    
+    # Save full training state for resumable training
+    full_state = {
+        "step": train_state.step,
+        "total_steps": train_state.total_steps,
+        "model_state_dict": train_state.model.state_dict(),
+        "optimizer_states": [opt.state_dict() for opt in train_state.optimizers],
+        "optimizer_lrs": list(train_state.optimizer_lrs),
+    }
+    full_state_path = os.path.join(config.checkpoint_path, f"full_state_step_{train_state.step}.pt")
+    torch.save(full_state, full_state_path)
+    print(f"Saved full training state to {full_state_path}")
 
 
-def load_checkpoint(model: nn.Module, config: PretrainConfig):
+def load_full_train_state(
+    train_state: TrainState,
+    checkpoint_path: str,
+    device: str = None,
+) -> TrainState:
+    """
+    Load full training state from a checkpoint saved by save_train_state.
+    This restores model weights, optimizer states, and training step.
+    
+    Args:
+        train_state: The TrainState object to restore into.
+        checkpoint_path: Path to the full_state checkpoint file.
+        device: Target device for loading. If None, auto-detects CUDA availability.
+    """
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Loading full training state from {checkpoint_path} to {device}")
+    full_state = torch.load(checkpoint_path, map_location=device)
+    
+    train_state.model.load_state_dict(full_state["model_state_dict"])
+    train_state.step = full_state["step"]
+    train_state.total_steps = full_state["total_steps"]
+    
+    for opt, opt_state in zip(train_state.optimizers, full_state["optimizer_states"]):
+        opt.load_state_dict(opt_state)
+    
+    print(f"Resumed training from step {train_state.step}/{train_state.total_steps}")
+    return train_state
+
+
+def load_checkpoint(model: nn.Module, config: PretrainConfig, device: str = None):
     if config.load_checkpoint is not None:
-        print(f"Loading checkpoint {config.load_checkpoint}")
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Loading checkpoint {config.load_checkpoint} to {device}")
 
         # Load state dict
-        state_dict = torch.load(config.load_checkpoint, map_location="cuda")
+        state_dict = torch.load(config.load_checkpoint, map_location=device)
 
         # Resize and reset puzzle emb if needed
         puzzle_emb_name = "_orig_mod.model.inner.puzzle_emb.weights"
@@ -292,11 +348,12 @@ def train_batch(config: PretrainConfig, train_state: TrainState, batch: Any, glo
         return
 
     # To device
-    batch = {k: v.cuda() for k, v in batch.items()}
+    device = next(train_state.model.parameters()).device
+    batch = {k: v.to(device) for k, v in batch.items()}
 
     # Init carry if it is None
     if train_state.carry is None:
-        with torch.device("cuda"):
+        with torch.device(device):
             train_state.carry = train_state.model.initial_carry(batch)  # type: ignore
 
     # Forward
@@ -377,8 +434,9 @@ def evaluate(
                 print(f"Processing batch {processed_batches}: {set_name}")
             
             # To device
-            batch = {k: v.cuda() for k, v in batch.items()}
-            with torch.device("cuda"):
+            device = next(train_state.model.parameters()).device
+            batch = {k: v.to(device) for k, v in batch.items()}
+            with torch.device(device):
                 carry = train_state.model.initial_carry(batch)  # type: ignore
 
             # Forward

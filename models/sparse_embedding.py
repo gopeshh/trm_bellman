@@ -1,3 +1,4 @@
+import logging
 from typing import Union
 
 import torch
@@ -6,6 +7,8 @@ import torch.distributed as dist
 from torch.optim.optimizer import Optimizer, ParamsT
 
 from models.common import trunc_normal_init_
+
+logger = logging.getLogger(__name__)
 
 
 class CastedSparseEmbedding(nn.Module):
@@ -29,8 +32,33 @@ class CastedSparseEmbedding(nn.Module):
         if not self.training:
             # Test mode, no gradient
             return self.weights[inputs].to(self.cast_to)
+        
+        actual_batch_size = inputs.shape[0]
+        expected_batch_size = self.local_weights.shape[0]
+        
+        if actual_batch_size != expected_batch_size:
+            # Batch size mismatch - common during rollouts with batch=1
+            # 
+            # IMPORTANT: If gradients are enabled, this is a bug - puzzle embeddings
+            # won't be updated because we bypass the local_weights buffer that tracks
+            # which embeddings were used. Raise an error to make this visible.
+            if torch.is_grad_enabled():
+                raise RuntimeError(
+                    f"CastedSparseEmbedding batch size mismatch during gradient-enabled forward: "
+                    f"got {actual_batch_size}, expected {expected_batch_size}. "
+                    f"This would silently skip gradient tracking for puzzle embeddings. "
+                    f"Either use torch.no_grad() for inference/rollouts, or ensure batch size matches "
+                    f"the value passed to __init__ during training."
+                )
+            # No gradients needed (e.g., rollouts under torch.no_grad()) - safe to bypass
+            logger.debug(
+                "CastedSparseEmbedding batch size mismatch: got %d, expected %d. "
+                "Using direct embedding lookup (no_grad context, safe).",
+                actual_batch_size, expected_batch_size
+            )
+            return self.weights[inputs].to(self.cast_to)
             
-        # Training mode, fill puzzle embedding from weights
+        # Training mode with matching batch size, fill puzzle embedding from weights
         with torch.no_grad():
             self.local_weights.copy_(self.weights[inputs])
             self.local_ids.copy_(inputs)

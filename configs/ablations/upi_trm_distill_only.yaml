@@ -1,0 +1,23 @@
+# Ablation config: Only policy mixture distillation
+# Tests the impact of distribution-level CPI mixture in isolation
+
+gamma: 0.99
+K: 5
+inner_unroll_n: 4
+max_edits: 120
+num_train_steps: 20000
+batch_size: 128
+rollout_episodes_per_step: 6
+mixture_alpha: 0.1
+entropy_coef: 0.02
+value_lr: 0.0001
+policy_lr: 0.0001
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 5.0
+
+# Enable only distillation (NOTE: Not covered by theory!)
+exact_k_step_targets: false
+batch_centered_advantage: false
+distill_mixture_policy: true
+
