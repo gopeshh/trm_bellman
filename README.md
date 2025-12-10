@@ -508,3 +508,16 @@ and the Hierarchical Reasoning Model (HRM):
 ```
 
 This code is based on the Hierarchical Reasoning Model [code](https://github.com/sapientinc/HRM) and the Hierarchical Reasoning Model Analysis [code](https://github.com/arcprize/hierarchical-reasoning-model-analysis).
+
+## Quick Start: Working Sudoku Solver
+
+For a working 4x4 Sudoku solver, use imitation learning from oracle:
+
+```bash
+# Train and demo (100% solve rate)
+python imitation_train.py --dataset-paths data/sudoku-4x4-ultra-easy --num-epochs 100
+
+# Output: 50/50 puzzles solved, step-by-step solving demos
+```
+
+**Key Finding**: Pure RL exploration cannot discover Sudoku solutions from scratch. Imitation learning from oracle is required for this task.
