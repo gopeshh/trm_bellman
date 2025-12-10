@@ -268,6 +268,17 @@ class RLConfig(BaseModel):
                 "theory-exact behavior (but slower due to evaluating two networks)."
             )
         
+        # Rush-to-fail mitigation (Remark 2.6)
+        # For Sudoku-like tasks where the checker score is in [0, C_max],
+        # the theory suggests setting fail_terminal_reward <= -gamma * C_max.
+        # We don't know C_max here, but we can at least warn if fail_terminal_reward >= 0.
+        if self.reward_shaping and self.fail_terminal_reward >= 0.0:
+            issues.append(
+                "fail_terminal_reward >= 0 with reward_shaping=True may allow 'rush to fail' "
+                "behaviour, violating Remark 2.6. For theory-aligned configs, set "
+                "fail_terminal_reward to a sufficiently negative value (e.g. -C_max)."
+            )
+        
         if warn and issues:
             for issue in issues:
                 warnings.warn(f"[UPI-TRM Theory] {issue}", UserWarning)

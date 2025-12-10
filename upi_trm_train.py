@@ -689,6 +689,18 @@ def main():
     print(f"\nIs theory-exact: {rl_cfg.is_theory_exact()}")
     print("="*60 + "\n")
     
+    print("UPI-TRM theoretical dials:")
+    print(f"  L_z target (rl_cfg.target_Lz): {rl_cfg.target_Lz}")
+    print(f"  L_V target (rl_cfg.target_Lv): {rl_cfg.target_Lv}")
+    print(f"  Inner unroll n (rl_cfg.inner_unroll_n): {rl_cfg.inner_unroll_n}")
+    print(f"  K-step horizon K (rl_cfg.K): {rl_cfg.K}")
+    print(f"  Mixture alpha (rl_cfg.mixture_alpha): {rl_cfg.mixture_alpha}")
+    print(f"  Latent ball radius (rl_cfg.latent_ball_radius): {rl_cfg.latent_ball_radius}")
+    print(f"  Episodic latent: {rl_cfg.episodic_latent}")
+    print(f"  Exact K-step targets: {rl_cfg.exact_k_step_targets}")
+    print(f"  Exact baseline summation: {rl_cfg.exact_baseline_summation}")
+    print()
+    
     # Log additional configuration settings
     stop_mode = getattr(rl_cfg, "stop_action_mode", "noop")
     print(f"[INFO] STOP action mode: {stop_mode}")

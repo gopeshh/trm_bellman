@@ -913,6 +913,20 @@ class UPITrmTrainer:
             # misinterpretation of experimental runs as "theory-compatible".
             use_exact_baseline = getattr(self.rl_cfg, "exact_baseline_summation", False)
             
+            theory_exact_mode = (
+                use_exact_baseline
+                and hasattr(self.rl_cfg, "is_theory_exact")
+                and self.rl_cfg.is_theory_exact()
+            )
+            
+            if use_exact_baseline and not getattr(self.rl_cfg, "episodic_latent", True):
+                raise RuntimeError(
+                    "exact_baseline_summation=True is only theory-exact in the reset-latent "
+                    "(episodic_latent=True) regime. In persistent-latent mode it becomes the "
+                    "memoryless approximation from Section 5.4 and Theorem 5.9 no longer strictly applies. "
+                    "Either set episodic_latent=True or disable exact_baseline_summation."
+                )
+            
             if use_exact_baseline:
                 # Validate prerequisites for exact baseline
                 if self._checker_fn is None:
@@ -968,7 +982,12 @@ class UPITrmTrainer:
                     td_target = rewards + gamma * v_next_masked
                     adv = td_target - v_s
 
-                if getattr(self.rl_cfg, "batch_centered_advantage", False):
+            if getattr(self.rl_cfg, "batch_centered_advantage", False):
+                if theory_exact_mode:
+                    # Do NOT re-center in theory-exact mode; it would break the per-state centering
+                    # property needed for the O(alpha * eps_A) bound.
+                    pass
+                else:
                     # Batch-level centering: subtract mean across batch (HEURISTIC for variance reduction)
                     # NOTE: This does NOT enable the O(α·ε_A) bound from Theorem 5.9.
                     # For theory-exact centering, use exact_baseline_summation=True instead.
@@ -976,6 +995,15 @@ class UPITrmTrainer:
 
             adv_clip = getattr(self.rl_cfg, "advantage_clip", None)
             if adv_clip is not None and adv_clip > 0:
+                if theory_exact_mode:
+                    # Either disable clipping in theory-exact mode or emit a warning.
+                    # For now, just warn and still apply the clip to avoid exploding gradients.
+                    import warnings
+                    warnings.warn(
+                        "[UPI-TRM Theory] advantage_clip>0 while is_theory_exact() is True. "
+                        "This technically perturbs the exact advantages used in Theorem 5.9.",
+                        UserWarning,
+                    )
                 adv = adv.clamp(-adv_clip, adv_clip)
 
         # Get old policy distribution for KL computation
