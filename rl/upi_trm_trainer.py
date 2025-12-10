@@ -60,6 +60,7 @@ class UPITrmTrainer:
             rel_tol=1e-6,
             abs_tol=1e-8,
         ), f"Env gamma ({self.env_config.gamma}) and RL gamma ({self.rl_cfg.gamma}) must match."
+        assert 0.0 < self.rl_cfg.gamma < 1.0, "RLConfig.gamma must be in (0,1) for theory to hold."
         self.device = device
         self.debug_checks = bool(getattr(self.rl_cfg, "debug_checks", False))
 

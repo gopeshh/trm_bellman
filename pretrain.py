@@ -305,9 +305,10 @@ def load_checkpoint(model: nn.Module, config: PretrainConfig, device: str = None
         state_dict = torch.load(config.load_checkpoint, map_location=device)
 
         # Resize and reset puzzle emb if needed
+        # NOTE: puzzle_emb only exists when puzzle_emb_ndim > 0
         puzzle_emb_name = "_orig_mod.model.inner.puzzle_emb.weights"
-        expected_shape: torch.Size = model.model.puzzle_emb.weights.shape  # type: ignore
-        if puzzle_emb_name in state_dict:
+        if puzzle_emb_name in state_dict and hasattr(model.model, 'puzzle_emb'):
+            expected_shape: torch.Size = model.model.puzzle_emb.weights.shape  # type: ignore
             puzzle_emb = state_dict[puzzle_emb_name]
             if puzzle_emb.shape != expected_shape:
                 print(f"Resetting puzzle embedding as shape is different. Found {puzzle_emb.shape}, Expected {expected_shape}")

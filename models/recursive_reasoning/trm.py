@@ -397,14 +397,20 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         # Policy head dimensions: use FLATTENED representations to preserve position info
         # BUG FIX: Mean pooling loses positional info which is critical for Sudoku!
         # Actions are pos*vocab_size+digit, so position MUST be preserved.
-        self.z_dim_flat = seq_len * hidden_size
-        self.x_embed_dim_flat = seq_len * hidden_size
-        self.y_embed_dim_flat = seq_len * hidden_size
+        # 
+        # IMPORTANT: When puzzle embeddings are enabled (puzzle_emb_ndim > 0), the actual
+        # embedding shape is [B, puzzle_emb_len + seq_len, hidden_size], not [B, seq_len, hidden_size].
+        # We must account for this to avoid dimension mismatches at runtime.
+        puzzle_emb_len = self.inner.puzzle_emb_len  # 0 when puzzle_emb_ndim == 0
+        total_seq_len = seq_len + puzzle_emb_len
+        self.z_dim_flat = total_seq_len * hidden_size
+        self.x_embed_dim_flat = total_seq_len * hidden_size
+        self.y_embed_dim_flat = total_seq_len * hidden_size
         
         # Legacy aliases for compatibility
         self.z_dim = self.z_dim_pooled  # Value head uses this
         self.x_embed_dim = self.x_embed_dim_pooled
-        self.y_embed_dim = self.x_embed_dim_pooled
+        self.y_embed_dim = self.plan_embed_dim  # Plan embedding dimension
 
         if self.config.rl_enable_value_head:
             self.value_head = LatentValueHead(
@@ -764,18 +770,20 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         
         # BUG FIX: Don't mean-pool z_H - FLATTEN to preserve positional info!
         # For Sudoku, actions are pos*vocab_size+digit, so position matters!
-        # z_n.z_H shape: [B, seq_len, hidden_dim]
-        z_vec = z_n.z_H.view(z_n.z_H.shape[0], -1)  # [B, seq_len * hidden_dim]
+        # z_n.z_H shape: [B, total_seq_len, hidden_dim] where total_seq_len = seq_len + puzzle_emb_len
+        z_vec = z_n.z_H.view(z_n.z_H.shape[0], -1)  # [B, total_seq_len * hidden_dim]
 
         # 2) Get x and y embeddings - FLATTEN instead of mean pool!
         batch = self._standardize_latent_batch(x, y)
         latent_context = self._build_latent_context_with_plan(batch)
-        input_embeddings = latent_context["input_embeddings"]  # [B, seq_len, hidden_dim]
-        plan_embeddings = latent_context["plan_embeddings"]    # [B, seq_len, hidden_dim]
+        # NOTE: When puzzle_emb_ndim > 0, shape is [B, puzzle_emb_len + seq_len, hidden_dim]
+        # otherwise shape is [B, seq_len, hidden_dim]. We call this "total_seq_len".
+        input_embeddings = latent_context["input_embeddings"]  # [B, total_seq_len, hidden_dim]
+        plan_embeddings = latent_context["plan_embeddings"]    # [B, total_seq_len, hidden_dim]
         
         # Flatten to preserve positional information
-        x_embed = input_embeddings.view(input_embeddings.shape[0], -1)  # [B, seq_len * hidden_dim]
-        y_embed = plan_embeddings.view(plan_embeddings.shape[0], -1)    # [B, seq_len * hidden_dim]
+        x_embed = input_embeddings.view(input_embeddings.shape[0], -1)  # [B, total_seq_len * hidden_dim]
+        y_embed = plan_embeddings.view(plan_embeddings.shape[0], -1)    # [B, total_seq_len * hidden_dim]
 
         dist = self.edit_policy(z_vec, x_embed, y_embed, action_mask=action_mask)
         return dist, z_n

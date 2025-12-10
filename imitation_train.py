@@ -327,8 +327,8 @@ if __name__ == "__main__":
         seed=args.seed,
     )
     
-    # Demo
-    if args.demo or True:  # Always demo
+    # Demo (always run to show learned behavior)
+    if True:
         inputs, labels = load_puzzles(args.dataset_paths)
         for i in range(3):
             demo_solve(policy, inputs, labels, puzzle_idx=i)

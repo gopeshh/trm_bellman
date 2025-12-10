@@ -219,6 +219,13 @@ class RLConfig(BaseModel):
         """
         issues = []
         
+        # Discount sanity check
+        if not (0.0 < self.gamma < 1.0):
+            issues.append(
+                f"gamma={self.gamma} is outside (0,1). Theoretical guarantees "
+                "assume a strictly discounted MDP. Set 0 < gamma < 1."
+            )
+        
         # Check forward-invariant projection (Assumption 4.1)
         if self.latent_ball_radius <= 0:
             issues.append(
