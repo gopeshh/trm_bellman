@@ -459,6 +459,18 @@ def parse_args():
         default=0.1,
         help="Weight decay for puzzle embeddings (default: 0.1).",
     )
+    # Imitation learning pre-training arguments
+    parser.add_argument(
+        "--imitation-pretrain",
+        action="store_true",
+        help="Pre-train policy with imitation learning from oracle before RL.",
+    )
+    parser.add_argument(
+        "--imitation-epochs",
+        type=int,
+        default=50,
+        help="Number of imitation learning epochs (default: 50).",
+    )
     return parser.parse_args()
 
 
@@ -747,6 +759,36 @@ def main():
             print("[WandB] Requested but not available (install with: pip install wandb)")
         elif not args.wandb:
             print("[WandB] Disabled by default (enable with: --wandb)")
+
+    # === Imitation learning pre-training (optional but recommended) ===
+    if args.imitation_pretrain:
+        print("\n" + "="*60)
+        print("IMITATION LEARNING PRE-TRAINING")
+        print("="*60)
+        print("Pre-training policy from oracle demonstrations...")
+        print("This bootstraps RL by giving the policy a good starting point.")
+        print()
+        
+        imitation_stats = trainer.imitation_pretrain(
+            dataset=dataset,
+            checker=checker_fn,
+            num_epochs=args.imitation_epochs,
+            batch_size=rl_cfg.batch_size,
+            log_interval=10,
+        )
+        print()
+        
+        # Quick evaluation after imitation pre-training
+        if args.eval_interval > 0:
+            print("Evaluating policy after imitation pre-training...")
+            eval_metrics = trainer.evaluate_policy_metrics(
+                env_cfg=env_cfg,
+                dataset=dataset,
+                checker=checker_fn,
+            )
+            print(f"[Post-imitation] eval_success_rate={eval_metrics['success_rate']:.3f} "
+                  f"eval_mean_score={eval_metrics['mean_score']:.3f}")
+            print()
 
     # === Training loop with puzzle embedding updates and checkpointing ===
     total_steps = rl_cfg.num_train_steps

@@ -1463,3 +1463,241 @@ class UPITrmTrainer:
         metrics = self.evaluate_policy_metrics(env_cfg=env_cfg, dataset=dataset, checker=checker)
         return metrics["success_rate"]
 
+    # =========================================================================
+    # IMITATION LEARNING (for bootstrapping RL from oracle demonstrations)
+    # =========================================================================
+    
+    def imitation_update(
+        self,
+        oracle_transitions: List[Tuple[Any, Any, int]],  # List of (x, y, oracle_action)
+        optimizer: Optional[torch.optim.Optimizer] = None,  # Optional separate optimizer
+    ) -> Dict[str, float]:
+        """
+        Perform one imitation learning update from oracle demonstrations.
+        
+        Args:
+            oracle_transitions: List of (x, y, oracle_action) tuples where
+                oracle_action is the correct action to take in state (x, y).
+            optimizer: Optional optimizer to use (default: self.policy_opt).
+        
+        Returns:
+            Dict with 'imitation_loss' and 'imitation_accuracy'.
+        """
+        if len(oracle_transitions) == 0:
+            return {"imitation_loss": 0.0, "imitation_accuracy": 0.0}
+        
+        opt = optimizer if optimizer is not None else self.policy_opt
+        
+        self.model.train()
+        self.policy_model_candidate.train()
+        opt.zero_grad()
+        
+        total_loss = 0.0
+        total_correct = 0
+        total_count = 0
+        
+        for x, y, oracle_action in oracle_transitions:
+            batched = self._state_is_batched(x)
+            batch_x = self._prepare_batch_x(x, batched=batched)
+            batch_y = self._prepare_plan(y, batched=batched)
+            
+            # Get action mask
+            action_mask = None
+            if self.env.vocab_size is not None and self.env.stop_action_id is not None:
+                action_mask = PlanEditEnv.compute_batch_action_mask(
+                    batch_x["inputs"] if isinstance(batch_x, dict) else batch_x,
+                    self.env.vocab_size,
+                    self.env.stop_action_id,
+                    stop_mode=self.env._stop_mode,
+                )
+            
+            # Get policy distribution from candidate model
+            dist, _ = self.policy_model_candidate.policy_dist(
+                batch_x, batch_y, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask
+            )
+            
+            # Cross-entropy loss on oracle action
+            target = torch.tensor([oracle_action], dtype=torch.long, device=self.device)
+            logits = dist.logits if hasattr(dist, 'logits') else torch.log(dist.probs + 1e-10)
+            loss = F.cross_entropy(logits, target)
+            
+            total_loss += loss
+            total_count += 1
+            
+            # Check accuracy
+            pred = logits.argmax(1).item()
+            if pred == oracle_action:
+                total_correct += 1
+        
+        # Average loss and backprop
+        avg_loss = total_loss / total_count
+        avg_loss.backward()
+        
+        if self.rl_cfg.policy_grad_clip > 0:
+            nn_utils.clip_grad_norm_(self._policy_params, self.rl_cfg.policy_grad_clip)
+        
+        opt.step()
+        
+        # Sync policy models
+        self._sync_policy_old_towards_candidate()
+        
+        return {
+            "imitation_loss": avg_loss.item(),
+            "imitation_accuracy": total_correct / total_count if total_count > 0 else 0.0,
+        }
+    
+    def collect_oracle_demonstrations(
+        self,
+        dataset: Any,
+        checker: Any,
+        num_episodes: int = 100,
+    ) -> List[Tuple[Any, Any, int]]:
+        """
+        Collect oracle demonstrations by running the optimal policy.
+        
+        For Sudoku, the oracle action at state (x, y) for an empty cell at
+        position `pos` is: action = pos * vocab_size + correct_token.
+        
+        Args:
+            dataset: Dataset to sample puzzles from.
+            checker: Checker function to evaluate puzzle states.
+            num_episodes: Number of episodes to collect.
+        
+        Returns:
+            List of (x, y, oracle_action) tuples.
+        """
+        demonstrations = []
+        vocab_size = self.env.vocab_size
+        num_samples = min(num_episodes, len(dataset) if hasattr(dataset, '__len__') else num_episodes)
+        
+        for ep_idx in range(num_samples):
+            # Get sample directly from dataset to access solution
+            sample = dataset[ep_idx % len(dataset)]
+            
+            # Get inputs and solution from sample
+            if isinstance(sample, dict):
+                inputs = sample.get("inputs")
+                # Solution might be stored as "solution", "labels", or "targets"
+                solution = sample.get("solution", sample.get("labels", sample.get("targets")))
+            else:
+                continue  # Skip non-dict samples
+            
+            if inputs is None or solution is None:
+                continue
+            
+            # Convert to numpy for easier manipulation
+            if torch.is_tensor(inputs):
+                inputs_np = inputs.cpu().numpy().flatten()
+            else:
+                inputs_np = inputs.flatten()
+            
+            if torch.is_tensor(solution):
+                solution_np = solution.cpu().numpy().flatten()
+            else:
+                solution_np = solution.flatten()
+            
+            # Create initial state (copy inputs for y)
+            y_current = inputs_np.copy()
+            
+            # Find empty cells and generate demonstrations for each
+            empty_positions = [pos for pos in range(len(inputs_np)) if inputs_np[pos] == 1]
+            
+            for pos in empty_positions:
+                correct_token = int(solution_np[pos])
+                oracle_action = pos * vocab_size + correct_token
+                
+                # Create state for this step - include all required fields
+                x_dict = {
+                    "inputs": torch.tensor(inputs_np, dtype=torch.long),
+                    "puzzle_identifiers": torch.tensor([ep_idx], dtype=torch.long),  # Use episode idx as puzzle id
+                }
+                y_tensor = torch.tensor(y_current.copy(), dtype=torch.long)
+                
+                demonstrations.append((x_dict, y_tensor, oracle_action))
+                
+                # Update y for next step (fill in correct answer)
+                y_current[pos] = correct_token
+        
+        return demonstrations
+    
+    def imitation_pretrain(
+        self,
+        dataset: Any,
+        checker: Any,
+        num_epochs: int = 50,
+        batch_size: int = 64,
+        log_interval: int = 10,
+        imitation_lr: float = 0.003,  # Separate LR for imitation (higher than RL)
+    ) -> Dict[str, float]:
+        """
+        Pre-train the policy with imitation learning from oracle.
+        
+        This bootstraps the RL training by giving the policy a good starting point.
+        Uses a separate (higher) learning rate than RL to enable fast imitation learning.
+        
+        Args:
+            dataset: Dataset to sample puzzles from.
+            checker: Checker function.
+            num_epochs: Number of epochs of imitation learning.
+            batch_size: Batch size for imitation updates.
+            log_interval: How often to log progress.
+            imitation_lr: Learning rate for imitation (default 0.003, higher than RL).
+        
+        Returns:
+            Dict with final training stats.
+        """
+        import random
+        
+        # Create a separate optimizer for imitation learning with higher LR
+        imitation_opt = torch.optim.Adam(self._policy_params, lr=imitation_lr)
+        
+        print("[Imitation] Collecting oracle demonstrations...")
+        # Collect more demonstrations by repeating puzzles
+        all_demos = []
+        num_repeats = 10  # Repeat each puzzle multiple times for more training data
+        for repeat in range(num_repeats):
+            demos = self.collect_oracle_demonstrations(
+                dataset=dataset,
+                checker=checker,
+                num_episodes=min(500, len(dataset) if hasattr(dataset, '__len__') else 500),
+            )
+            all_demos.extend(demos)
+        print(f"[Imitation] Collected {len(all_demos)} demonstrations")
+        
+        if len(all_demos) == 0:
+            print("[Imitation] Warning: No demonstrations collected!")
+            return {"imitation_loss": 0.0, "imitation_accuracy": 0.0}
+        
+        best_accuracy = 0.0
+        
+        for epoch in range(num_epochs):
+            random.shuffle(all_demos)
+            
+            epoch_loss = 0.0
+            epoch_correct = 0
+            epoch_total = 0
+            
+            # Process in batches
+            for i in range(0, len(all_demos), batch_size):
+                batch = all_demos[i:i + batch_size]
+                stats = self.imitation_update(batch, optimizer=imitation_opt)
+                
+                epoch_loss += stats["imitation_loss"] * len(batch)
+                epoch_correct += stats["imitation_accuracy"] * len(batch)
+                epoch_total += len(batch)
+            
+            avg_loss = epoch_loss / epoch_total if epoch_total > 0 else 0.0
+            accuracy = epoch_correct / epoch_total if epoch_total > 0 else 0.0
+            best_accuracy = max(best_accuracy, accuracy)
+            
+            if (epoch + 1) % log_interval == 0:
+                print(f"[Imitation] Epoch {epoch+1}/{num_epochs}: "
+                      f"loss={avg_loss:.4f}, accuracy={accuracy:.2%}")
+            
+            # Early stopping if perfect
+            if accuracy >= 0.99:
+                print(f"[Imitation] Early stopping at epoch {epoch+1} with {accuracy:.2%} accuracy")
+                break
+        
+        print(f"[Imitation] Pre-training complete. Best accuracy: {best_accuracy:.2%}")
+        return {"imitation_loss": avg_loss, "imitation_accuracy": best_accuracy}

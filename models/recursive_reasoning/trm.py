@@ -384,16 +384,32 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         super().__init__()
         self.config = TinyRecursiveReasoningModel_ACTV1Config(**config_dict)
         self.inner = TinyRecursiveReasoningModel_ACTV1_Inner(self.config)
-        self.z_dim = self.config.hidden_size
-        self.x_embed_dim = self.config.hidden_size
-        self.y_embed_dim = self.config.hidden_size  # pooled representation of y
-        self.plan_embed_dim = self.config.hidden_size
-        self.xy_embed_dim = self.x_embed_dim + self.plan_embed_dim
+        
+        seq_len = self.config.seq_len
+        hidden_size = self.config.hidden_size
+        
+        # Value head dimensions: use mean-pooled representations (doesn't need position info)
+        self.z_dim_pooled = hidden_size
+        self.x_embed_dim_pooled = hidden_size
+        self.plan_embed_dim = hidden_size
+        self.xy_embed_dim = self.x_embed_dim_pooled + self.plan_embed_dim
+        
+        # Policy head dimensions: use FLATTENED representations to preserve position info
+        # BUG FIX: Mean pooling loses positional info which is critical for Sudoku!
+        # Actions are pos*vocab_size+digit, so position MUST be preserved.
+        self.z_dim_flat = seq_len * hidden_size
+        self.x_embed_dim_flat = seq_len * hidden_size
+        self.y_embed_dim_flat = seq_len * hidden_size
+        
+        # Legacy aliases for compatibility
+        self.z_dim = self.z_dim_pooled  # Value head uses this
+        self.x_embed_dim = self.x_embed_dim_pooled
+        self.y_embed_dim = self.x_embed_dim_pooled
 
         if self.config.rl_enable_value_head:
             self.value_head = LatentValueHead(
-                z_dim=self.z_dim,
-                x_dim=self.xy_embed_dim,
+                z_dim=self.z_dim_pooled,  # Value head uses pooled z
+                x_dim=self.xy_embed_dim,  # pooled x + pooled y
                 hidden_dim=self.config.rl_value_hidden_dim,
             )
         else:
@@ -402,10 +418,11 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         if self.config.rl_enable_policy_head:
             if self.config.rl_num_actions <= 0:
                 raise ValueError("rl_num_actions must be > 0 when rl_enable_policy_head=True")
+            # BUG FIX: Use flattened dimensions to preserve positional information!
             self.edit_policy = EditPolicyHead(
-                latent_dim=self.z_dim,
-                x_embed_dim=self.x_embed_dim,
-                y_embed_dim=self.y_embed_dim,
+                latent_dim=self.z_dim_flat,
+                x_embed_dim=self.x_embed_dim_flat,
+                y_embed_dim=self.y_embed_dim_flat,
                 action_dim=self.config.rl_num_actions,
             )
         else:
@@ -416,9 +433,9 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             puzzle_emb_len = self.inner.puzzle_emb_len
             total_seq_len = self.config.seq_len + puzzle_emb_len
             self.z_init_encoder = ZInitEncoder(
-                input_dim=self.x_embed_dim,
+                input_dim=self.x_embed_dim_pooled,  # Uses pooled embeddings
                 hidden_dim=self.config.rl_value_hidden_dim,
-                output_dim=self.z_dim * 2, # Double output dim to separate H and L init
+                output_dim=self.z_dim_pooled * 2,  # Double output dim to separate H and L init
                 seq_len=total_seq_len,
             )
         else:
@@ -744,15 +761,21 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         else:
             # Persistent mode: continue from existing z
             z_n, _ = self.continue_latent(z, x, y, n)
-        z_vec = z_n.z_H.mean(dim=1)
+        
+        # BUG FIX: Don't mean-pool z_H - FLATTEN to preserve positional info!
+        # For Sudoku, actions are pos*vocab_size+digit, so position matters!
+        # z_n.z_H shape: [B, seq_len, hidden_dim]
+        z_vec = z_n.z_H.view(z_n.z_H.shape[0], -1)  # [B, seq_len * hidden_dim]
 
-        # 2) Summarize x via latent context embeddings
+        # 2) Get x and y embeddings - FLATTEN instead of mean pool!
         batch = self._standardize_latent_batch(x, y)
         latent_context = self._build_latent_context_with_plan(batch)
-        input_embeddings = latent_context["input_embeddings"]
-        plan_embeddings = latent_context["plan_embeddings"]
-        x_embed = self._pool_embedding(input_embeddings)
-        y_embed = self._pool_embedding(plan_embeddings)
+        input_embeddings = latent_context["input_embeddings"]  # [B, seq_len, hidden_dim]
+        plan_embeddings = latent_context["plan_embeddings"]    # [B, seq_len, hidden_dim]
+        
+        # Flatten to preserve positional information
+        x_embed = input_embeddings.view(input_embeddings.shape[0], -1)  # [B, seq_len * hidden_dim]
+        y_embed = plan_embeddings.view(plan_embeddings.shape[0], -1)    # [B, seq_len * hidden_dim]
 
         dist = self.edit_policy(z_vec, x_embed, y_embed, action_mask=action_mask)
         return dist, z_n
