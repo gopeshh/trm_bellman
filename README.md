@@ -15,6 +15,8 @@ This repository extends the Tiny Recursive Model (TRM) codebase with a plan-spac
 - `scripts/` – ready-to-run helpers: `run_rl_dummy.sh`, `run_tests.sh`, `run_k_step_experiment.sh`, `run_sudoku_rl_full.sh`.
 
 ## Installation
+
+### Standard Installation (pip)
 ```bash
 git clone <repo-url>
 cd trm_bellman
@@ -24,6 +26,42 @@ pip install --upgrade pip wheel setuptools
 pip install -r requirements.txt  # torch, tqdm, pytest, and the original TRM deps
 ```
 If you prefer not to use `requirements.txt`, minimally install `torch`, `tqdm`, and `pytest`.
+
+### Meta/fbcode Installation (Buck2)
+
+For Meta devservers, the project includes a `BUCK` file that uses internal PyPI packages:
+
+```bash
+cd ~/fbsource/fbcode
+
+# Symlink or copy the project to fbcode
+ln -s /path/to/trm_bellman buiksat_trm
+
+# Build and run with A100 GPU support
+buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 \
+    -c fbcode.enable_gpu_sections=true \
+    -- \
+    --train-steps 1000 \
+    --batch-size 64 \
+    --seed 42
+```
+
+**Important flags for A100 GPUs:**
+- `-c fbcode.nvcc_arch=a100` - Enables sm_80 CUDA kernels for A100
+- `-c fbcode.enable_gpu_sections=true` - Enables GPU code sections
+
+**Quick debug run:**
+```bash
+buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 \
+    -c fbcode.enable_gpu_sections=true \
+    -- \
+    --train-steps 20 \
+    --batch-size 16 \
+    --log-interval 5 \
+    --debug-checks
+```
 
 ## Running Tests
 ```bash

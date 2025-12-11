@@ -10,7 +10,10 @@ from torch.utils.data import IterableDataset, get_worker_info
 from models.losses import IGNORE_LABEL_ID
 from dataset.common import PuzzleDatasetMetadata
 
-from argdantic import ArgParser
+try:
+    from argdantic import ArgParser
+except ImportError:
+    ArgParser = None  # Make argdantic optional for Buck builds
 from pydantic import BaseModel
 
 def _sample_batch(rng: np.random.Generator, group_order: np.ndarray, puzzle_indices: np.ndarray, group_indices: np.ndarray, start_index: int, global_batch_size: int):
