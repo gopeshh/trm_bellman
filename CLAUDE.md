@@ -23,7 +23,7 @@ UPI-TRM (Unrolled Policy Iteration for Tiny Recursive Models) extends the Tiny R
 **Background**:
 - Original TRM paper: https://arxiv.org/pdf/2510.04871v1
 - Original repository: https://github.com/SamsungSAILMontreal/TinyRecursiveModels
-- ICML 2026 paper: `$HOME/UPI_TRM/UPI_TRM/main.tex`
+- ICML 2026 paper: `$HOME/UPI_TRM/UPI_TRM_ICML/main.tex`
 
 **Core Innovation**: A ~7M parameter model that recursively refines solutions through:
 - Inner loop: Latent state recursion (z^(0) → z^(n)) for reasoning
