@@ -1,0 +1,51 @@
+# Ablation: no_contraction
+#
+# Disables contraction enforcement (Assumption 4.2).
+# Tests: Can the agent learn without L_z < 1 guarantee?
+# Expected: Higher variance, possible instability, worse sample efficiency.
+# This removes spectral normalization, so latent dynamics can expand.
+#
+# Changes from base theory-exact config:
+#   - enable_contraction: False
+#   - target_Lz: 1.0
+#
+reward_shaping: true
+fail_terminal_reward: -10.0
+solve_terminal_reward: 0.0
+gamma: 0.99
+K: 1
+inner_unroll_n: 4
+max_edits: 120
+exact_k_step_targets: true
+exact_baseline_summation: true
+theory_exact_mixture: true
+distill_mixture_policy: false
+batch_centered_advantage: false
+enable_contraction: false
+target_Lz: 1.0
+target_Lv: 1.0
+latent_ball_radius: 10.0
+mixture_alpha: 0.05
+episodic_latent: true
+stop_action_mode: noop
+stop_action_penalty: -0.1
+value_lr: 0.0003
+policy_lr: 0.0003
+entropy_coef: 0.01
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+lr_schedule: cosine
+lr_warmup_steps: 500
+lr_min_factor: 0.1
+replay_capacity: 100000
+batch_size: 256
+num_train_steps: 10000
+rollout_episodes_per_step: 4
+log_interval: 10
+eval_interval: 50
+eval_num_episodes: 50
+use_tqdm: false
+debug_checks: false
+track_theory_metrics: true
+task_name: sudoku
+solved_threshold: 10.0
