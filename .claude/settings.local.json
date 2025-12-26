@@ -5,7 +5,9 @@
       "Bash(python3:*)",
       "Bash(nvidia-smi:*)",
       "Bash(python:*)",
-      "Bash(pytest:*)"
+      "Bash(pytest:*)",
+      "Bash(buck2 clean:*)",
+      "Bash(buck2 test:*)"
     ],
     "deny": [],
     "ask": []

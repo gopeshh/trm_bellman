@@ -1,6 +1,6 @@
 import logging
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -13,7 +13,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils as nn_utils
 
-from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
+# Lazy import to break circular dependency with evaluators
+if TYPE_CHECKING:
+    from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
+
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan, normalize_puzzle_id
 from rl.config import RLConfig
@@ -1448,10 +1451,10 @@ class UPITrmTrainer:
     def evaluate_policy_metrics(self, env_cfg: PlanEditEnvConfig, dataset: Any, checker: Any) -> Dict[str, float]:
         """
         Evaluate the deployed policy, returning both strict success rate and mean checker score.
-        
+
         Note: Uses the same episodic_latent setting as training to ensure consistency.
         Evaluation always uses greedy (argmax) action selection for deterministic results.
-        
+
         Returns dict with:
             - mean_score: Average final checker score
             - success_rate: Fraction of episodes that reached max score (solved)
@@ -1463,6 +1466,9 @@ class UPITrmTrainer:
             - max_possible_score: Maximum possible score (from solution)
             - initial_score_mean: Mean score at episode start (before edits)
         """
+        # Runtime import to avoid circular dependency
+        from evaluators.rl_plan_evaluator import evaluate_plan_policy_with_scores
+
         episodic_latent = getattr(self.rl_cfg, "episodic_latent", True)
 
         mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(

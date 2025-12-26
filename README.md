@@ -64,6 +64,30 @@ buck2 run //buiksat_trm:upi_trm_train \
 ```
 
 ## Running Tests
+
+### Using Buck2 (Meta devservers)
+
+```bash
+cd ~/fbsource/fbcode
+
+# Run all 17 test targets (86 tests total)
+buck2 test //buiksat_trm:test_... \
+    -c fbcode.nvcc_arch=a100 \
+    -c fbcode.enable_gpu_sections=true \
+    --local-only
+
+# Run a single test
+buck2 test //buiksat_trm:test_rl_k_step_targets \
+    -c fbcode.nvcc_arch=a100 \
+    -c fbcode.enable_gpu_sections=true \
+    --local-only
+
+# Clear Buck2 cache (if tests are stale after BUCK file changes)
+buck2 clean
+```
+
+### Using pytest (standard installation)
+
 ```bash
 pytest -v
 ```

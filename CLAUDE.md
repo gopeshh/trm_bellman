@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## User Preferences
+
+**IMPORTANT: Always use Meta Buck2 for everything** (building, running, testing). Do not use pip/python directly.
+
+```bash
+# Standard Buck2 command pattern for this project
+buck2 run //buiksat_trm:<target> \
+    -c fbcode.nvcc_arch=a100 \
+    -c fbcode.enable_gpu_sections=true \
+    -- <args>
+```
+
 ## Project Overview
 
 UPI-TRM (Unrolled Policy Iteration for Tiny Recursive Models) extends the Tiny Recursive Model with reinforcement learning. The codebase implements a theory-exact RL framework based on an ICML 2026 submission, combining supervised learning and plan-space RL for constraint satisfaction problems (Sudoku, ARC-AGI, mazes).
@@ -11,7 +23,7 @@ UPI-TRM (Unrolled Policy Iteration for Tiny Recursive Models) extends the Tiny R
 **Background**:
 - Original TRM paper: https://arxiv.org/pdf/2510.04871v1
 - Original repository: https://github.com/SamsungSAILMontreal/TinyRecursiveModels
-- ICML 2026 paper: `~/UPI_TRM/UPI_TRM_ICML/main.tex`
+- ICML 2026 paper: `$HOME/UPI_TRM/UPI_TRM/main.tex`
 
 **Core Innovation**: A ~7M parameter model that recursively refines solutions through:
 - Inner loop: Latent state recursion (z^(0) → z^(n)) for reasoning
@@ -28,18 +40,46 @@ UPI-TRM (Unrolled Policy Iteration for Tiny Recursive Models) extends the Tiny R
 
 ## Essential Commands
 
-### Testing
+### Testing (Buck2)
+
 ```bash
-# Run all tests
-pytest -v
-./scripts/run_tests.sh
+# Navigate to fbcode directory first
+cd ~/fbsource/fbcode
 
-# Run specific test
-pytest tests/test_upi_trm_trainer_smoke.py -v
+# Run all 17 test targets (86 tests total)
+buck2 test //buiksat_trm:test_... \
+    -c fbcode.nvcc_arch=a100 \
+    -c fbcode.enable_gpu_sections=true \
+    --local-only
 
-# Run theory component tests
-pytest tests/test_theory_exact_components.py -v
+# Run a single test target
+buck2 test //buiksat_trm:test_rl_k_step_targets \
+    -c fbcode.nvcc_arch=a100 \
+    -c fbcode.enable_gpu_sections=true \
+    --local-only
+
+# Clear Buck2 cache (if tests are stale after BUCK file changes)
+buck2 clean
 ```
+
+**Available test targets (17 total, 86 tests):**
+- `test_rl_k_step_targets` - K-step bootstrapped target computation
+- `test_theory_exact_components` - Theory-exact features (exact baseline, contraction)
+- `test_refactored_modules` - Refactored RL modules (replay buffer, task configs)
+- `test_upi_trm_trainer_smoke` - End-to-end training smoke test
+- `test_cpi_mixture_policy_smoke` - CPI mixture mechanics
+- `test_upi_trm_logging_smoke` - Metric logging
+- `test_plan_edit_env` - Environment dynamics
+- `test_plan_edit_env_reward_shaping` - Reward shaping
+- `test_gae` - GAE computation
+- `test_trm_latent_unroll` - Inner recursion APIs
+- `test_trm_rl_heads` - RL head modules
+- `test_edit_policy_head` - Edit policy head
+- `test_lipschitz_spectral_norm` - Lipschitz/spectral norm utilities
+- `test_theory_metrics` - Theory metrics computation
+- `test_rl_plan_evaluator_smoke` - Plan policy evaluation
+- `test_rl_k_step_value_update_trainer` - K-step value update
+- `test_z_init_encoder` - Z-init encoder tests
 
 ### RL Training
 
