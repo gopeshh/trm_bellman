@@ -822,6 +822,7 @@ class UPITrmTrainer:
                     gamma=gamma,
                     K=K,
                     exact_k_step_targets=bool(getattr(self.rl_cfg, "exact_k_step_targets", False)),
+                    C_max=getattr(self.rl_cfg, "C_max", None),  # Paper Eq. 12: V(s_abs) = -C_max
                 )
 
             v_s, _ = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)

@@ -86,6 +86,64 @@ class TestKStepTargets(unittest.TestCase):
         expected_tensor = torch.tensor([expected_return], dtype=targets.dtype)
         self.assertTrue(torch.allclose(targets, expected_tensor, atol=1e-6))
 
+    def test_k_step_targets_use_negative_C_max_for_terminal(self):
+        """Test that terminal states bootstrap with -C_max (paper Eq. 12, lines 677-678)."""
+        gamma = 0.9
+        K = 3
+        C_max = 10.0
+
+        # Batch of 2: first terminates, second continues
+        rewards_K = torch.tensor([
+            [1.0, 2.0, 0.0],  # terminates at step 2
+            [1.0, 2.0, 3.0],  # continues
+        ], dtype=torch.float32)
+        dones_K = torch.tensor([
+            [False, True, False],   # done at step 2
+            [False, False, False],  # not done
+        ], dtype=torch.bool)
+        steps_taken = torch.tensor([2, 3], dtype=torch.long)
+        v_K = torch.tensor([5.0, 5.0], dtype=torch.float32)  # Bootstrap values
+
+        # With C_max: terminal bootstraps with -C_max
+        targets_with_cmax = compute_k_step_bootstrapped_target(
+            rewards_K=rewards_K,
+            dones_K=dones_K,
+            steps_taken=steps_taken,
+            v_K=v_K,
+            gamma=gamma,
+            K=K,
+            exact_k_step_targets=False,
+            C_max=C_max,
+        )
+
+        # Without C_max (legacy): terminal bootstraps with 0
+        targets_without_cmax = compute_k_step_bootstrapped_target(
+            rewards_K=rewards_K,
+            dones_K=dones_K,
+            steps_taken=steps_taken,
+            v_K=v_K,
+            gamma=gamma,
+            K=K,
+            exact_k_step_targets=False,
+            C_max=None,
+        )
+
+        # Sample 0: terminated, should bootstrap with -C_max vs 0
+        # G = r0 + γ*r1 + γ^2 * V_bootstrap
+        # With C_max:    G = 1 + 0.9*2 + 0.81*(-10) = 1 + 1.8 - 8.1 = -5.3
+        # Without C_max: G = 1 + 0.9*2 + 0.81*(0)   = 1 + 1.8 + 0   = 2.8
+        expected_with_cmax_0 = 1.0 + 0.9 * 2.0 + (0.9 ** 2) * (-C_max)
+        expected_without_cmax_0 = 1.0 + 0.9 * 2.0 + (0.9 ** 2) * 0.0
+
+        self.assertAlmostEqual(targets_with_cmax[0].item(), expected_with_cmax_0, places=4)
+        self.assertAlmostEqual(targets_without_cmax[0].item(), expected_without_cmax_0, places=4)
+
+        # Sample 1: not terminated, should bootstrap with v_K in both cases
+        # G = r0 + γ*r1 + γ^2*r2 + γ^3 * v_K
+        expected_1 = 1.0 + 0.9 * 2.0 + (0.9 ** 2) * 3.0 + (0.9 ** 3) * 5.0
+        self.assertAlmostEqual(targets_with_cmax[1].item(), expected_1, places=4)
+        self.assertAlmostEqual(targets_without_cmax[1].item(), expected_1, places=4)
+
 
 if __name__ == "__main__":
     unittest.main()

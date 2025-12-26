@@ -7,7 +7,7 @@ This module provides functions for computing:
 - Empirical Bellman residual monitoring
 """
 
-from typing import Dict
+from typing import Dict, Optional
 
 import torch
 
@@ -20,13 +20,22 @@ def compute_k_step_bootstrapped_target(
     gamma: float,
     K: int,
     exact_k_step_targets: bool = False,
+    C_max: Optional[float] = None,
 ) -> torch.Tensor:
     """
     Compute K-step bootstrapped targets with proper terminal masking.
-    
+
     Implements the K-step value operator T_K^π from Section 5:
         G^(K)(s_0) = Σ_{k=0}^{K-1} γ^k r_k + γ^K V(s_K)
-    
+
+    PAPER ALIGNMENT (lines 677-678):
+        V̄(s) = V_ψ(z^(n)(s), x)  if s ∈ S_plan
+        V̄(s) = -C_max            if s = s_abs (absorbing state)
+
+    When C_max is provided and the trajectory terminates (done=True),
+    we bootstrap with -C_max instead of 0, matching the paper's
+    absorbing state convention.
+
     Args:
         rewards_K: [batch_size, K] rewards for each step
         dones_K: [batch_size, K] done flags for each step
@@ -34,9 +43,12 @@ def compute_k_step_bootstrapped_target(
         v_K: [batch_size] V(s_K) bootstrap values
         gamma: Discount factor
         K: Maximum horizon
-        exact_k_step_targets: If True, use γ^K (theory-exact). 
+        exact_k_step_targets: If True, use γ^K (theory-exact).
                               If False, use γ^steps_taken (practical).
-    
+        C_max: Maximum checker score. If provided, terminal states bootstrap
+               with -C_max instead of 0 (paper Eq. 12, lines 677-678).
+               For Sudoku: C_max = 10.0.
+
     Returns:
         [batch_size] K-step bootstrapped targets
     """
@@ -60,13 +72,22 @@ def compute_k_step_bootstrapped_target(
     final_idx = (steps_taken - 1).clamp(min=0)
     batch_indices = torch.arange(batch_size, device=rewards_K.device)
     done_final = dones_K[batch_indices, final_idx]
-    
-    # Do not bootstrap from terminal segments: if the segment hits done early,
-    # the true return is purely the discounted reward sum (V(s_terminal) = 0).
-    not_done_final = (~done_final).to(v_K.dtype)
-    v_K = v_K * not_done_final
 
-    return reward_returns + bootstrap_factor * v_K
+    # Paper Section 3.1 (lines 653-656, 677-678):
+    # For terminal states, bootstrap with V(s_abs) = -C_max instead of 0.
+    # This aligns with the absorbing state convention where:
+    #   r(s_abs, a, s_abs) = (γ - 1) * C_max  (self-loop reward)
+    #   V^π(s_abs) = -C_max                  (fixed boundary value)
+    if C_max is not None:
+        # Use -C_max for terminal states, v_K for non-terminal
+        terminal_value = v_K.new_tensor(-C_max)
+        v_bootstrap = torch.where(done_final, terminal_value, v_K)
+    else:
+        # Legacy behavior: zero out terminal bootstrap (less theory-aligned)
+        not_done_final = (~done_final).to(v_K.dtype)
+        v_bootstrap = v_K * not_done_final
+
+    return reward_returns + bootstrap_factor * v_bootstrap
 
 
 def compute_gae(

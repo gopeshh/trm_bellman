@@ -522,11 +522,24 @@ pytest -v --tb=short
 | Assumption 4.1: Forward-invariant | Latent ball projection | `latent_ball_radius` in config |
 | Assumption 4.2: Contraction | Spectral normalization | `utils/lipschitz.py` |
 | Section 5: K-step operator | Bootstrapped targets | `rl/value_targets.py` |
+| Eq. 12 (lines 677-678): V(s_abs) = -C_max | Terminal bootstrap | `C_max` in RLConfig, `value_targets.py` |
 | Theorem 5.9: Exact baseline | Exact summation for discrete actions | `exact_baseline_summation` flag |
+| Remark 2.6: Rush-to-fail | fail_terminal_reward ≤ -γC_max | `fail_terminal_reward` in RLConfig |
 | Section 6: CPI | Mixture updates | `UPITrmTrainer._mixed_policy_dist()` |
 | Algorithm 1: UPI-TRM | Main training loop | `rl/upi_trm_trainer.py` |
 
 Equation references in docstrings link to paper equations (e.g., "Equation 10" = finite unrolling bias).
+
+## Theory-Aligned Defaults
+
+The codebase now uses theory-aligned defaults matching the ICML 2026 paper:
+
+- **`C_max = 10.0`**: Maximum checker score (Sudoku scale [0, 10])
+- **`fail_terminal_reward = -10.0`**: Satisfies Remark 2.6 (≤ -γC_max ≈ -9.9)
+- **K-step terminal bootstrap**: Uses V(s_abs) = -C_max instead of 0 (Eq. 12)
+- **`latent_ball_radius = 10.0`**: Forward-invariant projection enabled (Assumption 4.1)
+
+To check theory alignment: `RLConfig.validate_theory_alignment()` or `RLConfig.is_theory_exact()`
 
 ## Shaped Reward Experiments Documentation
 

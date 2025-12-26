@@ -75,18 +75,25 @@ class RLConfig(BaseModel):
     # True (default): Use potential-based reward shaping r = γ·Φ(s') - Φ(s)
     # False: Sparse terminal rewards only (receive checker score at episode end)
     reward_shaping: bool = True
-    
+
+    # === Absorbing state value (Paper Section 3.1, lines 653-656) ===
+    # C_max is the maximum checker score (Φ(s_abs) in paper notation).
+    # The paper defines V^π(s_abs) = -C_max for all policies.
+    # This is used in K-step bootstrapping: when episode terminates, bootstrap
+    # with -C_max instead of 0 (paper Eq. 12, line 677-678).
+    # For Sudoku: C_max = 10.0 (checker returns 0-10 scale)
+    C_max: float = 10.0
+
     # === Terminal rewards (Paper Remark 2.6: Rush-to-fail mitigation) ===
     # These are the r_0 terms in the shaped reward: r = r_0 + γ·Φ(s') - Φ(s)
     #
     # fail_terminal_reward: Applied when episode ends WITHOUT solving.
-    #   Set to -C_max (e.g., -10.0 for Sudoku) to prevent "rush to fail".
-    #   The condition r_fail ≤ -γC_max ensures failing yields non-positive reward.
-    #   Default 0.0 does NOT fully prevent rush-to-fail.
+    #   Paper requires r_fail ≤ -γC_max to prevent "rush to fail".
+    #   Default -10.0 = -C_max for Sudoku, satisfying this condition.
     #
     # solve_terminal_reward: Applied when episode ends WITH solving.
     #   Default 0.0 relies purely on shaping. Can add positive bonus.
-    fail_terminal_reward: float = 0.0
+    fail_terminal_reward: float = -10.0  # Theory-aligned default (= -C_max)
     solve_terminal_reward: float = 0.0
     
     # Target network EMA
@@ -276,15 +283,15 @@ class RLConfig(BaseModel):
             )
         
         # Rush-to-fail mitigation (Remark 2.6)
-        # For Sudoku-like tasks where the checker score is in [0, C_max],
-        # the theory suggests setting fail_terminal_reward <= -gamma * C_max.
-        # We don't know C_max here, but we can at least warn if fail_terminal_reward >= 0.
-        if self.reward_shaping and self.fail_terminal_reward >= 0.0:
-            issues.append(
-                "fail_terminal_reward >= 0 with reward_shaping=True may allow 'rush to fail' "
-                "behaviour, violating Remark 2.6. For theory-aligned configs, set "
-                "fail_terminal_reward to a sufficiently negative value (e.g. -C_max)."
-            )
+        # The theory requires fail_terminal_reward <= -gamma * C_max.
+        # With C_max now explicit, we can check this properly.
+        if self.reward_shaping:
+            required_threshold = -self.gamma * self.C_max
+            if self.fail_terminal_reward > required_threshold:
+                issues.append(
+                    f"fail_terminal_reward={self.fail_terminal_reward} > -γ·C_max={required_threshold:.2f} "
+                    f"may allow 'rush to fail' (Remark 2.6). Set fail_terminal_reward <= {required_threshold:.2f}."
+                )
         
         if warn and issues:
             for issue in issues:
