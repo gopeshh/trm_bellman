@@ -45,10 +45,14 @@ distill_mixture_policy: false   # No distillation (not in theory)
 reward_shaping: true
 shaping_scale: 1.0
 
+# === Absorbing state value (Paper Eq. 12, lines 677-678) ===
+# For 4x4 Sudoku, checker returns [0, 10] scale
+C_max: 10.0
+
 # === Terminal rewards (Paper Remark 2.6) ===
 # Strict fail penalty: -C_max for 4x4 Sudoku (checker range [0, 10])
 solve_terminal_reward: 1.0
-fail_terminal_reward: -12.0     # Strict: prevents rush-to-fail
+fail_terminal_reward: -10.0     # = -C_max, prevents rush-to-fail
 
 # STOP disabled for simplicity
 stop_action_mode: disabled

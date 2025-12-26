@@ -7,7 +7,12 @@
       "Bash(python:*)",
       "Bash(pytest:*)",
       "Bash(buck2 clean:*)",
-      "Bash(buck2 test:*)"
+      "Bash(buck2 test:*)",
+      "Bash(conda info:*)",
+      "Bash(pip3 list:*)",
+      "Bash(source /usr/share/modules/init/bash)",
+      "Bash(module avail pytorch)",
+      "Bash(pip3 show:*)"
     ],
     "deny": [],
     "ask": []
