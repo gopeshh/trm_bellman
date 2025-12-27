@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 class PlanEditEnvConfig:
     """
     Configuration for the plan-space edit environment.
-    
+
     Attributes:
         max_edits: Maximum number of edit steps per episode
         gamma: Discount factor (used for potential-based reward shaping)
@@ -21,19 +21,25 @@ class PlanEditEnvConfig:
         solved_threshold: Checker score that triggers episode termination
         stop_action_mode: How STOP action behaves ("terminal", "noop", "disabled")
         stop_action_penalty: Penalty for choosing STOP in "noop" mode
-        
+
+        UNDO ACTION (IMPLEMENTATION_GUIDELINE Phase 5.4):
+        enable_undo: If True, add UNDO action that reverts to previous plan state.
+            Expands action space: num_actions = seq_len * vocab_size + 2 (STOP + UNDO).
+            UNDO is valid when history > 1 (at least one edit has been made).
+            UNDO pops the last plan from history and returns the previous state.
+
         RUSH-TO-FAIL MITIGATION (Paper Remark 2.6):
         fail_terminal_reward: Terminal reward for failing (not solving) the puzzle.
             Set to a sufficiently negative value (e.g., -C_max) to prevent the
             agent from "rushing to fail" under potential-based shaping.
-            
+
             Theory: With Φ(s_abs) = C_max and shaping r = γΦ(s') - Φ(s),
             the condition r_term_fail ≤ -γC_max ensures that failing from
             any state yields non-positive total reward.
-            
+
             Default is 0.0 (no extra penalty), which may allow rush-to-fail
             in some edge cases. Set to -C_max for theory alignment.
-            
+
         solve_terminal_reward: Terminal reward bonus for solving the puzzle.
             Default is 0.0 (rely on shaping). Can be positive for extra incentive.
     """
@@ -46,6 +52,8 @@ class PlanEditEnvConfig:
     # STOP action behavior (inherited from RLConfig)
     stop_action_mode: str = "noop"  # "terminal", "noop", "disabled"
     stop_action_penalty: float = -0.1
+    # UNDO action support (Phase 5.4)
+    enable_undo: bool = False
     # Terminal rewards (Paper Remark 2.6: rush-to-fail mitigation)
     fail_terminal_reward: float = 0.0   # Set to -C_max for theory alignment
     solve_terminal_reward: float = 0.0  # Optional bonus for solving
@@ -55,34 +63,41 @@ class PlanEditEnv:
     """
     Simple plan-space meta–MDP:
       - State: (x, y), where x is an instance and y is a plan / candidate solution.
-      - Actions: edit actions over y plus a special STOP action.
+      - Actions: edit actions over y plus special STOP action (and optional UNDO).
       - Reward: derived from a checker c(x, y) with potential-based shaping.
-      
+
+    UNDO ACTION (Phase 5.4):
+      When config.enable_undo=True:
+      - Action space expands: num_actions = seq_len * vocab_size + 2 (STOP + UNDO)
+      - UNDO reverts to the previous plan state (pops from edit history)
+      - UNDO is masked out when history has only 1 entry (nothing to undo)
+      - This allows the agent to explore without permanently committing to edits
+
     STOP Action Modes:
       - "terminal": STOP ends the episode immediately (standard RL)
       - "noop": STOP is treated as no-op, episode continues (prevents STOP collapse)
       - "disabled": STOP action is masked out and cannot be selected
-    
+
     STOP + REWARD SHAPING INTERACTION (Issue 7):
         In stop_action_mode="noop" with reward_shaping=True, STOP yields:
             r = stop_action_penalty + (γ * Φ(y) - Φ(y))
               = stop_action_penalty + (γ - 1) * Φ(y)
-        
+
         Since γ < 1, the term (γ - 1) * Φ(y) is NEGATIVE when Φ(y) > 0.
         Near high-scoring states (large Φ), STOP is strongly penalized.
         This is intentional: it discourages stopping when progress is possible.
-    
+
     DEVIATION FROM PAPER (Issue 6 - Absorbing State):
         The ICML paper defines an explicit absorbing state s_abs with potential
         Φ(s_abs) = C_max. Terminal transitions get:
             r = r_term(x, y) + γ * C_max - c(x, y)
-        
+
         This implementation does NOT model an explicit s_abs node. Instead:
         - Episodes halt directly at the final plan (x, y_final)
         - phi_new = checker(x, y_final) as usual (no separate C_max)
         - Terminal rewards are controlled by fail_terminal_reward and
           solve_terminal_reward in PlanEditEnvConfig
-        
+
         This is behaviorally equivalent for most experiments, but readers
         comparing code to paper notation should note the difference.
     """
@@ -107,7 +122,7 @@ class PlanEditEnv:
         self.x: Any = None
         self.y: Any = None
         self.done: bool = False
-        
+
         # Store original inputs to identify "given" cells that shouldn't be edited
         self._original_inputs: Optional[torch.Tensor] = None
         self._action_mask: Optional[torch.Tensor] = None
@@ -116,7 +131,12 @@ class PlanEditEnv:
         # Action space: caller is responsible for interpreting action indices.
         # We require STOP to be the last action index by convention.
         self.stop_action_id: Optional[int] = None
-        
+
+        # UNDO action support (Phase 5.4)
+        self._enable_undo = getattr(config, "enable_undo", False)
+        self.undo_action_id: Optional[int] = None
+        self._edit_history: List[torch.Tensor] = []  # Stack of plan states for UNDO
+
         # STOP action behavior
         self._stop_mode = getattr(config, "stop_action_mode", "noop")
         self._stop_penalty_value = getattr(config, "stop_action_penalty", -0.1)
@@ -124,9 +144,21 @@ class PlanEditEnv:
     def set_stop_action_id(self, stop_id: int) -> None:
         """
         Configure which discrete action index corresponds to STOP.
-        """
 
+        If UNDO is enabled, UNDO action is assumed to be at stop_id + 1.
+        """
         self.stop_action_id = stop_id
+
+        if self._enable_undo:
+            self.undo_action_id = stop_id + 1
+
+    def set_undo_action_id(self, undo_id: int) -> None:
+        """
+        Explicitly configure which action index corresponds to UNDO.
+
+        Only needed if using non-standard action layout.
+        """
+        self.undo_action_id = undo_id
 
     def reset(self, idx: Optional[int] = None) -> Tuple[Any, Any]:
         """
@@ -161,10 +193,17 @@ class PlanEditEnv:
 
         self.step_count = 0
         self.done = False
-        
+
+        # Initialize edit history for UNDO support
+        if self._enable_undo:
+            # Store initial plan as first entry (cannot undo past this)
+            self._edit_history = [self.y.clone() if torch.is_tensor(self.y) else torch.as_tensor(self.y)]
+        else:
+            self._edit_history = []
+
         # Compute action mask to protect "given" cells (non-zero in original inputs)
         self._compute_action_mask()
-        
+
         return self.x, self.y
     
     def _compute_action_mask(self) -> None:
@@ -242,7 +281,21 @@ class PlanEditEnv:
             mask[self.stop_action_id] = False
         else:
             mask[self.stop_action_id] = True
-        
+
+        # Handle UNDO action if enabled
+        if self._enable_undo and self.undo_action_id is not None:
+            # Expand mask to include UNDO action if needed
+            if len(mask) <= self.undo_action_id:
+                # Expand mask to include UNDO
+                new_mask = torch.ones(self.undo_action_id + 1, dtype=torch.bool, device=mask.device)
+                new_mask[:len(mask)] = mask
+                mask = new_mask
+
+            # UNDO is valid only when there's something to undo (history > 1)
+            # At reset, history has exactly 1 entry (initial state), so UNDO is invalid
+            can_undo = len(self._edit_history) > 1
+            mask[self.undo_action_id] = can_undo
+
         self._action_mask = mask
     
     def get_action_mask(self) -> Optional[torch.Tensor]:
@@ -457,11 +510,16 @@ class PlanEditEnv:
 
         Action decoding:
           - STOP action id (set via set_stop_action_id) terminates the episode.
+          - UNDO action id (if enabled) reverts to previous plan state.
           - Other actions represent (position, token) edits using a flattened index.
         """
 
         if action == self.stop_action_id:
             return y
+
+        # Handle UNDO action
+        if self._enable_undo and action == self.undo_action_id:
+            return self._apply_undo(y)
 
         vocab_size = self.vocab_size
         if vocab_size is None:
@@ -492,16 +550,44 @@ class PlanEditEnv:
 
         return new_flat.view_as(plan_tensor)
 
+    def _apply_undo(self, y: Any) -> Any:
+        """
+        Apply UNDO action by reverting to the previous plan state.
+
+        UNDO pops the last entry from the edit history and returns the previous state.
+        If history has only 1 entry (initial state), returns the current plan (no-op).
+
+        Args:
+            y: Current plan (for fallback if can't undo)
+
+        Returns:
+            Previous plan state from history, or current plan if can't undo.
+        """
+        if len(self._edit_history) > 1:
+            # Pop the current state and return the previous one
+            self._edit_history.pop()
+            return self._edit_history[-1].clone()
+        else:
+            # Can't undo past initial state - return current plan
+            if torch.is_tensor(y):
+                return y.clone()
+            return torch.as_tensor(y)
+
     def step(self, action: int):
         """
         Take a discrete action in the plan-space MDP.
-        
+
         STOP action behavior depends on config.stop_action_mode:
         - "terminal": STOP ends the episode immediately
         - "noop": STOP is a no-op (plan unchanged), episode continues
         - "disabled": STOP should have been masked, but if received, treated as noop
-        
-        Non-STOP actions apply edits until max_edits or checker termination.
+
+        UNDO action (if enabled):
+        - Reverts to the previous plan state from history
+        - Valid only when there's something to undo (history > 1)
+        - No termination, episode continues
+
+        Non-STOP/UNDO actions apply edits until max_edits or checker termination.
         """
 
         assert self.stop_action_id is not None, "stop_action_id must be set before calling step()"
@@ -511,12 +597,13 @@ class PlanEditEnv:
         terminated_by_stop = False
         terminated_by_budget = False
         terminated_by_solved = False
+        is_undo_action = False
 
         self.step_count += 1
-        
+
         if action == self.stop_action_id:
             terminated_by_stop = True
-            
+
             if self._stop_mode == "terminal":
                 # Standard RL: STOP terminates the episode
                 y_next = self.y
@@ -530,11 +617,21 @@ class PlanEditEnv:
                 done = False
                 done_reason = None
                 self._stop_penalty = self._stop_penalty_value
-        else:
-            # Non-stop action: apply edit
+        elif self._enable_undo and action == self.undo_action_id:
+            # UNDO action: revert to previous plan state
+            is_undo_action = True
             self._stop_penalty = 0.0
             y_next = self.apply_edit(self.y, action, self.x)
             done = False
+        else:
+            # Non-stop, non-undo action: apply edit
+            self._stop_penalty = 0.0
+            y_next = self.apply_edit(self.y, action, self.x)
+            done = False
+
+            # Push new state to history for UNDO support
+            if self._enable_undo:
+                self._edit_history.append(y_next.clone() if torch.is_tensor(y_next) else torch.as_tensor(y_next))
 
         pending_budget_termination = False
         if not done and self.step_count >= self.config.max_edits:
@@ -594,11 +691,17 @@ class PlanEditEnv:
             "terminated_by_stop": terminated_by_stop,
             "terminated_by_budget": terminated_by_budget,
             "terminated_by_solved": terminated_by_solved,
+            "is_undo_action": is_undo_action,
             "phi_old": phi_old,
             "phi_new": phi_new,
         }
 
         self.y = y_next
         self.done = done
+
+        # Update action mask after state change (important for UNDO validity)
+        if self._enable_undo and not done:
+            self._compute_action_mask()
+
         return (self.x, self.y), r, done, info
 

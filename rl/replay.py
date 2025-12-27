@@ -5,9 +5,9 @@ This module provides the replay buffer infrastructure for storing and sampling
 transitions during RL training.
 """
 
-from collections import deque
+from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Deque, Dict, List, Union
+from typing import Deque, Dict, List, Optional, Tuple, Union
 
 import torch
 
@@ -95,4 +95,159 @@ class ReplayBuffer:
     def is_ready(self, batch_size: int) -> bool:
         """Check if buffer has enough transitions for sampling."""
         return len(self.storage) >= batch_size
+
+    def sample_sequences(
+        self,
+        batch_size: int,
+        K: int,
+        allow_overlap: bool = True,
+    ) -> List[List[Transition]]:
+        """
+        Sample K-step contiguous sequences for multi-step returns.
+
+        This method groups transitions by episode_id, then samples K consecutive
+        transitions from the same episode. This is useful for computing K-step
+        bootstrapped targets or n-step returns.
+
+        Args:
+            batch_size: Number of K-step sequences to sample
+            K: Length of each sequence
+            allow_overlap: If True, sampled sequences may overlap within episodes.
+                          If False, sequences are sampled without replacement
+                          (requires more data).
+
+        Returns:
+            List of K-step sequences, where each sequence is a list of K Transitions.
+            If an episode has fewer than K remaining transitions, the sequence is
+            truncated (will have fewer than K transitions).
+
+        Raises:
+            AssertionError: If buffer doesn't have enough valid sequences
+
+        Example:
+            >>> buffer = ReplayBuffer(10000)
+            >>> # ... add transitions ...
+            >>> sequences = buffer.sample_sequences(batch_size=32, K=5)
+            >>> for seq in sequences:
+            ...     # seq is a list of up to 5 consecutive transitions
+            ...     rewards = [t.reward for t in seq]
+        """
+        # Group transitions by episode_id
+        episode_groups: Dict[int, List[Tuple[int, int]]] = defaultdict(list)
+        for buffer_idx, transition in enumerate(self.storage):
+            episode_groups[transition.episode_id].append(
+                (buffer_idx, transition.timestep)
+            )
+
+        # Sort each episode by timestep
+        for ep_id in episode_groups:
+            episode_groups[ep_id].sort(key=lambda x: x[1])
+
+        # Build list of valid starting indices for K-step sequences
+        # A valid starting index is one where we can get at least 1 transition
+        # (we allow truncated sequences at episode boundaries)
+        valid_starts: List[Tuple[int, int, int]] = []  # (buffer_idx, ep_id, ep_offset)
+
+        for ep_id, indices in episode_groups.items():
+            for ep_offset, (buffer_idx, timestep) in enumerate(indices):
+                # Every position is a valid start (may be truncated)
+                valid_starts.append((buffer_idx, ep_id, ep_offset))
+
+        if len(valid_starts) < batch_size:
+            raise AssertionError(
+                f"Not enough valid sequence starts: {len(valid_starts)} < {batch_size}"
+            )
+
+        # Sample starting positions
+        if allow_overlap:
+            # Sample with replacement
+            sample_indices = torch.randint(
+                low=0, high=len(valid_starts), size=(batch_size,)
+            ).tolist()
+        else:
+            # Sample without replacement
+            perm = torch.randperm(len(valid_starts))[:batch_size].tolist()
+            sample_indices = perm
+
+        # Extract K-step sequences
+        sequences = []
+        for sample_idx in sample_indices:
+            buffer_idx, ep_id, ep_offset = valid_starts[sample_idx]
+            ep_indices = episode_groups[ep_id]
+
+            # Get K consecutive transitions (or fewer if episode ends)
+            seq = []
+            for k in range(K):
+                seq_offset = ep_offset + k
+                if seq_offset >= len(ep_indices):
+                    # Episode ended, truncate sequence
+                    break
+
+                buf_idx, _ = ep_indices[seq_offset]
+                seq.append(self.storage[buf_idx])
+
+                # Stop if this transition is terminal
+                if self.storage[buf_idx].done:
+                    break
+
+            sequences.append(seq)
+
+        return sequences
+
+    def sample_full_episodes(
+        self,
+        num_episodes: int,
+    ) -> List[List[Transition]]:
+        """
+        Sample complete episodes from the buffer.
+
+        Useful for on-policy methods or episode-level analysis.
+
+        Args:
+            num_episodes: Number of episodes to sample
+
+        Returns:
+            List of episodes, where each episode is a list of Transitions
+            ordered by timestep.
+
+        Raises:
+            AssertionError: If buffer doesn't have enough complete episodes
+        """
+        # Group by episode_id
+        episode_groups: Dict[int, List[Tuple[int, int]]] = defaultdict(list)
+        for buffer_idx, transition in enumerate(self.storage):
+            episode_groups[transition.episode_id].append(
+                (buffer_idx, transition.timestep)
+            )
+
+        # Find complete episodes (those with a terminal transition)
+        complete_episodes: List[int] = []
+        for ep_id, indices in episode_groups.items():
+            # Sort by timestep
+            indices.sort(key=lambda x: x[1])
+            # Check if last transition is terminal
+            last_buf_idx = indices[-1][0]
+            if self.storage[last_buf_idx].done:
+                complete_episodes.append(ep_id)
+
+        if len(complete_episodes) < num_episodes:
+            raise AssertionError(
+                f"Not enough complete episodes: {len(complete_episodes)} < {num_episodes}"
+            )
+
+        # Sample episodes
+        sample_indices = torch.randint(
+            low=0, high=len(complete_episodes), size=(num_episodes,)
+        ).tolist()
+
+        episodes = []
+        for idx in sample_indices:
+            ep_id = complete_episodes[idx]
+            indices = episode_groups[ep_id]
+            indices.sort(key=lambda x: x[1])
+
+            episode = [self.storage[buf_idx] for buf_idx, _ in indices]
+            episodes.append(episode)
+
+        return episodes
 

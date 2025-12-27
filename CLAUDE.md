@@ -29,13 +29,26 @@ UPI-TRM (Unrolled Policy Iteration for Tiny Recursive Models) extends the Tiny R
 - Inner loop: Latent state recursion (z^(0) → z^(n)) for reasoning
 - Outer loop: Plan editing via discrete actions in a meta-MDP
 
-**Project Status** (as of shaped reward implementation):
+**Project Status** (as of baseline implementation):
 - ✅ Task 1: Shaped-reward Sudoku infrastructure complete
   - 9 configs created (2 main + 7 ablations)
   - All configs validated
   - Scripts ready: `run_shaped_reward_experiments.sh`, `verify_configs.py`
-- 🔄 Task 2: Run ablation experiments (ready to execute)
-- 📋 Pending: Four-dial sweeps, unrolling bias measurements, paper revisions
+- ✅ Task 2: Baseline algorithms (PPO, A2C) and NoRecursionEncoder
+  - `rl/algos/ppo.py` - PPO trainer for comparison
+  - `rl/algos/a2c.py` - A2C trainer for comparison
+  - `models/norec_encoder.py` - MLP/Transformer baseline without TRM recursion
+  - Configs in `configs/baselines/`
+- ✅ Task 3: Paper figure/table generation scripts
+  - `scripts/aggregate_runs.py` - WandB data export
+  - `scripts/plot_learning_curves.py` - ICML-ready learning curves
+  - `scripts/plot_ablations.py` - Ablation bar charts
+  - `scripts/make_tables.py` - LaTeX table generation
+  - `scripts/stats_tests.py` - Statistical significance tests
+- ✅ Task 4: UNDO action and curriculum training
+  - UNDO action in `rl/envs/plan_edit_env.py` (enable with `enable_undo: true`)
+  - `scripts/run_curriculum.py` - 4x4 → 9x9 curriculum training
+- 🔄 Task 5: Run experiments and generate paper figures
 - 📚 Documentation: See `DOCUMENTATION_INDEX.md` for navigation guide
 
 ## Essential Commands
@@ -151,6 +164,38 @@ python upi_trm_train.py \
 - ✅ Ablations removing: (i) contraction, (ii) exact centering, (iii) conservative mixture
 - ⏭️ Run experiments and collect results for paper Section 6
 
+**Baseline Algorithms (PPO, A2C):**
+```bash
+# Note: Baseline trainers (PPO, A2C) require integration with upi_trm_train.py
+# The trainers are in rl/algos/ and configs in configs/baselines/
+
+# Available baseline configs:
+# - configs/baselines/ppo_trm_sudoku.yaml   (PPO + TRM backbone)
+# - configs/baselines/a2c_trm_sudoku.yaml   (A2C + TRM backbone)
+# - configs/baselines/ppo_norec_sudoku.yaml (PPO + MLP encoder)
+# - configs/baselines/a2c_norec_sudoku.yaml (A2C + MLP encoder)
+```
+
+**UNDO Action Variant:**
+```bash
+# Enable UNDO action that lets agent revert to previous plan states
+python upi_trm_train.py \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
+    --config configs/rl_sudoku_undo.yaml \
+    --seed 42
+```
+
+**Curriculum Training (4×4 → 9×9):**
+```bash
+# Two-stage curriculum: start on 4×4, transfer to 9×9
+python scripts/run_curriculum.py \
+    --stage1-dataset data/sudoku-4x4-ultra-easy \
+    --stage2-dataset data/sudoku-extreme-1k-aug-1000 \
+    --stage1-steps 2000 \
+    --total-steps 10000 \
+    --config configs/rl_sudoku_shaped_theory_exact.yaml
+```
+
 **Imitation learning pretraining:**
 ```bash
 python imitation_train.py --dataset-paths data/sudoku-4x4-ultra-easy --num-epochs 100
@@ -215,6 +260,38 @@ python upi_trm_train.py \
     --checkpoint-dir checkpoints/rl_run \
     --save-interval 1000 \
     --train-steps 10000
+```
+
+### Paper Figure Generation (ICML 2026)
+
+```bash
+# Step 1: Aggregate runs from WandB
+python scripts/aggregate_runs.py \
+    --project UPI-TRM-ICML-Shaped-Rewards \
+    --output artifacts/summary.parquet \
+    --compute-stats
+
+# Step 2: Generate learning curve figures
+python scripts/plot_learning_curves.py \
+    --input artifacts/summary.parquet \
+    --output paper/figures/
+
+# Step 3: Generate ablation bar chart
+python scripts/plot_ablations.py \
+    --input artifacts/summary.parquet \
+    --output paper/figures/ablation_bar_chart.pdf
+
+# Step 4: Generate LaTeX tables
+python scripts/make_tables.py \
+    --input artifacts/summary.parquet \
+    --output paper/tables/
+
+# Step 5: Run statistical significance tests
+python scripts/stats_tests.py \
+    --input artifacts/summary.parquet \
+    --output paper/tables/significance.tex \
+    --test bootstrap \
+    --alpha 0.05
 ```
 
 ## Architecture Overview

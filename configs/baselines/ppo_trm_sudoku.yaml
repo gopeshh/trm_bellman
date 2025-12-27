@@ -1,0 +1,109 @@
+# PPO Baseline with TRM Backbone for Sudoku
+#
+# This config uses PPO algorithm with the TRM latent recursion backbone.
+# Tests whether UPI-TRM's improvement comes from the algorithm vs PPO.
+#
+# Key differences from UPI-TRM:
+# - Uses clipped surrogate objective instead of CPI mixture
+# - Multiple epochs over collected data
+# - Standard GAE without exact baseline summation
+# - No theory-exact features
+
+# ===================================================================
+# PPO-SPECIFIC PARAMETERS
+# ===================================================================
+algorithm: "ppo"  # Selects PPO trainer instead of UPI-TRM
+
+# PPO hyperparameters
+ppo_clip_eps: 0.2  # Clipping epsilon for policy ratio
+ppo_epochs: 4  # Number of epochs per PPO update
+ppo_minibatch_size: 64  # Minibatch size within epochs
+vf_coef: 0.5  # Value function loss coefficient
+
+# PPO rollout collection
+ppo_num_steps: 128  # Steps before update (trajectory length)
+normalize_advantages: true  # Normalize advantages per minibatch
+clip_vf_loss: false  # Optional: clip value function loss
+
+# ===================================================================
+# CORE RL PARAMETERS
+# ===================================================================
+gamma: 0.99
+inner_unroll_n: 4  # Use TRM latent recursion
+max_edits: 120
+num_train_steps: 20000
+
+# ===================================================================
+# REWARD CONFIGURATION
+# ===================================================================
+reward_shaping: true
+fail_terminal_reward: -10.0
+solve_terminal_reward: 0.0
+
+# ===================================================================
+# MODEL ARCHITECTURE
+# ===================================================================
+model_type: "trm"  # Use TRM backbone (not no-recursion)
+enable_contraction: true  # Keep Lipschitz constraints
+target_Lz: 0.9
+target_Lv: 5.0
+latent_ball_radius: 10.0
+
+# ===================================================================
+# OPTIMIZATION
+# ===================================================================
+policy_lr: 3.0e-4
+value_lr: 1.0e-4  # Lower for value function stability
+entropy_coef: 0.01
+max_grad_norm: 0.5  # Gradient clipping norm
+
+# LR schedule
+lr_schedule: "cosine"
+lr_warmup_steps: 500
+lr_min_factor: 0.1
+
+# ===================================================================
+# GAE PARAMETERS
+# ===================================================================
+use_gae: true
+gae_lambda: 0.95
+
+# ===================================================================
+# TRAINING
+# ===================================================================
+batch_size: 256  # Total batch size for updates
+rollout_episodes_per_step: 4
+
+# ===================================================================
+# LATENT MODE
+# ===================================================================
+episodic_latent: true  # Reset latent at each step
+
+# ===================================================================
+# STOP ACTION
+# ===================================================================
+stop_action_mode: "noop"
+stop_action_penalty: -0.1
+
+# ===================================================================
+# LOGGING & EVALUATION
+# ===================================================================
+log_interval: 100
+eval_interval: 500
+eval_num_episodes: 50
+use_tqdm: false
+track_theory_metrics: false  # PPO doesn't enforce theory
+
+# ===================================================================
+# TASK CONFIGURATION
+# ===================================================================
+task_name: "sudoku"
+solved_threshold: 10.0
+
+# ===================================================================
+# DISABLED THEORY FEATURES
+# ===================================================================
+exact_baseline_summation: false  # PPO uses standard advantages
+exact_k_step_targets: false  # PPO uses GAE
+theory_exact_mixture: false  # PPO uses clipping not mixture
+batch_centered_advantage: false  # PPO normalizes per minibatch
