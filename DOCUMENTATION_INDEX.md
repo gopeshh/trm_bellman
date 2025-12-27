@@ -61,16 +61,23 @@ This index helps you quickly find the right documentation for your ICML 2026 sub
 
 ### Other Documentation
 
-5. **`README.md`** (main repository README)
+5. **`docs/BASELINE_IMPLEMENTATION.md`** (NEW - Dec 27, 2024)
+   - PPO/A2C baseline trainers
+   - NoRecursionEncoder architecture
+   - CLI flags: `--baseline`, `--backbone`
+   - Experimental comparison matrix
+   - Usage examples for running baselines
+
+6. **`README.md`** (main repository README)
    - Full UPI-TRM documentation
    - Installation instructions
    - All training modes (not just shaped rewards)
 
-6. **`docs/rl_upi_trm.md`**
+7. **`docs/rl_upi_trm.md`**
    - Paper section → code file mapping
    - Implementation guide
 
-7. **`CLAUDE.md`**
+8. **`CLAUDE.md`**
    - Guide for future Claude Code sessions
    - Essential commands
    - Architecture overview

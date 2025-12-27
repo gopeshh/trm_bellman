@@ -166,10 +166,35 @@ python upi_trm_train.py \
 
 **Baseline Algorithms (PPO, A2C):**
 ```bash
-# Note: Baseline trainers (PPO, A2C) require integration with upi_trm_train.py
-# The trainers are in rl/algos/ and configs in configs/baselines/
+# Use --baseline flag to select algorithm and --backbone for model architecture
+# Available baselines: ppo, a2c
+# Available backbones: trm (default), norec-mlp, norec-transformer
 
-# Available baseline configs:
+# PPO with MLP backbone (simplest baseline)
+python upi_trm_train.py \
+    --baseline ppo \
+    --backbone norec-mlp \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
+    --train-steps 10000 \
+    --seed 42
+
+# A2C with Transformer backbone
+python upi_trm_train.py \
+    --baseline a2c \
+    --backbone norec-transformer \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
+    --train-steps 10000 \
+    --seed 42
+
+# PPO with TRM backbone (tests if improvement comes from algorithm vs architecture)
+python upi_trm_train.py \
+    --baseline ppo \
+    --backbone trm \
+    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
+    --train-steps 10000 \
+    --seed 42
+
+# Available baseline configs (alternative to CLI flags):
 # - configs/baselines/ppo_trm_sudoku.yaml   (PPO + TRM backbone)
 # - configs/baselines/a2c_trm_sudoku.yaml   (A2C + TRM backbone)
 # - configs/baselines/ppo_norec_sudoku.yaml (PPO + MLP encoder)

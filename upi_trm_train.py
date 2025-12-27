@@ -20,10 +20,13 @@ except ImportError:  # pragma: no cover
 
 from puzzle_dataset import PuzzleDataset, PuzzleDatasetConfig  # type: ignore
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+from models.norec_encoder import NoRecursionEncoder, NoRecEncoderConfig
 from models.sparse_embedding import CastedSparseEmbeddingSignSGD_Distributed
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.upi_trm_trainer import UPITrmTrainer
+from rl.algos.ppo import PPOTrainer, PPOConfig
+from rl.algos.a2c import A2CTrainer, A2CConfig
 from utils.seeding import set_global_seed
 
 
@@ -142,15 +145,23 @@ def save_checkpoint(
     checkpoint = {
         "step": step,
         "model_state_dict": model.state_dict(),
-        "value_optimizer_state_dict": trainer.value_opt.state_dict(),
-        "policy_optimizer_state_dict": trainer.policy_opt.state_dict(),
     }
-    
+
+    # Save optimizer states - different trainers have different optimizer structures
+    if hasattr(trainer, 'value_opt') and hasattr(trainer, 'policy_opt'):
+        # UPITrmTrainer has separate value and policy optimizers
+        checkpoint["value_optimizer_state_dict"] = trainer.value_opt.state_dict()
+        checkpoint["policy_optimizer_state_dict"] = trainer.policy_opt.state_dict()
+    elif hasattr(trainer, 'optimizer'):
+        # PPO/A2C have a single combined optimizer
+        checkpoint["optimizer_state_dict"] = trainer.optimizer.state_dict()
+
     if puzzle_emb_optimizer is not None:
         checkpoint["puzzle_emb_optimizer_state_dict"] = puzzle_emb_optimizer.state_dict()
-    
-    # Save replay buffer size (not contents, too large)
-    checkpoint["replay_buffer_size"] = len(trainer.replay)
+
+    # Save replay buffer size (not contents, too large) if trainer has replay buffer
+    if hasattr(trainer, 'replay'):
+        checkpoint["replay_buffer_size"] = len(trainer.replay)
     
     path = os.path.join(checkpoint_dir, f"rl_checkpoint_step_{step}.pt")
     torch.save(checkpoint, path)
@@ -350,6 +361,22 @@ def parse_args():
     parser.add_argument("--tqdm", action="store_true", help="Enable tqdm progress bar (disabled by default).")
     parser.add_argument("--seed", type=int, default=None, help="Optional global random seed.")
     parser.add_argument("--debug-checks", action="store_true", help="Enable additional debug assertions/prints.")
+    # Baseline algorithm selection
+    parser.add_argument(
+        "--baseline",
+        type=str,
+        default=None,
+        choices=["ppo", "a2c", None],
+        help="Use baseline algorithm instead of UPI-TRM. Options: ppo, a2c. Default: None (use UPI-TRM).",
+    )
+    parser.add_argument(
+        "--backbone",
+        type=str,
+        default="trm",
+        choices=["trm", "norec-mlp", "norec-transformer"],
+        help="Model backbone. Options: trm (default), norec-mlp, norec-transformer. "
+             "norec-* use NoRecursionEncoder (simpler baselines without latent recursion).",
+    )
     parser.add_argument(
         "--config",
         type=str,
@@ -613,26 +640,95 @@ def main():
         rl_latent_ball_radius=getattr(rl_cfg, "latent_ball_radius", 0.0),
     )
 
-    model = TinyRecursiveReasoningModel_ACTV1(trm_cfg_dict)
+    # === Model Selection ===
+    # Support for different backbones: TRM (default) or NoRecursionEncoder (simpler baselines)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
+    if args.backbone == "trm":
+        # Standard TRM backbone
+        model = TinyRecursiveReasoningModel_ACTV1(trm_cfg_dict)
+        print(f"[INFO] Using TRM backbone (hidden={hidden_size}, H={args.h_cycles}, L={args.l_cycles})")
+    elif args.backbone in ("norec-mlp", "norec-transformer"):
+        # NoRecursionEncoder baseline (no latent recursion)
+        encoder_type = "mlp" if args.backbone == "norec-mlp" else "transformer"
+        norec_cfg = NoRecEncoderConfig(
+            vocab_size=vocab_size,
+            seq_len=seq_len,
+            hidden_dim=hidden_size,
+            num_layers=2,
+            encoder_type=encoder_type,
+            rl_num_actions=rl_num_actions,
+        )
+        model = NoRecursionEncoder(norec_cfg)
+        print(f"[INFO] Using NoRecursionEncoder backbone (type={encoder_type}, hidden={hidden_size})")
+    else:
+        raise ValueError(f"Unknown backbone: {args.backbone}")
+
     # === Load pretrained checkpoint if provided ===
     if args.load_checkpoint is not None:
         load_checkpoint(model, args.load_checkpoint, device=str(device), strict=False)
-    
+
     # Debug: verify policy head initialization
-    if model.edit_policy is not None:
+    if hasattr(model, 'edit_policy') and model.edit_policy is not None:
         stop_bias = model.edit_policy.mlp[-1].bias[-1].item()
         print(f"[DEBUG] Policy head STOP bias: {stop_bias:.2f} (should be 0.0 for uniform init)")
-    
-    # Log puzzle embedding status
-    if puzzle_emb_ndim > 0:
-        print(f"[INFO] Puzzle embeddings ENABLED: dim={puzzle_emb_ndim}, len={puzzle_emb_len}")
-        print(f"[INFO] Puzzle embedding LR: {args.puzzle_emb_lr}, weight_decay: {args.puzzle_emb_weight_decay}")
+
+    # Log puzzle embedding status (only for TRM backbone)
+    if args.backbone == "trm":
+        if puzzle_emb_ndim > 0:
+            print(f"[INFO] Puzzle embeddings ENABLED: dim={puzzle_emb_ndim}, len={puzzle_emb_len}")
+            print(f"[INFO] Puzzle embedding LR: {args.puzzle_emb_lr}, weight_decay: {args.puzzle_emb_weight_decay}")
+        else:
+            print("[INFO] Puzzle embeddings DISABLED (set --puzzle-emb-ndim > 0 to enable)")
+
+    # === Trainer Selection ===
+    # Support for different algorithms: UPI-TRM (default), PPO, or A2C
+    if args.baseline is None:
+        # Default: UPI-TRM (theory-aligned algorithm)
+        trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
+        print(f"[INFO] Using UPI-TRM algorithm (K={rl_cfg.K}, inner_n={rl_cfg.inner_unroll_n})")
+    elif args.baseline == "ppo":
+        # PPO baseline
+        ppo_cfg = PPOConfig(
+            clip_eps=0.2,
+            vf_coef=0.5,
+            entropy_coef=rl_cfg.entropy_coef,
+            max_grad_norm=0.5,
+            num_steps=128,  # Standard PPO rollout length
+            num_epochs=4,
+            num_minibatches=4,
+            gamma=rl_cfg.gamma,
+            gae_lambda=0.95,
+            normalize_advantages=True,
+            policy_lr=rl_cfg.policy_lr,
+            value_lr=rl_cfg.value_lr,
+            inner_unroll_n=rl_cfg.inner_unroll_n,
+            log_interval=rl_cfg.log_interval,
+            eval_interval=rl_cfg.eval_interval,
+            num_train_steps=rl_cfg.num_train_steps,
+        )
+        trainer = PPOTrainer(model=model, env=env, config=ppo_cfg, device=device)
+        print(f"[INFO] Using PPO baseline (clip_eps={ppo_cfg.clip_eps}, epochs={ppo_cfg.num_epochs})")
+    elif args.baseline == "a2c":
+        # A2C baseline
+        a2c_cfg = A2CConfig(
+            vf_coef=0.5,
+            entropy_coef=rl_cfg.entropy_coef,
+            max_grad_norm=0.5,
+            num_steps=5,  # Standard A2C uses small rollouts
+            gamma=rl_cfg.gamma,
+            use_gae=True,
+            gae_lambda=0.95,
+            lr=rl_cfg.policy_lr,
+            inner_unroll_n=rl_cfg.inner_unroll_n,
+            log_interval=rl_cfg.log_interval,
+            eval_interval=rl_cfg.eval_interval,
+            num_train_steps=rl_cfg.num_train_steps,
+        )
+        trainer = A2CTrainer(model=model, env=env, config=a2c_cfg, device=device)
+        print(f"[INFO] Using A2C baseline (num_steps={a2c_cfg.num_steps})")
     else:
-        print("[INFO] Puzzle embeddings DISABLED (set --puzzle-emb-ndim > 0 to enable)")
-    
-    trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
+        raise ValueError(f"Unknown baseline algorithm: {args.baseline}")
     
     # === Setup puzzle embedding optimizer (separate from main optimizer) ===
     puzzle_emb_optimizer = None
@@ -661,57 +757,67 @@ def main():
             dataset_name = os.path.basename(args.dataset_paths[0])
         checkpoint_dir = os.path.join("checkpoints", f"rl_{dataset_name}_seed{args.seed or 0}")
         print(f"[INFO] Checkpoint directory: {checkpoint_dir}")
-    
+
     # === Set checker function for exact baseline computation (Theorem 5.9) ===
-    # When exact_baseline_summation=True, the trainer uses this to compute
-    # E_{a ~ π}[Q̂(s,a)] via exact summation over all discrete actions,
-    # enabling the O(α·ε_A) bound instead of naive O(ε_A).
-    trainer.set_checker_fn(checker_fn)
-    
-    # === Validate theory alignment and show warnings ===
-    print("\n" + "="*60)
-    print("UPI-TRM THEORY ALIGNMENT CHECK")
-    print("="*60)
-    validation = rl_cfg.validate_theory_alignment(warn=False)  # Get results without duplicate warnings
-    
-    if validation["theory_aligned"]:
-        print("✓ Configuration aligns with theoretical guarantees")
+    # Only applies to UPI-TRM trainer
+    if hasattr(trainer, 'set_checker_fn'):
+        # When exact_baseline_summation=True, the trainer uses this to compute
+        # E_{a ~ π}[Q̂(s,a)] via exact summation over all discrete actions,
+        # enabling the O(α·ε_A) bound instead of naive O(ε_A).
+        trainer.set_checker_fn(checker_fn)
+
+    # === Validate theory alignment and show warnings (UPI-TRM only) ===
+    if args.baseline is None:
+        print("\n" + "="*60)
+        print("UPI-TRM THEORY ALIGNMENT CHECK")
+        print("="*60)
+        validation = rl_cfg.validate_theory_alignment(warn=False)  # Get results without duplicate warnings
+
+        if validation["theory_aligned"]:
+            print("✓ Configuration aligns with theoretical guarantees")
+        else:
+            print("⚠ Configuration has theory gaps:")
+            for issue in validation["issues"]:
+                print(f"  • {issue}")
+
+        print(f"\nTheory status:")
+        print(f"  Forward-invariant projection: {'✓' if validation['forward_invariant'] else '✗'}")
+        print(f"  Contraction enforced (L_z < 1): {'✓' if validation['contraction_enforced'] else '✗'}")
+        print(f"  Exact baseline (Thm 5.9): {'✓' if validation['exact_baseline'] else '✗'}")
+        print(f"  Distillation (not in theory): {'✗ ENABLED' if validation['distillation_used'] else '✓ disabled'}")
+        print(f"\nIs theory-exact: {rl_cfg.is_theory_exact()}")
+        print("="*60 + "\n")
+
+        print("UPI-TRM theoretical dials:")
+        print(f"  L_z target (rl_cfg.target_Lz): {rl_cfg.target_Lz}")
+        print(f"  L_V target (rl_cfg.target_Lv): {rl_cfg.target_Lv}")
+        print(f"  Inner unroll n (rl_cfg.inner_unroll_n): {rl_cfg.inner_unroll_n}")
+        print(f"  K-step horizon K (rl_cfg.K): {rl_cfg.K}")
+        print(f"  Mixture alpha (rl_cfg.mixture_alpha): {rl_cfg.mixture_alpha}")
+        print(f"  Latent ball radius (rl_cfg.latent_ball_radius): {rl_cfg.latent_ball_radius}")
+        print(f"  Episodic latent: {rl_cfg.episodic_latent}")
+        print(f"  Exact K-step targets: {rl_cfg.exact_k_step_targets}")
+        print(f"  Exact baseline summation: {rl_cfg.exact_baseline_summation}")
+        print()
     else:
-        print("⚠ Configuration has theory gaps:")
-        for issue in validation["issues"]:
-            print(f"  • {issue}")
-    
-    print(f"\nTheory status:")
-    print(f"  Forward-invariant projection: {'✓' if validation['forward_invariant'] else '✗'}")
-    print(f"  Contraction enforced (L_z < 1): {'✓' if validation['contraction_enforced'] else '✗'}")
-    print(f"  Exact baseline (Thm 5.9): {'✓' if validation['exact_baseline'] else '✗'}")
-    print(f"  Distillation (not in theory): {'✗ ENABLED' if validation['distillation_used'] else '✓ disabled'}")
-    print(f"\nIs theory-exact: {rl_cfg.is_theory_exact()}")
-    print("="*60 + "\n")
-    
-    print("UPI-TRM theoretical dials:")
-    print(f"  L_z target (rl_cfg.target_Lz): {rl_cfg.target_Lz}")
-    print(f"  L_V target (rl_cfg.target_Lv): {rl_cfg.target_Lv}")
-    print(f"  Inner unroll n (rl_cfg.inner_unroll_n): {rl_cfg.inner_unroll_n}")
-    print(f"  K-step horizon K (rl_cfg.K): {rl_cfg.K}")
-    print(f"  Mixture alpha (rl_cfg.mixture_alpha): {rl_cfg.mixture_alpha}")
-    print(f"  Latent ball radius (rl_cfg.latent_ball_radius): {rl_cfg.latent_ball_radius}")
-    print(f"  Episodic latent: {rl_cfg.episodic_latent}")
-    print(f"  Exact K-step targets: {rl_cfg.exact_k_step_targets}")
-    print(f"  Exact baseline summation: {rl_cfg.exact_baseline_summation}")
-    print()
-    
+        # Baseline algorithm info
+        print(f"\n[INFO] Using {args.baseline.upper()} baseline algorithm")
+        print(f"[INFO] Backbone: {args.backbone}")
+        print(f"[INFO] This is a comparison baseline (no theory-exact features)")
+        print()
+
     # Log additional configuration settings
     stop_mode = getattr(rl_cfg, "stop_action_mode", "noop")
     print(f"[INFO] STOP action mode: {stop_mode}")
-    if getattr(rl_cfg, "exact_baseline_summation", False):
-        print("[INFO] Using EXACT baseline summation (Theorem 5.9 O(α·ε_A) bound)")
-    if getattr(rl_cfg, "latent_ball_radius", 0.0) > 0:
-        print(f"[INFO] Forward-invariant projection enabled (R={rl_cfg.latent_ball_radius})")
-    if getattr(rl_cfg, "track_drift_metrics", False):
-        print("[INFO] Drift tracking enabled (Lemma 4.4)")
-    if getattr(rl_cfg, "compute_value_of_memory", False):
-        print("[INFO] Value-of-memory computation enabled (Section 5.4)")
+    if args.baseline is None:  # Only show theory-specific info for UPI-TRM
+        if getattr(rl_cfg, "exact_baseline_summation", False):
+            print("[INFO] Using EXACT baseline summation (Theorem 5.9 O(α·ε_A) bound)")
+        if getattr(rl_cfg, "latent_ball_radius", 0.0) > 0:
+            print(f"[INFO] Forward-invariant projection enabled (R={rl_cfg.latent_ball_radius})")
+        if getattr(rl_cfg, "track_drift_metrics", False):
+            print("[INFO] Drift tracking enabled (Lemma 4.4)")
+        if getattr(rl_cfg, "compute_value_of_memory", False):
+            print("[INFO] Value-of-memory computation enabled (Section 5.4)")
 
     # === Initialize WandB (disabled by default, enable with --wandb) ===
     use_wandb = WANDB_AVAILABLE and args.wandb and not args.no_wandb
@@ -879,50 +985,57 @@ def main():
                 wandb.log(wandb_metrics, step=step + 1)
 
         if (step + 1) % rl_cfg.eval_interval == 0:
-            eval_metrics = trainer.evaluate_policy_metrics(
-                env_cfg=env_cfg,
-                dataset=dataset,
-                checker=checker_fn,
-            )
-            eval_policy_mode = eval_metrics.get("eval_policy_mode", "unknown")
-            solved_count = eval_metrics.get("solved_count", 0)
-            total_episodes = eval_metrics.get("total_episodes", 0)
-            score_min = eval_metrics.get("score_min", 0.0)
-            score_max = eval_metrics.get("score_max", 0.0)
-            max_possible = eval_metrics.get("max_possible_score")
-            initial_mean = eval_metrics.get("initial_score_mean", 0.0)
-            
-            eval_msg = (
-                f"[step {step+1:05d}] "
-                f"eval_success_rate={eval_metrics['success_rate']:.3f} "
-                f"eval_mean_score={eval_metrics['mean_score']:.3f} "
-                f"eval_policy_mode={eval_policy_mode} "
-                f"[solved={solved_count}/{total_episodes}, "
-                f"score_range={score_min:.2f}-{score_max:.2f}"
-                f"{f'/{max_possible:.1f}' if max_possible else ''}, "
-                f"initial={initial_mean:.2f}]"
-            )
-            if hasattr(step_iter, "write"):
-                step_iter.write(eval_msg)
+            # Only run evaluation if trainer supports it (UPI-TRM has it, baselines don't)
+            if hasattr(trainer, 'evaluate_policy_metrics'):
+                eval_metrics = trainer.evaluate_policy_metrics(
+                    env_cfg=env_cfg,
+                    dataset=dataset,
+                    checker=checker_fn,
+                )
+                eval_policy_mode = eval_metrics.get("eval_policy_mode", "unknown")
+                solved_count = eval_metrics.get("solved_count", 0)
+                total_episodes = eval_metrics.get("total_episodes", 0)
+                score_min = eval_metrics.get("score_min", 0.0)
+                score_max = eval_metrics.get("score_max", 0.0)
+                max_possible = eval_metrics.get("max_possible_score")
+                initial_mean = eval_metrics.get("initial_score_mean", 0.0)
+
+                eval_msg = (
+                    f"[step {step+1:05d}] "
+                    f"eval_success_rate={eval_metrics['success_rate']:.3f} "
+                    f"eval_mean_score={eval_metrics['mean_score']:.3f} "
+                    f"eval_policy_mode={eval_policy_mode} "
+                    f"[solved={solved_count}/{total_episodes}, "
+                    f"score_range={score_min:.2f}-{score_max:.2f}"
+                    f"{f'/{max_possible:.1f}' if max_possible else ''}, "
+                    f"initial={initial_mean:.2f}]"
+                )
+                if hasattr(step_iter, "write"):
+                    step_iter.write(eval_msg)
+                else:
+                    print(eval_msg)
+
+                # === WandB: Log evaluation metrics ===
+                if use_wandb:
+                    wandb_eval = {
+                        "eval/success_rate": eval_metrics["success_rate"],
+                        "eval/mean_score": eval_metrics["mean_score"],
+                        "eval/solved_count": solved_count,
+                        "eval/score_min": score_min,
+                        "eval/score_max": score_max,
+                        "eval/initial_score_mean": initial_mean,
+                    }
+                    if max_possible is not None:
+                        wandb_eval["eval/max_possible_score"] = max_possible
+                    wandb.log(wandb_eval, step=step + 1)
             else:
-                print(eval_msg)
-            
-            # === WandB: Log evaluation metrics ===
-            if use_wandb:
-                wandb_eval = {
-                    "eval/success_rate": eval_metrics["success_rate"],
-                    "eval/mean_score": eval_metrics["mean_score"],
-                    "eval/solved_count": solved_count,
-                    "eval/score_min": score_min,
-                    "eval/score_max": score_max,
-                    "eval/initial_score_mean": initial_mean,
-                }
-                if max_possible is not None:
-                    wandb_eval["eval/max_possible_score"] = max_possible
-                wandb.log(wandb_eval, step=step + 1)
-            
-            # Print debug stats every eval interval
-            debug_stats = trainer.get_debug_stats()
+                # Baselines: just print a message that eval is not available
+                print(f"[step {step+1:05d}] (eval not available for baseline trainer)")
+
+            # Print debug stats every eval interval (if trainer supports it)
+            debug_stats = None
+            if hasattr(trainer, 'get_debug_stats'):
+                debug_stats = trainer.get_debug_stats()
             if debug_stats:
                 debug_msg = (
                     f"[step {step+1:05d}] DEBUG: "
@@ -935,15 +1048,16 @@ def main():
                     step_iter.write(debug_msg)
                 else:
                     print(debug_msg)
-                
+
                 # === WandB: Log debug stats ===
                 if use_wandb:
                     wandb_debug = {}
                     for key, value in debug_stats.items():
                         wandb_debug[f"debug/{key}"] = value
                     wandb.log(wandb_debug, step=step + 1)
-            
-            trainer.clear_debug_stats()
+
+            if hasattr(trainer, 'clear_debug_stats'):
+                trainer.clear_debug_stats()
         
         # === Save checkpoint periodically ===
         if args.save_interval > 0 and checkpoint_dir is not None and (step + 1) % args.save_interval == 0:
