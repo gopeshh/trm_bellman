@@ -412,3 +412,35 @@ python_unittest(
         "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
+
+python_unittest(
+    name = "test_baselines",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_baselines_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/pytest:pytest",
+    ],
+)
+
+python_unittest(
+    name = "test_undo_and_sequences",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_undo_and_sequences_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/pytest:pytest",
+    ],
+)

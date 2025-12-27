@@ -3,9 +3,11 @@ Tests for baseline algorithms (PPO, A2C) and NoRecursionEncoder.
 
 These tests verify the basic functionality of the baseline components
 added for ICML 2026 paper comparison.
+
+Converted to unittest.TestCase for Buck2 compatibility.
 """
 
-import pytest
+import unittest
 import torch
 import torch.nn as nn
 
@@ -17,18 +19,18 @@ from models.norec_encoder import (
 )
 
 
-class TestNoRecEncoderConfig:
+class TestNoRecEncoderConfig(unittest.TestCase):
     """Test NoRecEncoderConfig dataclass."""
 
     def test_default_config(self):
         """Test default configuration values."""
         config = NoRecEncoderConfig()
-        assert config.vocab_size == 11
-        assert config.seq_len == 81
-        assert config.hidden_dim == 128
-        assert config.num_layers == 2
-        assert config.encoder_type == "mlp"
-        assert config.rl_num_actions == 892
+        self.assertEqual(config.vocab_size, 11)
+        self.assertEqual(config.seq_len, 81)
+        self.assertEqual(config.hidden_dim, 128)
+        self.assertEqual(config.num_layers, 2)
+        self.assertEqual(config.encoder_type, "mlp")
+        self.assertEqual(config.rl_num_actions, 892)
 
     def test_custom_config(self):
         """Test custom configuration."""
@@ -39,59 +41,57 @@ class TestNoRecEncoderConfig:
             encoder_type="transformer",
             rl_num_actions=81,
         )
-        assert config.vocab_size == 5
-        assert config.seq_len == 16
-        assert config.encoder_type == "transformer"
+        self.assertEqual(config.vocab_size, 5)
+        self.assertEqual(config.seq_len, 16)
+        self.assertEqual(config.encoder_type, "transformer")
 
     def test_model_dump(self):
         """Test model_dump serialization."""
         config = NoRecEncoderConfig()
         dump = config.model_dump()
-        assert isinstance(dump, dict)
-        assert "vocab_size" in dump
-        assert "hidden_dim" in dump
+        self.assertIsInstance(dump, dict)
+        self.assertIn("vocab_size", dump)
+        self.assertIn("hidden_dim", dump)
 
 
-class TestMLPEncoder:
+class TestMLPEncoder(unittest.TestCase):
     """Test MLPEncoder module."""
 
-    @pytest.fixture
-    def encoder(self):
-        return MLPEncoder(
+    def setUp(self):
+        self.encoder = MLPEncoder(
             vocab_size=5,
             seq_len=16,
             hidden_dim=32,
             num_layers=2,
         )
 
-    def test_forward_shape(self, encoder):
+    def test_forward_shape(self):
         """Test output shape is correct."""
         batch_size = 4
         x = torch.randint(0, 5, (batch_size, 16))
         y = torch.randint(0, 5, (batch_size, 16))
 
-        out = encoder(x, y)
+        out = self.encoder(x, y)
 
-        assert out.shape == (batch_size, 32)
+        self.assertEqual(out.shape, (batch_size, 32))
 
-    def test_forward_deterministic(self, encoder):
+    def test_forward_deterministic(self):
         """Test forward pass is deterministic in eval mode."""
-        encoder.eval()
+        self.encoder.eval()
         x = torch.randint(0, 5, (2, 16))
         y = torch.randint(0, 5, (2, 16))
 
-        out1 = encoder(x, y)
-        out2 = encoder(x, y)
+        out1 = self.encoder(x, y)
+        out2 = self.encoder(x, y)
 
         torch.testing.assert_close(out1, out2)
 
 
-class TestTransformerEncoder:
+class TestTransformerEncoder(unittest.TestCase):
     """Test TransformerEncoder module."""
 
-    @pytest.fixture
-    def encoder(self):
-        return TransformerEncoder(
+    def setUp(self):
+        self.encoder = TransformerEncoder(
             vocab_size=5,
             seq_len=16,
             hidden_dim=32,
@@ -99,23 +99,22 @@ class TestTransformerEncoder:
             num_heads=2,
         )
 
-    def test_forward_shape(self, encoder):
+    def test_forward_shape(self):
         """Test output shape is correct."""
         batch_size = 4
         x = torch.randint(0, 5, (batch_size, 16))
         y = torch.randint(0, 5, (batch_size, 16))
 
-        out = encoder(x, y)
+        out = self.encoder(x, y)
 
-        assert out.shape == (batch_size, 32)
+        self.assertEqual(out.shape, (batch_size, 32))
 
 
-class TestNoRecursionEncoder:
+class TestNoRecursionEncoder(unittest.TestCase):
     """Test NoRecursionEncoder module."""
 
-    @pytest.fixture
-    def config(self):
-        return NoRecEncoderConfig(
+    def setUp(self):
+        self.config = NoRecEncoderConfig(
             vocab_size=5,
             seq_len=16,
             hidden_dim=32,
@@ -123,48 +122,45 @@ class TestNoRecursionEncoder:
             encoder_type="mlp",
             rl_num_actions=81,
         )
+        self.model = NoRecursionEncoder(self.config)
 
-    @pytest.fixture
-    def model(self, config):
-        return NoRecursionEncoder(config)
-
-    def test_encode(self, model):
+    def test_encode(self):
         """Test encode method."""
         x = {"inputs": torch.randint(0, 5, (2, 16))}
         y = torch.randint(0, 5, (2, 16))
 
-        z = model.encode(x, y)
+        z = self.model.encode(x, y)
 
-        assert z.shape == (2, 32)
+        self.assertEqual(z.shape, (2, 32))
 
-    def test_used_value(self, model):
+    def test_used_value(self):
         """Test used_value matches TRM interface."""
         x = {"inputs": torch.randint(0, 5, (2, 16))}
         y = torch.randint(0, 5, (2, 16))
 
         # n parameter should be ignored
-        value, state = model.used_value(x, y, n=10)
+        value, state = self.model.used_value(x, y, n=10)
 
-        assert value.shape == (2,)  # LatentValueHead returns [B]
-        assert state is None  # No latent state
+        self.assertEqual(value.shape, (2,))  # LatentValueHead returns [B]
+        self.assertIsNone(state)  # No latent state
 
-    def test_policy_dist(self, model):
+    def test_policy_dist(self):
         """Test policy_dist matches TRM interface."""
         x = {"inputs": torch.randint(0, 5, (2, 16))}
         y = torch.randint(0, 5, (2, 16))
 
         # n parameter should be ignored
-        dist, state = model.policy_dist(x, y, n=10)
+        dist, state = self.model.policy_dist(x, y, n=10)
 
-        assert hasattr(dist, "sample")
-        assert hasattr(dist, "log_prob")
-        assert state is None  # No latent state
+        self.assertTrue(hasattr(dist, "sample"))
+        self.assertTrue(hasattr(dist, "log_prob"))
+        self.assertIsNone(state)  # No latent state
 
         # Sample should work
         action = dist.sample()
-        assert action.shape == (2,)
+        self.assertEqual(action.shape, (2,))
 
-    def test_policy_with_mask(self, model):
+    def test_policy_with_mask(self):
         """Test policy_dist with action mask."""
         x = {"inputs": torch.randint(0, 5, (2, 16))}
         y = torch.randint(0, 5, (2, 16))
@@ -173,30 +169,41 @@ class TestNoRecursionEncoder:
         mask = torch.zeros(2, 81, dtype=torch.bool)
         mask[:, :10] = True
 
-        dist, _ = model.policy_dist(x, y, action_mask=mask)
+        dist, _ = self.model.policy_dist(x, y, action_mask=mask)
 
         # Sample should be within valid range
         for _ in range(10):
             action = dist.sample()
-            assert (action < 10).all()
+            self.assertTrue((action < 10).all())
 
-    def test_dummy_methods(self, model):
+    def test_dummy_methods(self):
         """Test compatibility methods return None."""
         x = {"inputs": torch.randint(0, 5, (2, 16))}
         y = torch.randint(0, 5, (2, 16))
 
-        assert model.init_latent(x, y) is None
-        assert model.unroll_latent(x, y, n=5) == (None, None)
-        assert model.eval_latent(x, y, n=5) is None
-        assert model.continue_latent(None, x, y, n=5) == (None, None)
+        self.assertIsNone(self.model.init_latent(x, y))
+        self.assertEqual(self.model.unroll_latent(x, y, n=5), (None, None))
+        self.assertIsNone(self.model.eval_latent(x, y, n=5))
+        self.assertEqual(self.model.continue_latent(None, x, y, n=5), (None, None))
 
-    def test_transformer_encoder_type(self, config):
+    def test_transformer_encoder_type(self):
         """Test transformer encoder variant."""
-        config.encoder_type = "transformer"
+        config = NoRecEncoderConfig(
+            vocab_size=5,
+            seq_len=16,
+            hidden_dim=32,
+            num_layers=2,
+            encoder_type="transformer",
+            rl_num_actions=81,
+        )
         model = NoRecursionEncoder(config)
 
         x = {"inputs": torch.randint(0, 5, (2, 16))}
         y = torch.randint(0, 5, (2, 16))
 
         value, _ = model.used_value(x, y, n=0)
-        assert value.shape == (2,)  # LatentValueHead returns [B]
+        self.assertEqual(value.shape, (2,))  # LatentValueHead returns [B]
+
+
+if __name__ == "__main__":
+    unittest.main()
