@@ -388,34 +388,41 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         seq_len = self.config.seq_len
         hidden_size = self.config.hidden_size
         
-        # Value head dimensions: use mean-pooled representations (doesn't need position info)
-        self.z_dim_pooled = hidden_size
-        self.x_embed_dim_pooled = hidden_size
-        self.plan_embed_dim = hidden_size
-        self.xy_embed_dim = self.x_embed_dim_pooled + self.plan_embed_dim
-        
-        # Policy head dimensions: use FLATTENED representations to preserve position info
-        # BUG FIX: Mean pooling loses positional info which is critical for Sudoku!
-        # Actions are pos*vocab_size+digit, so position MUST be preserved.
-        # 
-        # IMPORTANT: When puzzle embeddings are enabled (puzzle_emb_ndim > 0), the actual
-        # embedding shape is [B, puzzle_emb_len + seq_len, hidden_size], not [B, seq_len, hidden_size].
-        # We must account for this to avoid dimension mismatches at runtime.
+        # Value head dimensions: use FLATTENED representations to preserve position info
+        # Similar to Policy head, we need spatial structure for Sudoku.
         puzzle_emb_len = self.inner.puzzle_emb_len  # 0 when puzzle_emb_ndim == 0
         total_seq_len = seq_len + puzzle_emb_len
+        
+        self.z_dim_pooled = hidden_size  # Legacy
+        self.x_embed_dim_pooled = hidden_size  # Legacy
+        
+        # Flattened dimensions
         self.z_dim_flat = total_seq_len * hidden_size
         self.x_embed_dim_flat = total_seq_len * hidden_size
         self.y_embed_dim_flat = total_seq_len * hidden_size
         
+        # Combined dimension for Value Head (z + x_embed + y_embed)
+        # Note: x and y embeddings are combined before value head
+        self.xy_embed_dim_flat = self.x_embed_dim_flat + self.y_embed_dim_flat
+        
+        # #region agent log
+        import json; from datetime import datetime
+        try:
+            with open('/home/buiksat/trm_bellman/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"location":"models/recursive_reasoning/trm.py:init","message":"Value Head Init Dims","data":{"z_dim_flat":self.z_dim_flat,"xy_embed_dim_flat":self.xy_embed_dim_flat},"timestamp":str(datetime.now()),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"}) + "\n")
+        except Exception: pass
+        # #endregion
+
         # Legacy aliases for compatibility
-        self.z_dim = self.z_dim_pooled  # Value head uses this
+        self.z_dim = self.z_dim_pooled
         self.x_embed_dim = self.x_embed_dim_pooled
-        self.y_embed_dim = self.plan_embed_dim  # Plan embedding dimension
+        self.plan_embed_dim = hidden_size
+        self.xy_embed_dim = self.x_embed_dim + self.plan_embed_dim
 
         if self.config.rl_enable_value_head:
             self.value_head = LatentValueHead(
-                z_dim=self.z_dim_pooled,  # Value head uses pooled z
-                x_dim=self.xy_embed_dim,  # pooled x + pooled y
+                z_dim=self.z_dim_flat,  # Use flattened z
+                x_dim=self.xy_embed_dim_flat,  # Use flattened context (x + y)
                 hidden_dim=self.config.rl_value_hidden_dim,
             )
         else:
@@ -719,18 +726,32 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         else:
             # Persistent mode: continue from existing z
             z_n, _ = self.continue_latent(z, x, y, n)
-        z_vec = z_n.z_H.mean(dim=1)
+        
+        # Flatten z to preserve positional information
+        z_vec = z_n.z_H.view(z_n.z_H.shape[0], -1)
 
         # 2) Build a fresh latent context to obtain input embeddings and summarize x
         batch = self._standardize_latent_batch(x, y)
         latent_context = self._build_latent_context_with_plan(batch)
         input_embeddings = latent_context["input_embeddings"]
         plan_embeddings = latent_context["plan_embeddings"]
-        x_embed = self._pool_embedding(input_embeddings)
-        y_embed = self._pool_embedding(plan_embeddings)
+        
+        # Flatten embeddings
+        x_embed = input_embeddings.view(input_embeddings.shape[0], -1)
+        y_embed = plan_embeddings.view(plan_embeddings.shape[0], -1)
+        
         combined_embed = torch.cat([x_embed, y_embed], dim=-1)
 
         # 3) Apply value head and return both value and updated z
+        
+        # #region agent log
+        import json; from datetime import datetime
+        try:
+            with open('/home/buiksat/trm_bellman/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"location":"models/recursive_reasoning/trm.py:used_value","message":"Value Head Input Shapes","data":{"z_vec_shape":list(z_vec.shape),"combined_embed_shape":list(combined_embed.shape)},"timestamp":str(datetime.now()),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"}) + "\n")
+        except Exception: pass
+        # #endregion
+
         value = self.value_head(z_vec, combined_embed)
         return value, z_n
 

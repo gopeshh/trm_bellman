@@ -41,6 +41,28 @@ The paper defines two latent modes (Section 5.4, Lemma 4.4):
 
 **Key Insight**: EXP-02 (episodic z) tests the main theorem; EXP-09 (persistent z) tests the practical approximation.
 
+### CPI Mixture Policy Modes (Updated Dec 27, 2024)
+
+The implementation supports three Conservative Policy Improvement (CPI) modes. **For strict theoretical correctness, use `theory_exact_mixture=True`**.
+
+**Why Importance Sampling Weights Are NOT Required** (in `theory_exact_mixture=True` mode):
+
+A concern was raised that data collected from the mixture policy `π_mix = (1-α)π_old + α·π_cand` should require importance sampling (IS) weights `ρ = π_cand(a|s) / π_mix(a|s)` when training `π_cand`. This is **not** the case because:
+
+1. **The deployed policy IS the mixture**: We don't train `π_cand` to behave like `π_mix`. We train `π_cand` with standard policy gradient, keep `π_old` fixed, and deploy the explicit mixture.
+
+2. **CPI's guarantee is about the mixture**: The improvement bound `V^{π_new} ≥ V^{π_old} - O(α·ε_A)` applies to the **deployed mixture policy**, not to `π_cand` in isolation.
+
+**Three CPI Modes** (in `rl/upi_trm_trainer.py:policy_update()`):
+
+| Mode | Config | Theory Status | Description |
+|------|--------|---------------|-------------|
+| **Theory-Exact** | `theory_exact_mixture=True` | ✅ CPI bound applies | `π_old` is **not updated**; behavior policy is explicit mixture |
+| **Distillation** | `distill_mixture_policy=True` | ⚠️ Heuristic | Mixture distilled into `π_old` via KL; introduces projection error |
+| **Default** | Both `False` | ⚠️ Heuristic | Parameter-space `lerp`; NOT equivalent to probability mixing |
+
+**Recommendation for ICML 2026**: Always use `theory_exact_mixture=True` in theory-aligned configs (EXP-02, EXP-07, etc.).
+
 ---
 
 ## Critical Finding: Reward Signal Issue

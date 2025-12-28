@@ -15,7 +15,9 @@
       "Bash(pip3 show:*)",
       "Bash(xargs:*)",
       "Bash(buck2 build:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(pgrep:*)",
+      "Bash(pkill:*)"
     ],
     "deny": [],
     "ask": []

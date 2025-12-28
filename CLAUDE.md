@@ -349,6 +349,7 @@ The UPI-TRM algorithm (`rl/upi_trm_trainer.py:UPITrmTrainer`) implements:
    - Policy-space mixture: `π_new = (1-α)π_old + α π_candidate`
    - Parameter-space interpolation: `param.lerp_(candidate_param, α)`
    - Controlled by `mixture_alpha` (typically 0.01-0.1)
+   - See "CPI Mixture Policy Modes" section below for theory details
 
 3. **Plan-Edit Environment** (`rl/envs/plan_edit_env.py`):
    - Potential-based reward shaping: `r = r_0 + γΦ(s') - Φ(s)`
@@ -440,6 +441,37 @@ Enforces Lipschitz bounds for theoretical guarantees (`utils/lipschitz.py`):
 - `compute_unrolling_term()`: Finite unrolling bias (Equation 10)
 
 Tracked when `track_theory_metrics=True`: logs `hat_Cz`, `hat_Lz`, `hat_Lv`, `unrolling_term`.
+
+### CPI Mixture Policy Modes
+
+The implementation supports three CPI (Conservative Policy Improvement) modes with different theoretical properties. **For strict theoretical correctness, use `theory_exact_mixture=True`**.
+
+**Why Importance Sampling Weights Are NOT Required** (in `theory_exact_mixture=True` mode):
+
+A common concern is that data collected from the mixture policy `π_mix = (1-α)π_old + α·π_cand` should require importance sampling (IS) weights `ρ = π_cand(a|s) / π_mix(a|s)` when training `π_cand`. This is **not** the case in CPI because:
+
+1. **The deployed policy IS the mixture**: We don't try to make `π_cand` behave like `π_mix`. Instead, we train `π_cand` with standard policy gradient, keep `π_old` fixed, and deploy the explicit mixture.
+
+2. **CPI's guarantee is about the mixture**: The improvement bound `V^{π_new} ≥ V^{π_old} - O(α·ε_A)` applies to the **deployed mixture policy**, not to `π_cand` in isolation.
+
+3. **The "bias" is intentional**: When we update `π_cand` using data from `π_mix`, we're improving `π_cand` relative to the current state distribution. CPI theory accounts for this.
+
+**Three CPI Modes** (in `rl/upi_trm_trainer.py:policy_update()`):
+
+| Mode | Config | Theory Status | Description |
+|------|--------|---------------|-------------|
+| **Theory-Exact** | `theory_exact_mixture=True` | ✅ CPI bound applies | `π_old` is **not updated**; behavior policy is explicit mixture from `_mixed_policy_dist()` |
+| **Distillation** | `distill_mixture_policy=True` | ⚠️ Heuristic | Mixture is distilled into `π_old` via KL minimization; introduces projection error |
+| **Default** | Both `False` | ⚠️ Heuristic | Parameter-space interpolation `param.lerp_(candidate, α)`; NOT equivalent to probability mixing |
+
+**Recommendation**: For ICML 2026 experiments, always use `theory_exact_mixture=True` in theory-aligned configs. The default parameter interpolation mode is faster but does not satisfy CPI guarantees.
+
+**Implementation Details** (`rl/upi_trm_trainer.py`):
+- Lines 1085-1110: Mode selection logic
+- Lines 222-284: `_mixed_policy_dist()` computes explicit mixture
+- Lines 286-327: `_sync_policy_old_towards_candidate()` implements parameter interpolation
+
+**Key Files**: `rl/upi_trm_trainer.py`, `rl/config.py:theory_exact_mixture`
 
 ## Configuration System
 

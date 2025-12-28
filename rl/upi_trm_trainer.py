@@ -1011,14 +1011,48 @@ class UPITrmTrainer:
                     )
                 adv = adv.clamp(-adv_clip, adv_clip)
 
-        # Get old policy distribution for KL computation
+        # Get old policy distribution for KL computation and Importance Sampling
         kl_div = None
         enable_kl_trust_region = getattr(self.rl_cfg, "enable_kl_trust_region", False)
-        if enable_kl_trust_region:
-            with torch.no_grad():
-                old_dist, _ = self.policy_model_old.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask)
-                old_log_probs = old_dist.logits.log_softmax(dim=-1)
-                old_probs = old_log_probs.exp()
+        use_importance_sampling = getattr(self.rl_cfg, "use_importance_sampling", True)
+
+        with torch.no_grad():
+            old_dist, _ = self.policy_model_old.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask)
+            old_probs = old_dist.probs
+            
+            # Compute mixture probability (behavior policy)
+            alpha = self.rl_cfg.mixture_alpha
+            
+            # We need candidate probs as well to compute the mixture
+            cand_dist_nograd, _ = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask)
+            cand_probs_nograd = cand_dist_nograd.probs
+            
+            # Mixture probability: pi_mix = (1-alpha) * pi_old + alpha * pi_cand
+            mix_probs = (1.0 - alpha) * old_probs + alpha * cand_probs_nograd
+            
+            # Apply epsilon-greedy mixture if configured
+            eps = getattr(self.rl_cfg, "policy_epsilon", 0.0)
+            if eps > 0.0:
+                num_actions = mix_probs.shape[-1]
+                if action_mask is not None:
+                    # Uniform over valid actions only
+                    valid_count = action_mask.float().sum(dim=-1, keepdim=True).clamp(min=1)
+                    uniform = action_mask.float() / valid_count
+                else:
+                    uniform = torch.full_like(mix_probs, 1.0 / num_actions)
+                mix_probs = (1.0 - eps) * mix_probs + eps * uniform
+            
+            # Get behavior log probability for the actions actually taken
+            if actions.dim() == 1:
+                actions_unsqueezed = actions.unsqueeze(-1)
+            else:
+                actions_unsqueezed = actions
+                
+            prob_behavior = mix_probs.gather(dim=-1, index=actions_unsqueezed).squeeze(-1)
+            log_prob_behavior = prob_behavior.clamp(min=1e-8).log()
+
+            if enable_kl_trust_region:
+                old_log_probs = old_probs.clamp(min=1e-8).log()
 
         dist, _ = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask)
         log_prob = dist.log_prob(actions)
@@ -1026,6 +1060,14 @@ class UPITrmTrainer:
         # Numerical stability: clamp log_prob to prevent -inf when action prob is 0
         # This can happen if action mask changed between collection and training
         log_prob = log_prob.clamp(min=LOG_PROB_MIN)
+        
+        # Importance Sampling Weight: rho = pi_cand(a|s) / pi_behavior(a|s)
+        if use_importance_sampling:
+            log_rho = log_prob - log_prob_behavior
+            rho = log_rho.exp()
+            rho = rho.detach()
+        else:
+            rho = torch.ones_like(log_prob)
         
         entropy = dist.entropy()
         # Handle NaN entropy (can happen with degenerate distributions)
@@ -1047,7 +1089,15 @@ class UPITrmTrainer:
         # Replace NaN advantages with 0 (neutral gradient)
         adv_clean = torch.where(torch.isnan(adv), torch.zeros_like(adv), adv)
         
-        loss_policy = -(log_prob * adv_clean.detach()).mean() - self.rl_cfg.entropy_coef * entropy
+        # #region agent log
+        import json; from datetime import datetime
+        try:
+            with open('/home/buiksat/trm_bellman/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"location":"rl/upi_trm_trainer.py:policy_update","message":"IS Weights Stats","data":{"rho_min":float(rho.min().item()),"rho_max":float(rho.max().item()),"rho_mean":float(rho.mean().item()),"log_prob_mean":float(log_prob.mean().item()),"adv_mean":float(adv_clean.mean().item())},"timestamp":str(datetime.now()),"sessionId":"debug-session","runId":"run1","hypothesisId":"H2"}) + "\n")
+        except Exception: pass
+        # #endregion
+
+        loss_policy = -(rho * log_prob * adv_clean.detach()).mean() - self.rl_cfg.entropy_coef * entropy
 
         # Add adaptive KL penalty if trust-region is enabled (PPO/TRPO-style)
         if enable_kl_trust_region:

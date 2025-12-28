@@ -68,7 +68,15 @@ This index helps you quickly find the right documentation for your ICML 2026 sub
    - Experimental comparison matrix
    - Usage examples for running baselines
 
-6. **`README.md`** (main repository README)
+6. **`docs/THEORY_NOTES.md`** (NEW - Dec 27, 2024)
+   - CPI mixture policy analysis
+   - Why IS weights are NOT required in theory-exact mode
+   - Three CPI modes comparison table
+   - Episodic vs persistent latent z
+   - Exact baseline summation (Theorem 5.9)
+   - Key config flags for theory alignment
+
+7. **`README.md`** (main repository README)
    - Full UPI-TRM documentation
    - Installation instructions
    - All training modes (not just shaped rewards)
