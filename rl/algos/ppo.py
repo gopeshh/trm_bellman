@@ -459,3 +459,51 @@ class PPOTrainer:
             "term_solved": self.term_stats["solved"],
             "term_budget": self.term_stats["budget"],
         }
+
+    def evaluate_policy_metrics(
+        self,
+        env_cfg: PlanEditEnvConfig,
+        dataset: Any,
+        checker: Any,
+        num_episodes: int = 50,
+    ) -> Dict[str, float]:
+        """
+        Evaluate the policy using greedy rollouts, returning success rate and mean score.
+
+        This method provides the same interface as UPITrmTrainer.evaluate_policy_metrics()
+        for fair comparison between algorithms.
+
+        Args:
+            env_cfg: Environment configuration
+            dataset: Dataset providing puzzle instances
+            checker: Checker function (x, y) -> score
+            num_episodes: Number of evaluation episodes (default 50)
+
+        Returns:
+            Dict with:
+                - mean_score: Average final checker score
+                - success_rate: Fraction of episodes that reached max score
+                - eval_policy_mode: "greedy"
+                - solved_count: Number of solved episodes
+                - total_episodes: Total evaluation episodes
+        """
+        from evaluators.rl_plan_evaluator import evaluate_plan_policy_with_scores
+
+        mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
+            model=self.model,
+            dataset=dataset,
+            checker=checker,
+            env_cfg=env_cfg,
+            num_episodes=num_episodes,
+            inner_unroll_n=self.config.inner_unroll_n,
+            episodic_latent=True,  # Baselines use episodic latent
+            greedy=True,  # Always greedy for deterministic evaluation
+        )
+
+        result = {
+            "mean_score": mean_score,
+            "success_rate": success_rate,
+            "eval_policy_mode": "greedy",
+        }
+        result.update(detailed_stats)
+        return result

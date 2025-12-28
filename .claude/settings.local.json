@@ -12,7 +12,9 @@
       "Bash(pip3 list:*)",
       "Bash(source /usr/share/modules/init/bash)",
       "Bash(module avail pytorch)",
-      "Bash(pip3 show:*)"
+      "Bash(pip3 show:*)",
+      "Bash(xargs:*)",
+      "Bash(buck2 build:*)"
     ],
     "deny": [],
     "ask": []

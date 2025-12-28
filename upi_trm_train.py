@@ -985,13 +985,18 @@ def main():
                 wandb.log(wandb_metrics, step=step + 1)
 
         if (step + 1) % rl_cfg.eval_interval == 0:
-            # Only run evaluation if trainer supports it (UPI-TRM has it, baselines don't)
-            if hasattr(trainer, 'evaluate_policy_metrics'):
+            # All trainers (UPI-TRM, PPO, A2C) now have evaluate_policy_metrics
+            # Use try/except to handle old cached binaries that may not have the method
+            eval_metrics = None
+            try:
                 eval_metrics = trainer.evaluate_policy_metrics(
                     env_cfg=env_cfg,
                     dataset=dataset,
                     checker=checker_fn,
                 )
+            except AttributeError:
+                pass  # Old cached binary without evaluate_policy_metrics
+            if eval_metrics is not None:
                 eval_policy_mode = eval_metrics.get("eval_policy_mode", "unknown")
                 solved_count = eval_metrics.get("solved_count", 0)
                 total_episodes = eval_metrics.get("total_episodes", 0)
