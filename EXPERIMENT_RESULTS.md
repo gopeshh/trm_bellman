@@ -110,11 +110,13 @@ All experiments use **constraint-based dense rewards**:
 
 | Method | Seeds | Peak Success Rate | Final Success Rate | Status |
 |--------|-------|-------------------|-------------------|--------|
-| **UPI-TRM Persistent z** | 42, 123, 456 | **42-44%** | 28-40% (oscillating) | ✅ Running |
-| UPI-TRM Episodic z | 42 | 30% (step 100) | - | 🔄 Running (restarted) |
-| PPO-TRM | 42, 123, 456 | **0%** | 0% | ✅ Running |
-| PPO-MLP | 42, 123, 456 | **0%** | 0% | ✅ Running |
+| **UPI-TRM Persistent z** | 42, 123, 456 | **42-44%** | 36-42% (oscillating) | ✅ ~70% complete |
+| UPI-TRM Episodic z | 42, 123, 456 | TBD | - | 🔄 Very slow (~100× slower) |
+| PPO-TRM | 42, 123, 456 | **0%** | 0% | ✅ ~25% complete |
+| PPO-MLP | 42, 123, 456 | **0%** | 0% | ✅ ~70% complete |
 | A2C-MLP | 42 | **0%** | Diverged | ❌ Failed |
+
+**Key Finding**: UPI-TRM achieves **42-44% success rate** while all baselines achieve **0%** across all seeds.
 
 ### UPI-TRM Persistent z Learning Curve (Multi-Seed)
 
@@ -137,6 +139,8 @@ Step    Success Rate    Value Loss    Notes
  200       34.0%         150.1       Stable
  700       42.0%          31.5       ★ PEAK (matches seed 42)
 1000       40.0%          63.5       Strong retention
+1200       42.0%          65.7       Back to peak!
+1300       36.0%          78.0       Oscillation continues
 ```
 
 **Seed 456**:
@@ -146,7 +150,9 @@ Step    Success Rate    Value Loss    Notes
  100       38.0%          81.1       Strong start
  200       44.0%          89.0       ★ EARLY PEAK
  300       44.0%         123.1       Maintained
-1000       28.0%          66.0       Recovery ongoing
+1000       28.0%          66.0       Temporary dip
+1200       30.0%          86.4       Recovery starting
+1300       36.0%          96.7       Improving
 ```
 
 **Key Multi-Seed Observations**:
@@ -204,8 +210,11 @@ Step    Success Rate    Notes
 
 ---
 
-### PPO-TRM Learning Curve
+### PPO-TRM Learning Curve (Multi-Seed)
 
+All 3 seeds show identical behavior: 0% success rate throughout training.
+
+**Seed 42** (at step ~3500):
 ```
 Step    Success Rate    Mean Score    Notes
 ────────────────────────────────────────────────────
@@ -217,14 +226,35 @@ Step    Success Rate    Mean Score    Notes
 3500+       0%            5.85       Still 0%
 ```
 
+**Seed 123** (at step ~900):
+```
+Step    Success Rate    Mean Score
+────────────────────────────────────────
+  50        0%            5.83
+ 500        0%            5.86
+ 900        0%            5.98       Still 0%
+```
+
+**Seed 456** (at step ~900):
+```
+Step    Success Rate    Mean Score
+────────────────────────────────────────
+  50        0%            5.79
+ 500        0%            5.90
+ 900        0%            5.84       Still 0%
+```
+
 **Key Observations**:
 1. **Zero learning**: Success rate remains 0% throughout training
 2. **Flat score**: Mean score stuck at 5.7-5.9 (near-random baseline)
 3. **Same architecture, different result**: Uses identical TRM backbone as UPI-TRM
 4. **Proves algorithm matters**: The UPI-TRM algorithm is essential, not just the architecture
 
-### PPO-MLP Learning Curve
+### PPO-MLP Learning Curve (Multi-Seed)
 
+All 3 seeds show identical behavior: 0% success rate throughout training.
+
+**Seed 42** (completed at step 5000):
 ```
 Step    Success Rate    Mean Score    Notes
 ────────────────────────────────────────────────────
@@ -236,10 +266,32 @@ Step    Success Rate    Mean Score    Notes
 5000        0%            5.83       ✅ Completed, 0%
 ```
 
+**Seed 123** (at step ~3700):
+```
+Step    Success Rate    Mean Score
+────────────────────────────────────────
+  50        0%            5.78
+1000        0%            5.84
+2000        0%            5.80
+3000        0%            5.85
+3700        0%            5.82       Still 0%
+```
+
+**Seed 456** (at step ~3700):
+```
+Step    Success Rate    Mean Score
+────────────────────────────────────────
+  50        0%            5.75
+1000        0%            5.85
+2000        0%            5.81
+3000        0%            5.88
+3700        0%            5.83       Still 0%
+```
+
 **Key Observations**:
-1. **Complete failure**: 0% success after full 5000 steps
-2. **Baseline comparison**: Simplest architecture, expected to fail
-3. **Score unchanged**: Stuck at random-level performance
+1. **Complete failure**: 0% success across all seeds even at step 3700+
+2. **No learning signal**: Mean score stays at 5.7-5.9 (random baseline)
+3. **Confirms algorithm matters**: Same task, same reward, but no UPI-TRM features = failure
 
 ### A2C-MLP Learning Curve
 
@@ -407,11 +459,25 @@ buck2 run //buiksat_trm:upi_trm_train \
 
 ## Next Steps
 
-1. **Run with multiple seeds** (3-5 seeds for statistical significance)
-2. **Test on 9×9 Sudoku** (harder task)
-3. **Ablation studies** on individual UPI-TRM components
-4. **Curriculum learning** (4×4 → 9×9 transfer)
-5. **Generate paper figures** with learning curves and bar charts
+1. ✅ **Multi-seed experiments** - Currently running (3 seeds each for UPI-TRM and baselines)
+2. **Wait for completion** - UPI-TRM persistent z at ~50%, PPO-MLP at ~75%
+3. **Test on 9×9 Sudoku** (harder task after 4×4 results finalized)
+4. **Ablation studies** on individual UPI-TRM components
+5. **Curriculum learning** (4×4 → 9×9 transfer)
+6. **Generate paper figures** with learning curves and bar charts
+
+### Current Experiment Status
+
+**Running experiments** (as of Dec 28, 2025, 11:21 UTC):
+- UPI-TRM Persistent z: Seeds 42, 123, 456 (at ~3500 steps each, 70% complete)
+- UPI-TRM Episodic z: Seeds 42, 123, 456 (very slow, ~100 steps)
+- PPO-TRM: Seeds 42, 123, 456 (at ~1250 steps each, 25% complete)
+- PPO-MLP: Seeds 42, 123, 456 (at ~3500 steps each, 70% complete)
+
+**Latest Results**:
+- UPI-TRM Persistent z: 42-44% peak success rate (consistent across all 3 seeds)
+- PPO-TRM: 0% success (consistent failure across all 3 seeds)
+- PPO-MLP: 0% success (consistent failure across all 3 seeds)
 
 ---
 
