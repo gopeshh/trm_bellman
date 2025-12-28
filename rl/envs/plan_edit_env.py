@@ -545,6 +545,28 @@ class PlanEditEnv:
         if pos >= num_positions:
             return plan_tensor
 
+        # Safety check: prevent editing "given" cells (clues)
+        # This acts as a second line of defense behind action masking
+        if torch.is_tensor(x):
+            inputs = x
+        elif isinstance(x, dict):
+            inputs = x.get("inputs")
+        else:
+            inputs = None
+        
+        if inputs is not None:
+            if torch.is_tensor(inputs):
+                flat_inputs = inputs.view(-1)
+            else:
+                flat_inputs = torch.as_tensor(inputs, device=plan_tensor.device).view(-1)
+            
+            # Check if pos corresponds to a clue (value > 1)
+            # Use safe indexing
+            if pos < flat_inputs.numel():
+                if flat_inputs[pos].item() > 1:
+                    # Attempted to edit a clue! Return original plan (no-op)
+                    return plan_tensor
+
         new_flat = flat.clone()
         new_flat[pos] = torch.as_tensor(tok, dtype=new_flat.dtype, device=new_flat.device)
 

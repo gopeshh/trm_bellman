@@ -405,14 +405,6 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         # Note: x and y embeddings are combined before value head
         self.xy_embed_dim_flat = self.x_embed_dim_flat + self.y_embed_dim_flat
         
-        # #region agent log
-        import json; from datetime import datetime
-        try:
-            with open('/home/buiksat/trm_bellman/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"location":"models/recursive_reasoning/trm.py:init","message":"Value Head Init Dims","data":{"z_dim_flat":self.z_dim_flat,"xy_embed_dim_flat":self.xy_embed_dim_flat},"timestamp":str(datetime.now()),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"}) + "\n")
-        except Exception: pass
-        # #endregion
-
         # Legacy aliases for compatibility
         self.z_dim = self.z_dim_pooled
         self.x_embed_dim = self.x_embed_dim_pooled
@@ -744,14 +736,6 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
 
         # 3) Apply value head and return both value and updated z
         
-        # #region agent log
-        import json; from datetime import datetime
-        try:
-            with open('/home/buiksat/trm_bellman/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"location":"models/recursive_reasoning/trm.py:used_value","message":"Value Head Input Shapes","data":{"z_vec_shape":list(z_vec.shape),"combined_embed_shape":list(combined_embed.shape)},"timestamp":str(datetime.now()),"sessionId":"debug-session","runId":"run1","hypothesisId":"H1"}) + "\n")
-        except Exception: pass
-        # #endregion
-
         value = self.value_head(z_vec, combined_embed)
         return value, z_n
 

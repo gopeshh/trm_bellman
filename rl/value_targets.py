@@ -88,14 +88,6 @@ def compute_k_step_bootstrapped_target(
     not_done_final = (~done_final).to(v_K.dtype)
     v_bootstrap = v_K * not_done_final
 
-    # #region agent log
-    import json; from datetime import datetime
-    try:
-        with open('/home/buiksat/trm_bellman/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"rl/value_targets.py:compute_k_step","message":"Target Calculation","data":{"reward_returns_mean":float(reward_returns.mean().item()),"v_bootstrap_mean":float(v_bootstrap.mean().item()),"bootstrap_factor_mean":float(bootstrap_factor.mean().item())},"timestamp":str(datetime.now()),"sessionId":"debug-session","runId":"run1","hypothesisId":"H3"}) + "\n")
-    except Exception: pass
-    # #endregion
-
     return reward_returns + bootstrap_factor * v_bootstrap
 
 

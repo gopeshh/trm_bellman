@@ -1089,14 +1089,6 @@ class UPITrmTrainer:
         # Replace NaN advantages with 0 (neutral gradient)
         adv_clean = torch.where(torch.isnan(adv), torch.zeros_like(adv), adv)
         
-        # #region agent log
-        import json; from datetime import datetime
-        try:
-            with open('/home/buiksat/trm_bellman/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"location":"rl/upi_trm_trainer.py:policy_update","message":"IS Weights Stats","data":{"rho_min":float(rho.min().item()),"rho_max":float(rho.max().item()),"rho_mean":float(rho.mean().item()),"log_prob_mean":float(log_prob.mean().item()),"adv_mean":float(adv_clean.mean().item())},"timestamp":str(datetime.now()),"sessionId":"debug-session","runId":"run1","hypothesisId":"H2"}) + "\n")
-        except Exception: pass
-        # #endregion
-
         loss_policy = -(rho * log_prob * adv_clean.detach()).mean() - self.rl_cfg.entropy_coef * entropy
 
         # Add adaptive KL penalty if trust-region is enabled (PPO/TRPO-style)

@@ -146,3 +146,110 @@ def test_plan_edit_env_threshold_works_without_reward_shaping():
 
     assert done is True
     assert abs(reward - 1.0) < 1e-6  # terminal reward equals checker score
+
+
+def test_action_masking():
+    """
+    Test that action masking correctly identifies 'given' cells (clues)
+    and prevents them from being edited.
+    """
+    # Create dataset with 1 empty cell (value=1) and 1 clue cell (value=2)
+    # 0=PAD, 1=Empty, 2=Value
+    inputs = torch.tensor([1, 2], dtype=torch.long) 
+    
+    class MockDataset:
+        def __init__(self, data):
+            self.data = [{"inputs": data, "puzzle_identifiers": torch.tensor([0])}]
+        def __len__(self): return 1
+        def __getitem__(self, idx): return self.data[idx]
+
+    dataset = MockDataset(inputs)
+    
+    # vocab_size=3 (0, 1, 2)
+    cfg = PlanEditEnvConfig(max_edits=10, gamma=0.99, vocab_size=3, stop_action_mode="noop")
+    env = PlanEditEnv(dataset, dummy_checker, cfg)
+    
+    # 2 positions * 3 tokens = 6 edit actions. STOP is action 6.
+    stop_id = 6
+    env.set_stop_action_id(stop_id)
+    
+    env.reset(0)
+    mask = env.get_action_mask()
+    
+    # Position 0 (Value=1, Empty):
+    # Should allow editing (setting to tokens).
+    # Tokens 0 and 1 are masked out by default in _compute_action_mask (range(min(2, vocab_size)))
+    # So for pos 0:
+    # Action 0 (pos=0, tok=0): False (PAD)
+    # Action 1 (pos=0, tok=1): False (Empty)
+    # Action 2 (pos=0, tok=2): True (Value)
+    
+    # Position 1 (Value=2, Clue):
+    # Should be COMPLETELY masked.
+    # Action 3 (pos=1, tok=0): False
+    # Action 4 (pos=1, tok=1): False
+    # Action 5 (pos=1, tok=2): False
+    
+    print(f"Mask: {mask}")
+    
+    # Verify Pos 0
+    assert mask[0].item() is False, "Pos 0, Tok 0 (PAD) should be masked"
+    assert mask[1].item() is False, "Pos 0, Tok 1 (Empty) should be masked"
+    assert mask[2].item() is True,  "Pos 0, Tok 2 (Value) should be allowed"
+    
+    # Verify Pos 1 (Clue)
+    assert mask[3].item() is False, "Pos 1 (Clue) should be masked"
+    assert mask[4].item() is False, "Pos 1 (Clue) should be masked"
+    assert mask[5].item() is False, "Pos 1 (Clue) should be masked"
+    
+    # Verify STOP
+    assert mask[6].item() is True, "STOP should be allowed"
+
+
+def test_action_masking_comprehensive():
+    """
+    Comprehensive test for action masking logic across a batch.
+    Verifies that for every cell with value > 1 (clue), ALL corresponding edit actions are masked.
+    This corresponds to the fix for 'Action masking bugs (agent edits clues)' in IMPLEMENTATION_GUIDELINE.md.
+    """
+    vocab_size = 5 # 0, 1, 2, 3, 4
+    seq_len = 4
+    # inputs: [2, 1, 3, 1] -> Clue, Empty, Clue, Empty
+    # Clues are at pos 0 (val 2) and pos 2 (val 3).
+    inputs = torch.tensor([[2, 1, 3, 1], [1, 4, 1, 2]], dtype=torch.long)
+    batch_size = 2
+    
+    stop_id = seq_len * vocab_size
+    
+    mask = PlanEditEnv.compute_batch_action_mask(
+        inputs, vocab_size, stop_id, stop_mode="noop"
+    )
+    
+    # Check shape: [B, num_actions] = [2, 4*5 + 1] = [2, 21]
+    assert mask.shape == (2, 21)
+    
+    # Check Batch 0: [2, 1, 3, 1]
+    # Pos 0 (Clue): Actions 0-4 should be False
+    assert not mask[0, 0:5].any(), "Batch 0 Pos 0 is clue, should be fully masked"
+    # Pos 1 (Empty): Actions 5-9. 
+    # Tokens 0, 1 are masked (invalid). Tokens 2,3,4 allowed.
+    assert not mask[0, 5].item() # Tok 0
+    assert not mask[0, 6].item() # Tok 1
+    assert mask[0, 7].item()     # Tok 2
+    # Pos 2 (Clue): Actions 10-14 masked
+    assert not mask[0, 10:15].any(), "Batch 0 Pos 2 is clue, should be fully masked"
+    # Pos 3 (Empty): Actions 15-19. Tok 2,3,4 allowed.
+    assert mask[0, 17].item()
+    
+    # Check Batch 1: [1, 4, 1, 2]
+    # Pos 0 (Empty): Allowed
+    assert mask[1, 2].item()
+    # Pos 1 (Clue): Masked
+    assert not mask[1, 5:10].any(), "Batch 1 Pos 1 is clue, should be fully masked"
+    # Pos 2 (Empty): Allowed
+    assert mask[1, 12].item()
+    # Pos 3 (Clue): Masked
+    assert not mask[1, 15:20].any(), "Batch 1 Pos 3 is clue, should be fully masked"
+    
+    print("Comprehensive masking test passed!")
+
