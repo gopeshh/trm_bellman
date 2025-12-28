@@ -56,6 +56,10 @@ class RLConfig(BaseModel):
     # For Sudoku checker: 10.0 = perfect match (100% cells correct scaled to [0, 10])
     # Set to None to disable early termination on solve
     solved_threshold: Optional[float] = 10.0
+    # Use constraint-based checker for 4x4 Sudoku (provides denser intermediate signals)
+    # When True, rewards are based on constraint violations (row/column/box duplicates)
+    # rather than matching the known solution. This provides better learning signal.
+    use_constraint_checker: bool = False
     
     # Latent z mode
     # True (default): z is reinitialized from (x, y) at every step (episodic)

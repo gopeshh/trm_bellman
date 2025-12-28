@@ -220,11 +220,103 @@ def dummy_checker(x, y) -> float:
     return float(-(target - plan).abs().mean().item())
 
 
+def count_sudoku_violations_4x4(grid: torch.Tensor) -> int:
+    """
+    Count constraint violations in a 4x4 Sudoku grid.
+
+    A 4x4 Sudoku has:
+    - 4 rows (each should have unique digits 1-4)
+    - 4 columns (each should have unique digits 1-4)
+    - 4 boxes of 2x2 (each should have unique digits 1-4)
+
+    Violations are counted as the number of duplicate entries in each constraint.
+
+    Args:
+        grid: [16] or [4, 4] tensor with values in token space (1=empty, 2-5 = digits 1-4)
+
+    Returns:
+        Total number of constraint violations (0 = solved)
+    """
+    grid = grid.reshape(4, 4)
+    violations = 0
+
+    # Convert from token space to digit space
+    # Token 1 = empty (treat as 0), Token 2-5 = digits 1-4
+    digits = grid.clone()
+    digits[digits == 1] = 0  # Empty cells don't count as violations
+    digits = digits - 1  # Shift: token 2 -> digit 1, etc.
+    digits = torch.clamp(digits, min=0)  # Ensure non-negative
+
+    # Check rows
+    for r in range(4):
+        row = digits[r, :]
+        filled = row[row > 0]  # Only check filled cells
+        if len(filled) > 0:
+            violations += len(filled) - len(torch.unique(filled))
+
+    # Check columns
+    for c in range(4):
+        col = digits[:, c]
+        filled = col[col > 0]
+        if len(filled) > 0:
+            violations += len(filled) - len(torch.unique(filled))
+
+    # Check 2x2 boxes
+    for box_r in range(2):
+        for box_c in range(2):
+            box = digits[box_r*2:(box_r+1)*2, box_c*2:(box_c+1)*2].reshape(-1)
+            filled = box[box > 0]
+            if len(filled) > 0:
+                violations += len(filled) - len(torch.unique(filled))
+
+    return violations
+
+
+def sudoku_constraint_checker(x, y, max_violations: int = 24) -> float:
+    """
+    Constraint-based Sudoku checker that provides dense intermediate signals.
+
+    Returns score based on constraint satisfaction (row/column/box violations),
+    NOT just matching the solution. This provides:
+    - Positive reward for moves that reduce violations
+    - Negative reward for moves that increase violations
+
+    Score = 10.0 * (1 - violations / max_violations)
+
+    For 4x4 Sudoku, max possible violations is ~24 (worst case: all duplicates).
+
+    Args:
+        x: Instance dict with "inputs"
+        y: Candidate plan tensor
+        max_violations: Maximum possible violations (for normalization)
+
+    Returns:
+        Score in [0, 10] range where 10 = no violations (solved)
+    """
+    plan = _to_plan_tensor(y).to(torch.long)
+
+    # Detect grid size
+    total_cells = plan.numel()
+    if total_cells == 16:
+        violations = count_sudoku_violations_4x4(plan)
+        # Normalize to [0, 10] range
+        # 0 violations = score 10 (solved)
+        # max_violations = score 0 (worst)
+        score = 10.0 * (1.0 - min(violations, max_violations) / max_violations)
+        return float(score)
+    else:
+        # Fall back to solution matching for 9x9 or other sizes
+        return sudoku_checker(x, y)
+
+
 def sudoku_checker(x, y) -> float:
     """
     Returns a scaled score for how many cells match the Sudoku solution.
     Scaled to [0, 10] range to provide meaningful reward signal while keeping values bounded.
     Falls back to dummy_checker if no solution is attached to the sample.
+
+    NOTE: This checker only rewards matching the known solution, NOT constraint satisfaction.
+    For constraint-based rewards, use sudoku_constraint_checker() instead.
     """
 
     solution = x.get("solution")
@@ -554,6 +646,10 @@ def main():
         pool_size=max(rl_cfg.batch_size, 8),
     )
 
+    # Choose checker function based on task and dataset
+    # For 4x4 Sudoku (seq_len=16), use constraint-based checker for better intermediate signals
+    # For 9x9 Sudoku or when solution is available, use solution-matching checker
+    use_constraint_checker = getattr(rl_cfg, "use_constraint_checker", False)
     checker_fn = sudoku_checker
     if len(dataset) == 0:
         checker_fn = dummy_checker
@@ -561,7 +657,11 @@ def main():
         sample = dataset[0]
         if not (isinstance(sample, dict) and "solution" in sample):
             checker_fn = dummy_checker
-    is_sudoku_checker = checker_fn is sudoku_checker
+        elif use_constraint_checker and seq_len == 16:
+            # For 4x4 Sudoku, constraint-based checker provides better intermediate signals
+            checker_fn = sudoku_constraint_checker
+            print("[INFO] Using constraint-based Sudoku checker for dense intermediate rewards")
+    is_sudoku_checker = checker_fn in (sudoku_checker, sudoku_constraint_checker)
 
     env_cfg = PlanEditEnvConfig(
         max_edits=rl_cfg.max_edits,

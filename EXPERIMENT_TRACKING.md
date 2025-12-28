@@ -12,13 +12,59 @@
 | Experiment ID | Method | Config | Seeds | Steps | Status | Success Rate | Mean Score |
 |--------------|--------|--------|-------|-------|--------|--------------|------------|
 | EXP-01 | Imitation Learning | supervised | 42 | 100 epochs | ✅ COMPLETE | **100%** | 10.0/10.0 |
-| EXP-02 | UPI-TRM (baseline) | rl_sudoku_4x4_ultra_easy.yaml | 42,123,456 | 5000 | ⏳ RUNNING | - | - |
-| EXP-03 | UPI-TRM (theory-exact) | rl_sudoku_shaped_theory_exact.yaml | 42,123,456 | 5000 | ⏳ PENDING | - | - |
-| EXP-04 | PPO-MLP | baseline ppo | 42,123,456 | 5000 | ⏳ PENDING | - | - |
-| EXP-05 | A2C-MLP | baseline a2c | 42,123,456 | 5000 | ⏳ PENDING | - | - |
-| EXP-06 | Ablation: No Exact Baseline | ablation_no_exact_baseline.yaml | 42 | 5000 | ⏳ PENDING | - | - |
-| EXP-07 | Ablation: No Contraction | ablation_no_contraction.yaml | 42 | 5000 | ⏳ PENDING | - | - |
-| EXP-08 | Ablation: No CPI (α=1.0) | ablation_no_conservative_mixture.yaml | 42 | 5000 | ⏳ PENDING | - | - |
+| EXP-02 | UPI-TRM (theory-exact, episodic z) | rl_sudoku_shaped_theory_exact.yaml | 42,123,456 | 5000 | ⏳ RUNNING | - | - |
+| EXP-03 | UPI-TRM (baseline) | rl_sudoku_4x4_ultra_easy.yaml | 42,123,456 | 5000 | ⏳ RUNNING | - | - |
+| EXP-04 | PPO-TRM | baseline ppo + trm | 42,123,456 | 5000 | ⏳ RUNNING | - | - |
+| EXP-05 | PPO-MLP | baseline ppo + mlp | 42,123,456 | 5000 | ⏳ RUNNING | - | - |
+| EXP-06 | A2C-MLP | baseline a2c + mlp | 42,123,456 | 5000 | ⏳ RUNNING | - | - |
+| EXP-07 | UPI-TRM (constraint-checker) | rl_sudoku_4x4_constraint_checker.yaml | 42,123,456 | 5000 | ⏳ RUNNING | - | - |
+| EXP-08 | UPI-TRM (persistent z + constraint) | rl_sudoku_4x4_constraint_persistent_z.yaml | 42,123,456 | 5000 | ⏳ RUNNING | - | - |
+| EXP-09 | UPI-TRM (persistent z, batch-centered) | rl_sudoku_shaped_theory_exact_persistent_z.yaml | 42,123,456 | 5000 | ⏳ RUNNING | - | - |
+
+---
+
+## Important Theory Notes
+
+### Episodic vs Persistent Latent z
+
+The paper defines two latent modes (Section 5.4, Lemma 4.4):
+
+1. **Episodic z** (`episodic_latent=true`): z is reinitialized from (x, y) at every step
+   - Enables `exact_baseline_summation=true` for Theorem 5.9's O(α·ε_A) bound
+   - This is the **theory-exact** mode
+
+2. **Persistent z** (`episodic_latent=false`): z is initialized once per episode and carried across steps (RNN-like)
+   - The exact baseline summation becomes the "memoryless approximation" from Section 5.4
+   - Theorem 5.9 does NOT strictly apply
+   - Use `batch_centered_advantage=true` as a heuristic instead
+   - Analyzed via Lemma 4.4 (two-timescale bound)
+
+**Key Insight**: EXP-02 (episodic z) tests the main theorem; EXP-09 (persistent z) tests the practical approximation.
+
+---
+
+## Critical Finding: Reward Signal Issue
+
+**Root Cause of 0% RL Success Rate Identified (Dec 27, 2024)**
+
+The current `sudoku_checker()` only compares the plan to the **known solution** (cell matching):
+- Score = (matching_cells / total_cells) × 10.0
+- This does NOT provide intermediate signals for constraint satisfaction
+- The shaped reward `r = γ·Φ(s') - Φ(s)` only rewards matching the exact solution
+
+**Solution: Constraint-Based Checker (EXP-07)**
+
+Implemented `sudoku_constraint_checker()` that scores based on **Sudoku constraint violations**:
+- Counts row/column/box duplicates (violations)
+- Score = 10.0 × (1 - violations / max_violations)
+- Provides positive reward for moves that **reduce** violations
+- Provides negative reward for moves that **increase** violations
+- This is the correct intermediate signal for RL learning!
+
+**Key Implementation Files:**
+- `upi_trm_train.py`: Added `count_sudoku_violations_4x4()` and `sudoku_constraint_checker()`
+- `rl/config.py`: Added `use_constraint_checker: bool` field
+- `configs/rl_sudoku_4x4_constraint_checker.yaml`: New config with constraint checker enabled
 
 ---
 
@@ -33,8 +79,9 @@
 - **Evaluation**: 50/50 puzzles solved
 - **Conclusion**: Task is solvable; this is the upper bound
 
-### Running/Pending Experiments
+### Running Experiments
 
+All experiments are currently running with 5000 training steps.
 Results will be populated as experiments complete...
 
 ---
@@ -48,15 +95,7 @@ buck2 run //buiksat_trm:imitation_train -- \
     --num-epochs 100 --seed 42
 ```
 
-### EXP-02: UPI-TRM Baseline
-```bash
-buck2 run //buiksat_trm:upi_trm_train -- \
-    --dataset-paths /home/buiksat/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-ultra-easy \
-    --config /home/buiksat/trm_bellman/configs/rl_sudoku_4x4_ultra_easy.yaml \
-    --train-steps 5000 --seed 42 --no-wandb
-```
-
-### EXP-03: UPI-TRM Theory-Exact
+### EXP-02: UPI-TRM Theory-Exact (MAIN CONTRIBUTION)
 ```bash
 buck2 run //buiksat_trm:upi_trm_train -- \
     --dataset-paths /home/buiksat/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-ultra-easy \
@@ -64,7 +103,23 @@ buck2 run //buiksat_trm:upi_trm_train -- \
     --train-steps 5000 --seed 42 --no-wandb
 ```
 
-### EXP-04: PPO-MLP
+### EXP-03: UPI-TRM Baseline (Non-Theory-Exact)
+```bash
+buck2 run //buiksat_trm:upi_trm_train -- \
+    --dataset-paths /home/buiksat/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-ultra-easy \
+    --config /home/buiksat/trm_bellman/configs/rl_sudoku_4x4_ultra_easy.yaml \
+    --train-steps 5000 --seed 42 --no-wandb
+```
+
+### EXP-04: PPO-TRM
+```bash
+buck2 run //buiksat_trm:upi_trm_train -- \
+    --baseline ppo --backbone trm \
+    --dataset-paths /home/buiksat/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-ultra-easy \
+    --train-steps 5000 --seed 42 --no-wandb
+```
+
+### EXP-05: PPO-MLP
 ```bash
 buck2 run //buiksat_trm:upi_trm_train -- \
     --baseline ppo --backbone norec-mlp \
@@ -72,13 +127,37 @@ buck2 run //buiksat_trm:upi_trm_train -- \
     --train-steps 5000 --seed 42 --no-wandb
 ```
 
-### EXP-05: A2C-MLP
+### EXP-06: A2C-MLP
 ```bash
 buck2 run //buiksat_trm:upi_trm_train -- \
     --baseline a2c --backbone norec-mlp \
     --dataset-paths /home/buiksat/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-ultra-easy \
     --train-steps 5000 --seed 42 --no-wandb
 ```
+
+### EXP-07: UPI-TRM (Constraint-Based Checker) - NEW
+```bash
+buck2 run //buiksat_trm:upi_trm_train -- \
+    --dataset-paths /home/buiksat/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-ultra-easy \
+    --config /home/buiksat/trm_bellman/configs/rl_sudoku_4x4_constraint_checker.yaml \
+    --train-steps 5000 --seed 42 --no-wandb
+```
+
+---
+
+## Theory-Exact Config Key Features
+
+The `rl_sudoku_shaped_theory_exact.yaml` config enables all paper features:
+
+| Feature | Config Key | Value | Paper Reference |
+|---------|------------|-------|-----------------|
+| Exact baseline summation | `exact_baseline_summation` | `true` | Theorem 5.9 (KEY) |
+| Contraction enforcement | `enable_contraction` | `true` | Assumption 4.2 |
+| Theory-exact CPI mixture | `theory_exact_mixture` | `true` | Section 6.5 |
+| Forward-invariant projection | `latent_ball_radius` | `10.0` | Assumption 4.1 |
+| Rush-to-fail mitigation | `fail_terminal_reward` | `-10.0` | Remark 2.6 |
+| Inner unroll depth | `inner_unroll_n` | `4` | Dial 'n' |
+| Mixture alpha | `mixture_alpha` | `0.05` | Dial 'α' |
 
 ---
 
@@ -90,18 +169,10 @@ buck2 run //buiksat_trm:upi_trm_train -- \
 |--------|--------------|------------|-------|
 | Imitation Learning (Upper Bound) | 100% | 10.0 | Supervised with oracle |
 | UPI-TRM (Theory-Exact) | TBD | TBD | All theory features |
-| UPI-TRM (Baseline) | TBD | TBD | Default config |
+| UPI-TRM (Baseline) | TBD | TBD | No theory features |
+| PPO-TRM | TBD | TBD | PPO with TRM backbone |
 | PPO-MLP | TBD | TBD | Standard baseline |
 | A2C-MLP | TBD | TBD | Simplest baseline |
-
-**Table 2: Ablation Study**
-
-| Ablation | Success Rate | Δ vs Full | Tests |
-|----------|--------------|-----------|-------|
-| Full UPI-TRM | TBD | - | All features |
-| No Exact Baseline | TBD | TBD | Theorem 5.9 |
-| No Contraction | TBD | TBD | Assumption 4.2 |
-| No CPI (α=1.0) | TBD | TBD | Conservative update |
 
 ---
 
@@ -111,3 +182,4 @@ buck2 run //buiksat_trm:upi_trm_train -- \
 - Imitation learning achieves 100% immediately
 - RL methods are expected to converge with sufficient training
 - Key question: How do theory-exact features improve over baselines?
+- Theory-exact config should show "Is theory-exact: True" at startup
