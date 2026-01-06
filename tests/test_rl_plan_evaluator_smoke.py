@@ -2,7 +2,7 @@ import math
 
 import torch
 
-from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
+from rl.evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.envs.plan_edit_env import PlanEditEnvConfig
 from upi_trm_train import DummyPuzzleDataset, dummy_checker

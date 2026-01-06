@@ -15,7 +15,7 @@ import torch.nn.utils as nn_utils
 
 # Lazy import to break circular dependency with evaluators
 if TYPE_CHECKING:
-    from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
+    from rl.evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan, normalize_puzzle_id
@@ -1510,7 +1510,7 @@ class UPITrmTrainer:
             - initial_score_mean: Mean score at episode start (before edits)
         """
         # Runtime import to avoid circular dependency
-        from evaluators.rl_plan_evaluator import evaluate_plan_policy_with_scores
+        from rl.evaluator import evaluate_plan_policy_with_scores
 
         episodic_latent = getattr(self.rl_cfg, "episodic_latent", True)
 

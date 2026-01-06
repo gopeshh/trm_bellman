@@ -1,0 +1,106 @@
+# DQN/Double DQN Baseline with TRM backbone for Sudoku
+#
+# This config uses Deep Q-Network (Double DQN by default) with TRM backbone.
+# DQN is a value-based RL method that learns Q(s,a) directly.
+#
+# Key differences from UPI-TRM:
+# - Value-based method (no separate policy network)
+# - Epsilon-greedy exploration instead of stochastic policy
+# - Experience replay for sample efficiency
+# - Target network for stable bootstrapping
+#
+# Key differences from PPO/A2C:
+# - Off-policy (can reuse old experience)
+# - No policy gradient (learns Q-values directly)
+# - More sample efficient but potentially less stable
+
+# ===================================================================
+# DQN-SPECIFIC PARAMETERS
+# ===================================================================
+algorithm: "dqn"
+
+# DQN variant
+double_dqn: true  # Use Double DQN (recommended, reduces overestimation)
+
+# Exploration schedule (epsilon-greedy)
+epsilon_start: 1.0
+epsilon_end: 0.01
+epsilon_decay_steps: 2000  # Steps to decay epsilon
+
+# Replay buffer
+buffer_size: 10000
+batch_size: 64
+min_buffer_size: 500  # Minimum transitions before training starts
+
+# Target network updates
+target_update_freq: 100  # Steps between hard target updates
+soft_update_tau: 0.0  # If > 0, use soft update (Polyak averaging)
+
+# Training frequency
+train_freq: 4  # Collect 4 steps, then train once
+gradient_steps: 1  # Number of gradient updates per training
+
+# ===================================================================
+# CORE RL PARAMETERS
+# ===================================================================
+gamma: 0.99
+inner_unroll_n: 4
+max_edits: 20
+num_train_steps: 5000
+
+# ===================================================================
+# REWARD CONFIGURATION
+# ===================================================================
+reward_shaping: true
+fail_terminal_reward: -10.0
+solve_terminal_reward: 0.0
+
+# ===================================================================
+# MODEL ARCHITECTURE
+# ===================================================================
+# Uses same TRM backbone as UPI-TRM
+# DQN adds a separate Q-head on top
+
+# These are for compatibility but NOT used by DQN Q-network:
+enable_contraction: false  # No contraction in DQN baseline
+target_Lz: 0.9
+target_Lv: 5.0
+latent_ball_radius: 0.0
+
+# ===================================================================
+# OPTIMIZATION
+# ===================================================================
+# DQN uses single learning rate for Q-network
+learning_rate: 1.0e-4  # Maps to value_lr for compatibility
+policy_lr: 1.0e-4  # Ignored by DQN
+value_lr: 1.0e-4
+max_grad_norm: 1.0
+
+# ===================================================================
+# STOP ACTION
+# ===================================================================
+stop_action_mode: "noop"
+stop_action_penalty: -0.1
+
+# ===================================================================
+# LOGGING & EVALUATION
+# ===================================================================
+log_interval: 100
+eval_interval: 500
+eval_num_episodes: 50
+use_tqdm: false
+
+# ===================================================================
+# TASK CONFIGURATION
+# ===================================================================
+task_name: "sudoku"
+solved_threshold: 10.0
+
+# ===================================================================
+# DISABLED THEORY FEATURES
+# ===================================================================
+# DQN is a baseline - no theory-exact features
+exact_baseline_summation: false
+exact_k_step_targets: false
+theory_exact_mixture: false
+batch_centered_advantage: false

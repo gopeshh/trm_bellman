@@ -27,6 +27,7 @@ from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.upi_trm_trainer import UPITrmTrainer
 from rl.algos.ppo import PPOTrainer, PPOConfig
 from rl.algos.a2c import A2CTrainer, A2CConfig
+from rl.algos.dqn import DQNTrainer, DQNConfig
 from utils.seeding import set_global_seed
 
 
@@ -164,13 +165,18 @@ def save_checkpoint(
         checkpoint["replay_buffer_size"] = len(trainer.replay)
     
     path = os.path.join(checkpoint_dir, f"rl_checkpoint_step_{step}.pt")
-    torch.save(checkpoint, path)
-    print(f"[Checkpoint] Saved to {path}")
-    
-    # Also save just the model weights for easy loading
-    model_path = os.path.join(checkpoint_dir, f"model_step_{step}.pt")
-    torch.save(model.state_dict(), model_path)
-    
+    try:
+        torch.save(checkpoint, path)
+        print(f"[Checkpoint] Saved to {path}")
+
+        # Also save just the model weights for easy loading
+        model_path = os.path.join(checkpoint_dir, f"model_step_{step}.pt")
+        torch.save(model.state_dict(), model_path)
+    except Exception as e:
+        print(f"[Checkpoint] Warning: Failed to save checkpoint: {e}")
+        print("[Checkpoint] Continuing training without saving...")
+        return ""
+
     return path
 
 
@@ -458,8 +464,8 @@ def parse_args():
         "--baseline",
         type=str,
         default=None,
-        choices=["ppo", "a2c", None],
-        help="Use baseline algorithm instead of UPI-TRM. Options: ppo, a2c. Default: None (use UPI-TRM).",
+        choices=["ppo", "a2c", "dqn", "ddqn", None],
+        help="Use baseline algorithm instead of UPI-TRM. Options: ppo, a2c, dqn, ddqn. Default: None (use UPI-TRM).",
     )
     parser.add_argument(
         "--backbone",
@@ -782,7 +788,7 @@ def main():
             print("[INFO] Puzzle embeddings DISABLED (set --puzzle-emb-ndim > 0 to enable)")
 
     # === Trainer Selection ===
-    # Support for different algorithms: UPI-TRM (default), PPO, or A2C
+    # Support for different algorithms: UPI-TRM (default), PPO, A2C, DQN, or Double DQN
     if args.baseline is None:
         # Default: UPI-TRM (theory-aligned algorithm)
         trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
@@ -827,6 +833,31 @@ def main():
         )
         trainer = A2CTrainer(model=model, env=env, config=a2c_cfg, device=device)
         print(f"[INFO] Using A2C baseline (num_steps={a2c_cfg.num_steps})")
+    elif args.baseline in ("dqn", "ddqn"):
+        # DQN/Double DQN baseline
+        use_double = (args.baseline == "ddqn")
+        dqn_cfg = DQNConfig(
+            double_dqn=use_double,
+            gamma=rl_cfg.gamma,
+            epsilon_start=1.0,
+            epsilon_end=0.01,
+            epsilon_decay_steps=2000,  # Faster decay for small action spaces
+            buffer_size=10000,
+            batch_size=64,
+            min_buffer_size=500,
+            target_update_freq=100,
+            learning_rate=rl_cfg.value_lr,
+            max_grad_norm=1.0,
+            inner_unroll_n=rl_cfg.inner_unroll_n,
+            train_freq=4,
+            gradient_steps=1,
+            num_train_steps=rl_cfg.num_train_steps,
+            log_interval=rl_cfg.log_interval,
+            eval_interval=rl_cfg.eval_interval,
+        )
+        trainer = DQNTrainer(model=model, env=env, config=dqn_cfg, device=device)
+        algo_name = "Double DQN" if use_double else "DQN"
+        print(f"[INFO] Using {algo_name} baseline (buffer={dqn_cfg.buffer_size}, target_update={dqn_cfg.target_update_freq})")
     else:
         raise ValueError(f"Unknown baseline algorithm: {args.baseline}")
     
@@ -1027,10 +1058,23 @@ def main():
             puzzle_emb_optimizer.zero_grad()
         
         if (step + 1) % rl_cfg.log_interval == 0:
-            msg = (
-                f"[step {step+1:05d}] value_loss={metrics['loss_value']:.6f} "
-                f"policy_loss={metrics['loss_policy']:.6f}"
-            )
+            # Normalize loss names across algorithms (DQN uses loss_q, others use loss_value)
+            loss_value = metrics.get('loss_value', metrics.get('loss_q', 0.0))
+            loss_policy = metrics.get('loss_policy', 0.0)
+
+            # Build message based on algorithm type
+            if args.baseline in ("dqn", "ddqn"):
+                epsilon = metrics.get('epsilon', trainer._get_epsilon() if hasattr(trainer, '_get_epsilon') else 0)
+                mean_q = metrics.get('mean_q', 0.0)
+                msg = (
+                    f"[step {step+1:05d}] q_loss={loss_value:.6f} "
+                    f"mean_q={mean_q:.3f} epsilon={epsilon:.3f}"
+                )
+            else:
+                msg = (
+                    f"[step {step+1:05d}] value_loss={loss_value:.6f} "
+                    f"policy_loss={loss_policy:.6f}"
+                )
             if hasattr(step_iter, "write"):
                 step_iter.write(msg)
             else:
@@ -1054,12 +1098,17 @@ def main():
             # === WandB: Log training metrics ===
             if use_wandb:
                 wandb_metrics = {
-                    "train/loss_value": metrics["loss_value"],
-                    "train/loss_policy": metrics["loss_policy"],
+                    "train/loss_value": loss_value,
+                    "train/loss_policy": loss_policy,
                     "train/term_stop": metrics.get("term_stop", 0),
                     "train/term_solved": metrics.get("term_solved", 0),
                     "train/term_budget": metrics.get("term_budget", 0),
                 }
+                # DQN-specific metrics
+                if args.baseline in ("dqn", "ddqn"):
+                    wandb_metrics["train/mean_q"] = metrics.get("mean_q", 0.0)
+                    wandb_metrics["train/epsilon"] = metrics.get("epsilon", 0.0)
+                    wandb_metrics["train/buffer_size"] = metrics.get("buffer_size", 0)
                 # Add learning rates if available
                 if "value_lr" in metrics:
                     wandb_metrics["train/lr_value"] = metrics["value_lr"]

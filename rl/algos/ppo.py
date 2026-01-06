@@ -487,7 +487,7 @@ class PPOTrainer:
                 - solved_count: Number of solved episodes
                 - total_episodes: Total evaluation episodes
         """
-        from evaluators.rl_plan_evaluator import evaluate_plan_policy_with_scores
+        from rl.evaluator import evaluate_plan_policy_with_scores
 
         mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
             model=self.model,

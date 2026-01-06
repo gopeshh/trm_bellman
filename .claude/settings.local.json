@@ -17,7 +17,8 @@
       "Bash(buck2 build:*)",
       "Bash(done)",
       "Bash(pgrep:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(CUDA_VISIBLE_DEVICES=0 buck2 run:*)"
     ],
     "deny": [],
     "ask": []
