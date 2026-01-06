@@ -41,7 +41,7 @@
 #### Theory-Faithful (Risk A Mitigation) - 🔄 RUNNING (38% PEAK!)
 - **Config**: `configs/paper_episodic_z_constraint.yaml`
 - **Seeds**: 42 (running)
-- **Current Step**: ~500/5000
+- **Current Step**: ~680/5000
 - **Current Results**: **38% peak at step 400**, 30% at step 500
 - **Purpose**: Validate theory with exact baseline summation (Theorem 5.9)
 - **Key settings**: `episodic_latent=True`, `exact_baseline_summation=True`
@@ -50,13 +50,28 @@
 
 #### Ablation: No Exact Baseline - 🔄 RUNNING (STILL 0%!)
 - **Config**: `configs/ablations/ablation_no_exact_baseline.yaml`
-- **Seeds**: 42 (running)
-- **Current Step**: ~550/5000
-- **Current Results**: **0% success at step 550** (VALIDATES THEOREM 5.9!)
+- **Seeds**: 42 (step ~950), 123, 456 (just started)
+- **Current Results**: **0% success at step 950** (VALIDATES THEOREM 5.9!)
 - **Purpose**: Test impact of removing exact baseline summation
 - **Key settings**: `exact_baseline_summation=False`, `batch_centered_advantage=True`
 - **Finding**: Without exact baseline (Theorem 5.9), UPI-TRM fails to learn!
-- **Log**: `runs/ablation_no_exact_baseline_seed42.log`
+- **Logs**: `runs/ablation_no_exact_baseline_seed{42,123,456}.log`
+
+#### Ablation: No Contraction - 🔄 RUNNING (just started)
+- **Config**: `configs/ablations/ablation_no_contraction.yaml`
+- **Seeds**: 42 (running)
+- **Purpose**: Test if L_z < 1 contraction (Assumption 4.2) is necessary
+- **Key settings**: `enable_contraction=False`, `target_Lz=1.0`
+- **Note**: SLOW - has exact baseline summation
+- **Log**: `runs/ablation_no_contraction_seed42.log`
+
+#### Ablation: No Conservative Mixture - 🔄 RUNNING (just started)
+- **Config**: `configs/ablations/ablation_no_conservative_mixture.yaml`
+- **Seeds**: 42 (running)
+- **Purpose**: Test if conservative policy updates (CPI) help vs greedy (α=1.0)
+- **Key settings**: `mixture_alpha=1.0`
+- **Note**: SLOW - has exact baseline summation
+- **Log**: `runs/ablation_no_conservative_mixture_seed42.log`
 
 ### Pending Experiments
 
@@ -103,13 +118,15 @@
 |------------|--------|-------|--------|---------------|
 | **UPI-TRM Persistent Z** | `paper_persistent_z_constraint.yaml` | 42, 123, 456 | ✅ DONE | **44% ± 2%** peak |
 | Theory-Faithful | `paper_episodic_z_constraint.yaml` | 42 | 🔄 Running | **38%** peak at step 400 |
-| **Ablation: No Exact Baseline** | `ablations/ablation_no_exact_baseline.yaml` | 42 | 🔄 Running | **0%** at step 550 |
+| **Ablation: No Exact Baseline** | `ablations/ablation_no_exact_baseline.yaml` | 42, 123, 456 | 🔄 Running | **0%** at step 950 |
+| Ablation: No Contraction | `ablations/ablation_no_contraction.yaml` | 42 | 🔄 Running | Just started |
+| Ablation: No Conservative Mixture | `ablations/ablation_no_conservative_mixture.yaml` | 42 | 🔄 Running | Just started |
 | PPO-TRM | `baselines/ppo_trm_sudoku.yaml` | 42, 123, 456 | ✅ DONE | **0%** all seeds |
 | Double-DQN | `baselines/dqn_trm_sudoku.yaml` | 42, 123, 456 | ✅ DONE | **0%** all seeds |
 | PPO-MLP | `baselines/ppo_norec_sudoku.yaml` | 42, 123, 456 | ✅ DONE | **0%** all seeds |
 | Other Ablations | `ablations/*.yaml` | 42, 123, 456 | ⏳ Pending | TBD |
 
-**Total experiments**: 10 completed + 2 running + 20 pending ablations = 32 total
+**Total experiments**: 10 completed + 6 running + ~15 pending ablations = ~31 total
 
 ### Key Findings (ICML 2026 Submission)
 
