@@ -111,13 +111,13 @@ All experiments use **constraint-based dense rewards**:
 | Method | Seeds | Peak Success Rate | Final Success Rate | Status |
 |--------|-------|-------------------|-------------------|--------|
 | **UPI-TRM Persistent z** | 42, 123, 456 | **42%, 46%, 44%** | 36%, 34%, 30% | ✅ COMPLETED |
-| **UPI-TRM Episodic z** | 42 | **30%** (step 100) | - | 🔄 Running |
-| PPO-TRM | 42, 123, 456 | **0%** | 0% | 🔄 Running |
-| Double-DQN | 42, 123, 456 | **0%** | 0% | 🔄 Running |
-| PPO-MLP | 42, 123, 456 | **0%** | 0% | 🔄 Running |
+| **UPI-TRM Episodic z** | 42 | **32%** (step 300) | - | 🔄 Running |
+| PPO-TRM | 42, 123, 456 | **0%** | 0% | ✅ COMPLETED |
+| Double-DQN | 42, 123, 456 | **0%** | 0% | ✅ COMPLETED |
+| PPO-MLP | 42, 123, 456 | **0%** | 0% | ✅ COMPLETED |
 | A2C-MLP | 42 | **0%** | Diverged | ❌ Failed |
 
-**Key Finding**: UPI-TRM achieves **44% mean peak success rate** (42%, 46%, 44%) while all baselines achieve **0%** across all seeds. The theory-faithful variant with episodic z shows 30% at step 100, validating the theoretical approach.
+**Key Finding**: UPI-TRM achieves **44% mean peak success rate** (42%, 46%, 44%) while all baselines achieve **0%** across all 9 seeds. The theory-faithful variant with episodic z shows 32% at step 300, validating the theoretical approach.
 
 ### UPI-TRM Persistent z Learning Curve (Multi-Seed)
 
