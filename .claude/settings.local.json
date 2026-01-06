@@ -18,7 +18,9 @@
       "Bash(done)",
       "Bash(pgrep:*)",
       "Bash(pkill:*)",
-      "Bash(CUDA_VISIBLE_DEVICES=0 buck2 run:*)"
+      "Bash(CUDA_VISIBLE_DEVICES=0 buck2 run:*)",
+      "Bash(for f in ablation_no_exact_baseline_seed123 ablation_no_exact_baseline_seed456 ablation_no_contraction_seed42 ablation_no_conservative_mixture_seed42)",
+      "Bash(do echo \"=== $f ===\" tail -5 /home/buiksat/trm_bellman/runs/$f.log)"
     ],
     "deny": [],
     "ask": []

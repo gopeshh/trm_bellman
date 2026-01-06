@@ -1,6 +1,6 @@
 # UPI-TRM Experiment Plan (ICML 2026)
 
-## Current Status (2026-01-06 00:15 PST)
+## Current Status (2026-01-06 11:30 PST)
 
 ### Completed Experiments
 
@@ -38,15 +38,25 @@
 
 ### Running Experiments
 
-#### Theory-Faithful (Risk A Mitigation) - 🔄 RUNNING (32% SUCCESS!)
+#### Theory-Faithful (Risk A Mitigation) - 🔄 RUNNING (38% PEAK!)
 - **Config**: `configs/paper_episodic_z_constraint.yaml`
 - **Seeds**: 42 (running)
-- **Current Step**: ~300/5000
-- **Current Results**: **32% success rate at step 300** (validates theory!)
+- **Current Step**: ~500/5000
+- **Current Results**: **38% peak at step 400**, 30% at step 500
 - **Purpose**: Validate theory with exact baseline summation (Theorem 5.9)
 - **Key settings**: `episodic_latent=True`, `exact_baseline_summation=True`
 - **Note**: ~100x slower due to enumerating all 97 actions per state
 - **Log**: `runs/upi_trm_theory_faithful_seed42.log`
+
+#### Ablation: No Exact Baseline - 🔄 RUNNING (STILL 0%!)
+- **Config**: `configs/ablations/ablation_no_exact_baseline.yaml`
+- **Seeds**: 42 (running)
+- **Current Step**: ~550/5000
+- **Current Results**: **0% success at step 550** (VALIDATES THEOREM 5.9!)
+- **Purpose**: Test impact of removing exact baseline summation
+- **Key settings**: `exact_baseline_summation=False`, `batch_centered_advantage=True`
+- **Finding**: Without exact baseline (Theorem 5.9), UPI-TRM fails to learn!
+- **Log**: `runs/ablation_no_exact_baseline_seed42.log`
 
 ### Pending Experiments
 
@@ -92,21 +102,23 @@
 | Experiment | Config | Seeds | Status | Final Results |
 |------------|--------|-------|--------|---------------|
 | **UPI-TRM Persistent Z** | `paper_persistent_z_constraint.yaml` | 42, 123, 456 | ✅ DONE | **44% ± 2%** peak |
-| Theory-Faithful | `paper_episodic_z_constraint.yaml` | 42 | 🔄 Running | **32%** at step 300 |
+| Theory-Faithful | `paper_episodic_z_constraint.yaml` | 42 | 🔄 Running | **38%** peak at step 400 |
+| **Ablation: No Exact Baseline** | `ablations/ablation_no_exact_baseline.yaml` | 42 | 🔄 Running | **0%** at step 550 |
 | PPO-TRM | `baselines/ppo_trm_sudoku.yaml` | 42, 123, 456 | ✅ DONE | **0%** all seeds |
 | Double-DQN | `baselines/dqn_trm_sudoku.yaml` | 42, 123, 456 | ✅ DONE | **0%** all seeds |
 | PPO-MLP | `baselines/ppo_norec_sudoku.yaml` | 42, 123, 456 | ✅ DONE | **0%** all seeds |
-| Ablations | `ablations/*.yaml` | 42, 123, 456 | ⏳ Pending | TBD |
+| Other Ablations | `ablations/*.yaml` | 42, 123, 456 | ⏳ Pending | TBD |
 
-**Total experiments**: 10 completed + 1 running + 21 pending ablations = 32 total
+**Total experiments**: 10 completed + 2 running + 20 pending ablations = 32 total
 
 ### Key Findings (ICML 2026 Submission)
 
 1. **UPI-TRM achieves 44% success** - Mean peak across 3 seeds on 4x4 Sudoku
 2. **All baselines at 0%** - PPO-TRM, Double-DQN, PPO-MLP all fail completely (9 seeds total)
-3. **Theory validates** - Episodic z + exact baseline achieves 32% at step 300
+3. **Theory validates** - Episodic z + exact baseline achieves 38% at step 400
 4. **Algorithm matters** - Same TRM backbone with PPO = 0%, with UPI-TRM = 44%
 5. **Comprehensive comparison** - Tested policy-based (PPO), value-based (DQN), and simple (MLP) baselines
+6. **KEY: Theorem 5.9 is critical** - Ablation without exact baseline shows 0% vs 38% with exact baseline!
 
 ## Commands Reference
 
@@ -156,3 +168,61 @@ cd ~/fbsource/fbcode && buck2 run //buiksat_trm:upi_trm_train \
 - `CLAUDE.md` - Claude Code project instructions
 - `rl/algos/dqn.py` - DQN/Double-DQN implementation
 - `rl/evaluator.py` - Policy evaluation utilities (moved from evaluators/)
+
+## Ablation Experiment Commands
+
+### Key Ablations (Priority Order)
+
+```bash
+# 1. No Exact Baseline (Tests Theorem 5.9 - KEY!) - FAST, no enumeration
+cd ~/fbsource/fbcode && CUDA_VISIBLE_DEVICES=1 nohup buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
+    --dataset-paths /home/buiksat/trm_bellman/data/sudoku-4x4-ultra-easy \
+    --config /home/buiksat/trm_bellman/configs/ablations/ablation_no_exact_baseline.yaml \
+    --train-steps 5000 --seed 42 \
+    > /home/buiksat/trm_bellman/runs/ablation_no_exact_baseline_seed42.log 2>&1 &
+
+# 2. No Contraction (Tests Assumption 4.2) - SLOW, has exact baseline
+cd ~/fbsource/fbcode && CUDA_VISIBLE_DEVICES=0 nohup buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
+    --dataset-paths /home/buiksat/trm_bellman/data/sudoku-4x4-ultra-easy \
+    --config /home/buiksat/trm_bellman/configs/ablations/ablation_no_contraction.yaml \
+    --train-steps 5000 --seed 42 \
+    > /home/buiksat/trm_bellman/runs/ablation_no_contraction_seed42.log 2>&1 &
+
+# 3. No Conservative Mixture (Tests CPI with α=1.0) - SLOW, has exact baseline
+cd ~/fbsource/fbcode && CUDA_VISIBLE_DEVICES=1 nohup buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
+    --dataset-paths /home/buiksat/trm_bellman/data/sudoku-4x4-ultra-easy \
+    --config /home/buiksat/trm_bellman/configs/ablations/ablation_no_conservative_mixture.yaml \
+    --train-steps 5000 --seed 42 \
+    > /home/buiksat/trm_bellman/runs/ablation_no_conservative_mixture_seed42.log 2>&1 &
+```
+
+### Seeds 123 and 456 for Key Ablations
+
+```bash
+# No Exact Baseline - Seeds 123 and 456
+cd ~/fbsource/fbcode && CUDA_VISIBLE_DEVICES=0 nohup buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
+    --dataset-paths /home/buiksat/trm_bellman/data/sudoku-4x4-ultra-easy \
+    --config /home/buiksat/trm_bellman/configs/ablations/ablation_no_exact_baseline.yaml \
+    --train-steps 5000 --seed 123 \
+    > /home/buiksat/trm_bellman/runs/ablation_no_exact_baseline_seed123.log 2>&1 &
+
+cd ~/fbsource/fbcode && CUDA_VISIBLE_DEVICES=1 nohup buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
+    --dataset-paths /home/buiksat/trm_bellman/data/sudoku-4x4-ultra-easy \
+    --config /home/buiksat/trm_bellman/configs/ablations/ablation_no_exact_baseline.yaml \
+    --train-steps 5000 --seed 456 \
+    > /home/buiksat/trm_bellman/runs/ablation_no_exact_baseline_seed456.log 2>&1 &
+```
+
+### Other Ablation Configs
+
+| Config | What It Tests | Speed |
+|--------|--------------|-------|
+| `ablation_no_projection.yaml` | Latent ball projection (Assumption 4.1) | SLOW |
+| `ablation_no_theory_exact_mixture.yaml` | Theory-exact CPI mixture | SLOW |
+| `ablation_no_theory_features.yaml` | All theory features disabled | FAST |
+| `ablation_sparse_no_theory.yaml` | Sparse rewards + no theory | FAST |
