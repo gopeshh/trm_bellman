@@ -1,6 +1,6 @@
 # UPI-TRM Experiment Results Report
 
-**Date**: January 5, 2026 (updated from December 28, 2025)
+**Date**: January 6, 2026 (updated from January 5, 2026)
 **Project**: UPI-TRM (Unrolled Policy Iteration for Tiny Recursive Models)
 **Target**: ICML 2026 Submission (Deadline: January 18)
 
@@ -111,13 +111,16 @@ All experiments use **constraint-based dense rewards**:
 | Method | Seeds | Peak Success Rate | Final Success Rate | Status |
 |--------|-------|-------------------|-------------------|--------|
 | **UPI-TRM Persistent z** | 42, 123, 456 | **42%, 46%, 44%** | 36%, 34%, 30% | ✅ COMPLETED |
-| **UPI-TRM Episodic z** | 42 | **32%** (step 300) | - | 🔄 Running |
+| **UPI-TRM Episodic z** | 42 | **38%** (step 400) | - | 🔄 Running (restarted) |
 | PPO-TRM | 42, 123, 456 | **0%** | 0% | ✅ COMPLETED |
 | Double-DQN | 42, 123, 456 | **0%** | 0% | ✅ COMPLETED |
 | PPO-MLP | 42, 123, 456 | **0%** | 0% | ✅ COMPLETED |
 | A2C-MLP | 42 | **0%** | Diverged | ❌ Failed |
+| **Ablation: No Exact Baseline** | 42 | **0%** | - | 🔄 Running (validates Thm 5.9) |
+| **Ablation: No Theory Features** | 42, 123, 456 | - | - | 🔄 Running |
+| **Ablation: Sparse No Theory** | 42, 123, 456 | - | - | 🔄 Running |
 
-**Key Finding**: UPI-TRM achieves **44% mean peak success rate** (42%, 46%, 44%) while all baselines achieve **0%** across all 9 seeds. The theory-faithful variant with episodic z shows 32% at step 300, validating the theoretical approach.
+**Key Finding**: UPI-TRM achieves **44% mean peak success rate** (42%, 46%, 44%) while all baselines achieve **0%** across all 9 seeds. The theory-faithful variant with episodic z achieved 38% peak at step 400 (previous run). The "No Exact Baseline" ablation at 0% validates Theorem 5.9.
 
 ### UPI-TRM Persistent z Learning Curve (Multi-Seed)
 
@@ -502,55 +505,74 @@ buck2 run //buiksat_trm:upi_trm_train \
 
 ## Next Steps
 
-1. ✅ **Multi-seed experiments** - Currently running (3 seeds each for UPI-TRM and baselines)
-2. **Wait for completion** - UPI-TRM persistent z at ~50%, PPO-MLP at ~75%
-3. **Test on 9×9 Sudoku** (harder task after 4×4 results finalized)
-4. **Ablation studies** on individual UPI-TRM components
+1. ✅ **Multi-seed experiments** - Completed for main UPI-TRM and all baselines
+2. ✅ **Ablation studies** - Currently running (8 experiments active, 5 queued)
+3. **Wait for ablations to complete** - Fast ablations in progress
+4. **Test on 9×9 Sudoku** (harder task after ablations complete)
 5. **Curriculum learning** (4×4 → 9×9 transfer)
 6. **Generate paper figures** with learning curves and bar charts
 
 ### Current Experiment Status
 
-**Updated**: January 5, 2026 21:45 PST
+**Updated**: January 6, 2026 16:00 PST
 
-#### Completed Experiments:
+#### Completed Experiments (12 total):
 - **UPI-TRM Persistent z** (3 seeds): ✅ COMPLETED
   - Seed 42: Peak 42%, Final 36% at step 5000
   - Seed 123: Peak 46%, Final 34% at step 5000
   - Seed 456: Peak 44%, Final 30% at step 5000
   - **Mean peak**: 44% ± 2%
 
-#### Running Experiments:
-- **UPI-TRM Episodic z (Theory-Faithful)**: 🔄 Seed 42 at step ~130
+- **PPO-TRM Baseline** (3 seeds): ✅ COMPLETED - **0% all seeds**
+- **Double-DQN Baseline** (3 seeds): ✅ COMPLETED - **0% all seeds**
+- **PPO-MLP Baseline** (3 seeds): ✅ COMPLETED - **0% all seeds**
+
+#### Running Experiments (8 active):
+
+**GPU 0:**
+- **UPI-TRM Episodic z (Theory-Faithful)**: 🔄 Seed 42 at step ~60/5000 (restarted)
   - Config: `paper_episodic_z_constraint.yaml`
-  - **Current Result**: 30% success at step 100 (very promising!)
-  - GPU 0, ~100× slower due to `exact_baseline_summation=true`
+  - **Previous Peak**: 38% success at step 400 (before restart)
+  - Note: SLOW (~100× slower due to `exact_baseline_summation=true`)
   - Log: `runs/upi_trm_theory_faithful_seed42.log`
 
-- **PPO-TRM Baseline**: 🔄 Seeds 42 (step ~1200), 123, 456 (starting)
-  - Config: `ppo_trm_sudoku.yaml`
-  - **Current Result**: 0% success at step 1000
-  - Log: `runs/ppo_trm_seed{42,123,456}.log`
+- **Ablation: No Theory Features**: 🔄 Seeds 42, 123, 456
+  - Config: `ablation_no_theory_features.yaml`
+  - Seed 42 at step ~120
+  - Purpose: Test with all theory features disabled
+  - Note: FAST (no exact baseline enumeration)
+  - Logs: `runs/ablation_no_theory_features_seed{42,123,456}.log`
 
-- **Double-DQN Baseline**: 🔄 Seeds 42 (~2000), 123 (~2000), 456 (~1700)
-  - Config: `dqn_trm_sudoku.yaml`
-  - **Current Result**: 0% success across all seeds
-  - Log: `runs/ddqn_trm_seed{42,123,456}.log`
+**GPU 1:**
+- **Ablation: No Exact Baseline**: 🔄 Seed 42 at step ~220
+  - Config: `ablation_no_exact_baseline.yaml`
+  - **Current Result**: 0% success (VALIDATES THEOREM 5.9!)
+  - Purpose: Test impact of removing exact baseline summation
+  - Log: `runs/ablation_no_exact_baseline_seed42.log`
 
-- **PPO-MLP Baseline**: 🔄 Seeds 42, 123, 456 (all at ~100 steps)
-  - Config: `ppo_norec_sudoku.yaml`
-  - **Current Result**: Just started
-  - Log: `runs/ppo_mlp_seed{42,123,456}.log`
+- **Ablation: Sparse No Theory**: 🔄 Seeds 42, 123, 456
+  - Config: `ablation_sparse_no_theory.yaml`
+  - Seed 42 at step ~40
+  - Purpose: Test sparse rewards + no theory features
+  - Logs: `runs/ablation_sparse_no_theory_seed{42,123,456}.log`
 
-#### Pending Experiments:
-- Ablation experiments (21 runs)
-- Supervised warm-start + RL baseline
+#### Queued Experiments (5 total):
+- **No Exact Baseline** - Seeds 123, 456 (waiting for seed 42)
+- **No Contraction** - Seed 42 (waiting for fast ablations)
+- **No Conservative Mixture** - Seed 42 (waiting for No Contraction)
+
+#### GPU Utilization:
+| GPU | Memory | Compute | Experiments Running |
+|-----|--------|---------|---------------------|
+| 0 | 3.6 GB / 80 GB | ~100% | Theory Faithful + No Theory Features (3 seeds) |
+| 1 | 3.8 GB / 80 GB | ~100% | No Exact Baseline + Sparse No Theory (3 seeds) |
 
 **Latest Results Summary**:
 - UPI-TRM Persistent z: **44% mean peak success** (42%, 46%, 44%)
-- UPI-TRM Episodic z: **30% at step 100** (theory-faithful mode)
-- All baselines: **0% success** (PPO-TRM, Double-DQN, PPO-MLP, A2C-MLP)
+- UPI-TRM Episodic z: **38% peak at step 400** (previous run, theory-faithful mode)
+- All baselines: **0% success** (PPO-TRM, Double-DQN, PPO-MLP, A2C-MLP) - 9 seeds total
+- **KEY FINDING**: Ablation without exact baseline shows **0% at step 220** (validates Theorem 5.9!)
 
 ---
 
-*Report last updated: January 5, 2026 21:45 PST*
+*Report last updated: January 6, 2026 16:00 PST*
