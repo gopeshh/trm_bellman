@@ -70,7 +70,7 @@ buck2 run //buiksat_trm:upi_trm_train \
 ```bash
 cd ~/fbsource/fbcode
 
-# Run all 17 test targets (86 tests total)
+# Run all 22 test targets (117 tests total)
 buck2 test //buiksat_trm:test_... \
     -c fbcode.nvcc_arch=a100 \
     -c fbcode.enable_gpu_sections=true \

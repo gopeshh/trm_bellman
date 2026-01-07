@@ -472,3 +472,45 @@ python_unittest(
         "fbsource//third-party/pypi/torch:torch",
     ],
 )
+
+python_unittest(
+    name = "test_sudoku_checkers",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_sudoku_checkers.py",
+    ],
+    base_module = "",
+    deps = [
+        ":upi_trm_train_lib",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_unittest(
+    name = "test_config_integrity",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_config_integrity.py",
+    ],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_unittest(
+    name = "test_convergence_smoke",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_convergence_smoke.py",
+    ],
+    base_module = "",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        ":upi_trm_train_lib",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)

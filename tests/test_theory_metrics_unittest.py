@@ -102,14 +102,16 @@ class TestTheoryMetrics(unittest.TestCase):
         y_batch = torch.zeros(cfg["batch_size"], cfg["seq_len"], dtype=torch.long)
 
         z_n = model.eval_latent(x_batch, y_batch, n=2)
-        z_vec = z_n.z_H.mean(dim=1)  # [B, hidden_size]
+        # Use flatten (view) to match model.used_value() behavior, NOT mean
+        z_vec = z_n.z_H.view(z_n.z_H.shape[0], -1)  # [B, seq_len * hidden_size]
 
         batch = model._standardize_latent_batch(x_batch, y_batch)
         context = model._build_latent_context_with_plan(batch)
         input_embeddings = context["input_embeddings"]
         plan_embeddings = context["plan_embeddings"]
-        x_embed = model._pool_embedding(input_embeddings)
-        y_embed = model._pool_embedding(plan_embeddings)
+        # Use flatten (view) to match model.used_value() behavior, NOT pool
+        x_embed = input_embeddings.view(input_embeddings.shape[0], -1)
+        y_embed = plan_embeddings.view(plan_embeddings.shape[0], -1)
         combined_embed = torch.cat([x_embed, y_embed], dim=-1)
 
         hat_Lv = estimate_Lv(model.value_head, z_vec, combined_embed, num_samples=4)

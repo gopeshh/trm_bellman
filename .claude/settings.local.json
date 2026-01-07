@@ -3,7 +3,10 @@
     "allow": [
       "Bash(*)",
       "Edit(*)",
-      "Write(*)"
+      "Write(*)",
+      "Bash(for f in /home/buiksat/trm_bellman/configs/ablations/*.yaml)",
+      "Bash(if ! grep -q \"use_progress_checker\" \"$f\")",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []
