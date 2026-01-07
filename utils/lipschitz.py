@@ -562,7 +562,22 @@ def compute_exact_baseline_summation(
         stop_is_terminal = env.is_stop_terminal()
         solved_threshold = getattr(env.config, "solved_threshold", None)
         
-        for a in range(num_actions):
+        # Optimization: Only iterate over actions that are valid for at least one sample
+        # This skips actions that are universally masked (e.g., PAD/Empty tokens)
+        if action_mask is not None:
+            if action_mask.dim() == 2:
+                # [B, A] -> Valid if ANY sample in batch allows it
+                valid_actions_mask = action_mask.any(dim=0)
+            else:
+                # [A]
+                valid_actions_mask = action_mask
+            
+            # Get list of integer indices to iterate over
+            action_indices = torch.nonzero(valid_actions_mask, as_tuple=True)[0].tolist()
+        else:
+            action_indices = range(num_actions)
+
+        for a in action_indices:
             is_stop = (a == stop_action_id)
             
             # Apply edit action to get y' = edit(y, a)

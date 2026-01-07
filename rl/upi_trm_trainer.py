@@ -954,6 +954,16 @@ class UPITrmTrainer:
                 # "memoryless" approximation from Section 5.4, and any mismatch from true Q^π
                 # represents the "value of memory" residual (Remark 5.5). See the docstring
                 # of compute_exact_baseline_summation for details.
+                
+                # Ensure action_mask is computed to enable the O(A_valid) loop optimization
+                if action_mask is None:
+                    action_mask = self.env.compute_batch_action_mask(
+                        inputs=x_batch["inputs"],
+                        vocab_size=self.env.vocab_size,
+                        stop_action_id=self.env.stop_action_id,
+                        stop_mode=self.env._stop_mode,
+                    )
+
                 exact_baseline, q_all = compute_exact_baseline_summation(
                     model=self.model,
                     x_batch=x_batch,

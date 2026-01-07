@@ -444,3 +444,18 @@ python_unittest(
         "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
+
+python_unittest(
+    name = "test_optimized_exact_baseline",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_optimized_exact_baseline.py",
+    ],
+    base_module = "",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)

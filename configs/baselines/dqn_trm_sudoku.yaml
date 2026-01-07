@@ -77,6 +77,7 @@ learning_rate: 1.0e-4  # Maps to value_lr for compatibility
 policy_lr: 1.0e-4  # Ignored by DQN
 value_lr: 1.0e-4
 max_grad_norm: 1.0
+value_target_clip: 20.0  # Progress checker range 0-16, add headroom
 
 # ===================================================================
 # STOP ACTION

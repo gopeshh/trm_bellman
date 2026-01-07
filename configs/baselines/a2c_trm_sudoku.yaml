@@ -52,6 +52,7 @@ latent_ball_radius: 10.0
 lr: 7.0e-4  # Single LR for A2C
 entropy_coef: 0.01
 max_grad_norm: 0.5
+value_target_clip: 20.0  # Progress checker range 0-16, add headroom
 
 # RMSprop settings (standard for A2C)
 rmsprop_alpha: 0.99

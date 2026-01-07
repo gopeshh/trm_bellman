@@ -58,6 +58,7 @@ policy_lr: 3.0e-4
 value_lr: 1.0e-4  # Lower for value function stability
 entropy_coef: 0.01
 max_grad_norm: 0.5  # Gradient clipping norm
+value_target_clip: 20.0  # Progress checker range 0-16, add headroom
 
 # LR schedule
 lr_schedule: "cosine"

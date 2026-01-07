@@ -13,6 +13,7 @@ reward_shaping: true
 use_progress_checker: true
 use_constraint_checker: false
 fail_terminal_reward: -16.0  # -C_max for progress checker (C_max=16)
+value_target_clip: 20.0  # Progress checker range 0-16
 solve_terminal_reward: 0.0
 gamma: 0.99
 K: 1

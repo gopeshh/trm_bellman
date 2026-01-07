@@ -184,7 +184,7 @@ class RLConfig(BaseModel):
     entropy_coef: float = 0.01
     value_grad_clip: Optional[float] = 5.0
     policy_grad_clip: Optional[float] = 1.0
-    value_target_clip: Optional[float] = 10.0
+    value_target_clip: Optional[float] = 20.0  # Default for progress checker (range 0-16)
     advantage_clip: Optional[float] = 10.0
     policy_epsilon: float = 0.0
     

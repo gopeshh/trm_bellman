@@ -66,6 +66,11 @@ solve_terminal_reward: 0.0
 stop_action_mode: "disabled"  # Force agent to use full budget
 
 # ===================================================================
+# VALUE CLIPPING (must match score range)
+# ===================================================================
+value_target_clip: 20.0  # Progress checker range 0-16, add headroom
+
+# ===================================================================
 # OPTIMIZATION
 # ===================================================================
 value_lr: 3.0e-4

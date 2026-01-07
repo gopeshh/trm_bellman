@@ -81,6 +81,25 @@ fail_terminal_reward: -16.0  # Rush-to-fail mitigation
 
 ---
 
+## Optimization: Exact Baseline Speedup (January 7, 2026)
+
+### Problem: Extreme Slowness in Theory-Exact Mode
+The `exact_baseline_summation=True` setting (required for Theorem 5.9 in episodic mode) was extremely slow (~100x slower than persistent mode).
+**Cause**: The code naively enumerated all 97 actions (including invalid ones like "Empty" or "PAD") for every state in the batch, running 97 full forward passes per state.
+
+### Solution: Dynamic Action Masking
+I implemented an optimization in `utils/lipschitz.py` and `rl/upi_trm_trainer.py` to:
+1. Check the `action_mask` **before** the heavy computation loop.
+2. Identify actions that are valid for **at least one** sample in the batch.
+3. Skip computation entirely for universally invalid actions (e.g., setting cells to Empty/PAD, or modifying fixed clues if they are fixed across the batch).
+
+**Impact**: 
+- Reduces the loop from 97 iterations to ~65 (or fewer) iterations per step.
+- Expected speedup: **~1.5x - 2x** for standard training.
+- Massive speedup for inference/evaluation where batch size is small (valid actions per state are few).
+
+---
+
 ## Experimental Setup
 
 ### Task: 4×4 Sudoku
