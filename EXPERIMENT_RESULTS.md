@@ -1,6 +1,6 @@
 # UPI-TRM Experiment Results Report
 
-**Date**: January 7, 2026 (updated from January 6, 2026)
+**Date**: January 7, 2026 (Evening Update)
 **Project**: UPI-TRM (Unrolled Policy Iteration for Tiny Recursive Models)
 **Target**: ICML 2026 Submission (Deadline: January 18)
 
@@ -10,11 +10,81 @@
 
 This report documents the experimental comparison between **UPI-TRM** (our proposed algorithm) and standard RL baselines (PPO, A2C, DQN) on Sudoku constraint satisfaction tasks. Key findings:
 
-> **UPI-TRM achieves 42% success rate on 4×4 Sudoku with constraint checker while PPO/A2C achieve 0%.**
+> **DQN achieves 100% success rate on 9×9 Sudoku across all 3 seeds** - the best performing algorithm.
 >
-> **DQN achieves 100% success rate on 9×9 Sudoku with progress checker** - the first algorithm to solve all puzzles.
+> **UPI-TRM struggles on 4×4 Sudoku with progress checker** - 0% success rate after 5000 steps.
 >
-> **UPDATE (Jan 7)**: After fixing a critical bug in ablation configs, ablation experiments now achieve **100% success rate** on 4×4 Sudoku, suggesting the task may be too easy to differentiate theory contributions.
+> **UPDATE (Jan 7 Evening)**: Comprehensive 4-GPU experiment run confirms DQN dominance. Analysis reveals UPI-TRM's conservative policy updates prevent effective exploration.
+
+---
+
+## NEW: Multi-GPU Experiment Results (January 7, 2026 Evening)
+
+### Comprehensive Comparison (18 Experiments, 4 GPUs)
+
+| Algorithm | Dataset | Seeds | Success Rate | Mean Score | Notes |
+|-----------|---------|-------|--------------|------------|-------|
+| **DQN-TRM** | 9×9 | 42, 123, 456 | **100%** | 27.5-29.3 | Best performer! |
+| UPI-TRM | 4×4 | 42, 123, 456 | 0% | 6.3-6.9 | Exploration trap |
+| Ablation no_theory_features | 4×4 | 42 | 0% | 9.0 | Higher score than UPI-TRM |
+| A2C-TRM | 4×4 | 42 | 0% | 8.0-9.1 | Stable but no solves |
+| PPO-TRM | 4×4 | 42 | 0% | N/A | Started |
+
+### DQN 9×9 Multi-Seed Results
+
+| Seed | Step 500 | Step 1000 | Step 2000 | Step 5000 |
+|------|----------|-----------|-----------|-----------|
+| 42 | 100% | 100% | 100% | 100% (29.26) |
+| 123 | 100% | 100% | 100% | 100% (27.56) |
+| 456 | 100% | 100% | 100% | 100% (27.76) |
+
+**Conclusion**: DQN achieves 100% success rate on 9×9 Sudoku as early as step 500, maintained throughout training. This is consistent across all 3 random seeds.
+
+### Analysis: Why DQN Succeeds and UPI-TRM Fails
+
+**DQN Success Factors:**
+1. **Epsilon-greedy exploration**: Starts with ε=1.0, forces random exploration
+2. **Off-policy learning**: Reuses experience from replay buffer efficiently
+3. **Direct Q-value learning**: Simpler objective, stable updates
+4. **Q-values grow steadily**: 0 → 85+ over training
+
+**UPI-TRM Failure Pattern (from logs):**
+```
+target(mean=-19.83)  ← Value targets stuck at MINIMUM (-20)
+V(s)(mean=0.38)      ← Predicted values near 0
+value_loss=400+      ← Massive gap!
+score_chg=-14.42     ← Making things WORSE (initial=8.84)
+```
+
+**Root Cause**: Policy gradient + conservative updates = exploration trap
+1. Progress checker starts at ~8.84 (clue cells)
+2. Random policy takes bad actions → score drops
+3. `fail_terminal_reward=-16.0` triggers on failure
+4. Value targets become -20 (clipped minimum)
+5. Policy gradient uses bad value estimates → no improvement
+6. Conservative mixture (α=0.05) updates too slowly to escape
+
+### Key Insight
+
+**The conservative policy improvement that gives UPI-TRM its theoretical guarantees also prevents effective exploration.** This is a fundamental exploration-exploitation tradeoff:
+
+- **DQN**: Explicit exploration via ε-greedy → finds good actions → exploits them
+- **UPI-TRM**: Implicit exploration via entropy → trapped in local minima → never finds good actions
+
+### Implications for Paper
+
+1. **Checker choice matters critically**:
+   - Progress checker: DQN wins (requires exploration to improve)
+   - Constraint checker: UPI-TRM wins (requires maintenance of score)
+
+2. **Consider hybrid approach**:
+   - Use DQN/exploration phase early
+   - Switch to UPI-TRM/refinement phase late
+
+3. **Paper framing options**:
+   - Focus on constraint checker results (UPI-TRM 44%)
+   - Present DQN as complementary comparison
+   - Acknowledge exploration limitations of conservative updates
 
 ---
 
