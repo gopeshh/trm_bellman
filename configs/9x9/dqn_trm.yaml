@@ -1,0 +1,92 @@
+# DQN/Double DQN Baseline with TRM backbone for 9x9 Sudoku
+#
+# DQN performed best on 4x4 with progress checker (50% success)
+# Testing if this holds for harder 9x9 puzzles
+
+# ===================================================================
+# DQN-SPECIFIC PARAMETERS
+# ===================================================================
+algorithm: "dqn"
+
+# DQN variant
+double_dqn: true  # Use Double DQN (recommended)
+
+# Exploration schedule (epsilon-greedy)
+epsilon_start: 1.0
+epsilon_end: 0.01
+epsilon_decay_steps: 5000  # More steps for harder task
+
+# Replay buffer
+buffer_size: 50000         # Larger buffer for 9x9
+batch_size: 64
+min_buffer_size: 1000      # More warmup
+
+# Target network updates
+target_update_freq: 200    # Less frequent updates for stability
+soft_update_tau: 0.0
+
+# Training frequency
+train_freq: 4
+gradient_steps: 1
+
+# ===================================================================
+# CORE RL PARAMETERS
+# ===================================================================
+gamma: 0.99
+inner_unroll_n: 4
+max_edits: 100             # More edits for 9x9
+num_train_steps: 10000     # More training for harder task
+
+# ===================================================================
+# REWARD CONFIGURATION
+# ===================================================================
+reward_shaping: true
+use_progress_checker: true
+use_constraint_checker: false
+fail_terminal_reward: -81.0  # -C_max for 9x9
+solve_terminal_reward: 0.0
+
+# ===================================================================
+# MODEL ARCHITECTURE
+# ===================================================================
+enable_contraction: false  # No contraction in DQN baseline
+target_Lz: 0.9
+target_Lv: 5.0
+latent_ball_radius: 0.0
+
+# ===================================================================
+# OPTIMIZATION
+# ===================================================================
+learning_rate: 1.0e-4
+policy_lr: 1.0e-4
+value_lr: 1.0e-4
+max_grad_norm: 1.0
+value_target_clip: 100.0  # 9x9 progress checker range 0-81
+
+# ===================================================================
+# STOP ACTION
+# ===================================================================
+stop_action_mode: "noop"
+stop_action_penalty: -0.1
+
+# ===================================================================
+# LOGGING & EVALUATION
+# ===================================================================
+log_interval: 100
+eval_interval: 500
+eval_num_episodes: 50
+use_tqdm: false
+
+# ===================================================================
+# TASK CONFIGURATION
+# ===================================================================
+task_name: "sudoku"
+solved_threshold: 81.0  # All 81 cells filled
+
+# ===================================================================
+# DISABLED THEORY FEATURES
+# ===================================================================
+exact_baseline_summation: false
+exact_k_step_targets: false
+theory_exact_mixture: false
+batch_centered_advantage: false
