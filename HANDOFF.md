@@ -2,7 +2,12 @@
 
 ## Summary
 
-This session ran comprehensive experiments across all 4 GPUs to compare DQN, UPI-TRM, PPO, A2C, and ablations on Sudoku tasks. **Key finding: DQN achieves 100% success rate on 9×9 Sudoku while UPI-TRM struggles on 4×4.**
+This session:
+1. Ran comprehensive experiments across all 4 GPUs to compare DQN, UPI-TRM, PPO, A2C, and ablations
+2. Fixed a theory-alignment bug in latent projection (Assumption 4.1)
+3. Verified all 117 tests still pass
+
+**Key finding: DQN achieves 100% success rate on 9×9 Sudoku while UPI-TRM struggles on 4×4.**
 
 ## Major Finding: DQN Dominates on 9×9 Sudoku
 
@@ -127,17 +132,50 @@ DQN solved 50/50 puzzles consistently from step 500 onward.
    - Focus on constraint checker ablations where UPI-TRM performs
    - The current progress checker results don't showcase theory benefits
 
-## Previous Session Bug Fixes (Still Relevant)
+## Bug Fixes Applied
 
-### 1. C_max Terminal Bootstrap (rl/value_targets.py:84-91)
+### 1. Forward-Invariant Projection in init_latent() (models/recursive_reasoning/trm.py:619-643)
+
+**Problem**: `init_latent()` was NOT projecting the initial latent `z^(0)` to the forward-invariant region. This violated **Assumption 4.1** from the paper which requires `z^(0) ∈ Z_inv` for contraction guarantees to hold.
+
+The `latent_step()` method already had projection (correctly), but `init_latent()` was missing it:
+- Paper requires: `z^(0) ∈ Z_inv` AND `z^(t+1) = (Π_R ∘ f_θ)(z^(t)) ∈ Z_inv`
+- Before: Only `latent_step()` had projection (satisfying the second requirement)
+- After: Both `init_latent()` and `latent_step()` have projection (satisfying both)
+
+**Fix**: Added projection to both code paths in `init_latent()`:
+```python
+# === Project initial latent to forward-invariant region (Assumption 4.1) ===
+# Paper requires z^(0) ∈ Z_inv for contraction guarantees to hold
+R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
+if R > 0.0:
+    z_H = self.inner._project_to_ball(z_H, R)
+    z_L = self.inner._project_to_ball(z_L, R)
+```
+
+### 2. C_max Terminal Bootstrap (rl/value_targets.py:84-91)
 Fixed `-C_max` for terminal states per paper Eq. 12.
 
-### 2. estimate_Lv Shape Mismatch
+### 3. estimate_Lv Shape Mismatch
 Fixed `.mean()` → `.view()` for value head input.
 
-### 3. Test Fixes
+### 4. Test Fixes
 - Config integrity path resolution
 - Convergence smoke test assertions
+
+## Paper-Implementation Consistency Check
+
+A full review of the ICML 2026 paper vs implementation was conducted. Results:
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Plan-space MDP (Section 2.3) | ✅ Consistent | State s=(x,y), actions, transitions |
+| Reward shaping (Eq. 4) | ✅ Consistent | `r = r_0 + γΦ(s') - Φ(s)` |
+| K-step targets with -C_max | ✅ Consistent | Paper lines 677-678 |
+| Spectral normalization | ✅ Consistent | Assumption 5.2 |
+| Exact baseline summation | ✅ Consistent | Theorem 6.4 |
+| CPI mixture modes | ✅ Consistent | 3 modes: theory-exact, distillation, parameter-space |
+| Latent projection | ✅ **Fixed** | Now projects in both `init_latent()` and `latent_step()` |
 
 ## Test Suite Status
 
@@ -147,3 +185,13 @@ Fixed `.mean()` → `.view()` for value head input.
 cd ~/fbsource/fbcode && buck2 test //buiksat_trm:test_... \
     -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only
 ```
+
+## Files Modified This Session
+
+1. `models/recursive_reasoning/trm.py` - Forward-invariant projection in `init_latent()` (Assumption 4.1)
+2. `configs/upi_trm_high_explore.yaml` - New high exploration config
+3. `scripts/run_all_experiments.sh` - New experiment runner
+4. `scripts/monitor_experiments.py` - New monitoring script
+5. `HANDOFF.md` - Updated with experiment results and bug fixes
+6. `EXPERIMENT_RESULTS.md` - Updated with multi-GPU experiment results
+7. `EXPERIMENT_PLAN.md` - Updated with current status

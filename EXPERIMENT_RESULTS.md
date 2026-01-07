@@ -143,9 +143,25 @@ This demonstrates that the UPI-TRM algorithm, with its theory-grounded features 
 
 ---
 
-## Critical Bug Fix (January 7, 2026)
+## Bug Fixes Applied
 
-### Bug: Ablation Configs Using Wrong Checker
+### 1. Forward-Invariant Projection in init_latent() (January 7, 2026) - NEW
+
+**File**: `models/recursive_reasoning/trm.py`
+
+**Problem**: `init_latent()` was not projecting `z^(0)` to the forward-invariant region, violating **Assumption 4.1** from the paper.
+
+**Fix**: Added projection to both code paths in `init_latent()`:
+```python
+R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
+if R > 0.0:
+    z_H = self.inner._project_to_ball(z_H, R)
+    z_L = self.inner._project_to_ball(z_L, R)
+```
+
+**Impact**: Now both `init_latent()` and `latent_step()` apply projection, ensuring the latent trajectory stays in Z_inv throughout training.
+
+### 2. Ablation Configs Using Wrong Checker (January 7, 2026)
 
 **Symptom**: All ablation experiments showed 0% success rate, appearing to validate the theory.
 

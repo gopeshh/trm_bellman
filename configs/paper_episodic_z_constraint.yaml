@@ -52,6 +52,7 @@ mixture_alpha: 0.05
 # REWARD SHAPING
 # ===================================================================
 reward_shaping: true
+C_max: 16.0                   # Progress checker range [0, 16]
 fail_terminal_reward: -16.0   # -C_max for rush-to-fail mitigation (C_max=16)
 solve_terminal_reward: 0.0
 
