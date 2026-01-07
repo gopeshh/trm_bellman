@@ -612,16 +612,36 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             
             # Split encoded init into H and L components
             z_init_H, z_init_L = torch.split(z_init_encoded, self.config.hidden_size, dim=-1)
-            
+
+            z_H = global_H + z_init_H
+            z_L = global_L + z_init_L
+
+            # === Project initial latent to forward-invariant region (Assumption 4.1) ===
+            # Paper requires z^(0) ∈ Z_inv for contraction guarantees to hold
+            R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
+            if R > 0.0:
+                z_H = self.inner._project_to_ball(z_H, R)
+                z_L = self.inner._project_to_ball(z_L, R)
+
             return TinyRecursiveReasoningModel_ACTV1InnerCarry(
-                z_H=global_H + z_init_H,
-                z_L=global_L + z_init_L,
+                z_H=z_H,
+                z_L=z_L,
             )
         else:
             # Use global initialization
             empty_carry = self.inner.empty_carry(batch_size, device=device)
             reset_flag = torch.ones(batch_size, dtype=torch.bool, device=device)
-            return self.inner.reset_carry(reset_flag, empty_carry)
+            z = self.inner.reset_carry(reset_flag, empty_carry)
+
+            # === Project initial latent to forward-invariant region (Assumption 4.1) ===
+            # Paper requires z^(0) ∈ Z_inv for contraction guarantees to hold
+            R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
+            if R > 0.0:
+                z = TinyRecursiveReasoningModel_ACTV1InnerCarry(
+                    z_H=self.inner._project_to_ball(z.z_H, R),
+                    z_L=self.inner._project_to_ball(z.z_L, R),
+                )
+            return z
 
     def update_latent(
         self,

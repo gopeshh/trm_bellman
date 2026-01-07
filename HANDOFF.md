@@ -2,11 +2,33 @@
 
 ## Summary
 
-This session focused on fixing test failures and updating documentation. All 117 tests now pass across 22 test targets.
+This session focused on:
+1. Reviewing the ICML 2026 paper for consistency with implementation
+2. Fixing a theory-alignment bug in latent projection
+3. Verifying all 117 tests still pass
 
 ## Bug Fixes Applied
 
-### 1. C_max Terminal Bootstrap (rl/value_targets.py:84-91)
+### 1. Forward-Invariant Projection in init_latent() (models/recursive_reasoning/trm.py:619-643)
+
+**Problem**: `init_latent()` was NOT projecting the initial latent `z^(0)` to the forward-invariant region. This violated **Assumption 4.1** from the paper which requires `z^(0) ∈ Z_inv` for contraction guarantees to hold.
+
+The `latent_step()` method already had projection (correctly), but `init_latent()` was missing it:
+- Paper requires: `z^(0) ∈ Z_inv` AND `z^(t+1) = (Π_R ∘ f_θ)(z^(t)) ∈ Z_inv`
+- Before: Only `latent_step()` had projection (satisfying the second requirement)
+- After: Both `init_latent()` and `latent_step()` have projection (satisfying both)
+
+**Fix**: Added projection to both code paths in `init_latent()`:
+```python
+# === Project initial latent to forward-invariant region (Assumption 4.1) ===
+# Paper requires z^(0) ∈ Z_inv for contraction guarantees to hold
+R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
+if R > 0.0:
+    z_H = self.inner._project_to_ball(z_H, R)
+    z_L = self.inner._project_to_ball(z_L, R)
+```
+
+### 2. C_max Terminal Bootstrap (rl/value_targets.py:84-91) [Previous Session]
 
 **Problem**: `compute_k_step_bootstrapped_target()` wasn't applying `-C_max` for terminal states despite documentation saying it should (paper Eq. 12, lines 677-678).
 
@@ -92,14 +114,30 @@ The two checkers favor different algorithms.
 
 ## Files Modified This Session
 
-1. `rl/value_targets.py` - C_max terminal bootstrap fix
-2. `tests/test_theory_metrics.py` - Shape mismatch fix
-3. `tests/test_theory_metrics_unittest.py` - Same fix
-4. `tests/test_config_integrity.py` - Path and glob fixes
-5. `tests/test_convergence_smoke.py` - Config and assertion fixes
-6. `CLAUDE.md` - Test count update
-7. `README.md` - Test count update
-8. `EXPERIMENT_PLAN.md` - Test status section added
+1. `models/recursive_reasoning/trm.py` - **NEW**: Forward-invariant projection in `init_latent()` (Assumption 4.1)
+2. `rl/value_targets.py` - C_max terminal bootstrap fix [Previous Session]
+3. `tests/test_theory_metrics.py` - Shape mismatch fix [Previous Session]
+4. `tests/test_theory_metrics_unittest.py` - Same fix [Previous Session]
+5. `tests/test_config_integrity.py` - Path and glob fixes [Previous Session]
+6. `tests/test_convergence_smoke.py` - Config and assertion fixes [Previous Session]
+7. `CLAUDE.md` - Test count update [Previous Session]
+8. `README.md` - Test count update [Previous Session]
+9. `EXPERIMENT_PLAN.md` - Test status section added [Previous Session]
+10. `HANDOFF.md` - Updated with projection fix documentation
+
+## Paper-Implementation Consistency Check
+
+A full review of the ICML 2026 paper vs implementation was conducted. Results:
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Plan-space MDP (Section 2.3) | ✅ Consistent | State s=(x,y), actions, transitions |
+| Reward shaping (Eq. 4) | ✅ Consistent | `r = r_0 + γΦ(s') - Φ(s)` |
+| K-step targets with -C_max | ✅ Consistent | Paper lines 677-678 |
+| Spectral normalization | ✅ Consistent | Assumption 5.2 |
+| Exact baseline summation | ✅ Consistent | Theorem 6.4 |
+| CPI mixture modes | ✅ Consistent | 3 modes: theory-exact, distillation, parameter-space |
+| Latent projection | ✅ **Fixed** | Now projects in both `init_latent()` and `latent_step()` |
 
 ## Next Steps
 

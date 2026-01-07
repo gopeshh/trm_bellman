@@ -686,7 +686,7 @@ pytest -v --tb=short
 |---------------|----------------|-----------|
 | Section 2: Meta-MDP | Plan-edit environment | `rl/envs/plan_edit_env.py` |
 | Section 3-4: Latent evaluator | U_n(s) = V_ψ(z^(n), x) | `models/value_head.py`, `trm.py:used_value()` |
-| Assumption 4.1: Forward-invariant | Latent ball projection | `latent_ball_radius` in config |
+| Assumption 4.1: Forward-invariant | Latent ball projection | `trm.py:init_latent()` + `latent_step()` |
 | Assumption 4.2: Contraction | Spectral normalization | `utils/lipschitz.py` |
 | Section 5: K-step operator | Bootstrapped targets | `rl/value_targets.py` |
 | Eq. 12 (lines 677-678): V(s_abs) = -C_max | Terminal bootstrap | `C_max` in RLConfig, `value_targets.py` |

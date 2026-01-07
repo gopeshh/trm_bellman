@@ -161,8 +161,9 @@ def sudoku_progress_checker(x, y, violation_penalty: float = 2.0) -> float:
 **All 117 tests pass across 22 test targets.**
 
 Bug fixes applied:
-1. **rl/value_targets.py**: Fixed C_max terminal bootstrap - now correctly uses `-C_max` for terminal states per paper Eq. 12
-2. **tests/test_theory_metrics.py**: Fixed shape mismatch - changed from `.mean()` pooling to `.view()` flattening to match model's `used_value()` implementation
+1. **models/recursive_reasoning/trm.py**: Fixed forward-invariant projection in `init_latent()` - now projects z^(0) to Z_inv per Assumption 4.1 (NEW)
+2. **rl/value_targets.py**: Fixed C_max terminal bootstrap - now correctly uses `-C_max` for terminal states per paper Eq. 12
+3. **tests/test_theory_metrics.py**: Fixed shape mismatch - changed from `.mean()` pooling to `.view()` flattening to match model's `used_value()` implementation
 
 New test targets added:
 - `test_baselines` - Baseline algorithms (PPO, A2C, NoRecursionEncoder)
