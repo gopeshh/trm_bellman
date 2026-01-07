@@ -59,7 +59,7 @@ UPI-TRM (Unrolled Policy Iteration for Tiny Recursive Models) extends the Tiny R
 # Navigate to fbcode directory first
 cd ~/fbsource/fbcode
 
-# Run all 17 test targets (86 tests total)
+# Run all 22 test targets (117 tests total)
 buck2 test //buiksat_trm:test_... \
     -c fbcode.nvcc_arch=a100 \
     -c fbcode.enable_gpu_sections=true \
@@ -75,7 +75,7 @@ buck2 test //buiksat_trm:test_rl_k_step_targets \
 buck2 clean
 ```
 
-**Available test targets (17 total, 86 tests):**
+**Available test targets (22 total, 117 tests):**
 - `test_rl_k_step_targets` - K-step bootstrapped target computation
 - `test_theory_exact_components` - Theory-exact features (exact baseline, contraction)
 - `test_refactored_modules` - Refactored RL modules (replay buffer, task configs)
@@ -93,6 +93,11 @@ buck2 clean
 - `test_rl_plan_evaluator_smoke` - Plan policy evaluation
 - `test_rl_k_step_value_update_trainer` - K-step value update
 - `test_z_init_encoder` - Z-init encoder tests
+- `test_baselines` - Baseline algorithms (PPO, A2C, NoRecursionEncoder)
+- `test_undo_and_sequences` - UNDO action and sequence sampling
+- `test_sudoku_checkers` - Sudoku checker functions (constraint/progress)
+- `test_config_integrity` - Config file validation
+- `test_convergence_smoke` - Training convergence smoke test
 
 ### RL Training
 

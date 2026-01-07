@@ -155,3 +155,18 @@ def sudoku_progress_checker(x, y, violation_penalty: float = 2.0) -> float:
 - `CLAUDE.md` - Project instructions including checker documentation
 - `upi_trm_train.py` - Contains `sudoku_progress_checker()` function
 - `rl/config.py` - Contains `use_progress_checker` flag
+
+### Test Suite Status (2026-01-07)
+
+**All 117 tests pass across 22 test targets.**
+
+Bug fixes applied:
+1. **rl/value_targets.py**: Fixed C_max terminal bootstrap - now correctly uses `-C_max` for terminal states per paper Eq. 12
+2. **tests/test_theory_metrics.py**: Fixed shape mismatch - changed from `.mean()` pooling to `.view()` flattening to match model's `used_value()` implementation
+
+New test targets added:
+- `test_baselines` - Baseline algorithms (PPO, A2C, NoRecursionEncoder)
+- `test_undo_and_sequences` - UNDO action and sequence sampling
+- `test_sudoku_checkers` - Sudoku checker functions (constraint/progress)
+- `test_config_integrity` - Config file validation
+- `test_convergence_smoke` - Training convergence smoke test

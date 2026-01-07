@@ -78,15 +78,17 @@ def compute_k_step_bootstrapped_target(
     # This aligns with the absorbing state convention where:
     #   r(s_abs, a, s_abs) = (γ - 1) * C_max  (self-loop reward)
     #   V^π(s_abs) = -C_max                  (fixed boundary value)
-    #
-    # PRACTICAL FIX: For standard experiments where solving yields a high positive reward,
-    # bootstrapping with -C_max (large negative) at success is incorrect.
-    # We only apply -C_max logic if explicitly requested and possibly only for failures.
-    # By default, we use standard RL: V(terminal) = 0.
-    
-    # Standard RL mode (V_terminal = 0):
+
     not_done_final = (~done_final).to(v_K.dtype)
-    v_bootstrap = v_K * not_done_final
+
+    if C_max is not None:
+        # Paper-aligned mode: terminal states bootstrap with -C_max
+        # V_bootstrap = V(s_K) if not done, else -C_max
+        terminal_bootstrap = v_K.new_full((batch_size,), -C_max)
+        v_bootstrap = torch.where(done_final, terminal_bootstrap, v_K)
+    else:
+        # Standard RL mode (V_terminal = 0):
+        v_bootstrap = v_K * not_done_final
 
     return reward_returns + bootstrap_factor * v_bootstrap
 
