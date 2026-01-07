@@ -60,6 +60,11 @@ class RLConfig(BaseModel):
     # When True, rewards are based on constraint violations (row/column/box duplicates)
     # rather than matching the known solution. This provides better learning signal.
     use_constraint_checker: bool = False
+    # Use progress-based checker for 4x4 Sudoku (most informative scoring)
+    # When True, score = filled_cells (if no violations) or filled_cells - penalty
+    # This distinguishes between "partially filled" (e.g., 12) and "fully solved" (16)
+    # Takes precedence over use_constraint_checker if both are True.
+    use_progress_checker: bool = False
     
     # Latent z mode
     # True (default): z is reinitialized from (x, y) at every step (episodic)

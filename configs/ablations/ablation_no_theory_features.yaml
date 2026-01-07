@@ -16,12 +16,13 @@
 #   - exact_k_step_targets: False
 #
 reward_shaping: true
+use_constraint_checker: true  # CRITICAL: Use constraint-based checker for fair comparison
 fail_terminal_reward: -10.0
 solve_terminal_reward: 0.0
 gamma: 0.99
 K: 1
 inner_unroll_n: 4
-max_edits: 120
+max_edits: 20  # Fixed: was 120, should match paper_persistent_z_constraint.yaml
 exact_k_step_targets: false
 exact_baseline_summation: false
 theory_exact_mixture: false

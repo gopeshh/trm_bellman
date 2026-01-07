@@ -1,0 +1,101 @@
+# PAPER EXPERIMENT: Progress-based Checker
+#
+# This config uses the NEW progress-based checker that is more informative:
+# - Score = filled_cells (if no violations) or filled_cells - penalty
+# - Initial score = number of clue cells (e.g., 12 for puzzle with 12 clues)
+# - Solved score = 16 (all cells filled correctly for 4x4 Sudoku)
+#
+# This clearly distinguishes between "partially filled" and "fully solved"
+# Unlike the constraint checker where both have score 10.0.
+
+# ===================================================================
+# PROGRESS CHECKER (KEY FEATURE)
+# ===================================================================
+use_progress_checker: true   # Score = filled_cells (range 0-16 for 4x4)
+use_constraint_checker: false  # Disabled (progress checker takes precedence anyway)
+
+# ===================================================================
+# LATENT MODE - PERSISTENT
+# ===================================================================
+episodic_latent: false  # z initialized ONCE per episode, carried across steps
+
+# ===================================================================
+# CORE RL PARAMETERS
+# ===================================================================
+gamma: 0.99
+K: 1                   # 1-step TD
+inner_unroll_n: 4      # Latent unroll depth
+max_edits: 20          # Episode budget for 4x4 Sudoku
+
+# ===================================================================
+# THEORY-EXACT FEATURES
+# ===================================================================
+exact_k_step_targets: true
+exact_baseline_summation: false  # DISABLED: incompatible with persistent z
+theory_exact_mixture: true       # Policy-space CPI mixture
+distill_mixture_policy: false
+batch_centered_advantage: true   # Use batch centering as heuristic
+
+# ===================================================================
+# CONTRACTION & LIPSCHITZ
+# ===================================================================
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 1.0
+latent_ball_radius: 10.0
+
+# ===================================================================
+# CONSERVATIVE POLICY IMPROVEMENT
+# ===================================================================
+mixture_alpha: 0.05
+
+# ===================================================================
+# REWARD SHAPING
+# ===================================================================
+reward_shaping: true
+fail_terminal_reward: -16.0   # -C_max for rush-to-fail mitigation (C_max=16 for progress checker)
+solve_terminal_reward: 0.0
+
+# ===================================================================
+# STOP ACTION
+# ===================================================================
+stop_action_mode: "disabled"  # Force agent to use full budget
+
+# ===================================================================
+# OPTIMIZATION
+# ===================================================================
+value_lr: 3.0e-4
+policy_lr: 1.0e-4
+entropy_coef: 0.05            # Higher entropy for exploration
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+
+# LR schedule - constant for stability
+lr_schedule: "constant"
+lr_warmup_steps: 0
+lr_min_factor: 1.0
+
+# ===================================================================
+# REPLAY & TRAINING
+# ===================================================================
+replay_capacity: 100000
+batch_size: 128               # Smaller for faster iteration
+num_train_steps: 5000
+rollout_episodes_per_step: 4
+rollout_batch_size: 32
+
+# ===================================================================
+# LOGGING & EVALUATION
+# ===================================================================
+log_interval: 10
+eval_interval: 50
+eval_num_episodes: 50
+use_tqdm: false
+debug_checks: false
+track_theory_metrics: true
+
+# ===================================================================
+# TASK CONFIGURATION
+# ===================================================================
+task_name: "sudoku"
+solved_threshold: 16.0  # For progress checker: 16 = all cells filled (4x4 Sudoku)

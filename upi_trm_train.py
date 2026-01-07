@@ -315,6 +315,57 @@ def sudoku_constraint_checker(x, y, max_violations: int = 24) -> float:
         return sudoku_checker(x, y)
 
 
+def sudoku_progress_checker(x, y, violation_penalty: float = 2.0) -> float:
+    """
+    Progress-based Sudoku checker that tracks filled cells AND constraint violations.
+
+    This checker is more informative than sudoku_constraint_checker because:
+    - Initial score = number of clue cells (e.g., 12 for a puzzle with 12 clues)
+    - Solved score = total cells (16 for 4x4, 81 for 9x9)
+    - Clearly distinguishes between "partially filled" and "fully solved"
+
+    Score formula:
+        If violations == 0:
+            score = filled_cells (range: clues to grid_size)
+        Else:
+            score = filled_cells - violations * violation_penalty
+
+    Args:
+        x: Instance dict with "inputs"
+        y: Candidate plan tensor
+        violation_penalty: Penalty per constraint violation (default: 2.0)
+
+    Returns:
+        Score where:
+        - Initial (e.g., 12 clues): 12
+        - Correctly filled all cells: 16 (for 4x4)
+        - Filled with violations: filled_cells - penalty
+    """
+    plan = _to_plan_tensor(y).to(torch.long)
+
+    # Detect grid size
+    total_cells = plan.numel()
+
+    if total_cells == 16:
+        # 4x4 Sudoku: token 1 = empty, tokens 2-5 = digits 1-4
+        filled_cells = (plan != 1).sum().item()
+        violations = count_sudoku_violations_4x4(plan)
+    elif total_cells == 81:
+        # 9x9 Sudoku: would need count_sudoku_violations_9x9
+        # For now, fall back to solution matching
+        return sudoku_checker(x, y)
+    else:
+        # Unknown grid size
+        return sudoku_checker(x, y)
+
+    if violations == 0:
+        score = float(filled_cells)
+    else:
+        score = float(filled_cells - violations * violation_penalty)
+
+    return score
+
+
 def sudoku_checker(x, y) -> float:
     """
     Returns a scaled score for how many cells match the Sudoku solution.
@@ -653,8 +704,12 @@ def main():
     )
 
     # Choose checker function based on task and dataset
-    # For 4x4 Sudoku (seq_len=16), use constraint-based checker for better intermediate signals
+    # Priority: progress_checker > constraint_checker > solution_checker
+    # For 4x4 Sudoku (seq_len=16):
+    #   - progress_checker: score = filled_cells (most informative, range 0-16)
+    #   - constraint_checker: score based on violations (range 0-10)
     # For 9x9 Sudoku or when solution is available, use solution-matching checker
+    use_progress_checker = getattr(rl_cfg, "use_progress_checker", False)
     use_constraint_checker = getattr(rl_cfg, "use_constraint_checker", False)
     checker_fn = sudoku_checker
     if len(dataset) == 0:
@@ -663,11 +718,16 @@ def main():
         sample = dataset[0]
         if not (isinstance(sample, dict) and "solution" in sample):
             checker_fn = dummy_checker
+        elif use_progress_checker and seq_len == 16:
+            # For 4x4 Sudoku, progress-based checker is most informative
+            # Score = filled_cells (range: clues to 16), distinguishes partial from solved
+            checker_fn = sudoku_progress_checker
+            print("[INFO] Using progress-based Sudoku checker (score = filled_cells, range 0-16)")
         elif use_constraint_checker and seq_len == 16:
             # For 4x4 Sudoku, constraint-based checker provides better intermediate signals
             checker_fn = sudoku_constraint_checker
             print("[INFO] Using constraint-based Sudoku checker for dense intermediate rewards")
-    is_sudoku_checker = checker_fn in (sudoku_checker, sudoku_constraint_checker)
+    is_sudoku_checker = checker_fn in (sudoku_checker, sudoku_constraint_checker, sudoku_progress_checker)
 
     env_cfg = PlanEditEnvConfig(
         max_edits=rl_cfg.max_edits,

@@ -20,7 +20,13 @@
       "Bash(pkill:*)",
       "Bash(CUDA_VISIBLE_DEVICES=0 buck2 run:*)",
       "Bash(for f in ablation_no_exact_baseline_seed123 ablation_no_exact_baseline_seed456 ablation_no_contraction_seed42 ablation_no_conservative_mixture_seed42)",
-      "Bash(do echo \"=== $f ===\" tail -5 /home/buiksat/trm_bellman/runs/$f.log)"
+      "Bash(do echo \"=== $f ===\" tail -5 /home/buiksat/trm_bellman/runs/$f.log)",
+      "Bash(find:*)",
+      "Bash(for f in /home/buiksat/trm_bellman/configs/ablations/ablation_*.yaml)",
+      "Bash(do)",
+      "Bash(if ! grep -q \"use_constraint_checker\" \"$f\")",
+      "Bash(then)",
+      "Bash(fi)"
     ],
     "deny": [],
     "ask": []
