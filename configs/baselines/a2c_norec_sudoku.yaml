@@ -104,4 +104,4 @@ solved_threshold: 10.0
 exact_baseline_summation: false
 exact_k_step_targets: false
 theory_exact_mixture: false
-batch_centered_advantage: false
+batch_centered_advantage: falseuse_progress_checker: true

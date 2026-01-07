@@ -46,3 +46,4 @@ reward_shaping: true
 # For 9x9 Sudoku with checker in [0, 81], set fail_terminal_reward ≤ -γ * 81 ≈ -80
 fail_terminal_reward: -100.0
 
+use_progress_checker: true

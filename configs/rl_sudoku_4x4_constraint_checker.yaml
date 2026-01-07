@@ -10,7 +10,7 @@ max_edits: 20  # More edits for exploration
 
 # Constraint-based checker (KEY CHANGE)
 # Scores based on Sudoku constraint violations, not solution matching
-use_constraint_checker: true
+use_constraint_checker: false
 
 # Task configuration
 task_name: sudoku

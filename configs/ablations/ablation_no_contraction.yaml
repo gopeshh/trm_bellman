@@ -10,8 +10,9 @@
 #   - target_Lz: 1.0
 #
 reward_shaping: true
-use_constraint_checker: true  # CRITICAL: Use constraint-based checker for fair comparison
-fail_terminal_reward: -10.0
+use_progress_checker: true
+use_constraint_checker: false
+fail_terminal_reward: -16.0  # -C_max for progress checker (C_max=16)
 solve_terminal_reward: 0.0
 gamma: 0.99
 K: 1
@@ -49,4 +50,4 @@ use_tqdm: false
 debug_checks: false
 track_theory_metrics: true
 task_name: sudoku
-solved_threshold: 10.0
+solved_threshold: 16.0  # Progress checker: 16 = all cells filled

@@ -14,7 +14,7 @@ max_edits: 20  # More edits for exploration
 
 # === KEY DIFFERENCE 1: Constraint-based checker ===
 # Scores based on Sudoku constraint violations, not solution matching
-use_constraint_checker: true
+use_constraint_checker: false
 
 # === KEY DIFFERENCE 2: Persistent latent z ===
 # z is initialized once per episode and carried across steps (RNN-like)

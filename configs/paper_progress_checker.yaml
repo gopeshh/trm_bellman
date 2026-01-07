@@ -11,8 +11,8 @@
 # ===================================================================
 # PROGRESS CHECKER (KEY FEATURE)
 # ===================================================================
-use_progress_checker: true   # Score = filled_cells (range 0-16 for 4x4)
-use_constraint_checker: false  # Disabled (progress checker takes precedence anyway)
+use_progress_checker: true
+use_constraint_checker: false
 
 # ===================================================================
 # LATENT MODE - PERSISTENT

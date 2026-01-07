@@ -58,3 +58,4 @@ track_theory_metrics: false
 task_name: "sudoku"
 solved_threshold: 10.0
 
+use_progress_checker: true

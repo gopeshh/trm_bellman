@@ -22,3 +22,4 @@ exact_k_step_targets: false
 batch_centered_advantage: true
 distill_mixture_policy: false
 
+use_progress_checker: true

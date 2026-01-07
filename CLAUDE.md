@@ -417,6 +417,34 @@ Addresses "rush-to-fail" problem (Remark 2.6):
 - For Sudoku with γ=0.99 and C_max=10.0: use `fail_terminal_reward = -10.0`
 - This ensures continuing to improve is always better than giving up
 
+### Checker Functions
+
+Three checker types are available for 4×4 Sudoku:
+
+**1. Solution Checker** (default): `use_constraint_checker=False, use_progress_checker=False`
+- Compares plan to known solution
+- Score = percentage match × 10 (range 0-10)
+- Dense signal but requires solution labels
+
+**2. Constraint Checker**: `use_constraint_checker=True`
+- Counts row/column/box violations
+- Score = `10 × (1 - violations/24)` (range 0-10)
+- Initial score = 10.0 (empty cells ignored)
+- Limitation: Can't distinguish partial from solved (both = 10.0)
+
+**3. Progress Checker** (NEW): `use_progress_checker=True`
+- Score = filled_cells (if no violations) or filled_cells - penalty
+- Initial score = number of clue cells (e.g., 12)
+- Solved score = 16 (all cells filled for 4×4)
+- Most informative: clearly distinguishes progress
+
+**Config example for progress checker**:
+```yaml
+use_progress_checker: true
+solved_threshold: 16.0  # All 16 cells filled
+fail_terminal_reward: -16.0  # Rush-to-fail mitigation
+```
+
 ### Puzzle Embeddings
 
 Per-instance learnable vectors (inspired by test-time training):

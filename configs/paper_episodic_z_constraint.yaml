@@ -7,9 +7,10 @@
 # (rewards reducing row/column/box violations, not just solution matching)
 
 # ===================================================================
-# CONSTRAINT CHECKER (KEY FEATURE)
+# PROGRESS CHECKER (KEY FEATURE)
 # ===================================================================
-use_constraint_checker: true  # Score = 10 * (1 - violations/24)
+use_progress_checker: true   # Score = filled_cells (range 0-16 for 4x4)
+use_constraint_checker: false
 
 # ===================================================================
 # LATENT MODE - EPISODIC
@@ -51,7 +52,7 @@ mixture_alpha: 0.05
 # REWARD SHAPING
 # ===================================================================
 reward_shaping: true
-fail_terminal_reward: -10.0   # -C_max for rush-to-fail mitigation
+fail_terminal_reward: -16.0   # -C_max for rush-to-fail mitigation (C_max=16)
 solve_terminal_reward: 0.0
 
 # ===================================================================
@@ -96,4 +97,4 @@ track_theory_metrics: true
 # TASK CONFIGURATION
 # ===================================================================
 task_name: "sudoku"
-solved_threshold: 10.0
+solved_threshold: 16.0  # Progress checker: 16 = all cells filled

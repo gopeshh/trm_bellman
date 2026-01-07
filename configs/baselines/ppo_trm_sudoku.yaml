@@ -30,14 +30,16 @@ clip_vf_loss: false  # Optional: clip value function loss
 # ===================================================================
 gamma: 0.99
 inner_unroll_n: 4  # Use TRM latent recursion
-max_edits: 120
-num_train_steps: 20000
+max_edits: 20  # Match ablation configs
+num_train_steps: 5000  # Match ablation configs
 
 # ===================================================================
 # REWARD CONFIGURATION
 # ===================================================================
 reward_shaping: true
-fail_terminal_reward: -10.0
+use_progress_checker: true
+use_constraint_checker: false
+fail_terminal_reward: -16.0  # -C_max for progress checker (C_max=16)
 solve_terminal_reward: 0.0
 
 # ===================================================================
@@ -98,7 +100,7 @@ track_theory_metrics: false  # PPO doesn't enforce theory
 # TASK CONFIGURATION
 # ===================================================================
 task_name: "sudoku"
-solved_threshold: 10.0
+solved_threshold: 16.0  # Progress checker: 16 = all cells filled
 
 # ===================================================================
 # DISABLED THEORY FEATURES
