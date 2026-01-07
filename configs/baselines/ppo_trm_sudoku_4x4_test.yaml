@@ -1,0 +1,60 @@
+# PPO Baseline for 4x4 Sudoku (Test Config)
+algorithm: "ppo"
+
+# PPO hyperparameters
+ppo_clip_eps: 0.2
+ppo_epochs: 4
+ppo_minibatch_size: 64
+vf_coef: 0.5
+
+# PPO rollout collection
+ppo_num_steps: 32  # Shorter rollouts for small puzzles
+normalize_advantages: true
+clip_vf_loss: false
+
+# Core RL
+gamma: 0.99
+inner_unroll_n: 4
+max_edits: 20
+num_train_steps: 3000
+
+# Reward
+reward_shaping: true
+fail_terminal_reward: -1.0
+solve_terminal_reward: 1.0
+
+# Model
+model_type: "trm"
+enable_contraction: false  # PPO doesn't strictly need this
+
+# Optimization
+policy_lr: 3.0e-4
+value_lr: 1.0e-4
+entropy_coef: 0.01
+max_grad_norm: 0.5
+lr_schedule: "constant"
+
+# GAE
+use_gae: true
+gae_lambda: 0.95
+
+# Training
+batch_size: 128  # Total batch
+rollout_episodes_per_step: 4
+episodic_latent: true
+
+# Stop action
+stop_action_mode: "noop"
+stop_action_penalty: -0.1
+
+# Logging
+log_interval: 50
+eval_interval: 200
+eval_num_episodes: 50
+use_tqdm: false
+track_theory_metrics: false
+
+# Task
+task_name: "sudoku"
+solved_threshold: 10.0
+

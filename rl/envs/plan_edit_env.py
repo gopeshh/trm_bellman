@@ -708,6 +708,34 @@ class PlanEditEnv:
                 is_solved=terminated_by_solved,
             )
 
+        # #region agent log
+        if r > 0.0 or done:
+            try:
+                import json
+                with open('.cursor/debug.log', 'a') as f:
+                    log_entry = {
+                        "location": "rl/envs/plan_edit_env.py:step",
+                        "message": "Step Info",
+                        "data": {
+                            "step_count": self.step_count,
+                            "reward": r,
+                            "done": done,
+                            "done_reason": done_reason,
+                            "solved": terminated_by_solved,
+                            "phi_old": phi_old,
+                            "phi_new": phi_new,
+                            "action": action,
+                            "is_stop": action == self.stop_action_id
+                        },
+                        "timestamp": 0,
+                        "sessionId": "debug-session",
+                        "runId": "run1",
+                        "hypothesisId": "C"
+                    }
+                    f.write(json.dumps(log_entry) + "\n")
+            except Exception: pass
+        # #endregion
+
         info = {
             "done_reason": done_reason,
             "terminated_by_stop": terminated_by_stop,

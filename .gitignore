@@ -62,3 +62,7 @@ build/
 dist/
 *.egg-info/
 
+# ----------------------------
+# Cursor / Debug Logs
+# ----------------------------
+.cursor/debug.log
