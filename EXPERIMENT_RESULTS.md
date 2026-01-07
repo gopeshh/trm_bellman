@@ -77,7 +77,72 @@ Added `sudoku_progress_checker()` that provides more informative scoring:
 use_progress_checker: true
 solved_threshold: 16.0  # For 4x4 Sudoku (all 16 cells filled)
 fail_terminal_reward: -16.0  # Rush-to-fail mitigation
+value_target_clip: 20.0  # CRITICAL: Must match score range
 ```
+
+---
+
+## Critical Fix: value_target_clip (January 7, 2026)
+
+### Problem
+
+The default `value_target_clip: 10.0` was too low for the progress checker (score range 0-16).
+This caused value targets to be clipped at ±10, preventing the agent from learning proper value estimates.
+
+**Symptom**: UPI-TRM showed `target(mean=-10.00)` in VALUE_DEBUG output, indicating all targets were being clipped.
+
+### Fix Applied
+
+1. Changed default in `rl/config.py` from 10.0 to 20.0
+2. Added `value_target_clip: 20.0` to all 12 configs
+
+**Verification**: After fix, VALUE_DEBUG shows `clip=20.0` and targets range from -20 to +20.
+
+---
+
+## Progress Checker Experiment Results (January 7, 2026)
+
+### Summary Table
+
+| Algorithm | Peak Success | Mean Score | Notes |
+|-----------|-------------|------------|-------|
+| **DQN-TRM** | **50%** | 8.78 | Best performer! |
+| A2C-TRM | 0% | 9.0 | Never solved |
+| PPO-TRM | 0% | 7.08 | Never solved |
+| UPI-TRM Persistent z | 0% | 6.98 | Never solved |
+| UPI-TRM Episodic z | - | - | Too slow (exact baseline) |
+
+### Key Finding
+
+**DQN is the only algorithm that solves puzzles with the progress checker.**
+
+This is the opposite of what happened with the constraint checker, where UPI-TRM achieved 44% and DQN achieved 0%.
+
+### Comparison: Progress Checker vs Constraint Checker
+
+| Checker | UPI-TRM Success | DQN Success | Task Type |
+|---------|----------------|-------------|-----------|
+| Constraint | **44%** | 0% | Avoid violations (start at max) |
+| Progress | 0% | **50%** | Fill correctly (must improve) |
+
+### Why Different Algorithms Win
+
+**Constraint Checker favors UPI-TRM**:
+- Start at maximum score (10.0)
+- Goal: maintain score while editing
+- UPI-TRM's conservative updates prevent destructive changes
+
+**Progress Checker favors DQN**:
+- Start at partial score (~8.84)
+- Goal: improve score by filling cells correctly
+- DQN's epsilon-greedy exploration finds good edits
+- Off-policy learning reuses successful experiences
+
+### Implications for Paper
+
+1. The choice of reward function significantly affects algorithm performance
+2. UPI-TRM may need different hyperparameters for "improvement" tasks vs "maintenance" tasks
+3. Consider testing both checkers in ablation studies
 
 ---
 
