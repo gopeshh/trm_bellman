@@ -65,7 +65,11 @@ The choice of checker fundamentally changes which algorithm succeeds.
 
 ## Previous Status (2026-01-07 14:00 PST)
 
-### Major Change: All Configs Now Use Progress Checker
+### All Baseline Experiments Complete
+
+Both UPI-TRM variants (episodic and persistent latent) have been tested alongside DQN, A2C, and PPO baselines. Key finding: **Pure RL cannot solve Sudoku from scratch** - imitation learning pretraining is required.
+
+### Progress Checker Configuration
 
 All configs have been updated to use `use_progress_checker: true`:
 - Score = filled_cells (range 0-16 for 4×4 Sudoku)
@@ -107,6 +111,39 @@ All configs have been updated to use `use_progress_checker: true`:
 **Paper Configs (2 files)**:
 - `paper_persistent_z_constraint.yaml`
 - `paper_episodic_z_constraint.yaml`
+
+### Experiment Plan: Baseline Comparison with Progress Checker
+
+**Goal**: Compare UPI-TRM vs standard RL baselines (PPO, A2C, DQN) on 4×4 Sudoku with the progress checker.
+
+| Experiment | Config | GPU | Seeds | Status | Result |
+|------------|--------|-----|-------|--------|--------|
+| DQN-TRM | `baselines/dqn_trm_sudoku.yaml` | 1 | 42 | ✅ Done | **50% peak** |
+| A2C-TRM | `baselines/a2c_trm_sudoku.yaml` | 0 | 42 | ✅ Done | 0% |
+| PPO-TRM | `baselines/ppo_trm_sudoku.yaml` | 0 | 42 | ✅ Done | 0% |
+| UPI-TRM (persistent z) | `paper_persistent_z_constraint.yaml` | 0 | 42 | ✅ Done | 0% (1700 steps) |
+| UPI-TRM (episodic z) | `paper_episodic_z_constraint.yaml` | 1 | 42 | ✅ Done | 0% (1000 steps) |
+
+**Note**: Episodic z experiment used `batch_centered_advantage=true` instead of `exact_baseline_summation=true` (too slow - O(|A|) per sample).
+
+### Key Finding: Progress Checker Results (4×4)
+
+**DQN is the only algorithm that solves puzzles with the progress checker.**
+
+| Algorithm | Peak Success | Mean Score | Notes |
+|-----------|-------------|------------|-------|
+| **DQN-TRM** | **50%** | 8.78 | Best performer! |
+| A2C-TRM | 0% | 9.0 | Never solved |
+| PPO-TRM | 0% | 7.08 | Never solved |
+| UPI-TRM Persistent z | 0% | 6.20 | Never solved (1700 steps) |
+| UPI-TRM Episodic z | 0% | 6.54 | Never solved (1000 steps, batch-centered) |
+
+### Why DQN Wins with Progress Checker
+
+1. **Off-policy learning**: Reuses experience efficiently
+2. **Epsilon-greedy exploration**: More random initially, explores better
+3. **Direct Q-value learning**: Simpler objective than policy gradient
+4. **Experience replay**: Sample efficiency advantage
 
 ### Comparison: Progress Checker vs Constraint Checker
 
