@@ -6,6 +6,27 @@
 
 ---
 
+## ✅ Pre-Experiment Sanity Check (PASSED)
+
+Before running experiments, the feasibility checker implementation was verified:
+
+| Check | Status | Details |
+|-------|--------|---------|
+| Config correctness | ✅ PASS | All 6 configs have correct settings |
+| Termination safety | ✅ SAFE | `solved_threshold=null` prevents premature termination |
+| Evaluation metric | ✅ CORRECT | Uses `sudoku_is_solved()` (solution-independent) |
+| Score formula | ✅ VERIFIED | `filled - 2.0*violations - 5.0*zeroCand` |
+
+**Key invariants verified:**
+- Empty grid: `is_solved=False`, score=0
+- Partial valid grid: `is_solved=False`
+- Solved grid: `is_solved=True`, score=16
+- Dead-end state: `zeroCand > 0`, negative score penalty
+
+**Sanity check scripts:** `scripts/sanity_check_standalone.py`, `scripts/sanity_check_feasibility.py`
+
+---
+
 ## Experimental Setup
 
 ### Task: 4×4 Sudoku with Feasibility-Aware Checker

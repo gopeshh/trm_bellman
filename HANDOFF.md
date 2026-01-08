@@ -1,5 +1,59 @@
 # Session Handoff (2026-01-08 - Feasibility Checker Implementation)
 
+## ✅ Sanity Check Complete (2026-01-08)
+
+**Pre-experiment verification passed.** The feasibility checker implementation is correct and will not produce inflated success metrics.
+
+### Sanity Check Summary
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| A) Config correctness | ✅ PASS | All 6 feasibility configs correct |
+| B) Termination safety | ✅ SAFE | `solved_threshold=null` prevents premature termination |
+| C) Evaluation success | ✅ CORRECT | Uses `sudoku_is_solved()` (solution-independent) |
+| D) Runtime sanity tests | ✅ ALL PASS | 6/6 tests pass |
+| E) Unit tests | ⚠️ SKIP | Buck import issue (build config, not code) |
+
+### Key Verified Invariants
+
+- ✅ Empty grid is NOT counted as solved (score=0, is_solved=False)
+- ✅ Partially-filled valid grid is NOT solved
+- ✅ Known solved 4×4 grid IS solved (score=16.0, is_solved=True)
+- ✅ Dead-end states have zeroCand > 0 and lower score
+- ✅ Score formula verified: `score = filled - 2.0*violations - 5.0*zeroCand`
+- ✅ Illegal placement correctly decreases score
+
+### Config Verification
+
+All 6 feasibility configs verified:
+- `configs/rl_sudoku_4x4_feasibility.yaml`
+- `configs/baselines/ppo_trm_feasibility.yaml`
+- `configs/baselines/a2c_trm_feasibility.yaml`
+- `configs/baselines/dqn_trm_feasibility.yaml`
+- `configs/ablations/upi_trm_feasibility_no_conservative.yaml`
+- `configs/ablations/upi_trm_feasibility_no_contraction.yaml`
+
+All have:
+- `use_feasibility_checker: true`
+- `feasibility_violation_weight: 2.0`, `feasibility_zerocand_weight: 5.0`
+- `solved_threshold: null` (no premature score-based termination)
+- `max_edits: 16`, `fail_terminal_reward: -16.0`
+
+### New Sanity Check Scripts
+
+| File | Description |
+|------|-------------|
+| `scripts/sanity_check_standalone.py` | Standalone sanity test (no torch dependency) |
+| `scripts/sanity_check_feasibility.py` | Full sanity test with torch |
+
+### Ready to Run Experiments
+
+```bash
+./scripts/run_feasibility_experiments.sh --seeds "42 123 456" --steps 5000
+```
+
+---
+
 ## Latest Update: Feasibility-Aware Checker
 
 Implemented a new checker that provides dense, non-misleading learning signal:

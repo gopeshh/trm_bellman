@@ -514,3 +514,15 @@ python_unittest(
         "fbsource//third-party/pypi/torch:torch",
     ],
 )
+
+python_binary(
+    name = "sanity_check_feasibility",
+    srcs = ["scripts/sanity_check_feasibility.py"],
+    base_module = "",
+    main_module = "scripts.sanity_check_feasibility",
+    deps = [
+        ":rl",
+        ":upi_trm_train_lib",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
