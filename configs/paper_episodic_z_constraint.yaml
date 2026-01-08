@@ -30,10 +30,10 @@ max_edits: 20          # Episode budget for 4x4 Sudoku
 # THEORY-EXACT FEATURES
 # ===================================================================
 exact_k_step_targets: true
-exact_baseline_summation: true   # Theorem 5.9 - works with episodic z
+exact_baseline_summation: false  # DISABLED: too slow (O(|A|) per sample). Use batch centering instead.
 theory_exact_mixture: true       # Policy-space CPI mixture
 distill_mixture_policy: false
-batch_centered_advantage: false  # Use exact baseline instead
+batch_centered_advantage: true   # Heuristic: batch-level centering (faster than exact baseline)
 
 # ===================================================================
 # CONTRACTION & LIPSCHITZ

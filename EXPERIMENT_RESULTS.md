@@ -125,8 +125,8 @@ This caused value targets to be clipped at ±10, preventing the agent from learn
 | **DQN-TRM** | **50%** | 8.78 | Best performer! |
 | A2C-TRM | 0% | 9.0 | Never solved |
 | PPO-TRM | 0% | 7.08 | Never solved |
-| UPI-TRM Persistent z | 0% | 6.98 | Never solved |
-| UPI-TRM Episodic z | - | - | Too slow (exact baseline) |
+| UPI-TRM Persistent z | 0% | 6.20 | Never solved (1700 steps) |
+| UPI-TRM Episodic z | 0% | 6.54 | Never solved (1000 steps, batch-centered) |
 
 ### Key Finding
 
@@ -159,6 +159,93 @@ This is the opposite of what happened with the constraint checker, where UPI-TRM
 1. The choice of reward function significantly affects algorithm performance
 2. UPI-TRM may need different hyperparameters for "improvement" tasks vs "maintenance" tasks
 3. Consider testing both checkers in ablation studies
+
+---
+
+## UPI-TRM Episodic vs Persistent Latent Experiment (January 7, 2026, Late Session)
+
+### Experiment Setup
+
+After fixing the forward-invariant projection bug in `init_latent()`, we ran controlled experiments comparing episodic vs persistent latent modes.
+
+**Dataset**: `data/sudoku-4x4-ultra-easy`
+**Checker**: Progress checker (score = filled_cells, range 0-16)
+**Config fixes applied**:
+- Added `C_max: 16.0` for consistency with progress checker range
+- Disabled `exact_baseline_summation` for episodic (too slow), used `batch_centered_advantage` instead
+
+| Setting | Episodic z | Persistent z |
+|---------|------------|--------------|
+| `episodic_latent` | true | false |
+| `exact_baseline_summation` | false | false |
+| `batch_centered_advantage` | true | true |
+| `theory_exact_mixture` | true | true |
+| `enable_contraction` | true | true |
+| `latent_ball_radius` | 10.0 | 10.0 |
+
+### Results
+
+| Experiment | Steps Run | Evaluations | Success Rate | Mean Score | Initial |
+|------------|-----------|-------------|--------------|------------|---------|
+| **Episodic z** | 1000 | 10 | **0%** | 6.5 ± 0.15 | 8.84 |
+| **Persistent z** | 1700 | 17 | **0%** | 6.2 ± 0.20 | 8.84 |
+
+**Both experiments showed 0% success rate across all evaluations.**
+
+### Detailed Evaluation History
+
+**Episodic z (batch-centered advantage):**
+```
+Step  100: 0% success, mean_score=6.72
+Step  200: 0% success, mean_score=6.50
+Step  300: 0% success, mean_score=6.56
+Step  400: 0% success, mean_score=6.82
+Step  500: 0% success, mean_score=6.38
+Step  600: 0% success, mean_score=6.44
+Step  700: 0% success, mean_score=6.38
+Step  800: 0% success, mean_score=6.48
+Step  900: 0% success, mean_score=6.58
+Step 1000: 0% success, mean_score=6.54
+```
+
+**Persistent z (batch-centered advantage):**
+```
+Step  100: 0% success, mean_score=6.50
+Step  200: 0% success, mean_score=6.50
+Step  300: 0% success, mean_score=6.24
+Step  400: 0% success, mean_score=6.74
+Step  500: 0% success, mean_score=6.32
+Step  600: 0% success, mean_score=6.06
+Step  700: 0% success, mean_score=6.24
+Step  800: 0% success, mean_score=6.34
+Step  900: 0% success, mean_score=6.20
+Step 1000: 0% success, mean_score=6.12
+Step 1500: 0% success, mean_score=6.12
+Step 1700: 0% success, mean_score=6.32
+```
+
+### Key Observations
+
+1. **No progress**: Neither mode learned to solve puzzles
+2. **Scores got worse**: Initial score 8.84 → final ~6.3 (negative progress)
+3. **Value function instability**: Target values oscillated between -20 and +20
+4. **Experiments stopped early**: Terminated due to lack of learning signal
+
+### Conclusion
+
+**Pure RL exploration cannot discover Sudoku solutions from scratch.**
+
+This confirms the README finding. The agents consistently made puzzles worse rather than better, suggesting that:
+
+1. **Imitation learning pretraining is required** before RL fine-tuning
+2. **Progress checker may be fundamentally harder** for policy gradient methods
+3. **Constraint checker** (where UPI-TRM achieved 44%) may be more suitable for paper experiments
+
+### Recommended Next Steps
+
+1. Try imitation learning pretraining first
+2. Switch to constraint checker for UPI-TRM experiments
+3. Reserve progress checker for DQN comparisons
 
 ---
 

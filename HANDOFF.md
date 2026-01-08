@@ -144,3 +144,91 @@ A full review of the ICML 2026 paper vs implementation was conducted. Results:
 1. Run experiments with fixed code to see if results improve
 2. Consider running ablation experiments
 3. The episodic z experiment was paused ("too slow") - may want to revisit
+
+---
+
+## Experiment Results (2026-01-07, Late Session)
+
+### UPI-TRM 4x4 Sudoku with Progress Checker
+
+Ran two experiments comparing episodic vs persistent latent modes on 4x4 Sudoku with progress checker.
+
+#### Configuration
+- **Dataset**: `data/sudoku-4x4-ultra-easy`
+- **Checker**: Progress checker (score = filled_cells, range 0-16)
+- **C_max**: 16.0 (added to configs for consistency)
+- **Both configs**: Theory-aligned (contraction, forward-invariant projection, CPI mixture)
+
+| Setting | Episodic z | Persistent z |
+|---------|------------|--------------|
+| `episodic_latent` | true | false |
+| `exact_baseline_summation` | false (too slow) | false (incompatible) |
+| `batch_centered_advantage` | true | true |
+| `theory_exact_mixture` | true | true |
+
+#### Results
+
+| Experiment | Steps Run | Evaluations | Success Rate | Mean Score | Initial |
+|------------|-----------|-------------|--------------|------------|---------|
+| **Episodic z** | 1000 | 10 | **0%** | 6.5 ± 0.15 | 8.84 |
+| **Persistent z** | 1700 | 17 | **0%** | 6.2 ± 0.20 | 8.84 |
+
+**All evaluations showed 0% success rate.** Agents made scores worse (from 8.84 → ~6.3).
+
+#### Detailed Evaluation History
+
+**Episodic z:**
+```
+Step  100: 0% success, mean_score=6.72
+Step  200: 0% success, mean_score=6.50
+Step  300: 0% success, mean_score=6.56
+Step  400: 0% success, mean_score=6.82
+Step  500: 0% success, mean_score=6.38
+Step  600: 0% success, mean_score=6.44
+Step  700: 0% success, mean_score=6.38
+Step  800: 0% success, mean_score=6.48
+Step  900: 0% success, mean_score=6.58
+Step 1000: 0% success, mean_score=6.54
+```
+
+**Persistent z:**
+```
+Step  100: 0% success, mean_score=6.50
+Step  200: 0% success, mean_score=6.50
+Step  500: 0% success, mean_score=6.32
+Step 1000: 0% success, mean_score=6.12
+Step 1500: 0% success, mean_score=6.12
+Step 1700: 0% success, mean_score=6.32
+```
+
+#### Key Finding
+
+**Pure RL exploration cannot discover Sudoku solutions from scratch.**
+
+This confirms the README insight. The value function showed high instability (oscillating between -20 and +20), and agents consistently made puzzles worse rather than better.
+
+#### Experiments Stopped
+
+Both experiments were terminated early due to lack of progress.
+
+### Recommended Next Steps
+
+1. **Imitation learning pretraining** required before RL fine-tuning:
+   ```bash
+   buck2 run //buiksat_trm:imitation_train -- \
+       --dataset-paths data/sudoku-4x4-ultra-easy \
+       --num-epochs 100
+   ```
+
+2. **Use constraint checker** instead of progress checker:
+   - Previous results: UPI-TRM achieved **44%** with constraint checker
+   - Progress checker seems to favor DQN (50%) over UPI-TRM (0%)
+
+3. **Config fix applied**: Added `C_max: 16.0` to both `paper_episodic_z_constraint.yaml` and `paper_persistent_z_constraint.yaml`
+
+### Files Modified
+
+1. `configs/paper_episodic_z_constraint.yaml` - Added `C_max: 16.0`, disabled `exact_baseline_summation` (too slow)
+2. `configs/paper_persistent_z_constraint.yaml` - Added `C_max: 16.0`
+3. `HANDOFF.md` - Added experiment results
+4. `EXPERIMENT_RESULTS.md` - Added experiment results

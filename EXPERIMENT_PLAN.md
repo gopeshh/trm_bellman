@@ -1,8 +1,12 @@
 # UPI-TRM Experiment Plan (ICML 2026)
 
-## Current Status (2026-01-07 14:00 PST)
+## Current Status (2026-01-07 Late Session)
 
-### Major Change: All Configs Now Use Progress Checker
+### All Baseline Experiments Complete
+
+Both UPI-TRM variants (episodic and persistent latent) have been tested alongside DQN, A2C, and PPO baselines. Key finding: **Pure RL cannot solve Sudoku from scratch** - imitation learning pretraining is required.
+
+### Progress Checker Configuration
 
 All configs have been updated to use `use_progress_checker: true`:
 - Score = filled_cells (range 0-16 for 4×4 Sudoku)
@@ -55,8 +59,10 @@ This provides more informative scoring than the constraint checker (which couldn
 | DQN-TRM | `baselines/dqn_trm_sudoku.yaml` | 1 | 42 | ✅ Done | **50% peak** |
 | A2C-TRM | `baselines/a2c_trm_sudoku.yaml` | 0 | 42 | ✅ Done | 0% |
 | PPO-TRM | `baselines/ppo_trm_sudoku.yaml` | 0 | 42 | ✅ Done | 0% |
-| UPI-TRM (persistent z) | `paper_persistent_z_constraint.yaml` | 0 | 42 | ✅ Done | 0% |
-| UPI-TRM (episodic z) | `paper_episodic_z_constraint.yaml` | 1 | 42 | ⏸️ Too slow | - |
+| UPI-TRM (persistent z) | `paper_persistent_z_constraint.yaml` | 0 | 42 | ✅ Done | 0% (1700 steps) |
+| UPI-TRM (episodic z) | `paper_episodic_z_constraint.yaml` | 1 | 42 | ✅ Done | 0% (1000 steps) |
+
+**Note**: Episodic z experiment used `batch_centered_advantage=true` instead of `exact_baseline_summation=true` (too slow - O(|A|) per sample).
 
 ### Key Finding: Progress Checker Results
 
@@ -67,7 +73,8 @@ This provides more informative scoring than the constraint checker (which couldn
 | **DQN-TRM** | **50%** | 8.78 | Best performer! |
 | A2C-TRM | 0% | 9.0 | Never solved |
 | PPO-TRM | 0% | 7.08 | Never solved |
-| UPI-TRM Persistent z | 0% | 6.98 | Never solved |
+| UPI-TRM Persistent z | 0% | 6.20 | Never solved (1700 steps) |
+| UPI-TRM Episodic z | 0% | 6.54 | Never solved (1000 steps, batch-centered) |
 
 ### Why DQN Wins with Progress Checker
 
