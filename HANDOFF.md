@@ -1,4 +1,51 @@
-# Session Handoff (2026-01-07 Evening - Final Results)
+# Session Handoff (2026-01-08 - Feasibility Checker Implementation)
+
+## Latest Update: Feasibility-Aware Checker
+
+Implemented a new checker that provides dense, non-misleading learning signal:
+
+**Score Formula**:
+```
+score = filled - w_v × violations - w_z × zeroCand
+```
+
+Where:
+- `w_v = 2.0`: Violation penalty weight
+- `w_z = 5.0`: Zero-candidate penalty weight (dead-end detection)
+
+**Success Definition (Solution-Independent)**:
+```
+solved = (filled == N) AND (violations == 0)
+```
+
+### Why This Matters
+
+1. **Constraint checker flaw**: Empty and solved grids both score 10.0
+2. **Progress checker flaw**: Doesn't detect dead-end states
+3. **Feasibility checker**: Addresses both issues + penalizes impossible states
+
+### New Files
+
+| File | Description |
+|------|-------------|
+| `rl/sudoku_utils.py` | Shared utilities for violation counting, filled cells, zero-candidate detection |
+| `configs/rl_sudoku_4x4_feasibility.yaml` | UPI-TRM main config |
+| `configs/baselines/ppo_trm_feasibility.yaml` | PPO baseline |
+| `configs/baselines/a2c_trm_feasibility.yaml` | A2C baseline |
+| `configs/baselines/dqn_trm_feasibility.yaml` | DQN baseline |
+| `configs/ablations/upi_trm_feasibility_no_conservative.yaml` | α=1.0 ablation |
+| `configs/ablations/upi_trm_feasibility_no_contraction.yaml` | No contraction ablation |
+| `scripts/run_feasibility_experiments.sh` | Experiment runner script |
+
+### To Run Experiments
+
+```bash
+./scripts/run_feasibility_experiments.sh --seeds "42 123 456" --steps 5000
+```
+
+---
+
+## Previous Findings (2026-01-07 Evening - Final Results)
 
 ## 🔥 BREAKTHROUGH FINDINGS
 
@@ -100,7 +147,7 @@ All UPI-TRM variants with theory features plateau around 26-36% - far below base
 2. Changed `exact_baseline_summation: true` → `false` in ablation configs for faster training
 
 ### Documentation Updated
-- `EXPERIMENT_RESULTS.md` - Comprehensive results with PPO breakthrough
+- `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md` - Results for 4x4 Sudoku with feasibility checker
 - `HANDOFF.md` - This file
 
 ## Current Experiment Status
@@ -488,4 +535,4 @@ cd ~/fbsource/fbcode && buck2 test //buiksat_trm:test_... \
 2. `configs/constraint_checker/` - 8 configs for constraint-based checker experiments
 3. `results/plot_data/` - 5 CSV/JSON files for paper figures
 4. `HANDOFF.md` - Updated with final experiment results
-5. `EXPERIMENT_RESULTS.md` - Updated with constraint checker results
+5. `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md` - Cleaned file for 4x4 feasibility checker experiments

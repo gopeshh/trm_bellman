@@ -1,0 +1,49 @@
+# UPI-TRM with Feasibility Checker - No Contraction
+#
+# Ablation: Tests what happens without contraction enforcement.
+# enable_contraction=false disables spectral normalization.
+
+gamma: 0.99
+K: 1
+inner_unroll_n: 2
+max_edits: 16
+
+num_train_steps: 5000
+batch_size: 32
+rollout_episodes_per_step: 4
+
+value_lr: 0.0003
+policy_lr: 0.0001
+value_grad_clip: 1.0
+policy_grad_clip: 0.5
+
+mixture_alpha: 0.1
+policy_epsilon: 0.1
+target_ema_tau: 0.99
+
+entropy_coef: 0.05
+
+# ABLATION: No contraction enforcement
+enable_contraction: false
+target_Lz: 0.9  # Ignored when contraction disabled
+value_target_clip: 50.0
+advantage_clip: 10.0
+batch_centered_advantage: true
+
+log_interval: 50
+eval_interval: 100
+eval_num_episodes: 50
+
+episodic_latent: true
+
+# Feasibility checker
+use_feasibility_checker: true
+feasibility_violation_weight: 2.0
+feasibility_zerocand_weight: 5.0
+reward_shaping: true
+solve_terminal_reward: 1.0
+fail_terminal_reward: -16.0
+C_max: 16.0
+solved_threshold: null
+
+stop_action_mode: disabled

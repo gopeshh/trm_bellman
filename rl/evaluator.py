@@ -10,6 +10,7 @@ import torch
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from rl.sudoku_utils import sudoku_is_solved, sudoku_get_stats
 
 
 def evaluate_plan_policy_with_scores(
@@ -21,6 +22,7 @@ def evaluate_plan_policy_with_scores(
     inner_unroll_n: Optional[int] = None,
     episodic_latent: bool = True,
     greedy: bool = True,
+    use_sudoku_solved_criterion: bool = True,
 ) -> Tuple[float, float, dict]:
     """
     Evaluate a TRM + policy head in plan space on a given dataset.
@@ -37,6 +39,8 @@ def evaluate_plan_policy_with_scores(
             forward across steps, allowing the model to accumulate information.
         greedy: If True (default), use argmax action selection for deterministic evaluation.
             If False, sample from the policy distribution (stochastic evaluation).
+        use_sudoku_solved_criterion: If True (default), use sudoku_is_solved() to determine
+            success (filled==N and violations==0). If False, use score matching.
 
     Returns:
         Tuple of (mean_checker_score, success_rate, detailed_stats)
@@ -47,6 +51,9 @@ def evaluate_plan_policy_with_scores(
             - score_max: maximum final score
             - max_possible_score: max score from solution (or None if no solution)
             - initial_score_mean: mean initial score before any edits
+            - final_filled_mean: mean number of filled cells at episode end (Sudoku only)
+            - final_violations_mean: mean violations at episode end (Sudoku only)
+            - final_zero_cand_mean: mean zero-candidate cells at episode end (Sudoku only)
     """
 
     device = next(model.parameters()).device
@@ -72,6 +79,12 @@ def evaluate_plan_policy_with_scores(
     all_final_scores: list = []
     all_initial_scores: list = []
     max_possible_score: Optional[float] = None
+
+    # Sudoku-specific tracking
+    all_filled: list = []
+    all_violations: list = []
+    all_zero_cand: list = []
+    is_sudoku_task = False
 
     with torch.no_grad():
         for episode_idx in range(num_episodes):
@@ -148,9 +161,33 @@ def evaluate_plan_policy_with_scores(
             all_final_scores.append(final_score)
             episodes_ran += 1
 
-            # Only count as solved if we have a valid max reward to compare against
-            if episode_max_reward is not None and abs(final_score - episode_max_reward) < 1e-6:
-                num_solved += 1
+            # Get the final plan tensor for Sudoku-specific checks
+            if isinstance(y, torch.Tensor):
+                final_plan = y
+            elif isinstance(y, dict) and "plan" in y:
+                final_plan = y["plan"]
+            else:
+                final_plan = None
+
+            # Track Sudoku-specific stats and use solution-independent success criterion
+            if final_plan is not None and final_plan.numel() in (16, 81):
+                is_sudoku_task = True
+                total_cells, filled, violations, zero_cand = sudoku_get_stats(final_plan)
+                all_filled.append(filled)
+                all_violations.append(violations)
+                all_zero_cand.append(zero_cand)
+
+                # Use sudoku_is_solved for solution-independent success
+                if use_sudoku_solved_criterion:
+                    if sudoku_is_solved(final_plan):
+                        num_solved += 1
+                elif episode_max_reward is not None and abs(final_score - episode_max_reward) < 1e-6:
+                    # Fallback: score-matching criterion (requires solution)
+                    num_solved += 1
+            else:
+                # Non-Sudoku task: use score-matching criterion
+                if episode_max_reward is not None and abs(final_score - episode_max_reward) < 1e-6:
+                    num_solved += 1
 
     mean_score = total_score / float(max(episodes_ran, 1))
     success_rate = num_solved / float(max(episodes_ran, 1))
@@ -164,6 +201,12 @@ def evaluate_plan_policy_with_scores(
         "max_possible_score": max_possible_score,
         "initial_score_mean": sum(all_initial_scores) / len(all_initial_scores) if all_initial_scores else 0.0,
     }
+
+    # Add Sudoku-specific stats if applicable
+    if is_sudoku_task and all_filled:
+        detailed_stats["final_filled_mean"] = sum(all_filled) / len(all_filled)
+        detailed_stats["final_violations_mean"] = sum(all_violations) / len(all_violations)
+        detailed_stats["final_zero_cand_mean"] = sum(all_zero_cand) / len(all_zero_cand)
 
     return mean_score, success_rate, detailed_stats
 

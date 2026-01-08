@@ -1,0 +1,59 @@
+# 4x4 Sudoku with Feasibility Checker
+# The feasibility checker provides the most informative learning signal:
+# - Rewards filling cells (progress)
+# - Penalizes violations (constraint satisfaction)
+# - Strongly penalizes dead-ends (zero-candidate cells)
+#
+# Score = filled - w_v * violations - w_z * zeroCand
+# Success = filled == N AND violations == 0
+
+gamma: 0.99
+K: 1
+inner_unroll_n: 2
+
+max_edits: 16  # 4x4 has 16 cells
+
+num_train_steps: 5000
+batch_size: 32
+rollout_episodes_per_step: 4
+
+value_lr: 0.0003
+policy_lr: 0.0001
+value_grad_clip: 1.0
+policy_grad_clip: 0.5
+
+# CPI settings
+mixture_alpha: 0.1
+policy_epsilon: 0.1
+target_ema_tau: 0.99
+
+entropy_coef: 0.05  # Encourage exploration
+enable_contraction: true
+target_Lz: 0.9
+
+# Clipping adjusted for feasibility checker score range (can go negative)
+value_target_clip: 50.0
+advantage_clip: 10.0
+batch_centered_advantage: true
+
+log_interval: 50
+eval_interval: 100
+eval_num_episodes: 50
+
+episodic_latent: true
+
+# === FEASIBILITY CHECKER ===
+use_feasibility_checker: true
+feasibility_violation_weight: 2.0  # w_v
+feasibility_zerocand_weight: 5.0   # w_z
+
+# Reward shaping
+reward_shaping: true
+solve_terminal_reward: 1.0
+fail_terminal_reward: -16.0  # Penalize failures heavily
+
+stop_action_mode: disabled
+
+# C_max for feasibility checker (max score = 16 for solved 4x4)
+C_max: 16.0
+solved_threshold: null  # Use sudoku_is_solved() instead of score threshold

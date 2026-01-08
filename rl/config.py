@@ -65,6 +65,18 @@ class RLConfig(BaseModel):
     # This distinguishes between "partially filled" (e.g., 12) and "fully solved" (16)
     # Takes precedence over use_constraint_checker if both are True.
     use_progress_checker: bool = False
+
+    # Use feasibility-aware checker for Sudoku (RECOMMENDED - most informative)
+    # Score = filled - w_v * violations - w_z * zeroCand
+    # Where zeroCand = number of empty cells with 0 legal candidates (dead-ends)
+    # This provides:
+    # - Dense signal for progress (filling cells)
+    # - Strong penalty for violations (duplicate digits)
+    # - Strong penalty for dead-ends (impossible states)
+    # Takes precedence over all other checkers if True.
+    use_feasibility_checker: bool = False
+    feasibility_violation_weight: float = 2.0  # w_v: weight for constraint violations
+    feasibility_zerocand_weight: float = 5.0   # w_z: weight for zero-candidate cells
     
     # Latent z mode
     # True (default): z is reinitialized from (x, y) at every step (episodic)

@@ -1,6 +1,51 @@
 # UPI-TRM Experiment Plan (ICML 2026)
 
-## Current Status (2026-01-07 15:50 PST) - EVENING UPDATE
+## Current Status (2026-01-08) - FEASIBILITY CHECKER UPDATE
+
+### New Feasibility-Aware Checker Implementation
+
+Implemented a new checker that addresses limitations of previous checkers:
+
+**Score Formula**:
+```
+score = filled - w_v × violations - w_z × zeroCand
+```
+
+Where:
+- `w_v = 2.0`: Violation penalty weight
+- `w_z = 5.0`: Zero-candidate penalty weight (dead-end detection)
+
+**Why this replaces constraint/progress checkers**:
+1. **Constraint checker limitation**: Cannot distinguish empty vs solved (both score 10.0)
+2. **Progress checker limitation**: Doesn't detect dead-end states
+3. **Feasibility checker**: Combines both + dead-end detection
+
+**Success Definition (Solution-Independent)**:
+```
+solved = (filled == N) AND (violations == 0)
+```
+
+### New Experiment Configs
+
+| Config | Algorithm | Description |
+|--------|-----------|-------------|
+| `rl_sudoku_4x4_feasibility.yaml` | UPI-TRM | Main config |
+| `baselines/ppo_trm_feasibility.yaml` | PPO-TRM | Baseline |
+| `baselines/a2c_trm_feasibility.yaml` | A2C-TRM | Baseline |
+| `baselines/dqn_trm_feasibility.yaml` | DQN-TRM | Baseline |
+| `ablations/upi_trm_feasibility_no_conservative.yaml` | UPI-TRM | α=1.0 |
+| `ablations/upi_trm_feasibility_no_contraction.yaml` | UPI-TRM | No contraction |
+
+### Implementation Files
+
+- `rl/sudoku_utils.py`: Shared utilities (violations, filled, zero-candidate)
+- `upi_trm_train.py`: `sudoku_feasibility_checker()` function
+- `rl/config.py`: `use_feasibility_checker` flag
+- `rl/evaluator.py`: Updated to use `sudoku_is_solved()` for success
+
+---
+
+## Previous Status (2026-01-07 15:50 PST) - EVENING UPDATE
 
 ### Multi-GPU Experiment Run Complete
 
@@ -220,7 +265,7 @@ def sudoku_progress_checker(x, y, violation_penalty: float = 2.0) -> float:
 
 ### Related Files
 
-- `EXPERIMENT_RESULTS.md` - Detailed experiment results
+- `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md` - 4x4 Sudoku results with feasibility checker
 - `CLAUDE.md` - Project instructions including checker documentation
 - `upi_trm_train.py` - Contains `sudoku_progress_checker()` function
 - `rl/config.py` - Contains `use_progress_checker` flag

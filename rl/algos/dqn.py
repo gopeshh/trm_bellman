@@ -22,6 +22,7 @@ import torch.nn.utils as nn_utils
 
 from rl.batch_utils import prepare_batch_x, prepare_plan, normalize_puzzle_id
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from rl.sudoku_utils import sudoku_is_solved, sudoku_get_stats
 
 
 @dataclass
@@ -622,9 +623,15 @@ class DQNTrainer:
             final_score = checker(x, y)
             total_scores.append(final_score)
 
-            # Check if solved (max score for Sudoku is 10.0)
-            if final_score >= 10.0 - 1e-6:
-                solved_count += 1
+            # Use solution-independent success criterion for Sudoku
+            # Check if grid is completely filled with no violations
+            if isinstance(y, torch.Tensor) and y.numel() in (16, 81):
+                if sudoku_is_solved(y):
+                    solved_count += 1
+            else:
+                # Fallback for non-Sudoku tasks: use score threshold
+                if final_score >= 10.0 - 1e-6:
+                    solved_count += 1
 
         mean_score = sum(total_scores) / len(total_scores) if total_scores else 0.0
         success_rate = solved_count / num_episodes if num_episodes > 0 else 0.0

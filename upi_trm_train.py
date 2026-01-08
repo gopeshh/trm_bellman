@@ -28,6 +28,14 @@ from rl.upi_trm_trainer import UPITrmTrainer
 from rl.algos.ppo import PPOTrainer, PPOConfig
 from rl.algos.a2c import A2CTrainer, A2CConfig
 from rl.algos.dqn import DQNTrainer, DQNConfig
+from rl.sudoku_utils import (
+    count_sudoku_violations_4x4,
+    count_sudoku_violations_9x9,
+    sudoku_filled_cells,
+    sudoku_zero_candidate_cells,
+    sudoku_is_solved,
+    sudoku_get_stats,
+)
 from utils.seeding import set_global_seed
 
 
@@ -226,108 +234,8 @@ def dummy_checker(x, y) -> float:
     return float(-(target - plan).abs().mean().item())
 
 
-def count_sudoku_violations_4x4(grid: torch.Tensor) -> int:
-    """
-    Count constraint violations in a 4x4 Sudoku grid.
-
-    A 4x4 Sudoku has:
-    - 4 rows (each should have unique digits 1-4)
-    - 4 columns (each should have unique digits 1-4)
-    - 4 boxes of 2x2 (each should have unique digits 1-4)
-
-    Violations are counted as the number of duplicate entries in each constraint.
-
-    Args:
-        grid: [16] or [4, 4] tensor with values in token space (1=empty, 2-5 = digits 1-4)
-
-    Returns:
-        Total number of constraint violations (0 = solved)
-    """
-    grid = grid.reshape(4, 4)
-    violations = 0
-
-    # Convert from token space to digit space
-    # Token 1 = empty (treat as 0), Token 2-5 = digits 1-4
-    digits = grid.clone()
-    digits[digits == 1] = 0  # Empty cells don't count as violations
-    digits = digits - 1  # Shift: token 2 -> digit 1, etc.
-    digits = torch.clamp(digits, min=0)  # Ensure non-negative
-
-    # Check rows
-    for r in range(4):
-        row = digits[r, :]
-        filled = row[row > 0]  # Only check filled cells
-        if len(filled) > 0:
-            violations += len(filled) - len(torch.unique(filled))
-
-    # Check columns
-    for c in range(4):
-        col = digits[:, c]
-        filled = col[col > 0]
-        if len(filled) > 0:
-            violations += len(filled) - len(torch.unique(filled))
-
-    # Check 2x2 boxes
-    for box_r in range(2):
-        for box_c in range(2):
-            box = digits[box_r*2:(box_r+1)*2, box_c*2:(box_c+1)*2].reshape(-1)
-            filled = box[box > 0]
-            if len(filled) > 0:
-                violations += len(filled) - len(torch.unique(filled))
-
-    return violations
-
-
-def count_sudoku_violations_9x9(grid: torch.Tensor) -> int:
-    """
-    Count constraint violations in a 9x9 Sudoku grid.
-
-    A 9x9 Sudoku has:
-    - 9 rows (each should have unique digits 1-9)
-    - 9 columns (each should have unique digits 1-9)
-    - 9 boxes of 3x3 (each should have unique digits 1-9)
-
-    Violations are counted as the number of duplicate entries in each constraint.
-
-    Args:
-        grid: [81] or [9, 9] tensor with values in token space (1=empty, 2-10 = digits 1-9)
-
-    Returns:
-        Total number of constraint violations (0 = solved)
-    """
-    grid = grid.reshape(9, 9)
-    violations = 0
-
-    # Convert from token space to digit space
-    # Token 1 = empty (treat as 0), Token 2-10 = digits 1-9
-    digits = grid.clone()
-    digits[digits == 1] = 0  # Empty cells don't count as violations
-    digits = digits - 1  # Shift: token 2 -> digit 1, etc.
-    digits = torch.clamp(digits, min=0)  # Ensure non-negative
-
-    # Check rows
-    for r in range(9):
-        row = digits[r, :]
-        filled = row[row > 0]  # Only check filled cells
-        if len(filled) > 0:
-            violations += len(filled) - len(torch.unique(filled))
-
-    # Check columns
-    for c in range(9):
-        col = digits[:, c]
-        filled = col[col > 0]
-        if len(filled) > 0:
-            violations += len(filled) - len(torch.unique(filled))
-
-    # Check 3x3 boxes
-    for box_r in range(3):
-        for box_c in range(3):
-            box = digits[box_r*3:(box_r+1)*3, box_c*3:(box_c+1)*3].reshape(-1)
-            filled = box[box > 0]
-            if len(filled) > 0:
-                violations += len(filled) - len(torch.unique(filled))
-
-    return violations
+# Note: count_sudoku_violations_4x4 and count_sudoku_violations_9x9 are now
+# imported from rl.sudoku_utils to avoid duplication
 
 
 def sudoku_constraint_checker(x, y, max_violations_4x4: int = 24, max_violations_9x9: int = 162) -> float:
@@ -338,6 +246,10 @@ def sudoku_constraint_checker(x, y, max_violations_4x4: int = 24, max_violations
     NOT just matching the solution. This provides:
     - Positive reward for moves that reduce violations
     - Negative reward for moves that increase violations
+
+    **LIMITATION**: Empty grids and solved grids BOTH score 10.0 because empty
+    cells don't count as violations. Cannot distinguish partial from solved.
+    Use sudoku_feasibility_checker() for a more informative signal.
 
     Score = 10.0 * (1 - violations / max_violations)
 
@@ -422,6 +334,65 @@ def sudoku_progress_checker(x, y, violation_penalty: float = 2.0) -> float:
     else:
         score = float(filled_cells - violations * violation_penalty)
 
+    return score
+
+
+def sudoku_feasibility_checker(x, y, w_v: float = 2.0, w_z: float = 5.0) -> float:
+    """
+    Feasibility-aware Sudoku checker that provides the most informative learning signal.
+
+    This checker combines three components:
+    1. **Filled cells**: Rewards progress in filling the grid
+    2. **Violations**: Penalizes constraint violations (duplicates in row/col/box)
+    3. **Zero-candidate cells**: Strongly penalizes dead-end states where empty cells
+       have no legal candidates left (impossible to complete)
+
+    Score formula:
+        score = filled - w_v * violations - w_z * zeroCand
+
+    Where:
+    - filled: Number of filled (non-empty) cells
+    - violations: Count of constraint violations
+    - zeroCand: Count of empty cells with 0 legal candidates
+    - w_v: Violation penalty weight (default: 2.0)
+    - w_z: Zero-candidate penalty weight (default: 5.0, strong to discourage dead-ends)
+
+    Advantages over other checkers:
+    - Unlike constraint_checker: Distinguishes empty vs solved (both have 0 violations)
+    - Unlike progress_checker: Penalizes dead-end states that cannot be completed
+    - Solution-independent: Doesn't require ground truth
+
+    Args:
+        x: Instance dict with "inputs"
+        y: Candidate plan tensor
+        w_v: Weight for violation penalty (default: 2.0)
+        w_z: Weight for zero-candidate penalty (default: 5.0)
+
+    Returns:
+        Score where:
+        - Maximum (solved): total_cells (16 for 4x4, 81 for 9x9)
+        - Initial: filled_cells (clue count, e.g., 12)
+        - Violations: filled - w_v * violations
+        - Dead-end: heavily penalized by -w_z * zeroCand
+    """
+    plan = _to_plan_tensor(y).to(torch.long)
+    total_cells = plan.numel()
+
+    if total_cells == 16:
+        grid_size = 4
+        filled = sudoku_filled_cells(plan, empty_token=1)
+        violations = count_sudoku_violations_4x4(plan)
+        zero_cand = sudoku_zero_candidate_cells(plan, grid_size=4)
+    elif total_cells == 81:
+        grid_size = 9
+        filled = sudoku_filled_cells(plan, empty_token=1)
+        violations = count_sudoku_violations_9x9(plan)
+        zero_cand = sudoku_zero_candidate_cells(plan, grid_size=9)
+    else:
+        # Unknown grid size - fall back to solution matching
+        return sudoku_checker(x, y)
+
+    score = float(filled - w_v * violations - w_z * zero_cand)
     return score
 
 
@@ -763,13 +734,20 @@ def main():
     )
 
     # Choose checker function based on task and dataset
-    # Priority: progress_checker > constraint_checker > solution_checker
+    # Priority: feasibility_checker > progress_checker > constraint_checker > solution_checker
     # For 4x4 Sudoku (seq_len=16):
-    #   - progress_checker: score = filled_cells (most informative, range 0-16)
+    #   - feasibility_checker: score = filled - w_v*violations - w_z*zeroCand (RECOMMENDED)
+    #   - progress_checker: score = filled_cells (range 0-16)
     #   - constraint_checker: score based on violations (range 0-10)
     # For 9x9 Sudoku or when solution is available, use solution-matching checker
+    use_feasibility_checker = getattr(rl_cfg, "use_feasibility_checker", False)
     use_progress_checker = getattr(rl_cfg, "use_progress_checker", False)
     use_constraint_checker = getattr(rl_cfg, "use_constraint_checker", False)
+
+    # Get feasibility checker weights from config
+    w_v = getattr(rl_cfg, "feasibility_violation_weight", 2.0)
+    w_z = getattr(rl_cfg, "feasibility_zerocand_weight", 5.0)
+
     checker_fn = sudoku_checker
     if len(dataset) == 0:
         checker_fn = dummy_checker
@@ -777,6 +755,16 @@ def main():
         sample = dataset[0]
         if not (isinstance(sample, dict) and "solution" in sample):
             checker_fn = dummy_checker
+        elif use_feasibility_checker and seq_len in (16, 81):
+            # Feasibility checker: most informative, penalizes dead-ends
+            # Score = filled - w_v*violations - w_z*zeroCand
+            def feasibility_checker_with_weights(x, y):
+                return sudoku_feasibility_checker(x, y, w_v=w_v, w_z=w_z)
+            checker_fn = feasibility_checker_with_weights
+            grid_size = "4x4" if seq_len == 16 else "9x9"
+            print(f"[INFO] Using feasibility-aware Sudoku checker for {grid_size}")
+            print(f"       score = filled - {w_v}*violations - {w_z}*zeroCand")
+            print(f"       Max score: {seq_len} (all filled, no violations)")
         elif use_progress_checker and seq_len in (16, 81):
             # For 4x4/9x9 Sudoku, progress-based checker is most informative
             # Score = filled_cells (range: clues to grid_size), distinguishes partial from solved
@@ -788,7 +776,7 @@ def main():
             checker_fn = sudoku_constraint_checker
             grid_size = "4x4" if seq_len == 16 else "9x9"
             print(f"[INFO] Using constraint-based Sudoku checker for {grid_size} for dense intermediate rewards")
-    is_sudoku_checker = checker_fn in (sudoku_checker, sudoku_constraint_checker, sudoku_progress_checker)
+    is_sudoku_checker = checker_fn in (sudoku_checker, sudoku_constraint_checker, sudoku_progress_checker) or use_feasibility_checker
 
     env_cfg = PlanEditEnvConfig(
         max_edits=rl_cfg.max_edits,
