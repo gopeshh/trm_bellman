@@ -302,6 +302,7 @@ def test_sudoku_terminates_when_solved_via_sudoku_is_solved():
     dataset = SudokuDataset()
 
     # Create config with solved_threshold=None (like feasibility configs)
+    # IMPORTANT: Set task_type="sudoku" to enable solution-independent termination
     cfg = PlanEditEnvConfig(
         max_edits=16,
         gamma=0.99,
@@ -309,6 +310,7 @@ def test_sudoku_terminates_when_solved_via_sudoku_is_solved():
         vocab_size=6,  # tokens 0-5 for 4x4 Sudoku
         solved_threshold=None,  # No threshold-based termination
         stop_action_mode="disabled",  # STOP disabled
+        task_type="sudoku",  # Required for sudoku_is_solved() termination
     )
 
     env = PlanEditEnv(dataset, feasibility_checker, cfg)
@@ -378,6 +380,7 @@ def test_sudoku_does_not_terminate_when_not_solved():
         vocab_size=6,
         solved_threshold=None,
         stop_action_mode="disabled",
+        task_type="sudoku",  # Even with task_type="sudoku", should not terminate if not fully solved
     )
 
     env = PlanEditEnv(dataset, feasibility_checker, cfg)
@@ -394,5 +397,130 @@ def test_sudoku_does_not_terminate_when_not_solved():
     assert info["solved"] is False, "info['solved'] should be False"
 
     print("Sudoku non-termination test passed!")
+
+
+def test_non_sudoku_task_does_not_trigger_sudoku_termination():
+    """
+    Test that a non-Sudoku task (task_type != "sudoku") does NOT trigger
+    early termination via sudoku_is_solved(), even if the plan has 16 or 81 elements
+    and happens to satisfy Sudoku constraints.
+
+    This verifies the fix that guards sudoku_is_solved() termination with task_type check.
+    """
+    # Use the same solved 4x4 Sudoku grid
+    solved_grid = torch.tensor([
+        2, 3, 4, 5,
+        4, 5, 2, 3,
+        3, 2, 5, 4,
+        5, 4, 3, 2
+    ], dtype=torch.long)
+
+    # Create initial plan with one empty cell at position 0
+    initial_plan = solved_grid.clone()
+    initial_plan[0] = 1  # Empty cell (token 1)
+
+    class NonSudokuDataset:
+        def __init__(self):
+            self.data = [{
+                "inputs": initial_plan.clone(),
+                "puzzle_identifiers": torch.tensor([0]),
+                "initial_plan": initial_plan.clone(),
+            }]
+        def __len__(self): return 1
+        def __getitem__(self, idx): return self.data[idx]
+
+    def dummy_checker(x, y):
+        return float((y != 1).sum().item())
+
+    dataset = NonSudokuDataset()
+
+    # Create config with task_type="dummy" (NOT "sudoku")
+    cfg = PlanEditEnvConfig(
+        max_edits=16,
+        gamma=0.99,
+        reward_shaping=True,
+        vocab_size=6,
+        solved_threshold=None,  # No threshold-based termination
+        stop_action_mode="disabled",
+        task_type="dummy",  # NOT "sudoku" - should NOT trigger sudoku_is_solved()
+    )
+
+    env = PlanEditEnv(dataset, dummy_checker, cfg)
+    seq_len = 16
+    stop_id = seq_len * cfg.vocab_size
+    env.set_stop_action_id(stop_id)
+
+    x, y = env.reset()
+
+    # Take the same edit action that would complete the grid
+    edit_action = 0 * cfg.vocab_size + 2  # position 0, token 2 (digit 1)
+    (x_next, y_next), reward, done, info = env.step(edit_action)
+
+    # The grid IS solved, but task_type="dummy" so sudoku_is_solved() should NOT trigger
+    assert done is False, "Episode should NOT terminate for non-Sudoku task_type"
+    assert info["solved"] is False, "info['solved'] should be False for non-Sudoku task"
+    assert info["terminated_by_solved"] is False, "terminated_by_solved should be False"
+    assert info["done_reason"] is None, "done_reason should be None (episode continues)"
+
+    # Verify the grid matches the solved Sudoku (it IS solved, just not triggering termination)
+    assert torch.equal(y_next, solved_grid), "Grid should match solved grid"
+
+    print("Non-Sudoku task_type termination guard test passed!")
+
+
+def test_task_type_none_does_not_trigger_sudoku_termination():
+    """
+    Test that task_type=None (default) does NOT trigger sudoku_is_solved() termination.
+    This is the safe default behavior.
+    """
+    solved_grid = torch.tensor([
+        2, 3, 4, 5,
+        4, 5, 2, 3,
+        3, 2, 5, 4,
+        5, 4, 3, 2
+    ], dtype=torch.long)
+
+    initial_plan = solved_grid.clone()
+    initial_plan[0] = 1
+
+    class DefaultTaskDataset:
+        def __init__(self):
+            self.data = [{
+                "inputs": initial_plan.clone(),
+                "puzzle_identifiers": torch.tensor([0]),
+                "initial_plan": initial_plan.clone(),
+            }]
+        def __len__(self): return 1
+        def __getitem__(self, idx): return self.data[idx]
+
+    def dummy_checker(x, y):
+        return float((y != 1).sum().item())
+
+    dataset = DefaultTaskDataset()
+
+    # Create config with task_type=None (default)
+    cfg = PlanEditEnvConfig(
+        max_edits=16,
+        gamma=0.99,
+        reward_shaping=True,
+        vocab_size=6,
+        solved_threshold=None,
+        stop_action_mode="disabled",
+        # task_type defaults to None - should NOT trigger sudoku_is_solved()
+    )
+
+    env = PlanEditEnv(dataset, dummy_checker, cfg)
+    env.set_stop_action_id(16 * cfg.vocab_size)
+
+    x, y = env.reset()
+
+    edit_action = 0 * cfg.vocab_size + 2
+    (x_next, y_next), reward, done, info = env.step(edit_action)
+
+    # task_type=None should NOT trigger sudoku_is_solved()
+    assert done is False, "Episode should NOT terminate when task_type is None"
+    assert info["solved"] is False, "info['solved'] should be False when task_type is None"
+
+    print("task_type=None termination guard test passed!")
 
 

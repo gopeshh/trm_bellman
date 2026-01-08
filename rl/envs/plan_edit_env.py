@@ -689,9 +689,13 @@ class PlanEditEnv:
         # When solved_threshold is None, we use sudoku_is_solved() to detect completion.
         # This ensures episodes terminate immediately when the puzzle is solved,
         # preventing "solved then unsolved" scenarios that inflate success metrics.
+        #
+        # IMPORTANT: Only apply this check when task_type == "sudoku" to prevent
+        # accidental termination for non-Sudoku tasks that happen to use 16/81-length plans.
         if not terminated_by_solved:
+            is_sudoku_task = (self.config.task_type == "sudoku")
             plan_tensor = y_next if torch.is_tensor(y_next) else None
-            if plan_tensor is not None and plan_tensor.numel() in (16, 81):
+            if is_sudoku_task and plan_tensor is not None and plan_tensor.numel() in (16, 81):
                 # This is a Sudoku task (4x4 or 9x9)
                 if sudoku_is_solved(plan_tensor):
                     done = True
