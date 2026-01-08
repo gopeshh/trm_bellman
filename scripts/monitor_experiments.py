@@ -6,7 +6,7 @@ import re
 import glob
 from datetime import datetime
 
-EXP_DIR = "/home/buiksat/trm_bellman/runs/exp_20260107"
+EXP_DIR = "/home/buiksat/trm_bellman/runs/constraint_v2_20260107_160240"
 
 print(f"\n{'='*60}")
 print(f"EXPERIMENT STATUS ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")

@@ -1,0 +1,86 @@
+# ============================================================
+# CONSTRAINT CHECKER EXPERIMENT: DQN Baseline
+# ============================================================
+# DQN with TRM backbone for comparison
+# Uses constraint-based checker: score = 10 - violations
+# MUST match UPI-TRM config for fair comparison
+
+# ===================================================================
+# ALGORITHM
+# ===================================================================
+algorithm: "dqn"
+double_dqn: true
+
+# ===================================================================
+# CHECKER CONFIGURATION - CONSTRAINT BASED (MUST MATCH UPI-TRM)
+# ===================================================================
+use_constraint_checker: true
+use_progress_checker: false
+
+# Task configuration
+task_name: sudoku
+solved_threshold: 10.0  # Score of 10.0 = 0 violations = solved
+
+# ===================================================================
+# REWARD SHAPING (MUST MATCH UPI-TRM)
+# ===================================================================
+reward_shaping: true
+fail_terminal_reward: -10.0  # -C_max for constraint checker (C_max=10)
+solve_terminal_reward: 0.0
+value_target_clip: 15.0  # Constraint checker range 0-10, add headroom
+
+# ===================================================================
+# CORE RL PARAMETERS (CONSISTENT ACROSS ALL EXPERIMENTS)
+# ===================================================================
+gamma: 0.99
+inner_unroll_n: 4
+max_edits: 20
+num_train_steps: 5000
+
+# ===================================================================
+# DQN-SPECIFIC PARAMETERS
+# ===================================================================
+epsilon_start: 1.0
+epsilon_end: 0.01
+epsilon_decay_steps: 2000
+buffer_size: 10000
+batch_size: 64
+min_buffer_size: 500
+target_update_freq: 100
+soft_update_tau: 0.0
+train_freq: 4
+gradient_steps: 1
+
+# ===================================================================
+# OPTIMIZATION
+# ===================================================================
+learning_rate: 1.0e-4
+value_lr: 1.0e-4
+policy_lr: 1.0e-4
+max_grad_norm: 1.0
+
+# ===================================================================
+# STOP ACTION
+# ===================================================================
+stop_action_mode: "noop"
+stop_action_penalty: -0.1
+
+# ===================================================================
+# DISABLED THEORY FEATURES (BASELINE)
+# ===================================================================
+enable_contraction: false
+target_Lz: 0.9
+target_Lv: 5.0
+latent_ball_radius: 0.0
+exact_baseline_summation: false
+exact_k_step_targets: false
+theory_exact_mixture: false
+batch_centered_advantage: false
+
+# ===================================================================
+# LOGGING & EVALUATION (MUST MATCH UPI-TRM)
+# ===================================================================
+log_interval: 100
+eval_interval: 100  # Standardized across all experiments
+eval_num_episodes: 50
+use_tqdm: false

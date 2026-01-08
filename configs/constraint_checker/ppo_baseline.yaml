@@ -1,0 +1,77 @@
+# ============================================================
+# CONSTRAINT CHECKER EXPERIMENT: PPO Baseline
+# ============================================================
+# PPO with TRM backbone for comparison
+# Uses constraint-based checker: score = 10 - violations
+
+# ===================================================================
+# ALGORITHM
+# ===================================================================
+algorithm: "ppo"
+
+# ===================================================================
+# CHECKER CONFIGURATION - CONSTRAINT BASED (MUST MATCH UPI-TRM)
+# ===================================================================
+use_constraint_checker: true
+use_progress_checker: false
+
+# Task configuration
+task_name: sudoku
+solved_threshold: 10.0
+
+# ===================================================================
+# REWARD SHAPING (MUST MATCH UPI-TRM)
+# ===================================================================
+reward_shaping: true
+fail_terminal_reward: -10.0
+solve_terminal_reward: 0.0
+value_target_clip: 15.0
+
+# ===================================================================
+# CORE RL PARAMETERS (CONSISTENT ACROSS ALL EXPERIMENTS)
+# ===================================================================
+gamma: 0.99
+inner_unroll_n: 4
+max_edits: 20
+num_train_steps: 5000
+
+# ===================================================================
+# PPO-SPECIFIC PARAMETERS
+# ===================================================================
+ppo_epochs: 4
+ppo_clip_ratio: 0.2
+ppo_value_clip: 10.0
+ppo_kl_target: 0.01
+ppo_entropy_coef: 0.01
+
+# ===================================================================
+# OPTIMIZATION
+# ===================================================================
+value_lr: 3.0e-4
+policy_lr: 1.0e-4
+batch_size: 64
+max_grad_norm: 0.5
+
+# ===================================================================
+# STOP ACTION
+# ===================================================================
+stop_action_mode: "noop"
+stop_action_penalty: -0.1
+
+# ===================================================================
+# DISABLED THEORY FEATURES (BASELINE)
+# ===================================================================
+enable_contraction: false
+latent_ball_radius: 0.0
+exact_baseline_summation: false
+exact_k_step_targets: false
+theory_exact_mixture: false
+batch_centered_advantage: true
+
+# ===================================================================
+# LOGGING & EVALUATION
+# ===================================================================
+log_interval: 100
+eval_interval: 100  # Standardized across all experiments
+eval_num_episodes: 50
+use_tqdm: false

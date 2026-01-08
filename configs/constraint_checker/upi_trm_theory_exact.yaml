@@ -1,0 +1,94 @@
+# ============================================================
+# CONSTRAINT CHECKER EXPERIMENT: UPI-TRM (Theory-Exact)
+# ============================================================
+# Main UPI-TRM configuration with all theory features enabled
+# Uses constraint-based checker: score = 10 - violations
+# Initial score = 10.0 (no violations in empty cells)
+# Solved score = 10.0 when all cells filled correctly
+
+# ===================================================================
+# CHECKER CONFIGURATION - CONSTRAINT BASED
+# ===================================================================
+use_constraint_checker: true
+use_progress_checker: false
+
+# Task configuration
+task_name: sudoku
+solved_threshold: 10.0  # Score of 10.0 = 0 violations = solved
+
+# ===================================================================
+# REWARD SHAPING
+# ===================================================================
+reward_shaping: true
+fail_terminal_reward: -10.0  # -C_max for constraint checker (C_max=10)
+solve_terminal_reward: 0.0
+value_target_clip: 15.0  # Constraint checker range 0-10, add headroom
+
+# ===================================================================
+# CORE RL PARAMETERS (CONSISTENT ACROSS ALL EXPERIMENTS)
+# ===================================================================
+gamma: 0.99
+K: 1
+inner_unroll_n: 4
+max_edits: 20
+num_train_steps: 5000
+
+# ===================================================================
+# LATENT MODE
+# ===================================================================
+episodic_latent: true  # Episodic z (required for exact_baseline_summation)
+
+# ===================================================================
+# THEORY-EXACT FEATURES (ALL ENABLED)
+# ===================================================================
+exact_baseline_summation: true   # Theorem 5.9: E[A]=0 exactly
+exact_k_step_targets: true       # Fixed-horizon bootstrap
+theory_exact_mixture: true       # Policy-space CPI mixture
+batch_centered_advantage: false  # Use exact baseline instead
+distill_mixture_policy: false    # No distillation (theory-aligned)
+
+# ===================================================================
+# CONTRACTION & LIPSCHITZ (Assumption 4.2)
+# ===================================================================
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 1.0
+latent_ball_radius: 10.0
+
+# ===================================================================
+# CONSERVATIVE POLICY IMPROVEMENT
+# ===================================================================
+mixture_alpha: 0.05
+
+# ===================================================================
+# STOP ACTION
+# ===================================================================
+stop_action_mode: "disabled"  # Force agent to use full budget
+
+# ===================================================================
+# OPTIMIZATION
+# ===================================================================
+value_lr: 3.0e-4
+policy_lr: 1.0e-4
+entropy_coef: 0.05
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+lr_schedule: "constant"
+
+# ===================================================================
+# REPLAY & TRAINING
+# ===================================================================
+replay_capacity: 100000
+batch_size: 128
+rollout_episodes_per_step: 4
+rollout_batch_size: 32
+
+# ===================================================================
+# LOGGING & EVALUATION
+# ===================================================================
+log_interval: 10
+eval_interval: 100
+eval_num_episodes: 50
+use_tqdm: false
+debug_checks: false
+track_theory_metrics: true

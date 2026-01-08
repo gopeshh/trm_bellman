@@ -1,0 +1,53 @@
+# ============================================================
+# CONSTRAINT CHECKER ABLATION: No Exact Baseline (KEY ABLATION)
+# ============================================================
+# Tests Theorem 5.9: exact baseline summation for O(α·ε_A) bound
+# Difference: exact_baseline_summation: false
+
+use_constraint_checker: true
+use_progress_checker: false
+task_name: sudoku
+solved_threshold: 10.0
+
+reward_shaping: true
+fail_terminal_reward: -10.0
+solve_terminal_reward: 0.0
+value_target_clip: 15.0
+
+gamma: 0.99
+K: 1
+inner_unroll_n: 4
+max_edits: 20
+num_train_steps: 5000
+
+episodic_latent: true  # Use episodic for fair comparison
+
+# ABLATION: Disable exact baseline
+exact_baseline_summation: false  # <-- DISABLED
+batch_centered_advantage: true   # Use batch centering instead
+
+exact_k_step_targets: true
+theory_exact_mixture: true
+distill_mixture_policy: false
+
+enable_contraction: true
+target_Lz: 0.9
+target_Lv: 1.0
+latent_ball_radius: 10.0
+
+mixture_alpha: 0.05
+stop_action_mode: "disabled"
+
+value_lr: 3.0e-4
+policy_lr: 1.0e-4
+entropy_coef: 0.05
+lr_schedule: "constant"
+
+replay_capacity: 100000
+batch_size: 128
+rollout_episodes_per_step: 4
+
+log_interval: 10
+eval_interval: 100
+eval_num_episodes: 50
+track_theory_metrics: true
