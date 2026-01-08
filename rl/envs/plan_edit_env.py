@@ -3,6 +3,8 @@ from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 
+from rl.sudoku_utils import sudoku_is_solved
+
 if TYPE_CHECKING:
     from rl.task_config import TaskConfig
 
@@ -683,6 +685,20 @@ class PlanEditEnv:
                 done_reason = "solved"
             terminated_by_solved = True
 
+        # Solution-independent termination for Sudoku tasks (Fix for feasibility checker)
+        # When solved_threshold is None, we use sudoku_is_solved() to detect completion.
+        # This ensures episodes terminate immediately when the puzzle is solved,
+        # preventing "solved then unsolved" scenarios that inflate success metrics.
+        if not terminated_by_solved:
+            plan_tensor = y_next if torch.is_tensor(y_next) else None
+            if plan_tensor is not None and plan_tensor.numel() in (16, 81):
+                # This is a Sudoku task (4x4 or 9x9)
+                if sudoku_is_solved(plan_tensor):
+                    done = True
+                    if done_reason is None:
+                        done_reason = "solved"
+                    terminated_by_solved = True
+
         if done_reason is None and pending_budget_termination:
             done_reason = "budget"
             terminated_by_budget = True
@@ -738,6 +754,7 @@ class PlanEditEnv:
 
         info = {
             "done_reason": done_reason,
+            "solved": terminated_by_solved,  # Explicit solved flag for clarity
             "terminated_by_stop": terminated_by_stop,
             "terminated_by_budget": terminated_by_budget,
             "terminated_by_solved": terminated_by_solved,

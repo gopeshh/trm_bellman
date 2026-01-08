@@ -253,3 +253,146 @@ def test_action_masking_comprehensive():
     
     print("Comprehensive masking test passed!")
 
+
+def test_sudoku_terminates_when_solved_via_sudoku_is_solved():
+    """
+    Test that a Sudoku episode terminates immediately when the grid becomes solved,
+    using the solution-independent sudoku_is_solved() criterion.
+
+    This test verifies Fix #1 for feasibility checker:
+    - When solved_threshold is None, episodes still terminate via sudoku_is_solved()
+    - Prevents "solved then unsolved" scenarios that could inflate success metrics
+    """
+    # Create a 4x4 Sudoku dataset where the grid is almost solved
+    # The plan starts with one empty cell (position 0), rest are solved
+    # After one edit, the grid becomes solved
+
+    # Valid 4x4 Sudoku solution (token encoding: digit d -> token d+1)
+    # 1 2 3 4 -> tokens 2 3 4 5
+    # 3 4 1 2 -> tokens 4 5 2 3
+    # 2 1 4 3 -> tokens 3 2 5 4
+    # 4 3 2 1 -> tokens 5 4 3 2
+    solved_grid = torch.tensor([
+        2, 3, 4, 5,
+        4, 5, 2, 3,
+        3, 2, 5, 4,
+        5, 4, 3, 2
+    ], dtype=torch.long)
+
+    # Create initial plan with one empty cell at position 0
+    initial_plan = solved_grid.clone()
+    initial_plan[0] = 1  # Empty cell (token 1)
+
+    class SudokuDataset:
+        def __init__(self):
+            # inputs has clue at position 0 as empty (1) to allow editing
+            # All other positions are clues (>1)
+            self.data = [{
+                "inputs": initial_plan.clone(),
+                "puzzle_identifiers": torch.tensor([0]),
+                "initial_plan": initial_plan.clone(),
+            }]
+        def __len__(self): return 1
+        def __getitem__(self, idx): return self.data[idx]
+
+    def feasibility_checker(x, y):
+        """Simple checker that returns filled count (for testing)."""
+        return float((y != 1).sum().item())
+
+    dataset = SudokuDataset()
+
+    # Create config with solved_threshold=None (like feasibility configs)
+    cfg = PlanEditEnvConfig(
+        max_edits=16,
+        gamma=0.99,
+        reward_shaping=True,
+        vocab_size=6,  # tokens 0-5 for 4x4 Sudoku
+        solved_threshold=None,  # No threshold-based termination
+        stop_action_mode="disabled",  # STOP disabled
+    )
+
+    env = PlanEditEnv(dataset, feasibility_checker, cfg)
+    seq_len = 16
+    stop_id = seq_len * cfg.vocab_size
+    env.set_stop_action_id(stop_id)
+
+    x, y = env.reset()
+
+    # Verify initial state
+    assert not env.done
+    assert y[0].item() == 1, "Position 0 should be empty initially"
+
+    # Take an edit action to set position 0 to digit 1 (token 2)
+    # This completes the solved grid
+    edit_action = 0 * cfg.vocab_size + 2  # position 0, token 2 (digit 1)
+    (x_next, y_next), reward, done, info = env.step(edit_action)
+
+    # The grid should now be solved and episode should terminate
+    assert done is True, "Episode should terminate when grid is solved"
+    assert info["done_reason"] == "solved", f"done_reason should be 'solved', got {info['done_reason']}"
+    assert info["solved"] is True, "info['solved'] should be True"
+    assert info["terminated_by_solved"] is True, "info['terminated_by_solved'] should be True"
+
+    # Verify the grid is actually solved
+    assert y_next[0].item() == 2, "Position 0 should now be digit 1 (token 2)"
+    assert torch.equal(y_next, solved_grid), "Grid should match the solved grid"
+
+    print("Sudoku solution-independent termination test passed!")
+
+
+def test_sudoku_does_not_terminate_when_not_solved():
+    """
+    Test that a Sudoku episode does NOT terminate when the grid is not fully solved,
+    even if it's partially filled.
+
+    This ensures sudoku_is_solved() correctly requires:
+    - All cells filled (no empty cells)
+    - Zero violations
+    """
+    # Create a 4x4 grid that is NOT solved (has empty cells)
+    partial_grid = torch.tensor([
+        2, 3, 4, 5,  # Row 0: filled
+        4, 5, 2, 3,  # Row 1: filled
+        3, 2, 1, 4,  # Row 2: one empty cell at position 10
+        5, 4, 3, 2   # Row 3: filled
+    ], dtype=torch.long)
+
+    class PartialSudokuDataset:
+        def __init__(self):
+            self.data = [{
+                "inputs": partial_grid.clone(),
+                "puzzle_identifiers": torch.tensor([0]),
+                "initial_plan": partial_grid.clone(),
+            }]
+        def __len__(self): return 1
+        def __getitem__(self, idx): return self.data[idx]
+
+    def feasibility_checker(x, y):
+        return float((y != 1).sum().item())
+
+    dataset = PartialSudokuDataset()
+    cfg = PlanEditEnvConfig(
+        max_edits=16,
+        gamma=0.99,
+        reward_shaping=True,
+        vocab_size=6,
+        solved_threshold=None,
+        stop_action_mode="disabled",
+    )
+
+    env = PlanEditEnv(dataset, feasibility_checker, cfg)
+    env.set_stop_action_id(16 * cfg.vocab_size)
+
+    x, y = env.reset()
+
+    # Take a no-op edit (edit position 0 to same value)
+    edit_action = 0 * cfg.vocab_size + 2  # position 0, token 2 (same as current)
+    (x_next, y_next), reward, done, info = env.step(edit_action)
+
+    # Episode should NOT terminate (grid still has empty cell)
+    assert done is False, "Episode should not terminate when grid is not solved"
+    assert info["solved"] is False, "info['solved'] should be False"
+
+    print("Sudoku non-termination test passed!")
+
+

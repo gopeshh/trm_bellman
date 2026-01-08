@@ -13,17 +13,20 @@ Before running experiments, the feasibility checker implementation was verified:
 | Check | Status | Details |
 |-------|--------|---------|
 | Config correctness | ✅ PASS | All 6 configs have correct settings |
-| Termination safety | ✅ SAFE | `solved_threshold=null` prevents premature termination |
+| Termination safety | ✅ FIXED | Episodes now terminate immediately via `sudoku_is_solved()` |
 | Evaluation metric | ✅ CORRECT | Uses `sudoku_is_solved()` (solution-independent) |
 | Score formula | ✅ VERIFIED | `filled - 2.0*violations - 5.0*zeroCand` |
+| Unit tests | ✅ FIXED | Buck deps fixed, 23/23 tests pass |
+
+**Critical Fix Applied**: Added `sudoku_is_solved()` based termination in `PlanEditEnv.step()` to prevent "solved then unsolved" scenarios.
 
 **Key invariants verified:**
 - Empty grid: `is_solved=False`, score=0
 - Partial valid grid: `is_solved=False`
-- Solved grid: `is_solved=True`, score=16
+- Solved grid: `is_solved=True`, score=16, **episode terminates immediately**
 - Dead-end state: `zeroCand > 0`, negative score penalty
 
-**Sanity check scripts:** `scripts/sanity_check_standalone.py`, `scripts/sanity_check_feasibility.py`
+**Sanity check scripts:** `scripts/sanity_check_standalone.py`, `scripts/test_solved_termination.py`
 
 ---
 

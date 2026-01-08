@@ -254,6 +254,7 @@ python_unittest(
     name = "test_plan_edit_env",
     srcs = [
         "tests/__init__.py",
+        "tests/test_plan_edit_env.py",
         "tests/test_plan_edit_env_unittest.py",
     ],
     base_module = "",
@@ -481,6 +482,7 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        ":rl",
         ":upi_trm_train_lib",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
@@ -523,6 +525,17 @@ python_binary(
     deps = [
         ":rl",
         ":upi_trm_train_lib",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
+    name = "test_solved_termination",
+    srcs = ["scripts/test_solved_termination.py"],
+    base_module = "",
+    main_module = "scripts.test_solved_termination",
+    deps = [
+        ":rl",
         "fbsource//third-party/pypi/torch:torch",
     ],
 )

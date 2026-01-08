@@ -1,5 +1,45 @@
 # Session Handoff (2026-01-08 - Feasibility Checker Implementation)
 
+## ✅ Critical Fixes Applied (2026-01-08)
+
+Two remaining footguns were fixed before running experiments:
+
+### Fix #1: Solution-Independent Termination in PlanEditEnv
+
+**Problem**: Episodes only terminated via `solved_threshold` or budget exhaustion. With `solved_threshold=null`, a solved state could be accidentally undone, corrupting success metrics.
+
+**Solution**: Added `sudoku_is_solved()` based termination in `rl/envs/plan_edit_env.py:step()`:
+```python
+# After applying edit, check if Sudoku is solved (solution-independent)
+if plan_tensor.numel() in (16, 81):  # 4x4 or 9x9 Sudoku
+    if sudoku_is_solved(plan_tensor):
+        done = True
+        done_reason = "solved"
+        terminated_by_solved = True
+```
+
+**Verification**:
+```
+✅ PASS: Sudoku episode terminates when grid becomes solved!
+✅ PASS: Non-solved Sudoku correctly continues!
+```
+
+### Fix #2: Buck Unit Test Deps
+
+**Problem**: `//buiksat_trm:test_sudoku_checkers` failed with `ModuleNotFoundError: No module named 'rl.sudoku_utils'`
+
+**Solution**: Added `:rl` to deps in BUCK file.
+
+**Verification**: `buck2 test //buiksat_trm:test_sudoku_checkers` → **23 tests pass**
+
+### New Test Scripts
+
+| File | Description |
+|------|-------------|
+| `scripts/test_solved_termination.py` | Verifies sudoku_is_solved termination works |
+
+---
+
 ## ✅ Sanity Check Complete (2026-01-08)
 
 **Pre-experiment verification passed.** The feasibility checker implementation is correct and will not produce inflated success metrics.
@@ -9,10 +49,10 @@
 | Check | Status | Notes |
 |-------|--------|-------|
 | A) Config correctness | ✅ PASS | All 6 feasibility configs correct |
-| B) Termination safety | ✅ SAFE | `solved_threshold=null` prevents premature termination |
+| B) Termination safety | ✅ FIXED | Now uses `sudoku_is_solved()` for immediate termination |
 | C) Evaluation success | ✅ CORRECT | Uses `sudoku_is_solved()` (solution-independent) |
 | D) Runtime sanity tests | ✅ ALL PASS | 6/6 tests pass |
-| E) Unit tests | ⚠️ SKIP | Buck import issue (build config, not code) |
+| E) Unit tests | ✅ FIXED | Buck deps fixed, 23/23 tests pass |
 
 ### Key Verified Invariants
 
