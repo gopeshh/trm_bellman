@@ -131,6 +131,19 @@ python_binary(
     ],
 )
 
+python_binary(
+    name = "build_9x9_sudoku",
+    srcs = [
+        "dataset/build_easy_sudoku.py",
+    ],
+    base_module = "",
+    main_module = "dataset.build_easy_sudoku",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/tqdm:tqdm",
+    ],
+)
+
 load("@fbcode_macros//build_defs:python_unittest.bzl", "python_unittest")
 
 python_unittest(

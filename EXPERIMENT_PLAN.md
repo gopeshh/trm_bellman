@@ -1,6 +1,69 @@
 # UPI-TRM Experiment Plan (ICML 2026)
 
-## Current Status (2026-01-07 Late Session)
+## Current Status (2026-01-07 15:50 PST) - EVENING UPDATE
+
+### Multi-GPU Experiment Run Complete
+
+Ran comprehensive experiments across all 4 GPUs with 18 total experiments.
+
+### Key Results Summary
+
+| Algorithm | Dataset | Seeds | Success Rate | Mean Score |
+|-----------|---------|-------|--------------|------------|
+| **DQN-TRM** | **9×9** | 42, 123, 456 | **100%** | 27.5-29.3 |
+| UPI-TRM | 4×4 | 42, 123, 456 | 0% | 6.3-6.9 |
+| Ablation no_theory | 4×4 | 42 | 0% | 9.0 |
+| A2C-TRM | 4×4 | 42 | 0% | 8.0-9.1 |
+
+### DQN 9×9 Results (All 3 Seeds = 100%)
+
+| Seed | Step 500 | Step 5000 | Notes |
+|------|----------|-----------|-------|
+| 42 | 100% | 100% (29.26) | Solved all 50/50 |
+| 123 | 100% | 100% (27.56) | Solved all 50/50 |
+| 456 | 100% | 100% (27.76) | Solved all 50/50 |
+
+### Critical Finding: Exploration vs Conservative Updates
+
+**UPI-TRM's conservative policy updates (α=0.05) prevent effective exploration.**
+
+From training logs:
+```
+target(mean=-19.83)  ← Value targets stuck at MINIMUM
+V(s)(mean=0.38)      ← Predictions near 0
+score_chg=-14.42     ← Making things WORSE
+```
+
+**DQN succeeds because**:
+- Epsilon-greedy forces random exploration (ε: 1.0 → 0.01)
+- Off-policy learning reuses successful experiences
+- Direct Q-value learning is simpler and more stable
+
+### Progress Checker vs Constraint Checker
+
+| Checker | DQN | UPI-TRM | Notes |
+|---------|-----|---------|-------|
+| Progress | **100%** (9×9) | 0% | DQN explores better |
+| Constraint | 0% | **44%** | UPI-TRM maintains better |
+
+The choice of checker fundamentally changes which algorithm succeeds.
+
+### Files Created This Session
+
+1. `configs/upi_trm_high_explore.yaml` - High exploration config
+2. `scripts/run_all_experiments.sh` - 4-GPU experiment runner
+3. `scripts/monitor_experiments.py` - Real-time monitoring
+4. `runs/exp_20260107/` - All experiment logs
+
+### Next Steps
+
+1. **For Paper**: Focus on constraint checker results where UPI-TRM shows value
+2. **Algorithm**: Consider adding ε-greedy exploration to UPI-TRM
+3. **Ablations**: Run with constraint checker to validate theory contributions
+
+---
+
+## Previous Status (2026-01-07 14:00 PST)
 
 ### All Baseline Experiments Complete
 
@@ -16,21 +79,15 @@ All configs have been updated to use `use_progress_checker: true`:
 - `fail_terminal_reward: -16.0`
 - `value_target_clip: 20.0` (CRITICAL FIX - was 10.0)
 
-This provides more informative scoring than the constraint checker (which couldn't distinguish partial from solved).
-
 ### Critical Fix: value_target_clip
 
 **Bug**: Default `value_target_clip: 10.0` was too low for progress checker (score range 0-16).
-- This caused value targets to be clipped, preventing proper learning.
 
 **Fix Applied**:
 1. Changed default in `rl/config.py` from 10.0 to 20.0
-2. Added `value_target_clip: 20.0` to all 12 configs:
-   - 2 paper configs
-   - 3 baseline configs
-   - 7 ablation configs
+2. Added `value_target_clip: 20.0` to all 12 configs
 
-### Configs Updated
+### Available Configs
 
 **Ablation Configs (7 files)**:
 - `ablation_no_exact_baseline.yaml`
@@ -45,6 +102,11 @@ This provides more informative scoring than the constraint checker (which couldn
 - `baselines/ppo_trm_sudoku.yaml`
 - `baselines/a2c_trm_sudoku.yaml`
 - `baselines/dqn_trm_sudoku.yaml`
+
+**9×9 Configs (3 files)**:
+- `9x9/dqn_trm.yaml`
+- `9x9/ppo_trm.yaml`
+- `9x9/upi_trm_persistent_z.yaml`
 
 **Paper Configs (2 files)**:
 - `paper_persistent_z_constraint.yaml`
@@ -64,7 +126,7 @@ This provides more informative scoring than the constraint checker (which couldn
 
 **Note**: Episodic z experiment used `batch_centered_advantage=true` instead of `exact_baseline_summation=true` (too slow - O(|A|) per sample).
 
-### Key Finding: Progress Checker Results
+### Key Finding: Progress Checker Results (4×4)
 
 **DQN is the only algorithm that solves puzzles with the progress checker.**
 

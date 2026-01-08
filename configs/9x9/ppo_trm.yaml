@@ -1,0 +1,89 @@
+# PPO Baseline with TRM backbone for 9x9 Sudoku
+#
+# PPO is a popular policy gradient baseline algorithm
+
+# ===================================================================
+# PPO-SPECIFIC PARAMETERS
+# ===================================================================
+algorithm: "ppo"
+
+# PPO clipping parameters
+clip_eps: 0.2
+ppo_epochs: 4
+minibatch_size: 64
+
+# ===================================================================
+# CORE RL PARAMETERS
+# ===================================================================
+gamma: 0.99
+inner_unroll_n: 4
+max_edits: 100              # More edits for 9x9
+num_train_steps: 10000      # More training for harder task
+
+# ===================================================================
+# REWARD CONFIGURATION
+# ===================================================================
+reward_shaping: true
+use_progress_checker: true
+use_constraint_checker: false
+fail_terminal_reward: -81.0   # -C_max for 9x9
+solve_terminal_reward: 0.0
+
+# ===================================================================
+# MODEL ARCHITECTURE
+# ===================================================================
+enable_contraction: false  # No contraction in PPO baseline
+target_Lz: 0.9
+target_Lv: 5.0
+latent_ball_radius: 0.0
+
+# ===================================================================
+# OPTIMIZATION
+# ===================================================================
+policy_lr: 3.0e-4
+value_lr: 1.0e-3
+entropy_coef: 0.01
+value_grad_clip: 0.5
+policy_grad_clip: 0.5
+value_target_clip: 100.0  # 9x9 progress checker range 0-81
+
+# LR schedule
+lr_schedule: "cosine"
+lr_warmup_steps: 500
+lr_min_factor: 0.1
+
+# ===================================================================
+# REPLAY & TRAINING
+# ===================================================================
+replay_capacity: 100000
+batch_size: 128
+rollout_episodes_per_step: 4
+rollout_batch_size: 64
+
+# ===================================================================
+# STOP ACTION
+# ===================================================================
+stop_action_mode: "noop"
+stop_action_penalty: -0.1
+
+# ===================================================================
+# LOGGING & EVALUATION
+# ===================================================================
+log_interval: 100
+eval_interval: 500
+eval_num_episodes: 50
+use_tqdm: false
+
+# ===================================================================
+# TASK CONFIGURATION
+# ===================================================================
+task_name: "sudoku"
+solved_threshold: 81.0  # All 81 cells filled
+
+# ===================================================================
+# DISABLED THEORY FEATURES
+# ===================================================================
+exact_baseline_summation: false
+exact_k_step_targets: false
+theory_exact_mixture: false
+batch_centered_advantage: false
