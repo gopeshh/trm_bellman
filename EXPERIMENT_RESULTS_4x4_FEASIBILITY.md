@@ -94,6 +94,24 @@ Before running experiments, the feasibility checker implementation was verified:
 
 ---
 
+## 📊 Random Baseline (2026-01-09)
+
+**Method:** Uniform random policy over VALID (masked) actions only.
+
+A fair random baseline that respects the Sudoku constraint mask - actions are sampled uniformly from the set of valid placements at each step.
+
+| Metric | Random Baseline |
+|--------|-----------------|
+| **Success Rate** | 52% |
+| **Mean Score** | 13.72 |
+| **Mean Filled** | 16.00 |
+| **Mean Violations** | 1.14 |
+| **Mean ZeroCand** | 0.00 |
+
+**Interpretation:** On trivial puzzles (1-4 empty cells), even random uniform selection achieves 52% success because the expected number of valid placements is small. This makes success rate a coarse metric - learned algorithms at ~52% barely beat random. Use `mean_score` (feasibility score) and `filled/violations/zeroCand` for finer-grained comparison.
+
+---
+
 ## 🟢 Wave 1 Results: UPI-TRM Outperforms Baselines (2026-01-08)
 
 **Dataset:** `sudoku-4x4-trivial` (1-4 empties, mean 2.46)
@@ -108,6 +126,7 @@ Before running experiments, the feasibility checker implementation was verified:
 | A2C | 28% | 32% | 13.69 | ✅ Complete |
 | PPO | 16% | 22% | 11.32 | ✅ Complete |
 | DQN | 8% | 24% | 10.73 | ✅ Complete |
+| Random Baseline | 52% | - | 13.72 | Reference |
 
 ### Key Findings
 
@@ -139,14 +158,19 @@ Before running experiments, the feasibility checker implementation was verified:
 **Config:** `configs/ablations/upi_trm_feasibility_persistent_z.yaml`
 **Key Change:** `episodic_latent: false` (z initialized once per episode, updated across steps)
 
-### Persistent-z Results
+### Understanding Metrics
 
-| Seed | Final Success | Peak Success | Peak Step | Mean Score | Status |
-|------|---------------|--------------|-----------|------------|--------|
-| 42 | 40% | 48% | 4400 | 14.76 | ✅ Complete |
-| 123 | 86% | 92% | 4300 | 15.66 | ✅ Complete |
-| 456 | 32% | 32% | - | 12.06 | ✅ Complete |
-| **Mean** | **52.7%** | **57.3%** | - | **14.16** | - |
+**Why multiple metrics?** On trivial puzzles (1-4 empty cells), success rate is a coarse binary metric - even random achieves 52%. The `mean_score` (feasibility score = `filled - 2×violations - 5×zeroCand`) provides smoother learning signal. Additionally, `filled` and `violations` show granular progress: an algorithm might fill all cells but have violations (filled=16, violations>0), which success rate would mark as 0% but mean_score reveals as near-solved.
+
+### Persistent-z Full Results (All Seeds)
+
+| Seed | Final Success | Peak Success | Peak Step | Final Score | Final Filled | Final Violations | Final ZeroCand |
+|------|---------------|--------------|-----------|-------------|--------------|------------------|----------------|
+| 42 | 40% | 48% | 4400 | 14.76 | 15.60 | 0.42 | 0.00 |
+| 123 | 86% | 92% | 4300 | 15.66 | 15.94 | 0.14 | 0.00 |
+| 456 | 32% | 32% | - | 12.06 | 14.88 | 1.41 | 0.00 |
+| **Mean** | **52.7%** | **57.3%** | - | **14.16** | **15.47** | **0.66** | **0.00** |
+| Random | 52% | - | - | 13.72 | 16.00 | 1.14 | 0.00 |
 
 ### Comparison: Persistent-z vs Episodic-z
 
@@ -175,6 +199,7 @@ Before running experiments, the feasibility checker implementation was verified:
 | **No Contraction** | **92%** | **94%** | 2900 | 15.68 |
 | No Conservative (α=1.0) | 28% | 36% | 500 | 11.02 |
 | UPI-TRM (baseline) | 42% | 46% | 4800 | 14.80 |
+| Random Baseline | 52% | - | - | 13.72 |
 
 ### Analysis
 
@@ -301,17 +326,23 @@ Where N is the total cells (16 for 4×4, 81 for 9×9).
 
 ---
 
-## Results
+## Results Summary
 
-### Summary Table
+### Final Comparison Table (Seed=42)
 
-| Algorithm | Seed | Step | Success Rate | Mean Filled | Mean Violations | Mean ZeroCand |
-|-----------|------|------|--------------|-------------|-----------------|---------------|
-| *Pending experiments* | | | | | | |
+| Algorithm | Final Success | Peak Success | Mean Score | vs Random |
+|-----------|---------------|--------------|------------|-----------|
+| **No Contraction** | **92%** | **94%** | **15.68** | **+40%** |
+| UPI-TRM | 42% | 46% | 14.80 | -10% |
+| Persistent-z | 40% | 48% | 14.76 | -12% |
+| A2C | 28% | 32% | 13.69 | -24% |
+| PPO | 16% | 22% | 11.32 | -36% |
+| DQN | 8% | 24% | 10.73 | -44% |
+| **Random Baseline** | 52% | - | 13.72 | 0% |
 
 ### Learning Curves
 
-*To be populated after experiments complete.*
+See `results/plots/` for generated learning curve plots.
 
 ---
 

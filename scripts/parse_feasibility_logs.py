@@ -57,6 +57,9 @@ def parse_log_file(log_path: Path) -> dict:
         "mean_scores": [],
         "solved_counts": [],
         "total_episodes": [],
+        "filled_means": [],
+        "violations_means": [],
+        "zero_cand_means": [],
     }
 
     final_success_rate = 0.0
@@ -76,6 +79,19 @@ def parse_log_file(log_path: Path) -> dict:
     # Pattern: [step XXXXX] eval_success_rate=X.XXX eval_mean_score=X.XXX ... [solved=X/Y, ...]
     pattern = r"\[step (\d+)\] eval_success_rate=([0-9.]+) eval_mean_score=([0-9.-]+).*\[solved=(\d+)/(\d+)"
 
+    # Also parse PROGRESS lines for filled/violations/zero_cand
+    progress_pattern = r"\[step (\d+)\] PROGRESS: filled=([0-9.]+) violations=([0-9.]+) zero_cand=([0-9.]+)"
+
+    # Build a dict of progress data by step
+    progress_by_step = {}
+    for match in re.finditer(progress_pattern, content):
+        step = int(match.group(1))
+        progress_by_step[step] = {
+            "filled": float(match.group(2)),
+            "violations": float(match.group(3)),
+            "zero_cand": float(match.group(4)),
+        }
+
     for match in re.finditer(pattern, content):
         step = int(match.group(1))
         success_rate = float(match.group(2))
@@ -88,6 +104,12 @@ def parse_log_file(log_path: Path) -> dict:
         results["mean_scores"].append(mean_score)
         results["solved_counts"].append(solved)
         results["total_episodes"].append(total)
+
+        # Add progress data if available
+        progress = progress_by_step.get(step, {})
+        results["filled_means"].append(progress.get("filled"))
+        results["violations_means"].append(progress.get("violations"))
+        results["zero_cand_means"].append(progress.get("zero_cand"))
 
         if success_rate > peak_success_rate:
             peak_success_rate = success_rate
@@ -121,7 +143,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Algorithm directories
-    algo_dirs = ["upi_trm", "ppo", "a2c", "dqn", "ablation_no_conservative", "ablation_no_contraction"]
+    algo_dirs = ["upi_trm", "ppo", "a2c", "dqn", "ablation_no_conservative", "ablation_no_contraction", "ablation_persistent_z"]
     seeds = [42, 123, 456]
 
     all_results = []
@@ -173,6 +195,9 @@ def main():
                         "mean_score": results["mean_scores"][i],
                         "solved_count": results["solved_counts"][i],
                         "total_episodes": results["total_episodes"][i],
+                        "filled_mean": results["filled_means"][i] if i < len(results["filled_means"]) else None,
+                        "violations_mean": results["violations_means"][i] if i < len(results["violations_means"]) else None,
+                        "zero_cand_mean": results["zero_cand_means"][i] if i < len(results["zero_cand_means"]) else None,
                     }
                     if args.all_matching:
                         curve_row["run_id"] = run_id
@@ -188,7 +213,8 @@ def main():
     comparison_fields = ["algorithm", "seed", "success_rate_final", "success_rate_peak",
                          "peak_step", "steps_to_100", "mean_score_final"]
     curve_fields = ["algorithm", "seed", "step", "success_rate", "mean_score",
-                    "solved_count", "total_episodes"]
+                    "solved_count", "total_episodes",
+                    "filled_mean", "violations_mean", "zero_cand_mean"]
 
     if args.all_matching:
         comparison_fields.append("run_id")

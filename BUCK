@@ -152,6 +152,17 @@ python_binary(
 )
 
 python_binary(
+    name = "eval_random_baseline",
+    srcs = ["scripts/eval_random_baseline.py"],
+    base_module = "",
+    main_module = "scripts.eval_random_baseline",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
     name = "build_9x9_sudoku",
     srcs = [
         "dataset/build_easy_sudoku.py",

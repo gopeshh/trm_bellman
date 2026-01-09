@@ -1,8 +1,8 @@
 algorithm,n_seeds,success_rate_final_mean,success_rate_final_std,success_rate_peak_mean,success_rate_peak_std,mean_score_final_mean,mean_score_final_std
 upi_trm,3,0.527,0.276,0.580,0.262,15.027,0.537
-ppo,2,0.170,0.014,0.200,0.028,11.290,0.042
+ppo,2,0.170,0.014,0.200,0.028,11.230,0.127
 a2c,3,0.280,0.020,0.320,0.040,13.733,0.261
 dqn,3,0.100,0.053,0.233,0.023,11.100,0.643
 ablation_no_conservative,1,0.280,0.000,0.360,0.000,11.020,0.000
 ablation_no_contraction,1,0.920,0.000,0.940,0.000,15.680,0.000
-ablation_persistent_z,3,0.527,0.296,0.573,0.307,14.160,1.865
+ablation_persistent_z,3,0.527,0.291,0.587,0.295,14.160,1.873

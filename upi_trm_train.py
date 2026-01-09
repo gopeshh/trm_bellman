@@ -1262,6 +1262,10 @@ def main():
                 score_max = eval_metrics.get("score_max", 0.0)
                 max_possible = eval_metrics.get("max_possible_score")
                 initial_mean = eval_metrics.get("initial_score_mean", 0.0)
+                # Sudoku-specific progress metrics
+                filled_mean = eval_metrics.get("final_filled_mean")
+                violations_mean = eval_metrics.get("final_violations_mean")
+                zero_cand_mean = eval_metrics.get("final_zero_cand_mean")
 
                 eval_msg = (
                     f"[step {step+1:05d}] "
@@ -1273,10 +1277,25 @@ def main():
                     f"{f'/{max_possible:.1f}' if max_possible else ''}, "
                     f"initial={initial_mean:.2f}]"
                 )
-                if hasattr(step_iter, "write"):
-                    step_iter.write(eval_msg)
+                # Add progress metrics if available (Sudoku tasks)
+                if filled_mean is not None:
+                    progress_msg = (
+                        f"[step {step+1:05d}] PROGRESS: "
+                        f"filled={filled_mean:.2f} "
+                        f"violations={violations_mean:.2f} "
+                        f"zero_cand={zero_cand_mean:.2f}"
+                    )
+                    if hasattr(step_iter, "write"):
+                        step_iter.write(eval_msg)
+                        step_iter.write(progress_msg)
+                    else:
+                        print(eval_msg)
+                        print(progress_msg)
                 else:
-                    print(eval_msg)
+                    if hasattr(step_iter, "write"):
+                        step_iter.write(eval_msg)
+                    else:
+                        print(eval_msg)
 
                 # === WandB: Log evaluation metrics ===
                 if use_wandb:
@@ -1290,6 +1309,11 @@ def main():
                     }
                     if max_possible is not None:
                         wandb_eval["eval/max_possible_score"] = max_possible
+                    # Add progress metrics if available
+                    if filled_mean is not None:
+                        wandb_eval["eval/filled_mean"] = filled_mean
+                        wandb_eval["eval/violations_mean"] = violations_mean
+                        wandb_eval["eval/zero_cand_mean"] = zero_cand_mean
                     wandb.log(wandb_eval, step=step + 1)
             else:
                 # Baselines: just print a message that eval is not available
