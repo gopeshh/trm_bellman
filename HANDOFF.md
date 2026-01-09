@@ -1,5 +1,50 @@
 # Session Handoff (2026-01-08 - Feasibility Checker Implementation)
 
+## 🔴 Dataset Mismatch Diagnosis (2026-01-08 Evening)
+
+**Root Cause of 0% Success Identified**: The "ultra-easy" dataset was NOT ultra-easy!
+
+### Summary
+
+| Dataset | Mean Empties | Expected | Actual |
+|---------|-------------|----------|--------|
+| `sudoku-4x4-ultra-easy` | 7.04 | 1-4 empties | 6-8 empties |
+| `sudoku-4x4-trivial` (NEW) | 2.46 | 1-4 empties | ✅ Correct |
+
+### Pilot Experiment Results
+
+| Dataset + Penalties | Peak Success Rate |
+|---------------------|-------------------|
+| Trivial + Low Penalties (w_v=0.5, w_z=1.0) | **56%** at step 1600 |
+| Trivial + Standard Penalties (w_v=2.0, w_z=5.0) | 36% at step 900-1000 |
+| Original + Any Penalties | 0% |
+
+### Key Files Created
+
+| File | Purpose |
+|------|---------|
+| `scripts/inspect_4x4_dataset.py` | Count empties per puzzle, diagnose difficulty |
+| `dataset/build_4x4_trivial.py` | Generate TRUE ultra-easy puzzles (1-4 empties) |
+| `data/sudoku-4x4-trivial/` | Correct dataset (450 train, 50 test, mean 2.46 empties) |
+| `configs/pilots/feasibility_trivial.yaml` | Pilot config with trivial dataset |
+| `configs/pilots/feasibility_low_penalty.yaml` | Lower penalty config (w_v=0.5, w_z=1.0) |
+| `runs/diagnostics/inspect_4x4_dataset.txt` | Diagnostic output saved |
+
+### Run Diagnosis Command
+
+```bash
+buck2 run //buiksat_trm:inspect_4x4_dataset \
+    -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true
+```
+
+### Next Steps
+
+1. Re-run full 18-experiment suite using `sudoku-4x4-trivial` dataset
+2. Consider curriculum: start with 1-2 empties, then increase to 3-4
+3. Or reduce zeroCand penalty further for initial exploration
+
+---
+
 ## ✅ Critical Fixes Applied (2026-01-08)
 
 Two remaining footguns were fixed before running experiments:

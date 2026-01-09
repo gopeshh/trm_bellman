@@ -142,6 +142,16 @@ python_binary(
 )
 
 python_binary(
+    name = "inspect_4x4_dataset",
+    srcs = ["scripts/inspect_4x4_dataset.py"],
+    base_module = "",
+    main_module = "scripts.inspect_4x4_dataset",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_binary(
     name = "build_9x9_sudoku",
     srcs = [
         "dataset/build_easy_sudoku.py",

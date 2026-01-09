@@ -80,9 +80,11 @@ def analyze_dataset(data_dir: Path, split: str = "train"):
     }
 
 def main():
+    # Paths relative to fbcode directory (when run via buck2)
     datasets = [
-        "data/sudoku-4x4-ultra-easy",
-        "data/sudoku-4x4",
+        "buiksat_trm/data/sudoku-4x4-ultra-easy",
+        "buiksat_trm/data/sudoku-4x4-trivial",
+        "buiksat_trm/data/sudoku-4x4",
     ]
 
     print("=" * 60)

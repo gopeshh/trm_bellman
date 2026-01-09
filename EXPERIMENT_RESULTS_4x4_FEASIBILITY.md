@@ -6,6 +6,70 @@
 
 ---
 
+## 🔴 0% Success Diagnosis: Dataset Mismatch (2026-01-08)
+
+**Root Cause**: The "ultra-easy" dataset was NOT ultra-easy. Puzzles had 6-8 empty cells instead of 1-4.
+
+### Dataset Inspection Results
+
+| Dataset | Mean Empties | Min | Max | Puzzles with 1-4 Empties |
+|---------|-------------|-----|-----|--------------------------|
+| `sudoku-4x4-ultra-easy` | **7.04** | 6 | 8 | **0%** (0/450) |
+| `sudoku-4x4-trivial` | **2.46** | 1 | 4 | **100%** (450/450) |
+
+### Empties Histogram
+
+**`sudoku-4x4-ultra-easy`** (WRONG - NOT ultra-easy!):
+```
+6 empties: 142 (31.6%) ################
+7 empties: 149 (33.1%) ################
+8 empties: 159 (35.3%) #################
+```
+
+**`sudoku-4x4-trivial`** (CORRECT - True ultra-easy):
+```
+1 empties: 120 (26.7%) #############
+2 empties: 109 (24.2%) ############
+3 empties: 114 (25.3%) ############
+4 empties: 107 (23.8%) ###########
+```
+
+### Pilot Experiments on Correct Dataset
+
+With the **trivial** dataset (1-4 empties), success rates are non-zero:
+
+| Config | Step 500 | Step 1000 | Step 1600 | Step 2000 | Peak |
+|--------|----------|-----------|-----------|-----------|------|
+| Trivial + Low Penalties (w_v=0.5, w_z=1.0) | 32% | 34% | **56%** | 54% | **56%** |
+| Trivial + Standard Penalties (w_v=2.0, w_z=5.0) | 32% | 36% | 34% | 32% | 36% |
+
+**Key Finding**: With truly easy puzzles (1-4 empties), agents achieve 36-56% success, proving the algorithm works when given appropriate difficulty.
+
+### Why This Explains 0% Success
+
+1. **"Ultra-easy" puzzles have ~7 empties** → Agent must make ~7 correct placements
+2. **With strict feasibility penalties** → Single bad move creates zeroCand dead-ends
+3. **Untrained policy makes random edits** → Almost always hits dead-ends immediately
+4. **Dead-ends have very negative scores** → Agent learns to avoid all edits
+5. **Result: 0% success** → Dataset difficulty × penalty severity = failure
+
+### Fix Applied
+
+1. Created `dataset/build_4x4_trivial.py` to generate true ultra-easy puzzles
+2. Generated `data/sudoku-4x4-trivial/` with 500 puzzles (1-4 empties, mean=2.46)
+3. Updated pilot configs to use the correct dataset
+
+### Diagnostic Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/inspect_4x4_dataset.py` | Count empties per puzzle, verify dataset difficulty |
+| `dataset/build_4x4_trivial.py` | Generate TRUE ultra-easy puzzles (1-4 empties) |
+
+**Run diagnosis**: `buck2 run //buiksat_trm:inspect_4x4_dataset`
+
+---
+
 ## ✅ Pre-Experiment Sanity Check (PASSED)
 
 Before running experiments, the feasibility checker implementation was verified:
