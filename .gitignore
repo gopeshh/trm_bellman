@@ -66,3 +66,14 @@ dist/
 # Cursor / Debug Logs
 # ----------------------------
 .cursor/debug.log
+
+# ----------------------------
+# Keep run directories out of git, but allow small summaries
+# ----------------------------
+# Note: `runs/` is ignored above; the rules below selectively un-ignore small
+# human-readable summaries so results can be shared without committing raw logs.
+runs/**
+!runs/**/
+!runs/**/RESULTS.md
+!runs/**/WAVE*_RESULTS*.md
+!runs/**/COMMANDS*.md

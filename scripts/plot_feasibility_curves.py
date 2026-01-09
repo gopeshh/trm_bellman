@@ -30,6 +30,7 @@ ALGO_CONFIG = {
     "ablation_no_conservative": {"name": "No Conservative", "color": "#9467bd", "marker": "v"},
     "ablation_no_contraction": {"name": "No Contraction", "color": "#8c564b", "marker": "<"},
     "ablation_persistent_z": {"name": "Persistent-z", "color": "#17becf", "marker": ">"},
+    "ablation_persistent_z_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
 }
 
 # Random baseline values (from eval_random_baseline.py)
@@ -125,7 +126,7 @@ def plot_success_vs_steps(data: dict, output_dir: Path):
     fig, ax = plt.subplots(figsize=(10, 6))
 
     # Plot main algorithms first
-    main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z"]
+    main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction"]
 
     for algo in main_algos:
         if algo not in data:
@@ -181,7 +182,7 @@ def plot_score_vs_steps(data: dict, output_dir: Path):
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z"]
+    main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction"]
 
     for algo in main_algos:
         if algo not in data:
@@ -237,7 +238,7 @@ def plot_filled_vs_steps(data: dict, output_dir: Path):
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z"]
+    main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction"]
 
     plotted_any = False
     for algo in main_algos:
@@ -295,7 +296,7 @@ def plot_zero_cand_vs_steps(data: dict, output_dir: Path):
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z"]
+    main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction"]
 
     plotted_any = False
     for algo in main_algos:
@@ -351,7 +352,7 @@ def plot_ablations(data: dict, output_dir: Path):
         print("Cannot plot: matplotlib not available")
         return
 
-    ablation_algos = ["ablation_no_conservative", "ablation_no_contraction", "ablation_persistent_z"]
+    ablation_algos = ["ablation_no_conservative", "ablation_no_contraction", "ablation_persistent_z", "ablation_persistent_z_no_contraction"]
     has_ablations = any(algo in data for algo in ablation_algos)
 
     if not has_ablations or "upi_trm" not in data:

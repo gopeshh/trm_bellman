@@ -2,7 +2,10 @@
 """
 Parse feasibility experiment logs and generate CSV plot data.
 
-Supports timestamped log files (e.g., 42_20260108_223720.log).
+Supports timestamped log files in multiple formats:
+- {seed}.log (e.g., 42.log)
+- {seed}_*.log (e.g., 42_20260108_223720.log)
+- seed_{seed}_*.log (e.g., seed_42_20260108_223720.log)
 
 Usage:
     python scripts/parse_feasibility_logs.py --log-dir runs/feasibility --output-dir results/plot_data
@@ -25,10 +28,16 @@ def find_logs_for_seed(algo_path: Path, seed: int, all_matching: bool = False) -
     Returns list of (log_path, run_id) tuples.
     - If all_matching=False: returns only the newest log
     - If all_matching=True: returns all matching logs
+
+    Supports patterns:
+    - {seed}.log (e.g., 42.log)
+    - {seed}_*.log (e.g., 42_20260108_223720.log)
+    - seed_{seed}_*.log (e.g., seed_42_20260108_223720.log)
     """
-    # Pattern: {seed}.log or {seed}_*.log
+    # Pattern: {seed}.log or {seed}_*.log or seed_{seed}_*.log
     pattern1 = algo_path / f"{seed}.log"
     pattern2 = str(algo_path / f"{seed}_*.log")
+    pattern3 = str(algo_path / f"seed_{seed}_*.log")
 
     logs = []
 
@@ -36,10 +45,16 @@ def find_logs_for_seed(algo_path: Path, seed: int, all_matching: bool = False) -
     if pattern1.exists():
         logs.append((pattern1, f"{seed}"))
 
-    # Find timestamped logs
+    # Find timestamped logs (both {seed}_* and seed_{seed}_* patterns)
     timestamped = sorted(glob.glob(pattern2), key=os.path.getmtime, reverse=True)
     for log_path in timestamped:
         run_id = Path(log_path).stem  # e.g., "42_20260108_223720"
+        logs.append((Path(log_path), run_id))
+
+    # Find seed_ prefixed logs
+    seed_prefixed = sorted(glob.glob(pattern3), key=os.path.getmtime, reverse=True)
+    for log_path in seed_prefixed:
+        run_id = Path(log_path).stem  # e.g., "seed_42_20260108_223720"
         logs.append((Path(log_path), run_id))
 
     if not all_matching and len(logs) > 0:
