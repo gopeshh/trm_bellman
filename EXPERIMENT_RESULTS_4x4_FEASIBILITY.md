@@ -102,22 +102,20 @@ Before running experiments, the feasibility checker implementation was verified:
 
 ### Final Results
 
-| Algorithm | Success Rate | Solved/50 | Mean Score | Status |
-|-----------|--------------|-----------|------------|--------|
-| **UPI-TRM** | **42%** | **21/50** | **14.80** | ✅ Complete |
-| A2C | 26% | 13/50 | 13.44 | ✅ Complete |
-| DQN | 12% | 6/50 | 10.68 | ✅ Complete |
-| PPO | 16%* | 8/50* | 11.28* | 🔄 Step 1200/5000 |
-
-*PPO is very slow (~3.5s/step) and still running
+| Algorithm | Final Success | Peak Success | Mean Score | Status |
+|-----------|---------------|--------------|------------|--------|
+| **UPI-TRM** | **42%** | **46%** | **14.80** | ✅ Complete |
+| A2C | 28% | 32% | 13.69 | ✅ Complete |
+| PPO | 16% | 22% | 11.32 | ✅ Complete |
+| DQN | 8% | 24% | 10.73 | ✅ Complete |
 
 ### Key Findings
 
-1. **UPI-TRM achieves 42% success rate** - significantly outperforming all baselines
+1. **UPI-TRM achieves 42% final success (46% peak)** - significantly outperforming all baselines
 2. **The trivial dataset (1-4 empties) works correctly** - all algorithms show non-zero success
-3. **UPI-TRM shows consistent learning**: 18% → 32% → 38% → 44% → 42%
-4. **DQN peaked early (20% at step 500) then regressed** - needs hyperparameter tuning
-5. **A2C showed stable learning** with consistent 24-26% success rate
+3. **UPI-TRM shows consistent learning**: 18% → 32% → 38% → 46% → 42%
+4. **DQN peaked early (24% at step 500) then regressed to 8%** - needs hyperparameter tuning
+5. **A2C showed stable learning** reaching 28% final (32% peak)
 
 ### Training Progress (UPI-TRM)
 
@@ -126,14 +124,13 @@ Before running experiments, the feasibility checker implementation was verified:
 | 100 | 18% | 9/50 | 12.64 |
 | 500 | 32% | 16/50 | 14.52 |
 | 1000 | 28% | 14/50 | 14.28 |
-| 2000 | 36% | 18/50 | 14.60 |
-| 3000 | 36% | 18/50 | 12.52 |
-| 4000 | 24% | 12/50 | 12.44 |
-| 4100 | 42% | 21/50 | 14.84 |
-| 4700 | **44%** | **22/50** | 14.82 |
+| 2000 | 40% | 20/50 | 14.66 |
+| 3000 | 34% | 17/50 | 12.58 |
+| 4000 | 40% | 20/50 | 14.78 |
+| 4800 | **46%** | **23/50** | 14.78 |
 | 5000 | 42% | 21/50 | 14.80 |
 
-**Peak performance: 44% success rate at step 4700**
+**Peak performance: 46% success rate at step 4800**
 
 ---
 
