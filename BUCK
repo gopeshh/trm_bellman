@@ -559,3 +559,21 @@ python_binary(
         "fbsource//third-party/pypi/torch:torch",
     ],
 )
+
+python_binary(
+    name = "parse_feasibility_logs",
+    srcs = ["scripts/parse_feasibility_logs.py"],
+    base_module = "",
+    main_module = "scripts.parse_feasibility_logs",
+    deps = [],
+)
+
+python_binary(
+    name = "plot_feasibility_curves",
+    srcs = ["scripts/plot_feasibility_curves.py"],
+    base_module = "",
+    main_module = "scripts.plot_feasibility_curves",
+    deps = [
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)

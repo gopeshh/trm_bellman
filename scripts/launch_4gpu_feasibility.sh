@@ -1,8 +1,8 @@
 #!/bin/bash
 # 4-GPU Parallel Launcher for Feasibility Checker Experiments
 #
-# Runs experiments in waves of 4 using buck2 run with separate isolation dirs.
-# Each experiment runs in a separate background process.
+# Runs experiments in waves of 4 using buck2 run (no isolation dirs).
+# Each experiment runs in a separate background process on a different GPU.
 # Logs are saved to runs/feasibility/<algo>/<seed>_<timestamp>.log
 #
 # Usage:
@@ -27,15 +27,15 @@ echo "# Feasibility Experiment Commands" > "$COMMANDS_FILE"
 echo "Generated: $(date)" >> "$COMMANDS_FILE"
 echo "" >> "$COMMANDS_FILE"
 
-# Parallelism check function
+# Post-launch parallelism check
 check_parallelism() {
     local wave_name="$1"
     shift
     local log_files=("$@")
 
     echo ""
-    echo "[$(date +%H:%M:%S)] Parallelism check for $wave_name..."
-    sleep 90  # Wait for builds to complete and training to start
+    echo "[$(date +%H:%M:%S)] Parallelism check for $wave_name (waiting 60s)..."
+    sleep 60
 
     echo ""
     echo "=== GPU Status ==="
@@ -47,8 +47,7 @@ check_parallelism() {
         if [ -f "$log" ]; then
             algo=$(basename "$(dirname "$log")")
             # Check for training start or eval metrics
-            train_line=$(grep -m1 "UPI-TRM RL training\|eval_success_rate" "$log" 2>/dev/null | head -c 100)
-            if [ -n "$train_line" ]; then
+            if grep -q "UPI-TRM RL training\|eval_success_rate" "$log" 2>/dev/null; then
                 echo "  $algo: Training started ✓"
             else
                 build_line=$(tail -1 "$log" 2>/dev/null | head -c 80)
@@ -75,9 +74,9 @@ run_wave1() {
     local LOG_A2C="$LOG_BASE/a2c/42_${TIMESTAMP}.log"
     local LOG_DQN="$LOG_BASE/dqn/42_${TIMESTAMP}.log"
 
-    # Launch all 4 in parallel with unique isolation dirs
+    # Launch all 4 in parallel (no isolation dirs, no local-only)
     echo "[$(date +%H:%M:%S)] Starting upi_trm (seed 42) on GPU 0"
-    CUDA_VISIBLE_DEVICES=0 buck2 --isolation-dir "gpu0_upi_s42" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=0 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --dataset-paths "$DATASET" --config buiksat_trm/configs/rl_sudoku_4x4_feasibility.yaml \
         --train-steps "$STEPS" --seed 42 \
@@ -85,7 +84,7 @@ run_wave1() {
     PID0=$!
 
     echo "[$(date +%H:%M:%S)] Starting ppo (seed 42) on GPU 1"
-    CUDA_VISIBLE_DEVICES=1 buck2 --isolation-dir "gpu1_ppo_s42" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=1 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --baseline ppo --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/ppo_trm_feasibility.yaml \
         --train-steps "$STEPS" --seed 42 \
@@ -93,7 +92,7 @@ run_wave1() {
     PID1=$!
 
     echo "[$(date +%H:%M:%S)] Starting a2c (seed 42) on GPU 2"
-    CUDA_VISIBLE_DEVICES=2 buck2 --isolation-dir "gpu2_a2c_s42" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=2 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --baseline a2c --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/a2c_trm_feasibility.yaml \
         --train-steps "$STEPS" --seed 42 \
@@ -101,7 +100,7 @@ run_wave1() {
     PID2=$!
 
     echo "[$(date +%H:%M:%S)] Starting dqn (seed 42) on GPU 3"
-    CUDA_VISIBLE_DEVICES=3 buck2 --isolation-dir "gpu3_dqn_s42" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=3 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --baseline dqn --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/dqn_trm_feasibility.yaml \
         --train-steps "$STEPS" --seed 42 \
@@ -134,7 +133,7 @@ run_wave2() {
     local LOG_DQN="$LOG_BASE/dqn/123_${TIMESTAMP}.log"
 
     echo "[$(date +%H:%M:%S)] Starting upi_trm (seed 123) on GPU 0"
-    CUDA_VISIBLE_DEVICES=0 buck2 --isolation-dir "gpu0_upi_s123" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=0 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --dataset-paths "$DATASET" --config buiksat_trm/configs/rl_sudoku_4x4_feasibility.yaml \
         --train-steps "$STEPS" --seed 123 \
@@ -142,7 +141,7 @@ run_wave2() {
     PID0=$!
 
     echo "[$(date +%H:%M:%S)] Starting ppo (seed 123) on GPU 1"
-    CUDA_VISIBLE_DEVICES=1 buck2 --isolation-dir "gpu1_ppo_s123" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=1 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --baseline ppo --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/ppo_trm_feasibility.yaml \
         --train-steps "$STEPS" --seed 123 \
@@ -150,7 +149,7 @@ run_wave2() {
     PID1=$!
 
     echo "[$(date +%H:%M:%S)] Starting a2c (seed 123) on GPU 2"
-    CUDA_VISIBLE_DEVICES=2 buck2 --isolation-dir "gpu2_a2c_s123" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=2 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --baseline a2c --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/a2c_trm_feasibility.yaml \
         --train-steps "$STEPS" --seed 123 \
@@ -158,7 +157,7 @@ run_wave2() {
     PID2=$!
 
     echo "[$(date +%H:%M:%S)] Starting dqn (seed 123) on GPU 3"
-    CUDA_VISIBLE_DEVICES=3 buck2 --isolation-dir "gpu3_dqn_s123" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=3 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --baseline dqn --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/dqn_trm_feasibility.yaml \
         --train-steps "$STEPS" --seed 123 \
@@ -189,7 +188,7 @@ run_wave3() {
     local LOG_DQN="$LOG_BASE/dqn/456_${TIMESTAMP}.log"
 
     echo "[$(date +%H:%M:%S)] Starting upi_trm (seed 456) on GPU 0"
-    CUDA_VISIBLE_DEVICES=0 buck2 --isolation-dir "gpu0_upi_s456" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=0 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --dataset-paths "$DATASET" --config buiksat_trm/configs/rl_sudoku_4x4_feasibility.yaml \
         --train-steps "$STEPS" --seed 456 \
@@ -197,7 +196,7 @@ run_wave3() {
     PID0=$!
 
     echo "[$(date +%H:%M:%S)] Starting ppo (seed 456) on GPU 1"
-    CUDA_VISIBLE_DEVICES=1 buck2 --isolation-dir "gpu1_ppo_s456" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=1 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --baseline ppo --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/ppo_trm_feasibility.yaml \
         --train-steps "$STEPS" --seed 456 \
@@ -205,7 +204,7 @@ run_wave3() {
     PID1=$!
 
     echo "[$(date +%H:%M:%S)] Starting a2c (seed 456) on GPU 2"
-    CUDA_VISIBLE_DEVICES=2 buck2 --isolation-dir "gpu2_a2c_s456" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=2 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --baseline a2c --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/a2c_trm_feasibility.yaml \
         --train-steps "$STEPS" --seed 456 \
@@ -213,7 +212,7 @@ run_wave3() {
     PID2=$!
 
     echo "[$(date +%H:%M:%S)] Starting dqn (seed 456) on GPU 3"
-    CUDA_VISIBLE_DEVICES=3 buck2 --isolation-dir "gpu3_dqn_s456" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=3 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --baseline dqn --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/dqn_trm_feasibility.yaml \
         --train-steps "$STEPS" --seed 456 \
@@ -244,7 +243,7 @@ run_wave4() {
     local LOG_NCTR42="$LOG_BASE/ablation_no_contraction/42_${TIMESTAMP}.log"
 
     echo "[$(date +%H:%M:%S)] Starting no_conservative (seed 42) on GPU 0"
-    CUDA_VISIBLE_DEVICES=0 buck2 --isolation-dir "gpu0_nocons_s42" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=0 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_conservative.yaml \
         --train-steps "$STEPS" --seed 42 \
@@ -252,7 +251,7 @@ run_wave4() {
     PID0=$!
 
     echo "[$(date +%H:%M:%S)] Starting no_conservative (seed 123) on GPU 1"
-    CUDA_VISIBLE_DEVICES=1 buck2 --isolation-dir "gpu1_nocons_s123" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=1 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_conservative.yaml \
         --train-steps "$STEPS" --seed 123 \
@@ -260,7 +259,7 @@ run_wave4() {
     PID1=$!
 
     echo "[$(date +%H:%M:%S)] Starting no_conservative (seed 456) on GPU 2"
-    CUDA_VISIBLE_DEVICES=2 buck2 --isolation-dir "gpu2_nocons_s456" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=2 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_conservative.yaml \
         --train-steps "$STEPS" --seed 456 \
@@ -268,7 +267,7 @@ run_wave4() {
     PID2=$!
 
     echo "[$(date +%H:%M:%S)] Starting no_contraction (seed 42) on GPU 3"
-    CUDA_VISIBLE_DEVICES=3 buck2 --isolation-dir "gpu3_nocontr_s42" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=3 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_contraction.yaml \
         --train-steps "$STEPS" --seed 42 \
@@ -292,7 +291,7 @@ run_wave4() {
     local LOG_NCTR456="$LOG_BASE/ablation_no_contraction/456_${TIMESTAMP}.log"
 
     echo "[$(date +%H:%M:%S)] Starting no_contraction (seed 123) on GPU 0"
-    CUDA_VISIBLE_DEVICES=0 buck2 --isolation-dir "gpu0_nocontr_s123" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=0 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_contraction.yaml \
         --train-steps "$STEPS" --seed 123 \
@@ -300,7 +299,7 @@ run_wave4() {
     PID0=$!
 
     echo "[$(date +%H:%M:%S)] Starting no_contraction (seed 456) on GPU 1"
-    CUDA_VISIBLE_DEVICES=1 buck2 --isolation-dir "gpu1_nocontr_s456" run //buiksat_trm:upi_trm_train \
+    CUDA_VISIBLE_DEVICES=1 buck2 run //buiksat_trm:upi_trm_train \
         -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
         --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_contraction.yaml \
         --train-steps "$STEPS" --seed 456 \

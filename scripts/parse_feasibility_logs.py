@@ -2,16 +2,51 @@
 """
 Parse feasibility experiment logs and generate CSV plot data.
 
+Supports timestamped log files (e.g., 42_20260108_223720.log).
+
 Usage:
     python scripts/parse_feasibility_logs.py --log-dir runs/feasibility --output-dir results/plot_data
+    python scripts/parse_feasibility_logs.py --all-matching  # Include all matching logs with run_id
 """
 
 import argparse
 import os
 import re
+import glob
 from pathlib import Path
 from collections import defaultdict
 import csv
+
+
+def find_logs_for_seed(algo_path: Path, seed: int, all_matching: bool = False) -> list:
+    """
+    Find log files for a given seed.
+
+    Returns list of (log_path, run_id) tuples.
+    - If all_matching=False: returns only the newest log
+    - If all_matching=True: returns all matching logs
+    """
+    # Pattern: {seed}.log or {seed}_*.log
+    pattern1 = algo_path / f"{seed}.log"
+    pattern2 = str(algo_path / f"{seed}_*.log")
+
+    logs = []
+
+    # Check old-style log first
+    if pattern1.exists():
+        logs.append((pattern1, f"{seed}"))
+
+    # Find timestamped logs
+    timestamped = sorted(glob.glob(pattern2), key=os.path.getmtime, reverse=True)
+    for log_path in timestamped:
+        run_id = Path(log_path).stem  # e.g., "42_20260108_223720"
+        logs.append((Path(log_path), run_id))
+
+    if not all_matching and len(logs) > 0:
+        # Return only the newest (first in sorted list by mtime)
+        return [logs[0]]
+
+    return logs
 
 
 def parse_log_file(log_path: Path) -> dict:
@@ -27,10 +62,15 @@ def parse_log_file(log_path: Path) -> dict:
     final_success_rate = 0.0
     final_mean_score = 0.0
     peak_success_rate = 0.0
+    peak_step = 0
     steps_to_100 = None
 
-    with open(log_path, "r") as f:
-        content = f.read()
+    try:
+        with open(log_path, "r") as f:
+            content = f.read()
+    except Exception as e:
+        print(f"  Warning: Could not read {log_path}: {e}")
+        return results
 
     # Find all eval lines
     # Pattern: [step XXXXX] eval_success_rate=X.XXX eval_mean_score=X.XXX ... [solved=X/Y, ...]
@@ -51,6 +91,7 @@ def parse_log_file(log_path: Path) -> dict:
 
         if success_rate > peak_success_rate:
             peak_success_rate = success_rate
+            peak_step = step
 
         if success_rate >= 1.0 and steps_to_100 is None:
             steps_to_100 = step
@@ -61,6 +102,7 @@ def parse_log_file(log_path: Path) -> dict:
     results["final_success_rate"] = final_success_rate
     results["final_mean_score"] = final_mean_score
     results["peak_success_rate"] = peak_success_rate
+    results["peak_step"] = peak_step
     results["steps_to_100"] = steps_to_100
 
     return results
@@ -70,6 +112,8 @@ def main():
     parser = argparse.ArgumentParser(description="Parse feasibility experiment logs")
     parser.add_argument("--log-dir", default="runs/feasibility", help="Directory containing logs")
     parser.add_argument("--output-dir", default="results/plot_data", help="Output directory for CSVs")
+    parser.add_argument("--all-matching", action="store_true",
+                        help="Parse ALL matching logs (adds run_id column)")
     args = parser.parse_args()
 
     log_dir = Path(args.log_dir)
@@ -83,48 +127,77 @@ def main():
     all_results = []
     learning_curves = []
 
+    # Track what we found
+    found_logs = 0
+
     for algo in algo_dirs:
         algo_path = log_dir / algo
         if not algo_path.exists():
             continue
 
         for seed in seeds:
-            log_file = algo_path / f"{seed}.log"
-            if not log_file.exists():
+            logs = find_logs_for_seed(algo_path, seed, args.all_matching)
+            if not logs:
                 continue
 
-            print(f"Parsing {algo} seed={seed}...")
-            results = parse_log_file(log_file)
+            for log_file, run_id in logs:
+                found_logs += 1
+                print(f"Parsing {algo} seed={seed} run={run_id}...")
+                results = parse_log_file(log_file)
 
-            # Store summary
-            all_results.append({
-                "algorithm": algo,
-                "seed": seed,
-                "success_rate_final": results["final_success_rate"],
-                "success_rate_peak": results["peak_success_rate"],
-                "steps_to_100": results["steps_to_100"] if results["steps_to_100"] else "N/A",
-                "mean_score_final": results["final_mean_score"],
-            })
+                if not results["steps"]:
+                    print(f"  Warning: No eval data found in {log_file}")
+                    continue
 
-            # Store learning curve data
-            for i, step in enumerate(results["steps"]):
-                learning_curves.append({
+                # Store summary
+                row = {
                     "algorithm": algo,
                     "seed": seed,
-                    "step": step,
-                    "success_rate": results["success_rates"][i],
-                    "mean_score": results["mean_scores"][i],
-                    "solved_count": results["solved_counts"][i],
-                    "total_episodes": results["total_episodes"][i],
-                })
+                    "success_rate_final": results["final_success_rate"],
+                    "success_rate_peak": results["peak_success_rate"],
+                    "peak_step": results["peak_step"],
+                    "steps_to_100": results["steps_to_100"] if results["steps_to_100"] else "N/A",
+                    "mean_score_final": results["final_mean_score"],
+                }
+                if args.all_matching:
+                    row["run_id"] = run_id
+                all_results.append(row)
+
+                # Store learning curve data
+                for i, step in enumerate(results["steps"]):
+                    curve_row = {
+                        "algorithm": algo,
+                        "seed": seed,
+                        "step": step,
+                        "success_rate": results["success_rates"][i],
+                        "mean_score": results["mean_scores"][i],
+                        "solved_count": results["solved_counts"][i],
+                        "total_episodes": results["total_episodes"][i],
+                    }
+                    if args.all_matching:
+                        curve_row["run_id"] = run_id
+                    learning_curves.append(curve_row)
+
+    print(f"\nFound {found_logs} log files")
+
+    if not all_results:
+        print("No results found!")
+        return
+
+    # Define fieldnames
+    comparison_fields = ["algorithm", "seed", "success_rate_final", "success_rate_peak",
+                         "peak_step", "steps_to_100", "mean_score_final"]
+    curve_fields = ["algorithm", "seed", "step", "success_rate", "mean_score",
+                    "solved_count", "total_episodes"]
+
+    if args.all_matching:
+        comparison_fields.append("run_id")
+        curve_fields.append("run_id")
 
     # Write algorithm comparison CSV
     comparison_path = output_dir / "plot_data_feasibility_algorithm_comparison.csv"
     with open(comparison_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "algorithm", "seed", "success_rate_final", "success_rate_peak",
-            "steps_to_100", "mean_score_final"
-        ])
+        writer = csv.DictWriter(f, fieldnames=comparison_fields)
         writer.writeheader()
         writer.writerows(all_results)
     print(f"Wrote {comparison_path}")
@@ -132,17 +205,21 @@ def main():
     # Write learning curves CSV
     curves_path = output_dir / "plot_data_feasibility_learning_curves.csv"
     with open(curves_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "algorithm", "seed", "step", "success_rate", "mean_score",
-            "solved_count", "total_episodes"
-        ])
+        writer = csv.DictWriter(f, fieldnames=curve_fields)
         writer.writeheader()
         writer.writerows(learning_curves)
     print(f"Wrote {curves_path}")
 
-    # Compute and write summary statistics
+    # Compute and write summary statistics (grouped by algorithm, ignoring run_id)
     summary = defaultdict(lambda: {"success_rates": [], "peak_rates": [], "mean_scores": []})
+
+    # For summary, use only latest run per algo/seed combination
+    seen = set()
     for r in all_results:
+        key = (r["algorithm"], r["seed"])
+        if key in seen:
+            continue
+        seen.add(key)
         algo = r["algorithm"]
         summary[algo]["success_rates"].append(r["success_rate_final"])
         summary[algo]["peak_rates"].append(r["success_rate_peak"])

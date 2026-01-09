@@ -1,5 +1,57 @@
 # Session Handoff (2026-01-08 - Feasibility Checker Implementation)
 
+## 🟢 Current Run Status (2026-01-08 ~23:30)
+
+**Dataset:** `sudoku-4x4-trivial` (1-4 empties, mean 2.46)
+**Checker:** Feasibility-aware (`filled - 2*violations - 5*zeroCand`)
+**Success:** Solution-independent via `sudoku_is_solved()`
+
+### Experiments Running
+
+| GPU | Experiment | Status | Latest |
+|-----|------------|--------|--------|
+| 0 | UPI-TRM seed=42 | Running | step 2900/5000, 32% |
+| 1 | PPO seed=42 | Running (SLOW) | step 700/5000, 16% |
+| 2 | A2C seed=123 | Running | step 800/5000, 20% |
+| 3 | DQN seed=123 | Running | step 1200/5000, 4% |
+
+### Completed Experiments (seed=42)
+
+| Algorithm | Final | Peak | Mean Score |
+|-----------|-------|------|------------|
+| **UPI-TRM** | **42%** | 46% | 14.80 |
+| A2C | 26% | 26% | 13.44 |
+| DQN | 12% | 24% | 10.68 |
+| PPO | - | - | (running) |
+
+### What Remains
+
+1. **UPI-TRM seeds 123, 456** - launch after GPU 0 frees
+2. **PPO seeds 123, 456** - run sequentially after PPO-42 completes
+3. **A2C/DQN seed 456** - launch after current wave completes
+4. **Ablations** - run after main experiments
+
+### Scripts Created
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/launch_4gpu_feasibility.sh` | 4-GPU parallel launcher (verified working) |
+| `scripts/launch_fast_wave.sh` | Fast wave (UPI/A2C/DQN only, no PPO) |
+| `scripts/parse_feasibility_logs.py` | Parse timestamped logs → CSVs |
+| `scripts/plot_feasibility_curves.py` | Generate learning curve plots |
+
+### Reproduce Plotting
+
+```bash
+# Parse logs
+python3 scripts/parse_feasibility_logs.py --log-dir runs/feasibility --output-dir results/plot_data
+
+# Generate plots
+python3 scripts/plot_feasibility_curves.py --input results/plot_data/plot_data_feasibility_learning_curves.csv --output-dir results/plots
+```
+
+---
+
 ## 🔴 Dataset Mismatch Diagnosis (2026-01-08 Evening)
 
 **Root Cause of 0% Success Identified**: The "ultra-easy" dataset was NOT ultra-easy!

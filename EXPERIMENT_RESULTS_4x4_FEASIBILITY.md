@@ -257,53 +257,63 @@ Where N is the total cells (16 for 4×4, 81 for 9×9).
 
 ## Running Experiments
 
-### Quick Start
+### 4-GPU Parallel Launcher (Recommended)
 
 ```bash
-# Run all experiments with the experiment script
-./scripts/run_feasibility_experiments.sh --seeds "42 123 456" --steps 5000
+# Run all waves (recommended for full experiment suite)
+./scripts/launch_4gpu_feasibility.sh all
+
+# Run individual waves
+./scripts/launch_4gpu_feasibility.sh wave1  # seed=42: UPI, PPO, A2C, DQN
+./scripts/launch_4gpu_feasibility.sh wave2  # seed=123: UPI, PPO, A2C, DQN
+./scripts/launch_4gpu_feasibility.sh wave3  # seed=456: UPI, PPO, A2C, DQN
+./scripts/launch_4gpu_feasibility.sh wave4  # Ablations
+
+# Fast wave (UPI/A2C/DQN only, avoiding slow PPO)
+./scripts/launch_fast_wave.sh 123  # Run seed=123 on GPUs 0,2,3
 ```
 
-### Manual Commands
+### Generate Plot Data
 
 ```bash
+# Parse logs and generate CSVs
+python3 scripts/parse_feasibility_logs.py --log-dir runs/feasibility --output-dir results/plot_data
+
+# Generate plots
+python3 scripts/plot_feasibility_curves.py --input results/plot_data/plot_data_feasibility_learning_curves.csv --output-dir results/plots
+```
+
+### Manual Commands (via Buck2)
+
+```bash
+cd /data/repos/fbsource/fbcode
+
 # UPI-TRM main
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-4x4-ultra-easy \
-    --config configs/rl_sudoku_4x4_feasibility.yaml \
+CUDA_VISIBLE_DEVICES=0 buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
+    --dataset-paths buiksat_trm/data/sudoku-4x4-trivial \
+    --config buiksat_trm/configs/rl_sudoku_4x4_feasibility.yaml \
     --train-steps 5000 --seed 42
 
 # PPO baseline
-python upi_trm_train.py \
-    --baseline ppo \
-    --dataset-paths data/sudoku-4x4-ultra-easy \
-    --config configs/baselines/ppo_trm_feasibility.yaml \
-    --train-steps 5000 --seed 42
-
-# DQN baseline
-python upi_trm_train.py \
-    --baseline dqn \
-    --dataset-paths data/sudoku-4x4-ultra-easy \
-    --config configs/baselines/dqn_trm_feasibility.yaml \
+CUDA_VISIBLE_DEVICES=1 buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
+    --baseline ppo --dataset-paths buiksat_trm/data/sudoku-4x4-trivial \
+    --config buiksat_trm/configs/baselines/ppo_trm_feasibility.yaml \
     --train-steps 5000 --seed 42
 
 # A2C baseline
-python upi_trm_train.py \
-    --baseline a2c \
-    --dataset-paths data/sudoku-4x4-ultra-easy \
-    --config configs/baselines/a2c_trm_feasibility.yaml \
+CUDA_VISIBLE_DEVICES=2 buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
+    --baseline a2c --dataset-paths buiksat_trm/data/sudoku-4x4-trivial \
+    --config buiksat_trm/configs/baselines/a2c_trm_feasibility.yaml \
     --train-steps 5000 --seed 42
 
-# Ablation: No conservative mixture
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-4x4-ultra-easy \
-    --config configs/ablations/upi_trm_feasibility_no_conservative.yaml \
-    --train-steps 5000 --seed 42
-
-# Ablation: No contraction
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-4x4-ultra-easy \
-    --config configs/ablations/upi_trm_feasibility_no_contraction.yaml \
+# DQN baseline
+CUDA_VISIBLE_DEVICES=3 buck2 run //buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
+    --baseline dqn --dataset-paths buiksat_trm/data/sudoku-4x4-trivial \
+    --config buiksat_trm/configs/baselines/dqn_trm_feasibility.yaml \
     --train-steps 5000 --seed 42
 ```
 
