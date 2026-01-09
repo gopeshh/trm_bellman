@@ -1,7 +1,7 @@
 #!/bin/bash
 # 4-GPU Parallel Launcher for Feasibility Checker Experiments
 #
-# Runs experiments in waves of 4 using buck2 run.
+# Runs experiments in waves of 4 using buck2 run with separate isolation dirs.
 # Each experiment runs in a separate background process.
 # Logs are saved to runs/feasibility/<algo>/<seed>.log
 #
@@ -26,71 +26,6 @@ echo "# Feasibility Experiment Commands" > "$COMMANDS_FILE"
 echo "Generated: $(date)" >> "$COMMANDS_FILE"
 echo "" >> "$COMMANDS_FILE"
 
-# Function to run a single experiment on a specific GPU
-# Returns the PID
-run_experiment() {
-    local gpu=$1
-    local name=$2
-    local config=$3
-    local seed=$4
-    local extra_args="${5:-}"
-    local log_dir=$6
-
-    local log_file="$log_dir/${seed}.log"
-    local full_config="buiksat_trm/$config"
-
-    echo "# $name seed=$seed on GPU $gpu" >> "$COMMANDS_FILE"
-    echo "CUDA_VISIBLE_DEVICES=$gpu buck2 run //buiksat_trm:upi_trm_train ... --seed $seed $extra_args" >> "$COMMANDS_FILE"
-    echo "" >> "$COMMANDS_FILE"
-
-    echo "[$(date +%H:%M:%S)] Starting $name (seed $seed) on GPU $gpu -> $log_file"
-
-    # Run in a subshell to avoid issues with job control
-    (
-        cd "$FBCODE_DIR"
-        CUDA_VISIBLE_DEVICES=$gpu buck2 run //buiksat_trm:upi_trm_train \
-            -c fbcode.nvcc_arch=a100 \
-            -c fbcode.enable_gpu_sections=true \
-            -- \
-            --dataset-paths "$DATASET" \
-            --config "$full_config" \
-            --train-steps "$STEPS" \
-            --seed "$seed" \
-            $extra_args \
-            > "$log_file" 2>&1
-    ) &
-
-    local pid=$!
-    echo "  -> PID: $pid"
-    echo $pid
-}
-
-# Wait for a list of PIDs
-wait_for_pids() {
-    local wave_name=$1
-    shift
-    local pids=("$@")
-
-    echo "[$(date +%H:%M:%S)] Waiting for $wave_name (${#pids[@]} jobs)..."
-
-    local failed=0
-    for pid in "${pids[@]}"; do
-        if ! wait $pid 2>/dev/null; then
-            echo "[ERROR] Process $pid failed"
-            failed=$((failed + 1))
-        else
-            echo "[OK] Process $pid completed"
-        fi
-    done
-
-    if [ $failed -eq 0 ]; then
-        echo "[$(date +%H:%M:%S)] $wave_name completed successfully!"
-    else
-        echo "[$(date +%H:%M:%S)] $wave_name completed with $failed failures"
-    fi
-    return $failed
-}
-
 # Wave 1: seed=42 (UPI, PPO, A2C, DQN)
 run_wave1() {
     echo ""
@@ -98,22 +33,46 @@ run_wave1() {
     echo "WAVE 1: seed=42 (UPI-TRM, PPO, A2C, DQN)"
     echo "=============================================="
 
-    local pids=()
-    local pid
+    cd "$FBCODE_DIR"
 
-    pid=$(run_experiment 0 "upi_trm" "configs/rl_sudoku_4x4_feasibility.yaml" 42 "" "$LOG_BASE/upi_trm" | tail -1)
-    pids+=($pid)
+    # Launch all 4 in parallel with unique isolation dirs
+    echo "[$(date +%H:%M:%S)] Starting upi_trm (seed 42) on GPU 0"
+    CUDA_VISIBLE_DEVICES=0 buck2 --isolation-dir "gpu0_upi_s42" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --dataset-paths "$DATASET" --config buiksat_trm/configs/rl_sudoku_4x4_feasibility.yaml \
+        --train-steps "$STEPS" --seed 42 \
+        > "$LOG_BASE/upi_trm/42.log" 2>&1 &
+    PID0=$!
 
-    pid=$(run_experiment 1 "ppo" "configs/baselines/ppo_trm_feasibility.yaml" 42 "--baseline ppo" "$LOG_BASE/ppo" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting ppo (seed 42) on GPU 1"
+    CUDA_VISIBLE_DEVICES=1 buck2 --isolation-dir "gpu1_ppo_s42" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --baseline ppo --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/ppo_trm_feasibility.yaml \
+        --train-steps "$STEPS" --seed 42 \
+        > "$LOG_BASE/ppo/42.log" 2>&1 &
+    PID1=$!
 
-    pid=$(run_experiment 2 "a2c" "configs/baselines/a2c_trm_feasibility.yaml" 42 "--baseline a2c" "$LOG_BASE/a2c" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting a2c (seed 42) on GPU 2"
+    CUDA_VISIBLE_DEVICES=2 buck2 --isolation-dir "gpu2_a2c_s42" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --baseline a2c --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/a2c_trm_feasibility.yaml \
+        --train-steps "$STEPS" --seed 42 \
+        > "$LOG_BASE/a2c/42.log" 2>&1 &
+    PID2=$!
 
-    pid=$(run_experiment 3 "dqn" "configs/baselines/dqn_trm_feasibility.yaml" 42 "--baseline dqn" "$LOG_BASE/dqn" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting dqn (seed 42) on GPU 3"
+    CUDA_VISIBLE_DEVICES=3 buck2 --isolation-dir "gpu3_dqn_s42" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --baseline dqn --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/dqn_trm_feasibility.yaml \
+        --train-steps "$STEPS" --seed 42 \
+        > "$LOG_BASE/dqn/42.log" 2>&1 &
+    PID3=$!
 
-    wait_for_pids "Wave 1" "${pids[@]}"
+    echo "[$(date +%H:%M:%S)] All 4 experiments launched: PIDs $PID0 $PID1 $PID2 $PID3"
+    echo "[$(date +%H:%M:%S)] Waiting for Wave 1 to complete..."
+
+    wait $PID0 $PID1 $PID2 $PID3
+    echo "[$(date +%H:%M:%S)] Wave 1 complete!"
 }
 
 # Wave 2: seed=123 (UPI, PPO, A2C, DQN)
@@ -123,22 +82,45 @@ run_wave2() {
     echo "WAVE 2: seed=123 (UPI-TRM, PPO, A2C, DQN)"
     echo "=============================================="
 
-    local pids=()
-    local pid
+    cd "$FBCODE_DIR"
 
-    pid=$(run_experiment 0 "upi_trm" "configs/rl_sudoku_4x4_feasibility.yaml" 123 "" "$LOG_BASE/upi_trm" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting upi_trm (seed 123) on GPU 0"
+    CUDA_VISIBLE_DEVICES=0 buck2 --isolation-dir "gpu0_upi_s123" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --dataset-paths "$DATASET" --config buiksat_trm/configs/rl_sudoku_4x4_feasibility.yaml \
+        --train-steps "$STEPS" --seed 123 \
+        > "$LOG_BASE/upi_trm/123.log" 2>&1 &
+    PID0=$!
 
-    pid=$(run_experiment 1 "ppo" "configs/baselines/ppo_trm_feasibility.yaml" 123 "--baseline ppo" "$LOG_BASE/ppo" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting ppo (seed 123) on GPU 1"
+    CUDA_VISIBLE_DEVICES=1 buck2 --isolation-dir "gpu1_ppo_s123" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --baseline ppo --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/ppo_trm_feasibility.yaml \
+        --train-steps "$STEPS" --seed 123 \
+        > "$LOG_BASE/ppo/123.log" 2>&1 &
+    PID1=$!
 
-    pid=$(run_experiment 2 "a2c" "configs/baselines/a2c_trm_feasibility.yaml" 123 "--baseline a2c" "$LOG_BASE/a2c" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting a2c (seed 123) on GPU 2"
+    CUDA_VISIBLE_DEVICES=2 buck2 --isolation-dir "gpu2_a2c_s123" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --baseline a2c --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/a2c_trm_feasibility.yaml \
+        --train-steps "$STEPS" --seed 123 \
+        > "$LOG_BASE/a2c/123.log" 2>&1 &
+    PID2=$!
 
-    pid=$(run_experiment 3 "dqn" "configs/baselines/dqn_trm_feasibility.yaml" 123 "--baseline dqn" "$LOG_BASE/dqn" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting dqn (seed 123) on GPU 3"
+    CUDA_VISIBLE_DEVICES=3 buck2 --isolation-dir "gpu3_dqn_s123" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --baseline dqn --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/dqn_trm_feasibility.yaml \
+        --train-steps "$STEPS" --seed 123 \
+        > "$LOG_BASE/dqn/123.log" 2>&1 &
+    PID3=$!
 
-    wait_for_pids "Wave 2" "${pids[@]}"
+    echo "[$(date +%H:%M:%S)] All 4 experiments launched: PIDs $PID0 $PID1 $PID2 $PID3"
+    echo "[$(date +%H:%M:%S)] Waiting for Wave 2 to complete..."
+
+    wait $PID0 $PID1 $PID2 $PID3
+    echo "[$(date +%H:%M:%S)] Wave 2 complete!"
 }
 
 # Wave 3: seed=456 (UPI, PPO, A2C, DQN)
@@ -148,62 +130,120 @@ run_wave3() {
     echo "WAVE 3: seed=456 (UPI-TRM, PPO, A2C, DQN)"
     echo "=============================================="
 
-    local pids=()
-    local pid
+    cd "$FBCODE_DIR"
 
-    pid=$(run_experiment 0 "upi_trm" "configs/rl_sudoku_4x4_feasibility.yaml" 456 "" "$LOG_BASE/upi_trm" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting upi_trm (seed 456) on GPU 0"
+    CUDA_VISIBLE_DEVICES=0 buck2 --isolation-dir "gpu0_upi_s456" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --dataset-paths "$DATASET" --config buiksat_trm/configs/rl_sudoku_4x4_feasibility.yaml \
+        --train-steps "$STEPS" --seed 456 \
+        > "$LOG_BASE/upi_trm/456.log" 2>&1 &
+    PID0=$!
 
-    pid=$(run_experiment 1 "ppo" "configs/baselines/ppo_trm_feasibility.yaml" 456 "--baseline ppo" "$LOG_BASE/ppo" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting ppo (seed 456) on GPU 1"
+    CUDA_VISIBLE_DEVICES=1 buck2 --isolation-dir "gpu1_ppo_s456" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --baseline ppo --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/ppo_trm_feasibility.yaml \
+        --train-steps "$STEPS" --seed 456 \
+        > "$LOG_BASE/ppo/456.log" 2>&1 &
+    PID1=$!
 
-    pid=$(run_experiment 2 "a2c" "configs/baselines/a2c_trm_feasibility.yaml" 456 "--baseline a2c" "$LOG_BASE/a2c" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting a2c (seed 456) on GPU 2"
+    CUDA_VISIBLE_DEVICES=2 buck2 --isolation-dir "gpu2_a2c_s456" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --baseline a2c --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/a2c_trm_feasibility.yaml \
+        --train-steps "$STEPS" --seed 456 \
+        > "$LOG_BASE/a2c/456.log" 2>&1 &
+    PID2=$!
 
-    pid=$(run_experiment 3 "dqn" "configs/baselines/dqn_trm_feasibility.yaml" 456 "--baseline dqn" "$LOG_BASE/dqn" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting dqn (seed 456) on GPU 3"
+    CUDA_VISIBLE_DEVICES=3 buck2 --isolation-dir "gpu3_dqn_s456" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --baseline dqn --dataset-paths "$DATASET" --config buiksat_trm/configs/baselines/dqn_trm_feasibility.yaml \
+        --train-steps "$STEPS" --seed 456 \
+        > "$LOG_BASE/dqn/456.log" 2>&1 &
+    PID3=$!
 
-    wait_for_pids "Wave 3" "${pids[@]}"
+    echo "[$(date +%H:%M:%S)] All 4 experiments launched: PIDs $PID0 $PID1 $PID2 $PID3"
+    echo "[$(date +%H:%M:%S)] Waiting for Wave 3 to complete..."
+
+    wait $PID0 $PID1 $PID2 $PID3
+    echo "[$(date +%H:%M:%S)] Wave 3 complete!"
 }
 
 # Wave 4: Ablations (all 3 seeds)
 run_wave4() {
     echo ""
     echo "=============================================="
-    echo "WAVE 4a: Ablations batch 1"
+    echo "WAVE 4a: Ablations batch 1 (no_conservative: 42, 123, 456; no_contraction: 42)"
     echo "=============================================="
 
-    local pids=()
-    local pid
+    cd "$FBCODE_DIR"
 
-    pid=$(run_experiment 0 "ablation_no_conservative" "configs/ablations/upi_trm_feasibility_no_conservative.yaml" 42 "" "$LOG_BASE/ablation_no_conservative" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting no_conservative (seed 42) on GPU 0"
+    CUDA_VISIBLE_DEVICES=0 buck2 --isolation-dir "gpu0_nocons_s42" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_conservative.yaml \
+        --train-steps "$STEPS" --seed 42 \
+        > "$LOG_BASE/ablation_no_conservative/42.log" 2>&1 &
+    PID0=$!
 
-    pid=$(run_experiment 1 "ablation_no_conservative" "configs/ablations/upi_trm_feasibility_no_conservative.yaml" 123 "" "$LOG_BASE/ablation_no_conservative" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting no_conservative (seed 123) on GPU 1"
+    CUDA_VISIBLE_DEVICES=1 buck2 --isolation-dir "gpu1_nocons_s123" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_conservative.yaml \
+        --train-steps "$STEPS" --seed 123 \
+        > "$LOG_BASE/ablation_no_conservative/123.log" 2>&1 &
+    PID1=$!
 
-    pid=$(run_experiment 2 "ablation_no_conservative" "configs/ablations/upi_trm_feasibility_no_conservative.yaml" 456 "" "$LOG_BASE/ablation_no_conservative" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting no_conservative (seed 456) on GPU 2"
+    CUDA_VISIBLE_DEVICES=2 buck2 --isolation-dir "gpu2_nocons_s456" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_conservative.yaml \
+        --train-steps "$STEPS" --seed 456 \
+        > "$LOG_BASE/ablation_no_conservative/456.log" 2>&1 &
+    PID2=$!
 
-    pid=$(run_experiment 3 "ablation_no_contraction" "configs/ablations/upi_trm_feasibility_no_contraction.yaml" 42 "" "$LOG_BASE/ablation_no_contraction" | tail -1)
-    pids+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting no_contraction (seed 42) on GPU 3"
+    CUDA_VISIBLE_DEVICES=3 buck2 --isolation-dir "gpu3_nocontr_s42" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_contraction.yaml \
+        --train-steps "$STEPS" --seed 42 \
+        > "$LOG_BASE/ablation_no_contraction/42.log" 2>&1 &
+    PID3=$!
 
-    wait_for_pids "Wave 4a" "${pids[@]}"
+    echo "[$(date +%H:%M:%S)] All 4 experiments launched: PIDs $PID0 $PID1 $PID2 $PID3"
+    echo "[$(date +%H:%M:%S)] Waiting for Wave 4a to complete..."
+
+    wait $PID0 $PID1 $PID2 $PID3
+    echo "[$(date +%H:%M:%S)] Wave 4a complete!"
 
     echo ""
     echo "=============================================="
-    echo "WAVE 4b: Ablations batch 2"
+    echo "WAVE 4b: Ablations batch 2 (no_contraction: 123, 456)"
     echo "=============================================="
 
-    local pids2=()
+    echo "[$(date +%H:%M:%S)] Starting no_contraction (seed 123) on GPU 0"
+    CUDA_VISIBLE_DEVICES=0 buck2 --isolation-dir "gpu0_nocontr_s123" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_contraction.yaml \
+        --train-steps "$STEPS" --seed 123 \
+        > "$LOG_BASE/ablation_no_contraction/123.log" 2>&1 &
+    PID0=$!
 
-    pid=$(run_experiment 0 "ablation_no_contraction" "configs/ablations/upi_trm_feasibility_no_contraction.yaml" 123 "" "$LOG_BASE/ablation_no_contraction" | tail -1)
-    pids2+=($pid)
+    echo "[$(date +%H:%M:%S)] Starting no_contraction (seed 456) on GPU 1"
+    CUDA_VISIBLE_DEVICES=1 buck2 --isolation-dir "gpu1_nocontr_s456" run //buiksat_trm:upi_trm_train \
+        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+        --dataset-paths "$DATASET" --config buiksat_trm/configs/ablations/upi_trm_feasibility_no_contraction.yaml \
+        --train-steps "$STEPS" --seed 456 \
+        > "$LOG_BASE/ablation_no_contraction/456.log" 2>&1 &
+    PID1=$!
 
-    pid=$(run_experiment 1 "ablation_no_contraction" "configs/ablations/upi_trm_feasibility_no_contraction.yaml" 456 "" "$LOG_BASE/ablation_no_contraction" | tail -1)
-    pids2+=($pid)
+    echo "[$(date +%H:%M:%S)] 2 experiments launched: PIDs $PID0 $PID1"
+    echo "[$(date +%H:%M:%S)] Waiting for Wave 4b to complete..."
 
-    wait_for_pids "Wave 4b" "${pids2[@]}"
+    wait $PID0 $PID1
+    echo "[$(date +%H:%M:%S)] Wave 4b complete!"
 }
 
 # Main execution
@@ -240,7 +280,6 @@ case "${1:-all}" in
         echo "ALL EXPERIMENTS COMPLETED!"
         echo "Finished: $(date)"
         echo "Logs saved to: $LOG_BASE/"
-        echo "Commands recorded in: $COMMANDS_FILE"
         echo "=============================================="
         ;;
     *)
