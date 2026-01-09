@@ -134,6 +134,67 @@ Before running experiments, the feasibility checker implementation was verified:
 
 ---
 
+## 🔵 Ablation: Persistent-z vs Episodic-z (2026-01-09)
+
+**Config:** `configs/ablations/upi_trm_feasibility_persistent_z.yaml`
+**Key Change:** `episodic_latent: false` (z initialized once per episode, updated across steps)
+
+### Persistent-z Results
+
+| Seed | Final Success | Peak Success | Peak Step | Mean Score | Status |
+|------|---------------|--------------|-----------|------------|--------|
+| 42 | 40% | 48% | 4400 | 14.76 | ✅ Complete |
+| 123 | 86% | 92% | 4300 | 15.66 | ✅ Complete |
+| 456 | 32% | 32%+ | - | 11.82 | 🔄 Running |
+
+### Comparison: Persistent-z vs Episodic-z
+
+| Seed | Episodic-z Final | Episodic-z Peak | Persistent-z Final | Persistent-z Peak |
+|------|------------------|-----------------|--------------------|--------------------|
+| 42 | 42% | 46% | 40% | 48% |
+| 123 | 84% | 88% | 86% | 92% |
+| 456 | 32% | 40% | (running) | (running) |
+
+### Observations
+
+1. **Comparable performance**: Persistent-z and episodic-z achieve similar results on average
+2. **Seed=123 shows high variance**: Both modes achieve 84-92% on seed=123, indicating favorable initialization
+3. **No clear winner**: Neither latent mode consistently outperforms the other
+4. **Persistent-z slightly higher peaks**: Peak success (48%, 92%) slightly higher than episodic-z (46%, 88%)
+
+---
+
+## 🟠 Ablation: Theory Features (2026-01-09)
+
+### Ablation Results (Seed=42)
+
+| Ablation | Final Success | Peak Success | Peak Step | Mean Score |
+|----------|---------------|--------------|-----------|------------|
+| **No Contraction** | **92%** | **94%** | 2900 | 15.68 |
+| No Conservative (α=1.0) | 28% | 36% | 500 | 11.02 |
+| UPI-TRM (baseline) | 42% | 46% | 4800 | 14.80 |
+
+### Analysis
+
+1. **No Contraction achieves 94% peak (92% final)** - the best result across all experiments!
+   - Config: `ablations/upi_trm_feasibility_no_contraction.yaml`
+   - Removing spectral normalization allows faster learning on this simple task
+   - **Key insight**: For 4x4 trivial puzzles, contraction may be overly restrictive
+
+2. **No Conservative (α=1.0) underperforms at 28%**
+   - Config: `ablations/upi_trm_feasibility_no_conservative.yaml`
+   - Full policy updates (no mixture) lead to worse stability
+   - Validates the importance of conservative policy improvement
+
+### Implications for 9x9 Sudoku
+
+The no_contraction result (94%) is unexpected and requires investigation:
+- **Hypothesis 1**: 4x4 trivial puzzles are too easy to benefit from contraction guarantees
+- **Hypothesis 2**: Spectral normalization hyperparameters need tuning
+- **Next step**: Test no_contraction on 9x9 extreme puzzles to verify if benefit persists
+
+---
+
 ## Experimental Setup
 
 ### Task: 4×4 Sudoku with Feasibility-Aware Checker
