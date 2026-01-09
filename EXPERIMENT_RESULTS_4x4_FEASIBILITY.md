@@ -502,4 +502,95 @@ The feasibility checker should provide:
 
 ---
 
-*Report created: January 8, 2026 - Ready for feasibility checker experiments*
+## 📈 PROGRESS-Enabled Runs (2026-01-09)
+
+**Purpose:** Populate the filled/violations/zero_cand learning curves which were previously missing in older logs.
+
+### Background
+
+Early experiment logs (pre-2026-01-09) did not include PROGRESS logging lines, which meant the filled/violations/zero_cand columns were empty in the learning curves CSV. New runs were conducted with PROGRESS logging enabled.
+
+### PROGRESS-Enabled Runs Completed
+
+| Algorithm | Seed | Steps | Date | Log File |
+|-----------|------|-------|------|----------|
+| UPI-TRM episodic | 42 | 2000 | 2026-01-09 | `upi_trm/42_20260109_140406_progress.log` |
+| Persistent-z | 42 | 2000 | 2026-01-09 | `ablation_persistent_z/42_20260109_140406_progress.log` |
+| A2C | 42 | 2000 | 2026-01-09 | `a2c/42_20260109_140406_progress.log` |
+| DQN | 42 | 500 | 2026-01-09 | `dqn/42_dqn_progress_test.log` |
+
+### Why PROGRESS Metrics Matter
+
+On trivial puzzles (1-4 empty cells), success is a coarse metric because:
+- Random baseline achieves 52% success
+- Learned algorithms at ~52% barely beat random
+- Binary success doesn't show learning granularity
+
+**Progress metrics provide finer-grained comparison:**
+- `filled_mean`: Average cells filled at episode end (target: 16)
+- `violations_mean`: Average constraint violations (target: 0)
+- `zero_cand_mean`: Average dead-end cells (target: 0)
+- `mean_score`: Feasibility score = filled - 2×violations - 5×zeroCand
+
+### Generated Plots with PROGRESS Data
+
+| Plot | Description |
+|------|-------------|
+| `feasibility_filled_vs_steps.png` | Mean filled cells vs training steps |
+| `feasibility_zero_cand_vs_steps.png` | Mean zero-candidate cells vs steps |
+| `feasibility_success_vs_steps.png` | Success rate vs steps (with random baseline) |
+| `feasibility_score_vs_steps.png` | Mean score vs steps |
+
+---
+
+## 🔸 Medium Dataset: Harder 4×4 Evaluation (2026-01-09)
+
+**Purpose:** Make success a more discriminative metric by using a harder evaluation set.
+
+### Problem with Trivial Dataset
+
+On trivial (1-4 empties), random baseline achieves 52% success, making success rate a coarse metric for comparing algorithms.
+
+### Medium Dataset Created
+
+**Path:** `data/sudoku-4x4-medium`
+**Empty cells:** 6-8 per puzzle (harder than trivial's 1-4)
+
+### Random Baseline Comparison
+
+| Dataset | Random Success | Random Mean Score | Random Violations |
+|---------|----------------|-------------------|-------------------|
+| **Trivial** (1-4 empties) | **52%** | 13.72 | 1.14 |
+| **Medium** (6-8 empties) | **0%** | -4.12 | 10.06 |
+
+### Key Insight
+
+On the medium dataset:
+- Random baseline achieves **0% success** (vs 52% on trivial)
+- Random mean score is **-4.12** (negative due to violations)
+- Success becomes a **discriminative metric**
+
+### Use Cases
+
+1. **Trivial dataset**: Use for development and fast iteration (1-4 empties, 52% random)
+2. **Medium dataset**: Use for evaluation and final results (6-8 empties, 0% random)
+
+### Evaluation Commands
+
+```bash
+# Random baseline on medium dataset
+buck2 run //buiksat_trm:eval_random_baseline -- \
+    --dataset-path buiksat_trm/data/sudoku-4x4-medium \
+    --seeds 42 123 456
+
+# Train on trivial, evaluate on medium
+buck2 run //buiksat_trm:upi_trm_train -- \
+    --dataset-paths buiksat_trm/data/sudoku-4x4-trivial \
+    --config buiksat_trm/configs/rl_sudoku_4x4_feasibility.yaml \
+    --eval-dataset buiksat_trm/data/sudoku-4x4-medium  # Future feature
+```
+
+---
+
+*Report updated: January 9, 2026 - Added PROGRESS-enabled runs and medium dataset*
+
