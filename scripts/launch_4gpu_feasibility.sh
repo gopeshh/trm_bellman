@@ -13,7 +13,7 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 FBCODE_DIR="$HOME/fbsource/fbcode"
 
 STEPS=5000
-DATASET="buiksat_trm/data/sudoku-4x4-ultra-easy"
+DATASET="buiksat_trm/data/sudoku-4x4-trivial"
 LOG_BASE="$REPO_DIR/runs/feasibility"
 
 # Create log directories
