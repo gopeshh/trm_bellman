@@ -132,6 +132,16 @@ python_binary(
 )
 
 python_binary(
+    name = "build_4x4_trivial",
+    srcs = ["dataset/build_4x4_trivial.py"],
+    base_module = "",
+    main_module = "dataset.build_4x4_trivial",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_binary(
     name = "build_9x9_sudoku",
     srcs = [
         "dataset/build_easy_sudoku.py",
