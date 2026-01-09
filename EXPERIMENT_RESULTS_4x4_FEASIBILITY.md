@@ -145,7 +145,8 @@ Before running experiments, the feasibility checker implementation was verified:
 |------|---------------|--------------|-----------|------------|--------|
 | 42 | 40% | 48% | 4400 | 14.76 | ✅ Complete |
 | 123 | 86% | 92% | 4300 | 15.66 | ✅ Complete |
-| 456 | 32% | 32%+ | - | 11.82 | 🔄 Running |
+| 456 | 32% | 32% | - | 12.06 | ✅ Complete |
+| **Mean** | **52.7%** | **57.3%** | - | **14.16** | - |
 
 ### Comparison: Persistent-z vs Episodic-z
 
@@ -153,7 +154,8 @@ Before running experiments, the feasibility checker implementation was verified:
 |------|------------------|-----------------|--------------------|--------------------|
 | 42 | 42% | 46% | 40% | 48% |
 | 123 | 84% | 88% | 86% | 92% |
-| 456 | 32% | 40% | (running) | (running) |
+| 456 | 32% | 40% | 32% | 32% |
+| **Mean** | **52.7%** | **58.0%** | **52.7%** | **57.3%** |
 
 ### Observations
 

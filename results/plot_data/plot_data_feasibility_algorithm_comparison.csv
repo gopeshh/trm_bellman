@@ -14,3 +14,4 @@ ablation_no_conservative,42,0.28,0.36,500,N/A,11.02
 ablation_no_contraction,42,0.92,0.94,2900,N/A,15.68
 ablation_persistent_z,42,0.40,0.48,4400,N/A,14.76
 ablation_persistent_z,123,0.86,0.92,4300,N/A,15.66
+ablation_persistent_z,456,0.32,0.32,0,N/A,12.06
