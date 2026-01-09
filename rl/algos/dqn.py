@@ -588,6 +588,9 @@ class DQNTrainer:
         """
         Evaluate the policy using greedy rollouts.
 
+        Uses the shared evaluator to ensure consistent metrics (including
+        filled/violations/zero_cand for PROGRESS logging) across all trainers.
+
         Args:
             env_cfg: Environment configuration
             dataset: Dataset providing puzzle instances
@@ -595,55 +598,25 @@ class DQNTrainer:
             num_episodes: Number of evaluation episodes
 
         Returns:
-            Dict with mean_score, success_rate, etc.
+            Dict with mean_score, success_rate, filled/violations/zero_cand, etc.
         """
-        self.q_network.eval()
+        from rl.evaluator import evaluate_plan_policy_with_scores
 
-        # Create evaluation environment
-        eval_env = PlanEditEnv(
+        mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
+            model=self.model,
             dataset=dataset,
             checker=checker,
-            config=env_cfg,
+            env_cfg=env_cfg,
+            num_episodes=num_episodes,
+            inner_unroll_n=2,  # DQN default inner unroll
+            episodic_latent=True,  # Baselines use episodic latent
+            greedy=True,  # Always greedy for deterministic evaluation
         )
-        # Set stop action ID from main env
-        eval_env.set_stop_action_id(self.env.stop_action_id)
 
-        solved_count = 0
-        total_scores = []
-
-        for _ in range(num_episodes):
-            x, y = eval_env.reset()
-            done = False
-
-            while not done:
-                action_mask = eval_env.get_action_mask()
-                action = self.select_action(x, y, action_mask, greedy=True)
-                (x, y), reward, done, info = eval_env.step(action)
-
-            final_score = checker(x, y)
-            total_scores.append(final_score)
-
-            # Use solution-independent success criterion for Sudoku
-            # Check if grid is completely filled with no violations
-            if isinstance(y, torch.Tensor) and y.numel() in (16, 81):
-                if sudoku_is_solved(y):
-                    solved_count += 1
-            else:
-                # Fallback for non-Sudoku tasks: use score threshold
-                if final_score >= 10.0 - 1e-6:
-                    solved_count += 1
-
-        mean_score = sum(total_scores) / len(total_scores) if total_scores else 0.0
-        success_rate = solved_count / num_episodes if num_episodes > 0 else 0.0
-
-        self.q_network.train()
-
-        return {
+        result = {
             "mean_score": mean_score,
             "success_rate": success_rate,
             "eval_policy_mode": "greedy",
-            "solved_count": solved_count,
-            "total_episodes": num_episodes,
-            "score_min": min(total_scores) if total_scores else 0.0,
-            "score_max": max(total_scores) if total_scores else 0.0,
         }
+        result.update(detailed_stats)
+        return result
