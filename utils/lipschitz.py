@@ -46,19 +46,189 @@ def apply_spectral_norm_to_value_head(value_head: nn.Module) -> None:
             nn_utils.spectral_norm(module)
 
 
-def enforce_global_contraction(inner_model: nn.Module, target_Lz: float) -> None:
+# =============================================================================
+# NEW: Operator-norm clamping (alternative to spectral_norm)
+# =============================================================================
+#
+# These functions provide a more robust alternative to PyTorch's spectral_norm,
+# which can be numerically unstable in certain architectures (see diagnose_contraction_components.py).
+#
+# Key differences:
+# - spectral_norm: Reparameterizes weight as W = sigma * W_normalized, updated via hooks
+# - opnorm_clamp: Directly rescales weight.data in-place, no hooks or reparameterization
+#
+# Usage:
+#   apply_opnorm_clamp_to_trm(inner, per_layer_max=1.0)  # Clamp each layer to ||W|| <= 1
+#   enforce_global_contraction(inner, target_Lz)         # Scale outputs to achieve target_Lz
+# =============================================================================
+
+
+def _power_iteration(weight: torch.Tensor, num_iters: int = 10) -> float:
+    """
+    Estimate spectral norm of weight matrix via power iteration.
+
+    Args:
+        weight: 2D weight tensor [out_features, in_features]
+        num_iters: Number of power iteration steps
+
+    Returns:
+        Estimated spectral norm (largest singular value)
+    """
+    # Ensure we work in float32 for numerical stability
+    W = weight.detach().float()
+    if W.dim() != 2:
+        # Reshape to 2D for non-standard weight shapes
+        W = W.view(W.size(0), -1)
+
+    out_features, in_features = W.shape
+
+    # Initialize random vector
+    v = torch.randn(in_features, device=W.device, dtype=W.dtype)
+    v = v / v.norm().clamp(min=1e-12)
+
+    for _ in range(num_iters):
+        # u = W @ v / ||W @ v||
+        u = W @ v
+        u_norm = u.norm().clamp(min=1e-12)
+        u = u / u_norm
+
+        # v = W^T @ u / ||W^T @ u||
+        v = W.t() @ u
+        v_norm = v.norm().clamp(min=1e-12)
+        v = v / v_norm
+
+    # σ = u^T @ W @ v
+    sigma = (u @ W @ v).item()
+    return max(0.0, sigma)  # Ensure non-negative
+
+
+def clamp_linear_operator_norm(
+    module: nn.Module,
+    max_norm: float,
+    num_power_iters: int = 10,
+) -> float:
+    """
+    Clamp the operator norm (spectral norm) of a linear layer's weight matrix.
+
+    If ||W|| > max_norm, rescales W in-place: W <- W * (max_norm / ||W||)
+    This is a one-shot rescaling, not a reparameterization like spectral_norm.
+
+    Args:
+        module: Linear layer (nn.Linear or CastedLinear)
+        max_norm: Maximum allowed operator norm
+        num_power_iters: Number of power iterations for spectral norm estimation
+
+    Returns:
+        The estimated spectral norm AFTER clamping
+    """
+    if not hasattr(module, 'weight') or module.weight is None:
+        return 0.0
+
+    weight = module.weight
+    sigma = _power_iteration(weight, num_power_iters)
+
+    if sigma > max_norm and sigma > 1e-8:
+        scale = max_norm / sigma
+        with torch.no_grad():
+            weight.data.mul_(scale)
+        # Recompute sigma after scaling
+        sigma = _power_iteration(weight, num_power_iters)
+
+    return sigma
+
+
+def apply_opnorm_clamp_to_trm(
+    inner_model: nn.Module,
+    per_layer_max: float = 1.0,
+    num_power_iters: int = 10,
+    restrict_to_reasoning_layers: bool = True,
+) -> Dict[str, float]:
+    """
+    Apply operator-norm clamping to linear layers in the TRM inner module.
+
+    This is a safer alternative to apply_spectral_norm_to_trm() that avoids
+    the numerical instability issues observed with PyTorch's spectral_norm.
+
+    Args:
+        inner_model: TRM inner module (TinyRecursiveReasoningModel_ACTV1_Inner)
+        per_layer_max: Maximum operator norm per layer (default 1.0)
+        num_power_iters: Number of power iterations for spectral norm estimation
+        restrict_to_reasoning_layers: If True, only clamp layers in the z->z path
+            (L_level), not embedding or output head layers
+
+    Returns:
+        Dict mapping layer name to its spectral norm after clamping
+    """
+    sigma_dict = {}
+
+    for name, module in inner_model.named_modules():
+        if not isinstance(module, _linear_module_types()):
+            continue
+
+        # Optionally restrict to reasoning (z->z) layers only
+        if restrict_to_reasoning_layers:
+            # Only clamp layers in L_level (the reasoning stack)
+            # Skip: embed_tokens, lm_head, q_head, puzzle_emb
+            if not name.startswith("L_level"):
+                continue
+
+        sigma = clamp_linear_operator_norm(module, per_layer_max, num_power_iters)
+        sigma_dict[name] = sigma
+
+    return sigma_dict
+
+
+def apply_opnorm_clamp_periodically(
+    inner_model: nn.Module,
+    per_layer_max: float = 1.0,
+    num_power_iters: int = 10,
+    restrict_to_reasoning_layers: bool = True,
+) -> None:
+    """
+    Convenience function to re-apply operator-norm clamping during training.
+
+    Call this periodically (e.g., every N training steps) to enforce the
+    per-layer norm constraint. Unlike spectral_norm which maintains the
+    constraint via hooks, opnorm_clamp needs periodic re-application.
+
+    This is a no-op wrapper around apply_opnorm_clamp_to_trm for API clarity.
+    """
+    apply_opnorm_clamp_to_trm(
+        inner_model, per_layer_max, num_power_iters, restrict_to_reasoning_layers
+    )
+
+
+def enforce_global_contraction(
+    inner_model: nn.Module,
+    target_Lz: float,
+    restrict_to_reasoning_layers: bool = False,
+) -> None:
     """
     Compound per-layer output scales so the overall inner latent map contraction
     is coarsely bounded by target_Lz.
 
-    Spectral normalization keeps each layer near 1-Lipschitz; the multiplicative
-    output scales produced here push the product of norms below target_Lz.
+    Spectral normalization (or opnorm clamping) keeps each layer near 1-Lipschitz;
+    the multiplicative output scales produced here push the product of norms
+    below target_Lz.
+
+    Args:
+        inner_model: TRM inner module
+        target_Lz: Target Lipschitz constant (< 1 for contraction)
+        restrict_to_reasoning_layers: If True, only scale z->z path layers (L_level)
     """
 
     if target_Lz <= 0.0:
         return
 
-    linear_modules = [m for m in inner_model.modules() if isinstance(m, _linear_module_types())]
+    # Collect linear modules, optionally restricting to reasoning layers
+    if restrict_to_reasoning_layers:
+        linear_modules = []
+        for name, m in inner_model.named_modules():
+            if isinstance(m, _linear_module_types()) and name.startswith("L_level"):
+                linear_modules.append(m)
+    else:
+        linear_modules = [m for m in inner_model.modules() if isinstance(m, _linear_module_types())]
+
     if not linear_modules:
         return
 
