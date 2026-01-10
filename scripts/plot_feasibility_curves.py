@@ -28,11 +28,11 @@ ALGO_CONFIG = {
     "a2c": {"name": "A2C", "color": "#2ca02c", "marker": "^"},
     "dqn": {"name": "DQN", "color": "#d62728", "marker": "D"},
     "ablation_no_conservative": {"name": "No Conservative", "color": "#9467bd", "marker": "v"},
-    "ablation_no_contraction": {"name": "No Contraction", "color": "#8c564b", "marker": "<"},
+    "ablation_no_contraction": {"name": "Reset-z + No Contraction", "color": "#8c564b", "marker": "<"},
     "ablation_persistent_z": {"name": "Persistent-z", "color": "#17becf", "marker": ">"},
     "ablation_persistent_z_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
     # Alternate naming (6-8 empties suite uses these names without "ablation_" prefix)
-    "no_contraction": {"name": "No Contraction", "color": "#8c564b", "marker": "<"},
+    "no_contraction": {"name": "Reset-z + No Contraction", "color": "#8c564b", "marker": "<"},
     "persistent_z_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
 }
 
@@ -120,7 +120,7 @@ def compute_mean_curve(seed_data: dict, metric_key: str = "success_rates") -> tu
     return list(steps), list(mean_values)
 
 
-def plot_success_vs_steps(data: dict, output_dir: Path):
+def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feasibility Checker, trivial dataset"):
     """Plot success rate vs training steps."""
     if not MATPLOTLIB_AVAILABLE:
         print("Cannot plot: matplotlib not available")
@@ -158,7 +158,7 @@ def plot_success_vs_steps(data: dict, output_dir: Path):
 
     ax.set_xlabel("Training Steps", fontsize=12)
     ax.set_ylabel("Success Rate", fontsize=12)
-    ax.set_title("4×4 Sudoku: Success Rate vs Training Steps\n(Feasibility Checker, trivial dataset)", fontsize=14)
+    ax.set_title(f"4×4 Sudoku: Success Rate vs Training Steps\n({title_suffix})", fontsize=14)
     ax.set_ylim(0, 1.0)
     ax.set_xlim(0, None)
     ax.grid(True, alpha=0.3)
@@ -178,7 +178,7 @@ def plot_success_vs_steps(data: dict, output_dir: Path):
     plt.close(fig)
 
 
-def plot_score_vs_steps(data: dict, output_dir: Path):
+def plot_score_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feasibility Checker, trivial dataset"):
     """Plot mean score vs training steps."""
     if not MATPLOTLIB_AVAILABLE:
         print("Cannot plot: matplotlib not available")
@@ -216,7 +216,7 @@ def plot_score_vs_steps(data: dict, output_dir: Path):
 
     ax.set_xlabel("Training Steps", fontsize=12)
     ax.set_ylabel("Mean Score", fontsize=12)
-    ax.set_title("4×4 Sudoku: Mean Score vs Training Steps\n(Feasibility Checker, trivial dataset)", fontsize=14)
+    ax.set_title(f"4×4 Sudoku: Mean Score vs Training Steps\n({title_suffix})", fontsize=14)
     ax.set_ylim(0, 16)
     ax.set_xlim(0, None)
     ax.grid(True, alpha=0.3)
@@ -235,7 +235,7 @@ def plot_score_vs_steps(data: dict, output_dir: Path):
     plt.close(fig)
 
 
-def plot_filled_vs_steps(data: dict, output_dir: Path):
+def plot_filled_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feasibility Checker, trivial dataset"):
     """Plot filled cells vs training steps."""
     if not MATPLOTLIB_AVAILABLE:
         print("Cannot plot: matplotlib not available")
@@ -275,7 +275,7 @@ def plot_filled_vs_steps(data: dict, output_dir: Path):
 
     ax.set_xlabel("Training Steps", fontsize=12)
     ax.set_ylabel("Filled Cells (mean)", fontsize=12)
-    ax.set_title("4×4 Sudoku: Filled Cells vs Training Steps\n(Completion proxy)", fontsize=14)
+    ax.set_title(f"4×4 Sudoku: Filled Cells vs Training Steps\n({title_suffix})", fontsize=14)
     ax.set_ylim(0, 16.5)
     ax.set_xlim(0, None)
     ax.grid(True, alpha=0.3)
@@ -294,7 +294,7 @@ def plot_filled_vs_steps(data: dict, output_dir: Path):
     plt.close(fig)
 
 
-def plot_zero_cand_vs_steps(data: dict, output_dir: Path):
+def plot_zero_cand_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feasibility Checker, trivial dataset"):
     """Plot zero-candidate cells vs training steps (dead-end proxy)."""
     if not MATPLOTLIB_AVAILABLE:
         print("Cannot plot: matplotlib not available")
@@ -334,7 +334,7 @@ def plot_zero_cand_vs_steps(data: dict, output_dir: Path):
 
     ax.set_xlabel("Training Steps", fontsize=12)
     ax.set_ylabel("Zero-Candidate Cells (mean)", fontsize=12)
-    ax.set_title("4×4 Sudoku: Dead-End Cells vs Training Steps\n(Lower is better)", fontsize=14)
+    ax.set_title(f"4×4 Sudoku: Dead-End Cells vs Training Steps\n({title_suffix})", fontsize=14)
     ax.set_ylim(0, None)
     ax.set_xlim(0, None)
     ax.grid(True, alpha=0.3)
@@ -353,7 +353,7 @@ def plot_zero_cand_vs_steps(data: dict, output_dir: Path):
     plt.close(fig)
 
 
-def plot_ablations(data: dict, output_dir: Path):
+def plot_ablations(data: dict, output_dir: Path, title_suffix: str = "Feasibility Checker, trivial dataset"):
     """Plot ablation comparison vs UPI-TRM."""
     if not MATPLOTLIB_AVAILABLE:
         print("Cannot plot: matplotlib not available")
@@ -390,7 +390,7 @@ def plot_ablations(data: dict, output_dir: Path):
 
     ax.set_xlabel("Training Steps", fontsize=12)
     ax.set_ylabel("Success Rate", fontsize=12)
-    ax.set_title("4×4 Sudoku: Ablation Study\n(Feasibility Checker, trivial dataset)", fontsize=14)
+    ax.set_title(f"4×4 Sudoku: Ablation Study\n({title_suffix})", fontsize=14)
     ax.set_ylim(0, 1.0)
     ax.set_xlim(0, None)
     ax.grid(True, alpha=0.3)
@@ -416,10 +416,13 @@ def main():
     parser.add_argument("--output-dir", default="results/plots", help="Output directory for plots")
     parser.add_argument("--random-baseline", default="results/plot_data/random_baseline_feasibility.csv",
                         help="Random baseline CSV file")
+    parser.add_argument("--title-suffix", default="Feasibility Checker, trivial dataset",
+                        help="Suffix for plot titles (e.g., 'Feasibility Checker, 6-8 empties')")
     args = parser.parse_args()
 
     input_path = Path(args.input)
     output_dir = Path(args.output_dir)
+    title_suffix = args.title_suffix
 
     if not input_path.exists():
         print(f"Error: Input file not found: {input_path}")
@@ -451,11 +454,11 @@ def main():
         print(f"  {algo}: seeds {list(seed_data.keys())}")
 
     print("\nGenerating plots...")
-    plot_success_vs_steps(data, output_dir)
-    plot_score_vs_steps(data, output_dir)
-    plot_filled_vs_steps(data, output_dir)
-    plot_zero_cand_vs_steps(data, output_dir)
-    plot_ablations(data, output_dir)
+    plot_success_vs_steps(data, output_dir, title_suffix)
+    plot_score_vs_steps(data, output_dir, title_suffix)
+    plot_filled_vs_steps(data, output_dir, title_suffix)
+    plot_zero_cand_vs_steps(data, output_dir, title_suffix)
+    plot_ablations(data, output_dir, title_suffix)
 
     print("\nDone!")
 
