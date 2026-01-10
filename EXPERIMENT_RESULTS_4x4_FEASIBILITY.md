@@ -662,3 +662,49 @@ buck2 run //buiksat_trm:plot_feasibility_curves -- \
 
 *Report updated: January 9, 2026 - Final consolidated results with all 8 algorithms*
 
+---
+
+## Harder Dataset Experiments (6-8 Empty Cells)
+
+**Date**: January 9, 2026
+
+### Dataset: sudoku-4x4-easy_6to8empties
+
+Created a harder dataset with 6-8 empty cells (vs 1-4 empties in trivial set).
+- Path: `buiksat_trm/data/sudoku-4x4-easy_6to8empties`
+- Random baseline: **0% success**, mean score **-3.26** (confirms difficulty)
+
+### Seed=42 Results (Completed)
+
+| Algorithm | Success Rate | Mean Score | Notes |
+|-----------|--------------|------------|-------|
+| UPI_TRM   | 0.0%         | 10.04      | Zero violations, ~1 cell above initial |
+| A2C       | 0.0%         | 5.82       | Some violations (0.84 avg) |
+| DQN       | N/A          | N/A        | No eval metrics (baseline trainer) |
+| Random    | 0.0%         | -3.26      | Baseline comparison |
+
+**Key Observation**: On harder puzzles (6-8 empties), no algorithm achieves success yet. UPI_TRM maintains validity (zero violations) but makes minimal progress. A2C introduces violations.
+
+### Running Experiments
+
+Seeds 123 and 456 launched for all three algorithms. Check status:
+```bash
+grep -E "eval_success_rate=" runs/feasibility_6to8empties/<algo>/*.log | tail -n 1
+```
+
+### Plots
+
+Generated plots for seed=42 data:
+- `results/plots_6to8empties/feasibility_success_vs_steps.{png,pdf}`
+- `results/plots_6to8empties/feasibility_score_vs_steps.{png,pdf}`
+- `results/plots_6to8empties/feasibility_filled_vs_steps.{png,pdf}`
+
+### CSV Data
+
+- `results/plot_data_6to8empties/plot_data_feasibility_learning_curves.csv`
+- `results/plot_data_6to8empties/plot_data_feasibility_summary.csv`
+
+---
+
+*Section added: January 9, 2026 - Harder dataset (6-8 empties) initial results*
+
