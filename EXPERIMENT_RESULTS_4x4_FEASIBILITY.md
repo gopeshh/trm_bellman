@@ -774,5 +774,70 @@ Generated learning curves with shaded uncertainty bands:
 
 ---
 
+## Baseline Comparison: A2C, DQN vs Ablations (20k Steps, 6-8 Empties)
+
+**Date**: January 10, 2026
+
+### Purpose
+
+Compare standard RL baselines (A2C, DQN) against UPI-TRM ablations at the same training horizon (20k steps) on the harder 6-8 empties dataset.
+
+### Baseline Results (20k Steps, Seeds 42 & 123)
+
+| Algorithm | Seed | Final Success | Peak Success | Mean Score |
+|-----------|------|---------------|--------------|------------|
+| A2C | 42 | 0.0% | 0.0% | 9.74 |
+| A2C | 123 | 0.0% | 0.0% | 9.34 |
+| DQN | 42 | 0.0% | 0.0% | 4.82 |
+| DQN | 123 | 0.0% | 0.0% | 4.32 |
+
+### Summary Statistics (Baselines)
+
+| Algorithm | Final Success (Mean ± Std) | Peak Success | Mean Score (Mean ± Std) |
+|-----------|---------------------------|--------------|------------------------|
+| A2C | 0.0% ± 0.0% | 0.0% | 9.54 ± 0.28 |
+| DQN | 0.0% ± 0.0% | 0.0% | 4.57 ± 0.35 |
+| Random | 0.0% | 0.0% | -3.26 |
+
+### Complete Comparison Table (All Algorithms, 20k Steps, 6-8 Empties)
+
+| Algorithm | Final Success | Peak Success | Mean Score | vs Random |
+|-----------|---------------|--------------|------------|-----------|
+| **persistent_z_no_contraction** | **56.0% ± 5.7%** | **65.0%** | **14.86** | **+56%** |
+| **no_contraction** | **48.0% ± 8.5%** | **60.0%** | **14.89** | **+48%** |
+| A2C | 0.0% | 0.0% | 9.54 | +0% (score only) |
+| DQN | 0.0% | 0.0% | 4.57 | +0% (score only) |
+| Random Baseline | 0.0% | 0.0% | -3.26 | 0% |
+
+### Key Findings
+
+1. **UPI-TRM ablations dramatically outperform baselines**: 48-65% success vs 0% for A2C/DQN
+2. **A2C learns better scores than DQN**: 9.54 vs 4.57 mean score (but neither solves puzzles)
+3. **A2C maintains initial score (~9.0)** while DQN degrades significantly
+4. **DQN shows poor learning**: Mean score of 4.57 is worse than initial 9.0
+5. **The gap is definitive**: Even after 20k steps, baselines achieve 0% success while ablations reach 48-65%
+
+### What This Demonstrates
+
+1. **UPI-TRM architecture provides significant advantages** over standard RL algorithms
+2. **Removing contraction is the key factor** - both high-performing variants disable spectral normalization
+3. **A2C and DQN fail to solve multi-step reasoning tasks** even with sufficient training time
+4. **The feasibility checker rewards are insufficient for baselines** - they maintain/avoid violations but can't complete puzzles
+
+### Learning Curves
+
+See `results/plots_6to8empties_long_baselines/` for baseline-only learning curves and `results/plots_6to8empties_long/` for ablation learning curves.
+
+### CSV Data
+
+- Baselines: `results/plot_data_6to8empties_long_baselines/`
+- Ablations: `results/plot_data_6to8empties_long/`
+
+---
+
+*Section added: January 10, 2026 - Baseline comparison (A2C, DQN) on 6-8 empties dataset*
+
+---
+
 *Section added: January 10, 2026 - Long-run experiments (20k steps) on 6-8 empties dataset*
 
