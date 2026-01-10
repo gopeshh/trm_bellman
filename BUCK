@@ -163,6 +163,19 @@ python_binary(
 )
 
 python_binary(
+    name = "diagnose_contraction_lipschitz",
+    srcs = ["scripts/diagnose_contraction_lipschitz.py"],
+    base_module = "",
+    main_module = "scripts.diagnose_contraction_lipschitz",
+    deps = [
+        ":models",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
     name = "build_9x9_sudoku",
     srcs = [
         "dataset/build_easy_sudoku.py",
