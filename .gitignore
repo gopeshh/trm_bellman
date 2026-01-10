@@ -25,7 +25,6 @@ checkpoints/
 lightning_logs/
 wandb/
 tensorboard/
-runs/
 
 # ----------------------------
 # Project-specific
