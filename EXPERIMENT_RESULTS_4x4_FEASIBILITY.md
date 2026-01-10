@@ -674,23 +674,27 @@ Created a harder dataset with 6-8 empty cells (vs 1-4 empties in trivial set).
 - Path: `buiksat_trm/data/sudoku-4x4-easy_6to8empties`
 - Random baseline: **0% success**, mean score **-3.26** (confirms difficulty)
 
-### Seed=42 Results (Completed)
+### Final Results (Seed=42, 5000 steps)
 
-| Algorithm | Success Rate | Mean Score | Notes |
-|-----------|--------------|------------|-------|
-| UPI_TRM   | 0.0%         | 10.04      | Zero violations, ~1 cell above initial |
-| A2C       | 0.0%         | 5.82       | Some violations (0.84 avg) |
-| DQN       | N/A          | N/A        | No eval metrics (baseline trainer) |
-| Random    | 0.0%         | -3.26      | Baseline comparison |
+| Algorithm | Final Success | Peak Success | Mean Score | Notes |
+|-----------|---------------|--------------|------------|-------|
+| **no_contraction** | **2.0%** | 2.0% | 11.50 | Best final - solved 1/50! |
+| **persistent_z_no_contraction** | 0.0% | **6.0%** | **12.24** | Highest mean score, peak 3/50! |
+| UPI_TRM baseline | 0.0% | 0.0% | 10.04 | Maintains validity |
+| A2C | 0.0% | 0.0% | 5.82 | Below initial, many violations |
+| DQN (fixed) | 0.0% | 0.0% | 4.06 | Worst performer |
+| Random | 0.0% | 0.0% | -3.26 | Baseline comparison |
 
-**Key Observation**: On harder puzzles (6-8 empties), no algorithm achieves success yet. UPI_TRM maintains validity (zero violations) but makes minimal progress. A2C introduces violations.
+**Key Findings (6-8 empties)**:
+1. **Ablations significantly outperform baselines** - removing contraction is the key factor
+2. **persistent_z_no_contraction achieved 6% peak success** (3/50 solved at step 3800)
+3. **no_contraction achieved 2% final success** (1/50 solved at step 5000)
+4. Both ablations maintain mean score >11 vs initial 9.0 (significant improvement)
+5. DQN and A2C struggle (scores below initial, many violations)
 
-### Running Experiments
+### DQN Evaluation Fix
 
-Seeds 123 and 456 launched for all three algorithms. Check status:
-```bash
-grep -E "eval_success_rate=" runs/feasibility_6to8empties/<algo>/*.log | tail -n 1
-```
+Fixed `DQNTrainer.evaluate_policy_metrics()` to use `self.q_network.base_model` instead of `self.model` (which didn't exist). DQN now reports proper eval metrics.
 
 ### Plots
 

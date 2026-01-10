@@ -1254,6 +1254,8 @@ def main():
                 )
             except AttributeError:
                 pass  # Old cached binary without evaluate_policy_metrics
+            except Exception as e:
+                print(f"[WARN] evaluate_policy_metrics error: {type(e).__name__}: {e}")
             if eval_metrics is not None:
                 eval_policy_mode = eval_metrics.get("eval_policy_mode", "unknown")
                 solved_count = eval_metrics.get("solved_count", 0)
