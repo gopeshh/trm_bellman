@@ -603,7 +603,7 @@ class DQNTrainer:
         from rl.evaluator import evaluate_plan_policy_with_scores
 
         mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
-            model=self.model,
+            model=self.q_network.base_model,
             dataset=dataset,
             checker=checker,
             env_cfg=env_cfg,

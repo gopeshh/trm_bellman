@@ -1,0 +1,7 @@
+algorithm,seed,success_rate_final,success_rate_peak,peak_step,steps_to_100,mean_score_final,run_id
+upi_trm,42,0.0,0.0,0,N/A,10.04,42_20260109_161919
+a2c,42,0.0,0.0,0,N/A,5.82,42_20260109_161919
+dqn,42,0.0,0.0,0,N/A,4.06,42_fixed
+no_contraction,42,0.02,0.02,3700,N/A,11.5,42_20260109_194739
+persistent_z_no_contraction,42,0.0,0.06,4500,N/A,12.24,42_20260109_194739
+dqn_fixed,42,0.0,0.0,0,N/A,4.06,42_20260109
