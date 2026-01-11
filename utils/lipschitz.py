@@ -183,7 +183,7 @@ def apply_opnorm_clamp_periodically(
     per_layer_max: float = 1.0,
     num_power_iters: int = 10,
     restrict_to_reasoning_layers: bool = True,
-) -> None:
+) -> Dict[str, float]:
     """
     Convenience function to re-apply operator-norm clamping during training.
 
@@ -192,8 +192,11 @@ def apply_opnorm_clamp_periodically(
     constraint via hooks, opnorm_clamp needs periodic re-application.
 
     This is a no-op wrapper around apply_opnorm_clamp_to_trm for API clarity.
+
+    Returns:
+        Dict mapping layer name to its spectral norm after clamping
     """
-    apply_opnorm_clamp_to_trm(
+    return apply_opnorm_clamp_to_trm(
         inner_model, per_layer_max, num_power_iters, restrict_to_reasoning_layers
     )
 

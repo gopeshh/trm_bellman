@@ -1,5 +1,6 @@
 
 import argparse
+import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1363,5 +1364,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # Configure logging only when running as CLI entrypoint (not on import)
+    # Only set up if no handlers already configured
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
     main()
 

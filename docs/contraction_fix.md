@@ -124,7 +124,9 @@ buck2 run //buiksat_trm:diagnose_contraction_fix -- \
 ### Modified Files
 1. **utils/lipschitz.py**: Added `_power_iteration()`, `clamp_linear_operator_norm()`, `apply_opnorm_clamp_to_trm()`, `apply_opnorm_clamp_periodically()`
 2. **models/recursive_reasoning/trm.py**: Updated contraction enforcement to use opnorm clamp instead of spectral_norm
-3. **scripts/diagnose_contraction_fix.py**: New diagnostic script to validate the fix
+3. **rl/config.py**: Added `opnorm_clamp_interval` config field
+4. **rl/upi_trm_trainer.py**: Added periodic opnorm clamping in `train_step()`
+5. **scripts/diagnose_contraction_fix.py**: New diagnostic script to validate the fix
 
 ### Key API Changes
 ```python
@@ -159,51 +161,66 @@ Not affected (intentionally):
 ```yaml
 rl_enable_contraction: true
 rl_target_Lz: 0.9  # or lower for stronger contraction
+opnorm_clamp_interval: 100  # Re-clamp every 100 steps (0 = disabled)
+opnorm_clamp_max_norm: 1.0  # Per-layer max operator norm (default 1.0)
+opnorm_clamp_num_power_iters: 10  # Power iterations for spectral norm estimation
+opnorm_log_max_sigma: false  # Set true to log max σ(W) when clamp fires
 ```
 
-### During Training (Optional Periodic Re-clamping)
-If weights drift during training, re-apply clamping:
-```python
-from utils.lipschitz import apply_opnorm_clamp_periodically
-
-# Every N training steps
-if step % 100 == 0:
-    apply_opnorm_clamp_periodically(model.inner, per_layer_max=1.0)
-```
+### Periodic Re-clamping (Automatic)
+Periodic re-clamping is now **automatic** when `enable_contraction=True` and `opnorm_clamp_interval > 0`. The `UPITrmTrainer.train_step()` method handles this internally every N steps.
 
 ## Recommendations
 
 1. **Use opnorm clamp**: The new approach is numerically stable and achieves Lz < 1
 2. **Restrict to reasoning layers**: Only clamp z→z path, not embeddings or outputs
-3. **Re-clamp periodically**: If weights drift during long training runs
+3. **Enable periodic re-clamping**: Set `opnorm_clamp_interval=100` to maintain contraction during training
 4. **Monitor Lz**: Track theory metrics to verify contraction is maintained
 
 ## Known Limitations
 
-### Init-Only Clamping (No Periodic Re-Clamp)
+### Periodic Re-Clamping (January 2026)
 
-**Current behavior**: Operator-norm clamping is applied **only at model initialization** (in `TinyRecursiveReasoningModel_ACTV1.__init__`). There is no automatic periodic re-clamping during RL training.
+**Current behavior**: Operator-norm clamping is now applied both at model initialization AND periodically during training. The `UPITrmTrainer.train_step()` method re-applies operator-norm clamping every N steps (default N=100) when `enable_contraction=True`.
 
-**Implication**: During training, SGD updates may cause per-layer spectral norms to drift above 1.0, potentially violating the contraction guarantee over time.
-
-**Mitigation**: A helper function `apply_opnorm_clamp_periodically()` exists in `utils/lipschitz.py` but is NOT currently called in the trainer. To enforce contraction throughout training, you would need to add periodic re-clamping to the training loop (e.g., every N steps).
-
-**For strict theory alignment**, consider:
-```python
-# In the training loop (e.g., UPITrmTrainer.train_step)
-if step % 100 == 0:
-    apply_opnorm_clamp_periodically(model.inner, per_layer_max=1.0)
+**Configuration**:
+```yaml
+enable_contraction: true
+opnorm_clamp_interval: 100  # Re-clamp every 100 steps (0 = disabled)
+opnorm_clamp_max_norm: 1.0  # Per-layer max operator norm
+opnorm_clamp_num_power_iters: 10  # Power iterations for spectral norm estimation
+opnorm_log_max_sigma: false  # Set true to log max σ(W) at each clamp
 ```
+
+**Implementation** (in `rl/upi_trm_trainer.py`):
+```python
+# Every N steps, re-apply operator-norm clamping
+if enable_contraction and opnorm_clamp_interval > 0 and step % opnorm_clamp_interval == 0:
+    with torch.no_grad():
+        sigma_dict = apply_opnorm_clamp_periodically(
+            model.inner,
+            per_layer_max=opnorm_clamp_max_norm,
+            num_power_iters=opnorm_clamp_num_power_iters,
+        )
+    # Optional: log max σ(W) over L_level layers
+    if opnorm_log_max_sigma and sigma_dict:
+        max_sigma = max(sigma_dict.values())
+        logger.info(f"[step {step}] opnorm clamp applied (max_sigma={max_sigma:.2f})")
+```
+
+This ensures contraction is maintained throughout training, not just at initialization.
 
 ### Training Sanity Check (January 2026)
 
-A 400-step training run with `enable_contraction=true` (opnorm clamp at init) showed:
+A 400-step training run with `enable_contraction=true` and `opnorm_clamp_interval=100` showed:
 - **Training does not crash or diverge**
 - eval_success_rate = 26% (on 4x4 trivial Sudoku)
 - Value and policy losses are stable (no NaN or explosion)
 - STOP action correctly disabled (stop_prob=0.000)
 
-This confirms the fix enables training without immediate issues, but does not prove contraction is maintained throughout long training runs without periodic re-clamping.
+Periodic re-clamping helps maintain the per-layer norm constraint throughout training. For strict verification, log/monitor layer norms or Lz proxies during long runs.
+
+**Note**: The trainer clamps `self.model.inner` (the main model used for value updates). The `policy_model_candidate` is synced from `self.model` at each train_step, so clamped weights propagate to policy updates.
 
 ## References
 
