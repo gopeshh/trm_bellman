@@ -198,13 +198,15 @@ This ensures contraction is maintained throughout training, not just at initiali
 
 ### Training Sanity Check (January 2026)
 
-A 400-step training run with `enable_contraction=true` (opnorm clamp at init) showed:
+A 400-step training run with `enable_contraction=true` and `opnorm_clamp_interval=100` showed:
 - **Training does not crash or diverge**
 - eval_success_rate = 26% (on 4x4 trivial Sudoku)
 - Value and policy losses are stable (no NaN or explosion)
 - STOP action correctly disabled (stop_prob=0.000)
 
-This confirms the fix enables training without immediate issues, but does not prove contraction is maintained throughout long training runs without periodic re-clamping.
+Periodic re-clamping helps maintain the per-layer norm constraint throughout training. For strict verification, log/monitor layer norms or Lz proxies during long runs.
+
+**Note**: The trainer clamps `self.model.inner` (the main model used for value updates). The `policy_model_candidate` is synced from `self.model` at each train_step, so clamped weights propagate to policy updates.
 
 ## References
 

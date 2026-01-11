@@ -1307,6 +1307,7 @@ class UPITrmTrainer:
                         per_layer_max=1.0,
                         restrict_to_reasoning_layers=True,
                     )
+                logger.info(f"[step {self._train_step_count:05d}] opnorm clamp applied")
             except Exception as e:
                 if not self._opnorm_clamp_warned:
                     logger.warning(f"Periodic opnorm clamp failed (step {self._train_step_count}): {e}")
