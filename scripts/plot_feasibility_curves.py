@@ -28,16 +28,16 @@ ALGO_CONFIG = {
     "a2c": {"name": "A2C", "color": "#2ca02c", "marker": "^"},
     "dqn": {"name": "DQN", "color": "#d62728", "marker": "D"},
     "ablation_no_conservative": {"name": "No Conservative", "color": "#9467bd", "marker": "v"},
-    "ablation_no_contraction": {"name": "Reset-z + No Contraction", "color": "#8c564b", "marker": "<"},
+    "ablation_no_contraction": {"name": "Episodic-z + No Contraction", "color": "#8c564b", "marker": "<"},
     "ablation_persistent_z": {"name": "Persistent-z", "color": "#17becf", "marker": ">"},
     "ablation_persistent_z_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
     # Alternate naming (6-8 empties suite uses these names without "ablation_" prefix)
-    "no_contraction": {"name": "Reset-z + No Contraction", "color": "#8c564b", "marker": "<"},
+    "no_contraction": {"name": "Episodic-z + No Contraction", "color": "#8c564b", "marker": "<"},
     "persistent_z_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
     # Contraction fix rerun naming
-    "episodic_contraction": {"name": "Episodic + Contraction", "color": "#1f77b4", "marker": "o"},
-    "persistent_contraction": {"name": "Persistent + Contraction", "color": "#d62728", "marker": "D"},
-    "persistent_no_contraction": {"name": "Persistent + No Contraction", "color": "#e377c2", "marker": "P"},
+    "episodic_contraction": {"name": "Episodic-z + Contraction", "color": "#1f77b4", "marker": "o"},
+    "persistent_contraction": {"name": "Persistent-z + Contraction", "color": "#d62728", "marker": "D"},
+    "persistent_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
     "persistent_z": {"name": "Persistent-z + Contraction", "color": "#9467bd", "marker": "v"},
 }
 

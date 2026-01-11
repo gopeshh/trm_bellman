@@ -158,7 +158,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Algorithm directories
-    algo_dirs = ["upi_trm", "ppo", "a2c", "dqn", "ablation_no_conservative", "ablation_no_contraction", "ablation_persistent_z", "ablation_persistent_z_no_contraction", "no_contraction", "persistent_z_no_contraction"]
+    algo_dirs = ["upi_trm", "ppo", "a2c", "dqn", "ablation_no_conservative", "ablation_no_contraction", "ablation_persistent_z", "ablation_persistent_z_no_contraction", "no_contraction", "persistent_z_no_contraction", "episodic_contraction", "persistent_z"]
     seeds = [42, 123, 456]
 
     all_results = []
