@@ -4,9 +4,6 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-# Configure logging to show INFO level messages from RL trainer
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-
 import torch
 import torch.nn as nn
 
@@ -1367,5 +1364,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # Configure logging only when running as CLI entrypoint (not on import)
+    # Only set up if no handlers already configured
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
     main()
 
