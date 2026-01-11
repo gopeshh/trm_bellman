@@ -22,23 +22,28 @@ except ImportError:
 
 
 # Algorithm display names and colors
+# All UPI-TRM variants use "UPI-TRM (...)" prefix for clarity
+# Terminology: "Episodic-z" (reset each step) vs "Persistent-z" (carry across steps)
 ALGO_CONFIG = {
-    "upi_trm": {"name": "UPI-TRM", "color": "#1f77b4", "marker": "o"},
+    # Baselines (not UPI-TRM)
     "ppo": {"name": "PPO", "color": "#ff7f0e", "marker": "s"},
     "a2c": {"name": "A2C", "color": "#2ca02c", "marker": "^"},
     "dqn": {"name": "DQN", "color": "#d62728", "marker": "D"},
-    "ablation_no_conservative": {"name": "No Conservative", "color": "#9467bd", "marker": "v"},
-    "ablation_no_contraction": {"name": "Episodic-z + No Contraction", "color": "#8c564b", "marker": "<"},
-    "ablation_persistent_z": {"name": "Persistent-z", "color": "#17becf", "marker": ">"},
-    "ablation_persistent_z_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
+    # UPI-TRM main (default = episodic + contraction)
+    "upi_trm": {"name": "UPI-TRM (Episodic-z, contraction)", "color": "#1f77b4", "marker": "o"},
+    # UPI-TRM ablations with "ablation_" prefix
+    "ablation_no_conservative": {"name": "UPI-TRM (no conservative)", "color": "#9467bd", "marker": "v"},
+    "ablation_no_contraction": {"name": "UPI-TRM (Episodic-z, no contraction)", "color": "#8c564b", "marker": "<"},
+    "ablation_persistent_z": {"name": "UPI-TRM (Persistent-z, contraction)", "color": "#17becf", "marker": ">"},
+    "ablation_persistent_z_no_contraction": {"name": "UPI-TRM (Persistent-z, no contraction)", "color": "#e377c2", "marker": "P"},
     # Alternate naming (6-8 empties suite uses these names without "ablation_" prefix)
-    "no_contraction": {"name": "Episodic-z + No Contraction", "color": "#8c564b", "marker": "<"},
-    "persistent_z_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
-    # Contraction fix rerun naming
-    "episodic_contraction": {"name": "Episodic-z + Contraction", "color": "#1f77b4", "marker": "o"},
-    "persistent_contraction": {"name": "Persistent-z + Contraction", "color": "#d62728", "marker": "D"},
-    "persistent_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
-    "persistent_z": {"name": "Persistent-z + Contraction", "color": "#9467bd", "marker": "v"},
+    "no_contraction": {"name": "UPI-TRM (Episodic-z, no contraction)", "color": "#8c564b", "marker": "<"},
+    "persistent_z_no_contraction": {"name": "UPI-TRM (Persistent-z, no contraction)", "color": "#e377c2", "marker": "P"},
+    # Contraction fix rerun naming (2x2 ablation grid)
+    "episodic_contraction": {"name": "UPI-TRM (Episodic-z, contraction)", "color": "#1f77b4", "marker": "o"},
+    "persistent_contraction": {"name": "UPI-TRM (Persistent-z, contraction)", "color": "#d62728", "marker": "D"},
+    "persistent_no_contraction": {"name": "UPI-TRM (Persistent-z, no contraction)", "color": "#e377c2", "marker": "P"},
+    "persistent_z": {"name": "UPI-TRM (Persistent-z, contraction)", "color": "#9467bd", "marker": "v"},
 }
 
 # Random baseline values (from eval_random_baseline.py)
