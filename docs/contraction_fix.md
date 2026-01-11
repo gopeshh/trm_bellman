@@ -50,11 +50,33 @@ def apply_opnorm_clamp_to_trm(inner_model, per_layer_max=1.0, restrict_to_reason
 
 ## Results After Fix
 
-| Variant | Measured Lz | Status |
-|---------|-------------|--------|
-| OFF (no contraction) | ~1.0 | OK |
-| CLAMP-only (opnorm clamp) | ~0.6 | **OK (contractive!)** |
-| CLAMP+SCALE (opnorm clamp + scaling) | ~0.6 | **OK (contractive!)** |
+### Final Validated Results (January 2026)
+
+**With target_Lz = 0.9 (eps=1e-3):**
+
+| Variant | Measured Lz | max σ(W) | Status |
+|---------|-------------|----------|--------|
+| OFF (no contraction) | 1.39 | 3.81 | OK |
+| CLAMP-only | **0.70** | 1.06 | **Contractive** |
+| SCALE-only | 1.27 | 3.82 | OK |
+| CLAMP+SCALE | **0.70** | 1.03 | **Contractive** |
+| SN-only | 50257 | 3.65 | **EXPLODED** |
+| SN+SCALE | 54055 | 3.81 | **EXPLODED** |
+
+**With target_Lz = 0.5 (eps=1e-3):**
+
+| Variant | Measured Lz | max σ(W) | Status |
+|---------|-------------|----------|--------|
+| OFF (no contraction) | 0.74 | 3.74 | OK |
+| CLAMP-only | **0.65** | 1.04 | **Contractive** |
+| SCALE-only | 0.64 | 3.69 | OK |
+| CLAMP+SCALE | **0.66** | 1.05 | **Contractive** |
+
+**Key observations:**
+- **Measured Lz stays O(1)**: No explosions with CLAMP variants
+- **Lz < 1 achieved**: Both CLAMP-only and CLAMP+SCALE give Lz ~0.65-0.70, satisfying Assumption 4.2
+- **Per-layer max σ(W) ≤ 1.1**: Confirms the clamping is working correctly
+- **SN variants explode**: Lz > 50,000 with spectral_norm, confirming the original issue
 
 The fix achieves:
 - **Stable Lz < 1**: Contractive behavior as required by Assumption 4.2
@@ -62,6 +84,18 @@ The fix achieves:
 - **Selective application**: Only z→z path layers are affected
 
 ## Diagnostic Commands
+
+### About the Diagnostic Scripts
+
+**`diagnose_contraction_components.py`**: Tests spectral_norm variants only
+- Variants: OFF, SN-only, SCALE-only, SN+SCALE
+- Purpose: Isolate whether spectral_norm or scaling causes the explosion
+- Result: **spectral_norm is the culprit** (SN-only and SN+SCALE explode)
+
+**`diagnose_contraction_fix.py`**: Tests operator-norm clamp vs spectral_norm
+- Variants: OFF, CLAMP-only, SCALE-only, CLAMP+SCALE, SN-only, SN+SCALE
+- Purpose: Validate that opnorm clamp fixes the issue
+- Result: **CLAMP variants are stable** (Lz < 1), SN variants explode
 
 ### Validate the Fix
 ```bash
@@ -143,6 +177,33 @@ if step % 100 == 0:
 2. **Restrict to reasoning layers**: Only clamp z→z path, not embeddings or outputs
 3. **Re-clamp periodically**: If weights drift during long training runs
 4. **Monitor Lz**: Track theory metrics to verify contraction is maintained
+
+## Known Limitations
+
+### Init-Only Clamping (No Periodic Re-Clamp)
+
+**Current behavior**: Operator-norm clamping is applied **only at model initialization** (in `TinyRecursiveReasoningModel_ACTV1.__init__`). There is no automatic periodic re-clamping during RL training.
+
+**Implication**: During training, SGD updates may cause per-layer spectral norms to drift above 1.0, potentially violating the contraction guarantee over time.
+
+**Mitigation**: A helper function `apply_opnorm_clamp_periodically()` exists in `utils/lipschitz.py` but is NOT currently called in the trainer. To enforce contraction throughout training, you would need to add periodic re-clamping to the training loop (e.g., every N steps).
+
+**For strict theory alignment**, consider:
+```python
+# In the training loop (e.g., UPITrmTrainer.train_step)
+if step % 100 == 0:
+    apply_opnorm_clamp_periodically(model.inner, per_layer_max=1.0)
+```
+
+### Training Sanity Check (January 2026)
+
+A 400-step training run with `enable_contraction=true` (opnorm clamp at init) showed:
+- **Training does not crash or diverge**
+- eval_success_rate = 26% (on 4x4 trivial Sudoku)
+- Value and policy losses are stable (no NaN or explosion)
+- STOP action correctly disabled (stop_prob=0.000)
+
+This confirms the fix enables training without immediate issues, but does not prove contraction is maintained throughout long training runs without periodic re-clamping.
 
 ## References
 
