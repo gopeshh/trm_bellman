@@ -1,0 +1,4 @@
+algorithm,seed,success_rate_final,success_rate_peak,peak_step,steps_to_100,mean_score_final,run_id
+persistent_z_no_contraction,42,0.96,0.96,5000,N/A,15.96,42_20260110_190404
+persistent_z_no_contraction,123,0.92,0.92,3000,N/A,15.92,123_20260110_201909
+persistent_z_no_contraction,456,0.92,0.92,2800,N/A,15.88,456_20260110_224433

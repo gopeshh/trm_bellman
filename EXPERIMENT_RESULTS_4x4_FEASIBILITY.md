@@ -843,3 +843,108 @@ See `results/plots_6to8empties_long_baselines/` for baseline-only learning curve
 
 *Section added: January 10, 2026 - Long-run experiments (20k steps) on 6-8 empties dataset*
 
+---
+
+## Post Contraction-Fix Rerun (n=3) - January 10, 2026
+
+### Motivation
+
+After fixing the contraction implementation to use **operator-norm (opnorm) clamping** instead of PyTorch's numerically unstable `spectral_norm`, we reran the key feasibility ablations to answer:
+
+> **Is contraction still worse than no-contraction once contraction is stable?**
+
+### Contraction Implementation Details
+
+The new contraction enforcement uses:
+- **Opnorm clamp**: Direct operator norm clamping on z→z reasoning layers
+- **Periodic re-clamping**: `opnorm_clamp_interval=100` (every 100 training steps)
+- **Max norm**: `opnorm_clamp_max_norm=1.0` (enforces L_z < 1)
+- **Power iterations**: `opnorm_clamp_num_power_iters=10`
+
+Trainer logs clamp events with `logger.info`: `"[step XXXXX] opnorm clamp applied"`
+
+### Experimental Setup
+
+- **Dataset**: `sudoku-4x4-trivial` (1-4 empty cells)
+- **Training Steps**: 5000
+- **Seeds**: 42, 123, 456 (n=3)
+- **Evaluation**: Every 100 steps, 50 episodes
+
+### Configurations Tested
+
+| Config | episodic_latent | enable_contraction | Description |
+|--------|-----------------|-------------------|-------------|
+| **episodic_contraction** | true | true | Baseline UPI-TRM with fixed contraction |
+| **persistent_z** | false | true | Persistent latent with fixed contraction |
+| **persistent_z_no_contraction** | false | false | Persistent latent without contraction |
+
+### Final Results (Step 5000)
+
+| Configuration | Seed 42 | Seed 123 | Seed 456 | Mean ± Std |
+|---------------|---------|----------|----------|------------|
+| **persistent_z_no_contraction** | **96%** | **92%** | **92%** | **93.3% ± 2.3%** |
+| episodic_contraction | 32% | 34% | 18% | 28.0% ± 8.7% |
+| persistent_z | 44% | 0% | 22% | 22.0% ± 22.0% |
+
+### Mean Score Results (Step 5000)
+
+| Configuration | Seed 42 | Seed 123 | Seed 456 | Mean ± Std |
+|---------------|---------|----------|----------|------------|
+| **persistent_z_no_contraction** | **15.96** | **15.92** | **15.88** | **15.92 ± 0.04** |
+| episodic_contraction | 11.58 | 13.22 | 13.38 | 12.73 ± 1.00 |
+| persistent_z | 14.76 | 12.60 | 13.70 | 13.69 ± 1.08 |
+
+### Key Findings
+
+1. **Contraction is STILL detrimental even after the fix**:
+   - persistent_z_no_contraction: **93.3%** success
+   - persistent_z (with contraction): **22.0%** success
+   - **Δ = -71.3 percentage points** from enabling contraction
+
+2. **Episodic latent with contraction performs poorly**:
+   - episodic_contraction: **28.0%** success
+   - This is below random baseline (52%) on trivial puzzles
+
+3. **High variance with contraction enabled**:
+   - persistent_z with contraction shows 22% std (range: 0-44%)
+   - Without contraction: only 2.3% std (range: 92-96%)
+
+4. **Opnorm clamp is active and logging correctly**:
+   - Verified `"[step XXXXX] opnorm clamp applied"` messages in logs
+   - Clamp applied every 100 steps as configured
+
+### Interpretation
+
+The contraction fix (opnorm clamp + periodic re-clamp) makes contraction enforcement **stable** but does not make it **beneficial** for 4×4 trivial puzzles. The Lipschitz constraint L_z < 1.0 appears to:
+
+1. **Over-regularize the latent dynamics** - Preventing the model from learning expressive latent representations
+2. **Slow down learning** - Episodic contraction runs plateau at low success rates
+3. **Increase training instability** - High variance across seeds with contraction enabled
+
+### Hypothesis for Future Work
+
+The contraction guarantee may only be beneficial for:
+- **Longer training horizons** (>20k steps)
+- **Harder problems** (9×9 extreme puzzles)
+- **Value function stability** (preventing divergence on long rollouts)
+
+For trivial 4×4 puzzles, the regularization penalty outweighs any stability benefit.
+
+### Artifacts
+
+| Artifact | Location |
+|----------|----------|
+| Learning curves CSV | `results/plot_data_contraction_fix_rerun/plot_data_feasibility_learning_curves.csv` |
+| Summary CSV | `results/plot_data_contraction_fix_rerun/plot_data_feasibility_summary.csv` |
+| Success rate plot | `results/plots_contraction_fix_rerun/feasibility_success_vs_steps.{png,pdf}` |
+| Mean score plot | `results/plots_contraction_fix_rerun/feasibility_score_vs_steps.{png,pdf}` |
+| Ablations bar chart | `results/plots_contraction_fix_rerun/feasibility_ablations.{png,pdf}` |
+
+### Conclusion
+
+**Contraction (even with stable opnorm clamp) hurts performance on 4×4 trivial puzzles.** The best configuration remains `persistent_z_no_contraction` at 93.3% ± 2.3% success rate.
+
+---
+
+*Section added: January 10, 2026 - Post contraction-fix rerun with opnorm clamp*
+
