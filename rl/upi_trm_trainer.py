@@ -38,6 +38,8 @@ from utils.lipschitz import (
     compute_value_of_memory_residual,
     compute_exact_baseline_summation,
     compute_exact_advantage,
+    # Periodic operator-norm clamping for contraction enforcement
+    apply_opnorm_clamp_periodically,
 )
 
 
@@ -85,6 +87,8 @@ class UPITrmTrainer:
         self._value_of_memory: List[float] = []
         # Store checker function reference for exact baseline computation
         self._checker_fn = None  # Set by caller if using exact_baseline_summation
+        # Track if we've warned about opnorm clamp failures (to print only one warning)
+        self._opnorm_clamp_warned: bool = False
 
         self.target_model = TinyRecursiveReasoningModel_ACTV1(self._config_to_dict(self.model.config)).to(device)
         self.target_model.eval()
@@ -1288,6 +1292,25 @@ class UPITrmTrainer:
         if loss_val != 0.0:  # Only step when we actually did an optimizer step
             self._step_lr_schedulers()
         metrics.update(self.get_current_lr())
+
+        # Periodic operator-norm clamping to maintain contraction during training
+        clamp_interval = getattr(self.rl_cfg, "opnorm_clamp_interval", 0)
+        if (
+            getattr(self.rl_cfg, "enable_contraction", False)
+            and clamp_interval > 0
+            and self._train_step_count % clamp_interval == 0
+        ):
+            try:
+                with torch.no_grad():
+                    apply_opnorm_clamp_periodically(
+                        self.model.inner,
+                        per_layer_max=1.0,
+                        restrict_to_reasoning_layers=True,
+                    )
+            except Exception as e:
+                if not self._opnorm_clamp_warned:
+                    logger.warning(f"Periodic opnorm clamp failed (step {self._train_step_count}): {e}")
+                    self._opnorm_clamp_warned = True
         
         # Reset termination stats for the next logging window
         self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}

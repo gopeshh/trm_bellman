@@ -209,6 +209,7 @@ class RLConfig(BaseModel):
     enable_contraction: bool = True
     target_Lz: float = 0.9
     target_Lv: float = 1.0
+    opnorm_clamp_interval: int = 100  # Re-apply opnorm clamp every N steps (0 = disabled)
 
     # Replay / data
     replay_capacity: int = 100_000
