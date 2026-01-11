@@ -782,22 +782,24 @@ Generated learning curves with shaded uncertainty bands:
 
 Compare standard RL baselines (A2C, DQN) against UPI-TRM ablations at the same training horizon (20k steps) on the harder 6-8 empties dataset.
 
-### Baseline Results (20k Steps, Seeds 42 & 123)
+### Baseline Results (20k Steps, Seeds 42, 123, 456)
 
 | Algorithm | Seed | Final Success | Peak Success | Mean Score |
 |-----------|------|---------------|--------------|------------|
 | A2C | 42 | 0.0% | 0.0% | 9.74 |
 | A2C | 123 | 0.0% | 0.0% | 9.34 |
+| A2C | 456 | 0.0% | 0.0% | 10.20 |
 | DQN | 42 | 0.0% | 0.0% | 4.82 |
 | DQN | 123 | 0.0% | 0.0% | 4.32 |
+| DQN | 456 | 0.0% | 0.0% | 3.30 |
 
-### Summary Statistics (Baselines)
+### Summary Statistics (Baselines, n=3)
 
 | Algorithm | Final Success (Mean ± Std) | Peak Success | Mean Score (Mean ± Std) |
 |-----------|---------------------------|--------------|------------------------|
-| A2C | 0.0% ± 0.0% | 0.0% | 9.54 ± 0.28 |
-| DQN | 0.0% ± 0.0% | 0.0% | 4.57 ± 0.35 |
-| Random | 0.0% | 0.0% | -3.26 |
+| A2C | 0.0% ± 0.0% | 0.0% | 9.76 ± 0.43 |
+| DQN | 0.0% ± 0.0% | 0.0% | 4.15 ± 0.78 |
+| Random | 0.0% | 0.0% | -3.59 |
 
 ### Complete Comparison Table (All Algorithms, 20k Steps, 6-8 Empties)
 
@@ -805,9 +807,9 @@ Compare standard RL baselines (A2C, DQN) against UPI-TRM ablations at the same t
 |-----------|---------------|--------------|------------|-----------|
 | **persistent_z_no_contraction** | **56.0% ± 5.7%** | **65.0%** | **14.86** | **+56%** |
 | **no_contraction** | **48.0% ± 8.5%** | **60.0%** | **14.89** | **+48%** |
-| A2C | 0.0% | 0.0% | 9.54 | +0% (score only) |
-| DQN | 0.0% | 0.0% | 4.57 | +0% (score only) |
-| Random Baseline | 0.0% | 0.0% | -3.26 | 0% |
+| A2C (n=3) | 0.0% | 0.0% | 9.76 ± 0.43 | +0% (score only) |
+| DQN (n=3) | 0.0% | 0.0% | 4.15 ± 0.78 | +0% (score only) |
+| Random Baseline | 0.0% | 0.0% | -3.59 | 0% |
 
 ### Key Findings
 
@@ -835,7 +837,7 @@ See `results/plots_6to8empties_long_baselines/` for baseline-only learning curve
 
 ---
 
-*Section added: January 10, 2026 - Baseline comparison (A2C, DQN) on 6-8 empties dataset*
+*Section updated: January 10, 2026 - Baseline comparison expanded to n=3 seeds (42, 123, 456)*
 
 ---
 
