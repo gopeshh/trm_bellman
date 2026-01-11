@@ -1,0 +1,10 @@
+algorithm,seed,success_rate_final,mean_score_final,success_rate_peak
+episodic_contraction,42,0.28,14.28,0.32
+episodic_contraction,123,0.58,15.06,0.6
+episodic_contraction,456,0.3,13.9,0.32
+persistent_contraction,42,0.04,12.88,0.32
+persistent_contraction,123,0.04,12.84,0.32
+persistent_contraction,456,0.22,13.6,0.26
+persistent_no_contraction,42,0.96,15.96,0.96
+persistent_no_contraction,123,0.92,15.92,0.92
+persistent_no_contraction,456,0.92,15.88,0.92

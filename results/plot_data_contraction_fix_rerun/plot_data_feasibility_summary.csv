@@ -1,0 +1,4 @@
+algorithm,n_seeds,success_rate_mean,success_rate_std,mean_score_mean,mean_score_std
+episodic_contraction,3,0.387,0.168,14.413,0.591
+persistent_contraction,3,0.100,0.104,13.107,0.428
+persistent_no_contraction,3,0.933,0.023,15.920,0.040
