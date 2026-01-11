@@ -34,6 +34,10 @@ ALGO_CONFIG = {
     # Alternate naming (6-8 empties suite uses these names without "ablation_" prefix)
     "no_contraction": {"name": "Reset-z + No Contraction", "color": "#8c564b", "marker": "<"},
     "persistent_z_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
+    # Contraction fix rerun naming
+    "episodic_contraction": {"name": "Episodic + Contraction", "color": "#1f77b4", "marker": "o"},
+    "persistent_contraction": {"name": "Persistent + Contraction", "color": "#d62728", "marker": "D"},
+    "persistent_no_contraction": {"name": "Persistent + No Contraction", "color": "#e377c2", "marker": "P"},
 }
 
 # Random baseline values (from eval_random_baseline.py)
@@ -130,7 +134,8 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
 
     # Plot main algorithms first
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
-                  "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction"]
+                  "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction",
+                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction"]
 
     for algo in main_algos:
         if algo not in data:
@@ -187,7 +192,8 @@ def plot_score_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feasi
     fig, ax = plt.subplots(figsize=(10, 6))
 
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
-                  "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction"]
+                  "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction",
+                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction"]
 
     for algo in main_algos:
         if algo not in data:
@@ -244,7 +250,8 @@ def plot_filled_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feas
     fig, ax = plt.subplots(figsize=(10, 6))
 
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
-                  "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction"]
+                  "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction",
+                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction"]
 
     plotted_any = False
     for algo in main_algos:
@@ -303,7 +310,8 @@ def plot_zero_cand_vs_steps(data: dict, output_dir: Path, title_suffix: str = "F
     fig, ax = plt.subplots(figsize=(10, 6))
 
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
-                  "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction"]
+                  "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction",
+                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction"]
 
     plotted_any = False
     for algo in main_algos:
