@@ -1313,9 +1313,9 @@ class UPITrmTrainer:
                     )
                 if log_sigma and sigma_dict:
                     max_sigma = max(sigma_dict.values())
-                    print(f"[step {self._train_step_count:05d}] opnorm clamp applied (max_sigma={max_sigma:.2f})")
+                    logger.info(f"[step {self._train_step_count:05d}] opnorm clamp applied (max_sigma={max_sigma:.2f})")
                 else:
-                    print(f"[step {self._train_step_count:05d}] opnorm clamp applied")
+                    logger.info(f"[step {self._train_step_count:05d}] opnorm clamp applied")
             except Exception as e:
                 if not self._opnorm_clamp_warned:
                     logger.warning(f"Periodic opnorm clamp failed (step {self._train_step_count}): {e}")
