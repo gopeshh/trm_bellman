@@ -162,6 +162,9 @@ Not affected (intentionally):
 rl_enable_contraction: true
 rl_target_Lz: 0.9  # or lower for stronger contraction
 opnorm_clamp_interval: 100  # Re-clamp every 100 steps (0 = disabled)
+opnorm_clamp_max_norm: 1.0  # Per-layer max operator norm (default 1.0)
+opnorm_clamp_num_power_iters: 10  # Power iterations for spectral norm estimation
+opnorm_log_max_sigma: false  # Set true to log max σ(W) when clamp fires
 ```
 
 ### Periodic Re-clamping (Automatic)
@@ -184,6 +187,9 @@ Periodic re-clamping is now **automatic** when `enable_contraction=True` and `op
 ```yaml
 enable_contraction: true
 opnorm_clamp_interval: 100  # Re-clamp every 100 steps (0 = disabled)
+opnorm_clamp_max_norm: 1.0  # Per-layer max operator norm
+opnorm_clamp_num_power_iters: 10  # Power iterations for spectral norm estimation
+opnorm_log_max_sigma: false  # Set true to log max σ(W) at each clamp
 ```
 
 **Implementation** (in `rl/upi_trm_trainer.py`):
@@ -191,7 +197,15 @@ opnorm_clamp_interval: 100  # Re-clamp every 100 steps (0 = disabled)
 # Every N steps, re-apply operator-norm clamping
 if enable_contraction and opnorm_clamp_interval > 0 and step % opnorm_clamp_interval == 0:
     with torch.no_grad():
-        apply_opnorm_clamp_periodically(model.inner, per_layer_max=1.0)
+        sigma_dict = apply_opnorm_clamp_periodically(
+            model.inner,
+            per_layer_max=opnorm_clamp_max_norm,
+            num_power_iters=opnorm_clamp_num_power_iters,
+        )
+    # Optional: log max σ(W) over L_level layers
+    if opnorm_log_max_sigma and sigma_dict:
+        max_sigma = max(sigma_dict.values())
+        logger.info(f"[step {step}] opnorm clamp applied (max_sigma={max_sigma:.2f})")
 ```
 
 This ensures contraction is maintained throughout training, not just at initialization.

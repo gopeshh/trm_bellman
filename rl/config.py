@@ -210,6 +210,9 @@ class RLConfig(BaseModel):
     target_Lz: float = 0.9
     target_Lv: float = 1.0
     opnorm_clamp_interval: int = 100  # Re-apply opnorm clamp every N steps (0 = disabled)
+    opnorm_clamp_max_norm: float = 1.0  # Per-layer max operator norm for clamping
+    opnorm_clamp_num_power_iters: int = 10  # Power iterations for spectral norm estimation
+    opnorm_log_max_sigma: bool = False  # If True, log max σ(W) when clamp fires (adds overhead)
 
     # Replay / data
     replay_capacity: int = 100_000

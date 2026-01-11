@@ -1301,13 +1301,21 @@ class UPITrmTrainer:
             and self._train_step_count % clamp_interval == 0
         ):
             try:
+                max_norm = getattr(self.rl_cfg, "opnorm_clamp_max_norm", 1.0)
+                num_iters = getattr(self.rl_cfg, "opnorm_clamp_num_power_iters", 10)
+                log_sigma = getattr(self.rl_cfg, "opnorm_log_max_sigma", False)
                 with torch.no_grad():
-                    apply_opnorm_clamp_periodically(
+                    sigma_dict = apply_opnorm_clamp_periodically(
                         self.model.inner,
-                        per_layer_max=1.0,
+                        per_layer_max=max_norm,
+                        num_power_iters=num_iters,
                         restrict_to_reasoning_layers=True,
                     )
-                logger.info(f"[step {self._train_step_count:05d}] opnorm clamp applied")
+                if log_sigma and sigma_dict:
+                    max_sigma = max(sigma_dict.values())
+                    print(f"[step {self._train_step_count:05d}] opnorm clamp applied (max_sigma={max_sigma:.2f})")
+                else:
+                    print(f"[step {self._train_step_count:05d}] opnorm clamp applied")
             except Exception as e:
                 if not self._opnorm_clamp_warned:
                     logger.warning(f"Periodic opnorm clamp failed (step {self._train_step_count}): {e}")
