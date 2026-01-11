@@ -38,6 +38,7 @@ ALGO_CONFIG = {
     "episodic_contraction": {"name": "Episodic + Contraction", "color": "#1f77b4", "marker": "o"},
     "persistent_contraction": {"name": "Persistent + Contraction", "color": "#d62728", "marker": "D"},
     "persistent_no_contraction": {"name": "Persistent + No Contraction", "color": "#e377c2", "marker": "P"},
+    "persistent_z": {"name": "Persistent-z + Contraction", "color": "#9467bd", "marker": "v"},
 }
 
 # Random baseline values (from eval_random_baseline.py)
@@ -135,7 +136,7 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
     # Plot main algorithms first
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
                   "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction",
-                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction"]
+                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction", "persistent_z"]
 
     for algo in main_algos:
         if algo not in data:
