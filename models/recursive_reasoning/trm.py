@@ -18,6 +18,7 @@ from utils.lipschitz import (
     apply_spectral_norm_to_value_head,
     enforce_global_contraction,
     enforce_global_contraction_on_value_head,
+    apply_opnorm_clamp_to_trm,
 )
 
 IGNORE_LABEL_ID = -100
@@ -446,22 +447,25 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         else:
             self.z_init_encoder = None
 
-        # === Spectral Normalization and Contraction (Assumption 3.2) ===
-        # 
+        # === Contraction Enforcement (Assumption 3.2) ===
+        #
         # WARNING: Enabling rl_enable_contraction is NOT compatible with loading
         # vanilla pretrained TRM weights without fine-tuning!
-        # 
-        # When enabled, this wraps all linear layers with spectral_norm and applies
-        # output scaling to enforce L_z < 1 (contraction). This substantially changes
-        # the network's behavior:
-        # - Spectral norm constrains each layer to ~1-Lipschitz
-        # - Output scaling compounds to achieve global contraction L_z ≈ target_Lz
-        # 
+        #
+        # When enabled, this applies operator-norm clamping and output scaling
+        # to enforce L_z < 1 (contraction). This modifies the network's behavior:
+        # - opnorm clamp: Rescales each layer to ||W|| <= 1 (1-Lipschitz per layer)
+        # - Output scaling: Compounds to achieve global contraction L_z ≈ target_Lz
+        #
+        # NOTE: We use opnorm_clamp instead of spectral_norm because PyTorch's
+        # spectral_norm is numerically unstable in this architecture (causes Lz
+        # explosion to 10^5+). See docs/contraction_fix.md for details.
+        #
         # If you load a checkpoint that was trained WITHOUT contraction:
         # - The pretrained weights will be rescaled by the contraction factors
         # - The original supervised performance will NOT be preserved
         # - You must fine-tune the model with the new constraints
-        # 
+        #
         # For theory alignment (Assumption 3.2), you MUST enable contraction.
         # For practical RL that builds on pretrained TRM, consider:
         # - Training with contraction from scratch, OR
@@ -469,15 +473,28 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         if self.config.rl_enable_contraction:
             import warnings
             warnings.warn(
-                "rl_enable_contraction=True: Applying spectral normalization and "
-                "contraction scaling. This is REQUIRED for Assumption 3.2 (L_z < 1) "
-                "but will substantially modify network behavior. Pretrained weights "
-                "from vanilla TRM will be rescaled and may require fine-tuning.",
+                "rl_enable_contraction=True: Applying operator-norm clamping and "
+                "contraction scaling to z->z path layers. This is REQUIRED for "
+                "Assumption 3.2 (L_z < 1) but will modify network behavior. "
+                "Pretrained weights from vanilla TRM may require fine-tuning.",
                 UserWarning,
                 stacklevel=2,
             )
-            apply_spectral_norm_to_trm(self.inner)
-            enforce_global_contraction(self.inner, self.config.rl_target_Lz)
+            # NEW: Use opnorm clamp instead of spectral_norm (avoids numerical instability)
+            # Only apply to z->z path layers (L_level), not embedding or output heads
+            apply_opnorm_clamp_to_trm(
+                self.inner,
+                per_layer_max=1.0,
+                num_power_iters=10,
+                restrict_to_reasoning_layers=True,
+            )
+            # Apply output scaling to achieve target_Lz (only to L_level layers)
+            enforce_global_contraction(
+                self.inner,
+                self.config.rl_target_Lz,
+                restrict_to_reasoning_layers=True,
+            )
+            # Value head: keep spectral_norm (it works fine there, simpler architecture)
             if self.value_head is not None:
                 apply_spectral_norm_to_value_head(self.value_head)
                 enforce_global_contraction_on_value_head(self.value_head, self.config.rl_target_Lv)
