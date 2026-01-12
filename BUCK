@@ -637,3 +637,13 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+python_binary(
+    name = "plot_contraction_sgd_tradeoff",
+    srcs = ["scripts/plot_contraction_sgd_tradeoff.py"],
+    base_module = "",
+    main_module = "scripts.plot_contraction_sgd_tradeoff",
+    deps = [
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)

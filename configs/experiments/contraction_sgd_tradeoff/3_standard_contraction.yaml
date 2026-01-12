@@ -1,0 +1,7 @@
+# CONDITION 3: Hard contraction, stronger
+#
+# target_Lz=0.90 is the standard paper setting
+# Tests if standard contraction hurts vs weaker/no contraction
+
+enable_contraction: true
+target_Lz: 0.90
