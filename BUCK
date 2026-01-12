@@ -627,3 +627,13 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+python_binary(
+    name = "plot_6to8empties_paper_style",
+    srcs = ["scripts/plot_6to8empties_paper_style.py"],
+    base_module = "",
+    main_module = "scripts.plot_6to8empties_paper_style",
+    deps = [
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)
