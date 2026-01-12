@@ -218,7 +218,7 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
     # Put legend below plot in two columns (prevents covering curves + improves readability)
     ax.legend(
         loc="upper center",
-        bbox_to_anchor=(0.5, -0.12),
+        bbox_to_anchor=(0.5, -0.22),
         ncol=2,
         frameon=False,
         handlelength=2.0,
@@ -231,8 +231,8 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
     png_path = output_dir / "feasibility_success_vs_steps.png"
     pdf_path = output_dir / "feasibility_success_vs_steps.pdf"
 
-    # Leave room for legend under axes
-    fig.subplots_adjust(bottom=0.32)
+    # Leave room for legend under axes (increased to prevent overlap with x-axis label)
+    fig.subplots_adjust(bottom=0.38)
     fig.savefig(png_path, dpi=200, bbox_inches="tight", pad_inches=0.02)
     fig.savefig(pdf_path, bbox_inches="tight", pad_inches=0.02)
     print(f"Saved {png_path}")
