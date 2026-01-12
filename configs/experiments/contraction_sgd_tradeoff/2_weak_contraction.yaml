@@ -1,0 +1,7 @@
+# CONDITION 2: Hard contraction, weak
+#
+# target_Lz=0.99 is very weak contraction (near identity)
+# Tests if even weak contraction hurts optimization
+
+enable_contraction: true
+target_Lz: 0.99

@@ -1,0 +1,1398 @@
+[2026-01-12T14:08:48.976-08:00] Buck UI: https://www.internalfb.com/buck2/76d8d5ff-5a56-4040-b7ef-9e549b645456
+[2026-01-12T14:08:56.054-08:00] Waiting on buck2 daemon 76d8d5ff-5a56-4040-b7ef-9e549b645456...
+[2026-01-12T14:08:56.055-08:00] Network: Up:   0B             Down:   0B           
+[2026-01-12T14:08:56.055-08:00] Resource usage: RSS: 24GiB CPU: 8512%
+[2026-01-12T14:08:56.055-08:00] IO: none
+[2026-01-12T14:09:03.153-08:00] Waiting on buck2 daemon 76d8d5ff-5a56-4040-b7ef-9e549b645456...
+[2026-01-12T14:09:03.153-08:00] Network: Up:   0B             Down:   0B           
+[2026-01-12T14:09:03.153-08:00] Resource usage: RSS: 25GiB CPU: 8472%
+[2026-01-12T14:09:03.153-08:00] IO: none
+[2026-01-12T14:09:10.153-08:00] Waiting on buck2 daemon 76d8d5ff-5a56-4040-b7ef-9e549b645456...
+[2026-01-12T14:09:10.153-08:00] Network: Up:   0B             Down:   0B           
+[2026-01-12T14:09:10.153-08:00] Resource usage: RSS: 24GiB CPU: 1200%
+[2026-01-12T14:09:10.153-08:00] IO: none
+[2026-01-12T14:09:17.253-08:00] Waiting on buck2 daemon 76d8d5ff-5a56-4040-b7ef-9e549b645456...
+[2026-01-12T14:09:17.253-08:00] Network: Up:   0B             Down:   0B           
+[2026-01-12T14:09:17.253-08:00] Resource usage: RSS: 23GiB CPU: 391%
+[2026-01-12T14:09:17.253-08:00] IO: none
+[2026-01-12T14:09:24.353-08:00] Waiting on buck2 daemon 76d8d5ff-5a56-4040-b7ef-9e549b645456...
+[2026-01-12T14:09:24.353-08:00] Network: Up:   0B             Down:   0B           
+[2026-01-12T14:09:24.353-08:00] Resource usage: RSS: 26GiB CPU: 106%
+[2026-01-12T14:09:24.353-08:00] IO: none
+[2026-01-12T14:09:31.353-08:00] Waiting on buck2 daemon 76d8d5ff-5a56-4040-b7ef-9e549b645456...
+[2026-01-12T14:09:31.353-08:00] Network: Up:   0B             Down:   0B           
+[2026-01-12T14:09:31.353-08:00] Resource usage: RSS: 29GiB CPU: 2976%
+[2026-01-12T14:09:31.353-08:00] IO: none
+[2026-01-12T14:09:38.355-08:00] Waiting on buck2 daemon 76d8d5ff-5a56-4040-b7ef-9e549b645456...
+[2026-01-12T14:09:38.355-08:00] Network: Up:   0B             Down:   0B           
+[2026-01-12T14:09:38.355-08:00] Resource usage: RSS: 29GiB CPU: 7869%
+[2026-01-12T14:09:38.355-08:00] IO: none
+[2026-01-12T14:09:45.453-08:00] Waiting on buck2 daemon 76d8d5ff-5a56-4040-b7ef-9e549b645456...
+[2026-01-12T14:09:45.453-08:00] Network: Up:   0B             Down:   0B           
+[2026-01-12T14:09:45.453-08:00] Resource usage: RSS: 29GiB CPU: 8421%
+[2026-01-12T14:09:45.453-08:00] IO: none
+[2026-01-12T14:09:46.495-08:00] Network: Up: 0B  Down: 0B
+BUILD SUCCEEDED - starting your binary
+[INFO] Training for 5000 steps (gamma=0.990, K=5, inner_unroll_n=4)
+[INFO] Terminal rewards: solve=0.000, fail=-10.000
+[INFO] Using TRM backbone (hidden=64, H=2, L=2)
+[DEBUG] Policy head STOP bias: 0.00 (should be 0.0 for uniform init)
+[INFO] Puzzle embeddings DISABLED (set --puzzle-emb-ndim > 0 to enable)
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU0 NVIDIA PG509-210 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+INFO:2026-01-12 14:09:56 1376127:1376127 CuptiCallbackApi.cpp:74] Callback: domain = 3, cbid = 1
+INFO:2026-01-12 14:09:56 1376127:1376127 CuptiActivityProfiler.cpp:245] CUDA versions. CUPTI: 22; Runtime: 12040; Driver: 12040
+INFO:2026-01-12 14:09:56 1376127:1385459 FBConfig.cpp:330] Perfetto builder enabled: 1
+INFO:2026-01-12 14:09:56 1376127:1385459 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+INFO:2026-01-12 14:09:56 1376127:1385459 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+TritonTraceHandler: disabled because /logs does not exist
+===========[FB_TRITON]=========== Triton Version: 3.3.2+fb
+[INFO] Using UPI-TRM algorithm (K=5, inner_n=4)
+[INFO] Checkpoint directory: checkpoints/rl_sudoku-4x4-trivial_seed123
+
+============================================================
+UPI-TRM THEORY ALIGNMENT CHECK
+============================================================
+⚠ Configuration has theory gaps:
+  • enable_contraction=False disables spectral normalization (Assumption 4.2). L_z < 1 contraction not enforced.
+  • exact_baseline_summation=False: Using approximate baseline. This gives O(ε_A/(1-γ)) bound instead of O(α·ε_A) from Theorem 5.9. For discrete action spaces (Sudoku), enable for tighter bounds.
+  • theory_exact_mixture=False: Using parameter-space interpolation for CPI, which is NOT equivalent to policy-space mixture. The CPI improvement guarantee does not strictly apply. Set theory_exact_mixture=True for theory-exact behavior (but slower due to evaluating two networks).
+
+Theory status:
+  Forward-invariant projection: ✓
+  Contraction enforced (L_z < 1): ✗
+  Exact baseline (Thm 5.9): ✗
+  Distillation (not in theory): ✓ disabled
+
+Is theory-exact: False
+============================================================
+
+UPI-TRM theoretical dials:
+  L_z target (rl_cfg.target_Lz): 0.9
+  L_V target (rl_cfg.target_Lv): 1.0
+  Inner unroll n (rl_cfg.inner_unroll_n): 4
+  K-step horizon K (rl_cfg.K): 5
+  Mixture alpha (rl_cfg.mixture_alpha): 0.1
+  Latent ball radius (rl_cfg.latent_ball_radius): 10.0
+  Episodic latent: True
+  Exact K-step targets: False
+  Exact baseline summation: False
+
+[INFO] STOP action mode: noop
+[INFO] Forward-invariant projection enabled (R=10.0)
+[WandB] Disabled by default (enable with: --wandb)
+[DEBUG] Action mask: 13 valid actions out of 97 total
+[DEBUG] Latent mode: episodic
+[DEBUG] Step 0 probs: STOP=0.066067, edits=0.933933
+[DEBUG] Top 5 action probs: torch.return_types.topk(
+values=tensor([0.1133, 0.1017, 0.0959, 0.0875, 0.0805], device='cuda:0',
+       grad_fn=<TopkBackward0>),
+indices=tensor([ 9, 88, 21, 20, 87], device='cuda:0'))
+[step 00010] value_loss=201.391418 policy_loss=-0.113686
+[step 00010] VALUE_DEBUG: target(mean=-11.70 std=7.97 min=-20.00 max=0.79) V(s)(mean=0.02 std=0.11) reward(mean=-4.605 std=5.153) clip=20.0
+[step 00020] value_loss=223.345596 policy_loss=-0.182903
+[step 00020] VALUE_DEBUG: target(mean=-12.36 std=8.71 min=-20.00 max=-0.22) V(s)(mean=-0.20 std=0.13) reward(mean=-5.911 std=5.013) clip=20.0
+[step 00030] value_loss=193.272552 policy_loss=-0.069632
+[step 00030] VALUE_DEBUG: target(mean=-11.38 std=8.85 min=-20.00 max=0.74) V(s)(mean=-0.60 std=0.28) reward(mean=-5.191 std=5.180) clip=20.0
+[step 00040] value_loss=178.400513 policy_loss=0.271469
+[step 00040] VALUE_DEBUG: target(mean=-11.19 std=8.91 min=-20.00 max=0.18) V(s)(mean=-1.14 std=0.37) reward(mean=-5.222 std=4.927) clip=20.0
+[step 00050] value_loss=176.119934 policy_loss=-0.390062
+[step 00050] VALUE_DEBUG: target(mean=-12.32 std=8.46 min=-20.00 max=0.58) V(s)(mean=-2.05 std=0.45) reward(mean=-5.496 std=5.205) clip=20.0
+[step 00050] eval_success_rate=0.180 eval_mean_score=8.700 eval_policy_mode=greedy [solved=9/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00050] PROGRESS: filled=14.60 violations=1.80 zero_cand=0.12
+[step 00050] DEBUG: ep_len=6.7 ep_ret=-6.927 stop_prob=0.099 score_chg=0.5000
+[step 00060] value_loss=162.831955 policy_loss=-0.101240
+[step 00060] VALUE_DEBUG: target(mean=-12.51 std=8.49 min=-20.00 max=0.45) V(s)(mean=-3.07 std=0.60) reward(mean=-5.609 std=5.107) clip=20.0
+[step 00070] value_loss=131.397903 policy_loss=-0.613086
+[step 00070] VALUE_DEBUG: target(mean=-12.01 std=8.56 min=-19.99 max=0.24) V(s)(mean=-4.25 std=0.95) reward(mean=-5.326 std=5.047) clip=20.0
+[step 00080] value_loss=87.672935 policy_loss=-0.193687
+[step 00080] VALUE_DEBUG: target(mean=-10.40 std=8.57 min=-20.00 max=-0.29) V(s)(mean=-6.08 std=1.32) reward(mean=-4.535 std=4.906) clip=20.0
+[step 00090] value_loss=86.809929 policy_loss=-0.548323
+[step 00090] VALUE_DEBUG: target(mean=-11.92 std=8.53 min=-20.00 max=-0.24) V(s)(mean=-7.97 std=1.23) reward(mean=-5.397 std=5.034) clip=20.0
+[step 00100] value_loss=81.497925 policy_loss=-1.807403
+[step 00100] VALUE_DEBUG: target(mean=-9.60 std=9.06 min=-20.00 max=-0.58) V(s)(mean=-9.63 std=1.24) reward(mean=-4.730 std=5.078) clip=20.0
+[step 00100] eval_success_rate=0.320 eval_mean_score=8.800 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00100] PROGRESS: filled=14.58 violations=1.28 zero_cand=0.14
+[step 00100] DEBUG: ep_len=6.4 ep_ret=-7.018 stop_prob=0.081 score_chg=0.5750
+[step 00110] value_loss=60.157513 policy_loss=-3.392887
+[step 00110] VALUE_DEBUG: target(mean=-10.25 std=7.95 min=-20.00 max=-0.36) V(s)(mean=-11.09 std=1.44) reward(mean=-3.780 std=5.043) clip=20.0
+[step 00120] value_loss=50.487125 policy_loss=-0.568988
+[step 00120] VALUE_DEBUG: target(mean=-12.13 std=7.89 min=-20.00 max=-1.28) V(s)(mean=-11.26 std=1.82) reward(mean=-5.063 std=5.188) clip=20.0
+[step 00130] value_loss=41.706177 policy_loss=-0.829894
+[step 00130] VALUE_DEBUG: target(mean=-11.77 std=7.65 min=-20.00 max=-1.70) V(s)(mean=-12.34 std=2.28) reward(mean=-4.764 std=5.051) clip=20.0
+[step 00140] value_loss=35.136665 policy_loss=-0.774958
+[step 00140] VALUE_DEBUG: target(mean=-14.97 std=6.69 min=-20.00 max=-0.91) V(s)(mean=-12.53 std=3.69) reward(mean=-6.623 std=5.058) clip=20.0
+[step 00150] value_loss=44.215027 policy_loss=-0.819612
+[step 00150] VALUE_DEBUG: target(mean=-12.47 std=7.00 min=-20.00 max=-2.65) V(s)(mean=-13.03 std=3.70) reward(mean=-4.787 std=5.230) clip=20.0
+[step 00150] eval_success_rate=0.320 eval_mean_score=8.838 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00150] PROGRESS: filled=14.58 violations=1.06 zero_cand=0.12
+[step 00150] DEBUG: ep_len=5.6 ep_ret=-5.426 stop_prob=0.025 score_chg=0.6750
+[step 00160] value_loss=31.865849 policy_loss=0.591044
+[step 00160] VALUE_DEBUG: target(mean=-14.12 std=6.87 min=-20.00 max=-3.52) V(s)(mean=-12.77 std=3.45) reward(mean=-6.085 std=4.972) clip=20.0
+[step 00170] value_loss=32.000351 policy_loss=-2.165601
+[step 00170] VALUE_DEBUG: target(mean=-10.67 std=6.55 min=-20.00 max=-3.25) V(s)(mean=-12.72 std=2.91) reward(mean=-3.130 std=4.935) clip=20.0
+[step 00180] value_loss=28.810970 policy_loss=-4.608974
+[step 00180] VALUE_DEBUG: target(mean=-12.71 std=6.98 min=-20.00 max=-3.69) V(s)(mean=-12.99 std=3.71) reward(mean=-5.194 std=4.886) clip=20.0
+[step 00190] value_loss=22.388237 policy_loss=-3.523523
+[step 00190] VALUE_DEBUG: target(mean=-14.36 std=6.43 min=-20.00 max=-4.23) V(s)(mean=-14.72 std=3.63) reward(mean=-5.910 std=4.990) clip=20.0
+[step 00200] value_loss=16.512325 policy_loss=0.171362
+[step 00200] VALUE_DEBUG: target(mean=-13.94 std=6.59 min=-20.00 max=-4.25) V(s)(mean=-13.22 std=4.24) reward(mean=-5.772 std=4.989) clip=20.0
+[step 00200] eval_success_rate=0.320 eval_mean_score=8.863 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00200] PROGRESS: filled=14.54 violations=0.88 zero_cand=0.08
+[step 00200] DEBUG: ep_len=5.6 ep_ret=-6.233 stop_prob=0.009 score_chg=0.6625
+[step 00210] value_loss=16.200226 policy_loss=-2.740136
+[step 00210] VALUE_DEBUG: target(mean=-15.30 std=6.04 min=-20.00 max=-3.97) V(s)(mean=-14.93 std=3.62) reward(mean=-6.535 std=4.898) clip=20.0
+[step 00220] value_loss=15.517096 policy_loss=-7.961920
+[step 00220] VALUE_DEBUG: target(mean=-13.71 std=6.46 min=-20.00 max=-4.63) V(s)(mean=-12.96 std=5.07) reward(mean=-5.373 std=5.258) clip=20.0
+[step 00230] value_loss=15.924244 policy_loss=-2.489618
+[step 00230] VALUE_DEBUG: target(mean=-13.29 std=6.28 min=-20.00 max=-4.53) V(s)(mean=-14.34 std=4.84) reward(mean=-5.017 std=4.927) clip=20.0
+[step 00240] value_loss=27.945335 policy_loss=-3.628009
+[step 00240] VALUE_DEBUG: target(mean=-15.26 std=5.76 min=-20.00 max=-3.98) V(s)(mean=-15.80 std=2.80) reward(mean=-6.339 std=5.033) clip=20.0
+[step 00250] value_loss=20.279613 policy_loss=1.057856
+[step 00250] VALUE_DEBUG: target(mean=-14.81 std=5.97 min=-20.00 max=-5.55) V(s)(mean=-13.88 std=4.22) reward(mean=-6.043 std=5.142) clip=20.0
+[step 00250] eval_success_rate=0.320 eval_mean_score=8.838 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00250] PROGRESS: filled=14.54 violations=1.00 zero_cand=0.08
+[step 00250] DEBUG: ep_len=5.8 ep_ret=-6.828 stop_prob=0.002 score_chg=0.4625
+[step 00260] value_loss=21.733831 policy_loss=0.007280
+[step 00260] VALUE_DEBUG: target(mean=-14.11 std=6.20 min=-20.00 max=-4.23) V(s)(mean=-12.66 std=3.74) reward(mean=-5.683 std=5.070) clip=20.0
+[step 00270] value_loss=17.095764 policy_loss=4.418777
+[step 00270] VALUE_DEBUG: target(mean=-16.15 std=5.15 min=-20.00 max=-7.18) V(s)(mean=-15.37 std=3.14) reward(mean=-6.959 std=4.807) clip=20.0
+[step 00280] value_loss=21.415344 policy_loss=-5.172583
+[step 00280] VALUE_DEBUG: target(mean=-13.44 std=5.72 min=-20.00 max=-4.61) V(s)(mean=-14.94 std=2.74) reward(mean=-4.475 std=5.121) clip=20.0
+[step 00290] value_loss=20.005447 policy_loss=-3.066786
+[step 00290] VALUE_DEBUG: target(mean=-13.14 std=5.47 min=-20.00 max=-4.61) V(s)(mean=-15.39 std=3.24) reward(mean=-4.170 std=5.002) clip=20.0
+[step 00300] value_loss=18.014751 policy_loss=-2.692292
+[step 00300] VALUE_DEBUG: target(mean=-15.26 std=4.99 min=-20.00 max=-8.69) V(s)(mean=-16.29 std=3.16) reward(mean=-5.809 std=5.073) clip=20.0
+[step 00300] eval_success_rate=0.320 eval_mean_score=8.875 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00300] PROGRESS: filled=14.60 violations=1.00 zero_cand=0.08
+[step 00300] DEBUG: ep_len=6.2 ep_ret=-7.525 stop_prob=0.000 score_chg=0.4000
+[step 00310] value_loss=14.265365 policy_loss=-3.133059
+[step 00310] VALUE_DEBUG: target(mean=-15.03 std=5.25 min=-19.99 max=-7.03) V(s)(mean=-14.11 std=3.89) reward(mean=-5.687 std=5.156) clip=20.0
+[step 00320] value_loss=13.091803 policy_loss=-3.485140
+[step 00320] VALUE_DEBUG: target(mean=-15.60 std=4.97 min=-20.00 max=-7.87) V(s)(mean=-15.41 std=3.10) reward(mean=-6.190 std=4.971) clip=20.0
+[step 00330] value_loss=13.625793 policy_loss=3.601180
+[step 00330] VALUE_DEBUG: target(mean=-15.34 std=5.20 min=-20.00 max=-5.57) V(s)(mean=-13.68 std=3.27) reward(mean=-6.024 std=5.002) clip=20.0
+[step 00340] value_loss=13.343905 policy_loss=0.167723
+[step 00340] VALUE_DEBUG: target(mean=-15.74 std=5.06 min=-20.00 max=-6.16) V(s)(mean=-14.88 std=3.25) reward(mean=-6.228 std=4.943) clip=20.0
+[step 00350] value_loss=14.241241 policy_loss=-1.511545
+[step 00350] VALUE_DEBUG: target(mean=-16.33 std=5.02 min=-20.00 max=-6.28) V(s)(mean=-14.80 std=3.44) reward(mean=-7.016 std=4.718) clip=20.0
+[step 00350] eval_success_rate=0.320 eval_mean_score=8.875 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00350] PROGRESS: filled=14.52 violations=0.76 zero_cand=0.08
+[step 00350] DEBUG: ep_len=5.6 ep_ret=-6.680 stop_prob=0.000 score_chg=0.3875
+[step 00360] value_loss=14.672495 policy_loss=-1.950207
+[step 00360] VALUE_DEBUG: target(mean=-16.39 std=4.32 min=-20.00 max=-8.96) V(s)(mean=-15.24 std=3.15) reward(mean=-6.376 std=4.997) clip=20.0
+[step 00370] value_loss=12.088987 policy_loss=1.112192
+[step 00370] VALUE_DEBUG: target(mean=-15.30 std=4.75 min=-20.00 max=-7.96) V(s)(mean=-14.65 std=3.23) reward(mean=-5.398 std=5.092) clip=20.0
+[step 00380] value_loss=14.487898 policy_loss=-3.671396
+[step 00380] VALUE_DEBUG: target(mean=-15.66 std=5.10 min=-19.99 max=-6.09) V(s)(mean=-16.15 std=2.54) reward(mean=-6.162 std=4.833) clip=20.0
+[step 00390] value_loss=12.841393 policy_loss=-1.696403
+[step 00390] VALUE_DEBUG: target(mean=-15.87 std=4.61 min=-20.00 max=-7.29) V(s)(mean=-16.23 std=3.26) reward(mean=-5.716 std=5.154) clip=20.0
+[step 00400] value_loss=16.872150 policy_loss=-1.051418
+[step 00400] VALUE_DEBUG: target(mean=-17.64 std=4.08 min=-20.00 max=-7.49) V(s)(mean=-15.92 std=3.11) reward(mean=-8.013 std=4.217) clip=20.0
+[step 00400] eval_success_rate=0.320 eval_mean_score=8.887 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00400] PROGRESS: filled=14.52 violations=0.70 zero_cand=0.08
+[step 00400] DEBUG: ep_len=5.9 ep_ret=-7.115 stop_prob=0.000 score_chg=0.3875
+[step 00410] value_loss=9.043364 policy_loss=3.598775
+[step 00410] VALUE_DEBUG: target(mean=-15.67 std=4.68 min=-20.00 max=-9.19) V(s)(mean=-15.73 std=3.00) reward(mean=-5.648 std=5.134) clip=20.0
+[step 00420] value_loss=9.933720 policy_loss=0.153707
+[step 00420] VALUE_DEBUG: target(mean=-16.52 std=4.45 min=-20.00 max=-6.83) V(s)(mean=-16.41 std=3.18) reward(mean=-6.490 std=4.959) clip=20.0
+[step 00430] value_loss=17.609198 policy_loss=-4.901735
+[step 00430] VALUE_DEBUG: target(mean=-16.03 std=4.66 min=-20.00 max=-7.53) V(s)(mean=-15.51 std=2.90) reward(mean=-5.775 std=5.013) clip=20.0
+[step 00440] value_loss=13.903804 policy_loss=-6.742636
+[step 00440] VALUE_DEBUG: target(mean=-15.30 std=4.56 min=-20.00 max=-7.92) V(s)(mean=-16.14 std=2.72) reward(mean=-4.795 std=5.100) clip=20.0
+[step 00450] value_loss=11.389428 policy_loss=-8.913173
+[step 00450] VALUE_DEBUG: target(mean=-16.59 std=4.04 min=-20.00 max=-7.67) V(s)(mean=-17.05 std=2.21) reward(mean=-6.110 std=5.013) clip=20.0
+[step 00450] eval_success_rate=0.320 eval_mean_score=8.900 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00450] PROGRESS: filled=14.52 violations=0.64 zero_cand=0.08
+[step 00450] DEBUG: ep_len=6.7 ep_ret=-8.303 stop_prob=0.000 score_chg=0.4750
+[step 00460] value_loss=11.120674 policy_loss=3.978455
+[step 00460] VALUE_DEBUG: target(mean=-16.63 std=3.87 min=-20.00 max=-9.38) V(s)(mean=-16.29 std=2.71) reward(mean=-6.040 std=4.893) clip=20.0
+[step 00470] value_loss=5.975706 policy_loss=-6.903005
+[step 00470] VALUE_DEBUG: target(mean=-16.75 std=3.59 min=-19.99 max=-9.38) V(s)(mean=-15.54 std=2.61) reward(mean=-5.739 std=4.978) clip=20.0
+[step 00480] value_loss=7.667941 policy_loss=-5.508868
+[step 00480] VALUE_DEBUG: target(mean=-18.12 std=2.95 min=-20.00 max=-9.38) V(s)(mean=-18.49 std=2.05) reward(mean=-7.517 std=4.454) clip=20.0
+[step 00490] value_loss=6.547144 policy_loss=-4.008814
+[step 00490] VALUE_DEBUG: target(mean=-17.07 std=3.66 min=-19.99 max=-9.38) V(s)(mean=-15.94 std=3.12) reward(mean=-6.357 std=4.917) clip=20.0
+[step 00500] value_loss=10.205397 policy_loss=-1.753842
+[step 00500] VALUE_DEBUG: target(mean=-16.59 std=4.06 min=-19.99 max=-8.39) V(s)(mean=-16.34 std=2.91) reward(mean=-6.111 std=4.896) clip=20.0
+[step 00500] eval_success_rate=0.320 eval_mean_score=8.887 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00500] PROGRESS: filled=14.54 violations=0.76 zero_cand=0.08
+[step 00500] DEBUG: ep_len=6.2 ep_ret=-7.423 stop_prob=0.000 score_chg=0.5125
+[step 00510] value_loss=5.586833 policy_loss=-2.684876
+[step 00510] VALUE_DEBUG: target(mean=-17.03 std=3.72 min=-20.00 max=-9.38) V(s)(mean=-16.93 std=2.47) reward(mean=-6.368 std=4.988) clip=20.0
+[step 00520] value_loss=7.025971 policy_loss=-1.777349
+[step 00520] VALUE_DEBUG: target(mean=-16.94 std=3.22 min=-20.00 max=-8.75) V(s)(mean=-17.36 std=2.22) reward(mean=-5.557 std=4.945) clip=20.0
+[step 00530] value_loss=8.535376 policy_loss=-1.035762
+[step 00530] VALUE_DEBUG: target(mean=-16.29 std=4.06 min=-20.00 max=-9.38) V(s)(mean=-17.35 std=2.78) reward(mean=-5.103 std=5.107) clip=20.0
+[step 00540] value_loss=6.379402 policy_loss=-2.429276
+[step 00540] VALUE_DEBUG: target(mean=-17.16 std=3.25 min=-20.00 max=-9.38) V(s)(mean=-17.60 std=2.57) reward(mean=-5.770 std=5.004) clip=20.0
+[step 00550] value_loss=4.268966 policy_loss=-0.081650
+[step 00550] VALUE_DEBUG: target(mean=-16.37 std=4.03 min=-20.00 max=-9.38) V(s)(mean=-15.87 std=3.40) reward(mean=-5.456 std=5.236) clip=20.0
+[step 00550] eval_success_rate=0.320 eval_mean_score=8.900 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00550] PROGRESS: filled=14.52 violations=0.64 zero_cand=0.08
+[step 00550] DEBUG: ep_len=5.8 ep_ret=-6.785 stop_prob=0.000 score_chg=0.5125
+[step 00560] value_loss=5.357740 policy_loss=-1.222497
+[step 00560] VALUE_DEBUG: target(mean=-16.86 std=3.44 min=-20.00 max=-9.38) V(s)(mean=-16.75 std=2.52) reward(mean=-5.509 std=5.036) clip=20.0
+[step 00570] value_loss=6.151904 policy_loss=0.465675
+[step 00570] VALUE_DEBUG: target(mean=-16.19 std=3.54 min=-20.00 max=-8.12) V(s)(mean=-16.60 std=2.88) reward(mean=-4.250 std=4.971) clip=20.0
+[step 00580] value_loss=3.176416 policy_loss=3.740046
+[step 00580] VALUE_DEBUG: target(mean=-17.77 std=2.93 min=-20.00 max=-9.38) V(s)(mean=-17.71 std=2.54) reward(mean=-6.472 std=4.852) clip=20.0
+[step 00590] value_loss=6.278517 policy_loss=-2.782815
+[step 00590] VALUE_DEBUG: target(mean=-17.67 std=2.39 min=-20.00 max=-13.39) V(s)(mean=-16.87 std=1.79) reward(mean=-5.552 std=4.918) clip=20.0
+[step 00600] value_loss=3.666962 policy_loss=-1.179896
+[step 00600] VALUE_DEBUG: target(mean=-16.94 std=3.17 min=-20.00 max=-9.38) V(s)(mean=-17.05 std=2.71) reward(mean=-4.877 std=4.977) clip=20.0
+[step 00600] eval_success_rate=0.320 eval_mean_score=8.900 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00600] PROGRESS: filled=14.52 violations=0.64 zero_cand=0.08
+[step 00600] DEBUG: ep_len=6.0 ep_ret=-7.216 stop_prob=0.000 score_chg=0.5125
+[step 00610] value_loss=4.093710 policy_loss=-3.083457
+[step 00610] VALUE_DEBUG: target(mean=-18.14 std=2.99 min=-20.00 max=-8.75) V(s)(mean=-18.09 std=1.87) reward(mean=-7.389 std=4.710) clip=20.0
+[step 00620] value_loss=5.293543 policy_loss=-1.471324
+[step 00620] VALUE_DEBUG: target(mean=-18.44 std=2.06 min=-20.00 max=-14.30) V(s)(mean=-17.71 std=1.63) reward(mean=-7.131 std=4.620) clip=20.0
+[step 00630] value_loss=2.803580 policy_loss=3.872569
+[step 00630] VALUE_DEBUG: target(mean=-18.36 std=2.78 min=-19.99 max=-9.38) V(s)(mean=-18.44 std=2.38) reward(mean=-7.992 std=4.160) clip=20.0
+[step 00640] value_loss=3.631924 policy_loss=-1.252057
+[step 00640] VALUE_DEBUG: target(mean=-17.83 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-17.69 std=2.61) reward(mean=-6.119 std=4.988) clip=20.0
+[step 00650] value_loss=6.771248 policy_loss=-1.317810
+[step 00650] VALUE_DEBUG: target(mean=-17.63 std=2.94 min=-20.00 max=-8.75) V(s)(mean=-18.07 std=2.27) reward(mean=-5.818 std=5.074) clip=20.0
+[step 00650] eval_success_rate=0.320 eval_mean_score=8.900 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00650] PROGRESS: filled=14.52 violations=0.64 zero_cand=0.08
+[step 00650] DEBUG: ep_len=6.2 ep_ret=-7.445 stop_prob=0.000 score_chg=0.4875
+[step 00660] value_loss=3.117818 policy_loss=3.523417
+[step 00660] VALUE_DEBUG: target(mean=-17.21 std=3.13 min=-19.99 max=-9.38) V(s)(mean=-17.45 std=2.32) reward(mean=-5.149 std=5.064) clip=20.0
+[step 00670] value_loss=5.010571 policy_loss=0.458655
+[step 00670] VALUE_DEBUG: target(mean=-17.14 std=3.79 min=-20.00 max=-8.32) V(s)(mean=-17.72 std=2.99) reward(mean=-6.013 std=5.124) clip=20.0
+[step 00680] value_loss=2.301857 policy_loss=-0.976664
+[step 00680] VALUE_DEBUG: target(mean=-18.16 std=2.28 min=-20.00 max=-9.47) V(s)(mean=-18.26 std=2.06) reward(mean=-6.201 std=4.871) clip=20.0
+[step 00690] value_loss=3.978621 policy_loss=-3.162483
+[step 00690] VALUE_DEBUG: target(mean=-18.30 std=1.65 min=-19.99 max=-15.62) V(s)(mean=-18.44 std=1.83) reward(mean=-5.817 std=4.961) clip=20.0
+[step 00700] value_loss=2.681758 policy_loss=1.936517
+[step 00700] VALUE_DEBUG: target(mean=-17.91 std=2.79 min=-20.00 max=-9.38) V(s)(mean=-18.17 std=2.51) reward(mean=-5.793 std=5.022) clip=20.0
+[step 00700] eval_success_rate=0.320 eval_mean_score=8.925 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00700] PROGRESS: filled=14.52 violations=0.60 zero_cand=0.08
+[step 00700] DEBUG: ep_len=6.2 ep_ret=-7.463 stop_prob=0.000 score_chg=0.4625
+[step 00710] value_loss=2.717006 policy_loss=-0.954657
+[step 00710] VALUE_DEBUG: target(mean=-17.70 std=2.81 min=-20.00 max=-9.38) V(s)(mean=-18.07 std=2.44) reward(mean=-5.441 std=5.085) clip=20.0
+[step 00720] value_loss=6.792849 policy_loss=-1.117923
+[step 00720] VALUE_DEBUG: target(mean=-17.57 std=2.72 min=-20.00 max=-8.32) V(s)(mean=-18.50 std=1.93) reward(mean=-4.237 std=4.912) clip=20.0
+[step 00730] value_loss=3.112722 policy_loss=-0.724130
+[step 00730] VALUE_DEBUG: target(mean=-17.69 std=3.03 min=-20.00 max=-9.38) V(s)(mean=-17.93 std=3.10) reward(mean=-4.382 std=4.933) clip=20.0
+[step 00740] value_loss=1.650073 policy_loss=-0.962166
+[step 00740] VALUE_DEBUG: target(mean=-17.73 std=3.05 min=-19.99 max=-9.38) V(s)(mean=-17.85 std=3.03) reward(mean=-5.471 std=5.074) clip=20.0
+[step 00750] value_loss=1.836808 policy_loss=0.396342
+[step 00750] VALUE_DEBUG: target(mean=-18.64 std=2.04 min=-19.99 max=-9.38) V(s)(mean=-18.62 std=1.63) reward(mean=-6.193 std=4.871) clip=20.0
+[step 00750] eval_success_rate=0.320 eval_mean_score=8.925 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00750] PROGRESS: filled=14.52 violations=0.60 zero_cand=0.08
+[step 00750] DEBUG: ep_len=5.9 ep_ret=-6.924 stop_prob=0.000 score_chg=0.5875
+[step 00760] value_loss=1.541710 policy_loss=-0.815597
+[step 00760] VALUE_DEBUG: target(mean=-17.71 std=2.56 min=-19.98 max=-9.38) V(s)(mean=-17.64 std=2.73) reward(mean=-4.518 std=4.998) clip=20.0
+[step 00770] value_loss=6.146049 policy_loss=-1.280725
+[step 00770] VALUE_DEBUG: target(mean=-18.30 std=2.41 min=-19.99 max=-8.75) V(s)(mean=-18.84 std=1.63) reward(mean=-6.060 std=4.929) clip=20.0
+[step 00780] value_loss=2.568771 policy_loss=1.180966
+[step 00780] VALUE_DEBUG: target(mean=-18.54 std=2.58 min=-20.00 max=-9.38) V(s)(mean=-18.20 std=1.99) reward(mean=-6.523 std=4.888) clip=20.0
+[step 00790] value_loss=2.922501 policy_loss=-1.550058
+[step 00790] VALUE_DEBUG: target(mean=-18.60 std=2.69 min=-20.00 max=-8.75) V(s)(mean=-18.69 std=1.65) reward(mean=-7.371 std=4.598) clip=20.0
+[step 00800] value_loss=1.190251 policy_loss=-1.572363
+[step 00800] VALUE_DEBUG: target(mean=-18.72 std=1.94 min=-20.00 max=-9.47) V(s)(mean=-19.04 std=2.06) reward(mean=-6.847 std=4.820) clip=20.0
+[step 00800] eval_success_rate=0.320 eval_mean_score=8.912 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00800] PROGRESS: filled=14.52 violations=0.74 zero_cand=0.04
+[step 00800] DEBUG: ep_len=4.9 ep_ret=-5.512 stop_prob=0.000 score_chg=0.5125
+[step 00810] value_loss=1.838327 policy_loss=-0.293966
+[step 00810] VALUE_DEBUG: target(mean=-18.75 std=2.00 min=-20.00 max=-9.38) V(s)(mean=-18.25 std=2.12) reward(mean=-5.849 std=4.979) clip=20.0
+[step 00820] value_loss=1.427302 policy_loss=-0.939082
+[step 00820] VALUE_DEBUG: target(mean=-17.93 std=3.39 min=-19.99 max=-9.38) V(s)(mean=-18.47 std=2.98) reward(mean=-6.365 std=5.015) clip=20.0
+[step 00830] value_loss=1.071748 policy_loss=-2.457642
+[step 00830] VALUE_DEBUG: target(mean=-17.95 std=2.95 min=-19.99 max=-9.38) V(s)(mean=-17.51 std=3.03) reward(mean=-4.857 std=4.946) clip=20.0
+[step 00840] value_loss=1.032871 policy_loss=-1.176654
+[step 00840] VALUE_DEBUG: target(mean=-18.41 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-18.89 std=2.16) reward(mean=-5.720 std=4.994) clip=20.0
+[step 00850] value_loss=2.910836 policy_loss=-2.680197
+[step 00850] VALUE_DEBUG: target(mean=-18.30 std=3.06 min=-20.00 max=-8.75) V(s)(mean=-18.58 std=2.57) reward(mean=-5.693 std=5.055) clip=20.0
+[step 00850] eval_success_rate=0.320 eval_mean_score=8.912 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00850] PROGRESS: filled=14.52 violations=0.74 zero_cand=0.04
+[step 00850] DEBUG: ep_len=6.9 ep_ret=-8.537 stop_prob=0.000 score_chg=0.4500
+[step 00860] value_loss=0.862285 policy_loss=-0.528592
+[step 00860] VALUE_DEBUG: target(mean=-18.30 std=3.00 min=-20.00 max=-9.38) V(s)(mean=-18.46 std=2.99) reward(mean=-6.472 std=4.957) clip=20.0
+[step 00870] value_loss=0.852170 policy_loss=14.029505
+[step 00870] VALUE_DEBUG: target(mean=-18.35 std=2.99 min=-19.99 max=-9.38) V(s)(mean=-18.45 std=2.81) reward(mean=-7.032 std=4.724) clip=20.0
+[step 00880] value_loss=1.532194 policy_loss=-1.928380
+[step 00880] VALUE_DEBUG: target(mean=-18.32 std=3.10 min=-19.99 max=-9.38) V(s)(mean=-18.51 std=2.84) reward(mean=-7.337 std=4.539) clip=20.0
+[step 00890] value_loss=2.429262 policy_loss=-0.266171
+[step 00890] VALUE_DEBUG: target(mean=-18.73 std=2.56 min=-20.00 max=-9.38) V(s)(mean=-18.46 std=2.90) reward(mean=-7.049 std=4.689) clip=20.0
+[step 00900] value_loss=2.564404 policy_loss=-5.306489
+[step 00900] VALUE_DEBUG: target(mean=-18.97 std=1.86 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=1.08) reward(mean=-4.908 std=4.988) clip=20.0
+[step 00900] eval_success_rate=0.320 eval_mean_score=8.900 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00900] PROGRESS: filled=14.52 violations=0.84 zero_cand=0.00
+[step 00900] DEBUG: ep_len=5.6 ep_ret=-6.572 stop_prob=0.000 score_chg=0.5125
+[step 00910] value_loss=1.926955 policy_loss=0.710626
+[step 00910] VALUE_DEBUG: target(mean=-17.90 std=3.31 min=-19.99 max=-9.38) V(s)(mean=-18.15 std=3.32) reward(mean=-5.217 std=5.051) clip=20.0
+[step 00920] value_loss=1.662873 policy_loss=1.554092
+[step 00920] VALUE_DEBUG: target(mean=-18.75 std=2.12 min=-20.00 max=-9.38) V(s)(mean=-19.19 std=1.91) reward(mean=-6.140 std=4.947) clip=20.0
+[step 00930] value_loss=3.535482 policy_loss=0.210585
+[step 00930] VALUE_DEBUG: target(mean=-18.29 std=3.46 min=-20.00 max=-8.75) V(s)(mean=-19.08 std=2.40) reward(mean=-6.664 std=4.919) clip=20.0
+[step 00940] value_loss=1.479192 policy_loss=-2.879440
+[step 00940] VALUE_DEBUG: target(mean=-18.78 std=1.86 min=-19.99 max=-9.38) V(s)(mean=-18.28 std=1.99) reward(mean=-5.441 std=5.058) clip=20.0
+[step 00950] value_loss=0.518405 policy_loss=-3.728533
+[step 00950] VALUE_DEBUG: target(mean=-18.90 std=1.92 min=-20.00 max=-9.38) V(s)(mean=-19.10 std=1.97) reward(mean=-5.792 std=5.022) clip=20.0
+[step 00950] eval_success_rate=0.320 eval_mean_score=8.900 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 00950] PROGRESS: filled=14.52 violations=0.84 zero_cand=0.00
+[step 00950] DEBUG: ep_len=5.8 ep_ret=-6.894 stop_prob=0.000 score_chg=0.4000
+[step 00960] value_loss=0.421667 policy_loss=5.079304
+[step 00960] VALUE_DEBUG: target(mean=-19.07 std=1.85 min=-20.00 max=-9.57) V(s)(mean=-19.36 std=1.80) reward(mean=-7.140 std=4.648) clip=20.0
+[step 00970] value_loss=3.041246 policy_loss=-1.716366
+[step 00970] VALUE_DEBUG: target(mean=-18.90 std=2.48 min=-20.00 max=-9.38) V(s)(mean=-19.21 std=2.29) reward(mean=-7.054 std=4.772) clip=20.0
+[step 00980] value_loss=1.100378 policy_loss=-1.388176
+[step 00980] VALUE_DEBUG: target(mean=-18.94 std=2.11 min=-20.00 max=-9.38) V(s)(mean=-19.17 std=1.84) reward(mean=-5.541 std=4.976) clip=20.0
+[step 00990] value_loss=7.156800 policy_loss=0.296328
+[step 00990] VALUE_DEBUG: target(mean=-18.23 std=3.45 min=-20.00 max=-8.75) V(s)(mean=-19.19 std=1.82) reward(mean=-5.768 std=5.012) clip=20.0
+[step 01000] value_loss=0.658040 policy_loss=-0.541022
+[step 01000] VALUE_DEBUG: target(mean=-18.81 std=2.49 min=-20.00 max=-9.38) V(s)(mean=-19.37 std=2.28) reward(mean=-5.873 std=5.060) clip=20.0
+[step 01000] eval_success_rate=0.320 eval_mean_score=8.900 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01000] PROGRESS: filled=14.52 violations=0.84 zero_cand=0.00
+[step 01000] DEBUG: ep_len=6.2 ep_ret=-7.494 stop_prob=0.000 score_chg=0.4375
+[Checkpoint] Saved to checkpoints/rl_sudoku-4x4-trivial_seed123/rl_checkpoint_step_1000.pt
+[step 01010] value_loss=3.654214 policy_loss=-1.450860
+[step 01010] VALUE_DEBUG: target(mean=-18.19 std=3.44 min=-20.00 max=-8.75) V(s)(mean=-18.57 std=3.38) reward(mean=-6.055 std=5.058) clip=20.0
+[step 01020] value_loss=1.182690 policy_loss=0.329236
+[step 01020] VALUE_DEBUG: target(mean=-18.67 std=2.62 min=-20.00 max=-9.38) V(s)(mean=-18.87 std=3.08) reward(mean=-4.954 std=5.034) clip=20.0
+[step 01030] value_loss=1.020449 policy_loss=-1.433917
+[step 01030] VALUE_DEBUG: target(mean=-19.15 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-18.67 std=1.98) reward(mean=-6.195 std=4.998) clip=20.0
+[step 01040] value_loss=0.631153 policy_loss=-1.321529
+[step 01040] VALUE_DEBUG: target(mean=-19.24 std=1.47 min=-20.00 max=-11.58) V(s)(mean=-19.58 std=1.34) reward(mean=-6.869 std=4.653) clip=20.0
+[step 01050] value_loss=0.654665 policy_loss=0.533513
+[step 01050] VALUE_DEBUG: target(mean=-19.13 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-18.95 std=2.05) reward(mean=-5.484 std=4.983) clip=20.0
+[step 01050] eval_success_rate=0.320 eval_mean_score=8.875 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01050] PROGRESS: filled=14.52 violations=0.92 zero_cand=0.04
+[step 01050] DEBUG: ep_len=6.3 ep_ret=-7.712 stop_prob=0.000 score_chg=0.4250
+[step 01060] value_loss=4.105723 policy_loss=0.949088
+[step 01060] VALUE_DEBUG: target(mean=-18.58 std=3.00 min=-20.00 max=-9.38) V(s)(mean=-19.38 std=2.15) reward(mean=-5.808 std=5.005) clip=20.0
+[step 01070] value_loss=0.405975 policy_loss=-2.301509
+[step 01070] VALUE_DEBUG: target(mean=-18.28 std=3.38 min=-20.00 max=-9.38) V(s)(mean=-18.34 std=3.42) reward(mean=-5.778 std=5.008) clip=20.0
+[step 01080] value_loss=0.498228 policy_loss=-0.565238
+[step 01080] VALUE_DEBUG: target(mean=-19.09 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.22 std=2.15) reward(mean=-4.534 std=5.073) clip=20.0
+[step 01090] value_loss=0.321243 policy_loss=-3.324910
+[step 01090] VALUE_DEBUG: target(mean=-18.99 std=2.51 min=-20.00 max=-9.38) V(s)(mean=-19.13 std=2.51) reward(mean=-5.559 std=5.020) clip=20.0
+[step 01100] value_loss=0.239921 policy_loss=-1.320645
+[step 01100] VALUE_DEBUG: target(mean=-19.01 std=2.49 min=-19.99 max=-9.38) V(s)(mean=-19.15 std=2.64) reward(mean=-7.697 std=4.358) clip=20.0
+[step 01100] eval_success_rate=0.320 eval_mean_score=8.850 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01100] PROGRESS: filled=14.52 violations=1.04 zero_cand=0.04
+[step 01100] DEBUG: ep_len=5.8 ep_ret=-6.842 stop_prob=0.000 score_chg=0.4500
+[step 01110] value_loss=3.034541 policy_loss=0.452129
+[step 01110] VALUE_DEBUG: target(mean=-18.44 std=3.01 min=-20.00 max=-8.75) V(s)(mean=-18.66 std=2.83) reward(mean=-5.156 std=5.124) clip=20.0
+[step 01120] value_loss=1.139449 policy_loss=-2.135429
+[step 01120] VALUE_DEBUG: target(mean=-19.39 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.26 std=2.06) reward(mean=-6.827 std=4.829) clip=20.0
+[step 01130] value_loss=0.783138 policy_loss=0.102633
+[step 01130] VALUE_DEBUG: target(mean=-19.23 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.73 std=1.19) reward(mean=-5.217 std=5.005) clip=20.0
+[step 01140] value_loss=3.882709 policy_loss=-3.182715
+[step 01140] VALUE_DEBUG: target(mean=-19.13 std=1.93 min=-20.00 max=-8.75) V(s)(mean=-19.61 std=0.62) reward(mean=-4.905 std=4.968) clip=20.0
+[step 01150] value_loss=7.835299 policy_loss=0.267866
+[step 01150] VALUE_DEBUG: target(mean=-18.33 std=3.47 min=-20.00 max=-8.75) V(s)(mean=-19.30 std=2.40) reward(mean=-6.676 std=4.844) clip=20.0
+[step 01150] eval_success_rate=0.320 eval_mean_score=8.850 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01150] PROGRESS: filled=14.52 violations=1.04 zero_cand=0.04
+[step 01150] DEBUG: ep_len=5.2 ep_ret=-5.996 stop_prob=0.000 score_chg=0.4500
+[step 01160] value_loss=3.659482 policy_loss=4.200726
+[step 01160] VALUE_DEBUG: target(mean=-19.29 std=1.94 min=-20.00 max=-8.75) V(s)(mean=-19.74 std=0.66) reward(mean=-6.051 std=4.918) clip=20.0
+[step 01170] value_loss=0.390005 policy_loss=-2.533270
+[step 01170] VALUE_DEBUG: target(mean=-19.26 std=1.79 min=-20.00 max=-9.57) V(s)(mean=-19.71 std=1.64) reward(mean=-4.239 std=4.919) clip=20.0
+[step 01180] value_loss=0.302652 policy_loss=-1.506578
+[step 01180] VALUE_DEBUG: target(mean=-19.32 std=1.81 min=-20.00 max=-9.38) V(s)(mean=-19.59 std=1.75) reward(mean=-6.133 std=4.971) clip=20.0
+[step 01190] value_loss=0.339985 policy_loss=-1.632373
+[step 01190] VALUE_DEBUG: target(mean=-19.11 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.24 std=2.95) reward(mean=-5.822 std=5.003) clip=20.0
+[step 01200] value_loss=0.122459 policy_loss=-0.665006
+[step 01200] VALUE_DEBUG: target(mean=-18.76 std=3.03 min=-20.00 max=-9.38) V(s)(mean=-19.01 std=3.09) reward(mean=-5.470 std=5.088) clip=20.0
+[step 01200] eval_success_rate=0.320 eval_mean_score=8.850 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01200] PROGRESS: filled=14.52 violations=1.04 zero_cand=0.04
+[step 01200] DEBUG: ep_len=5.8 ep_ret=-6.840 stop_prob=0.000 score_chg=0.4625
+[step 01210] value_loss=2.388774 policy_loss=-1.966717
+[step 01210] VALUE_DEBUG: target(mean=-19.05 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.59 std=1.91) reward(mean=-5.760 std=5.070) clip=20.0
+[step 01220] value_loss=0.050009 policy_loss=-1.204738
+[step 01220] VALUE_DEBUG: target(mean=-19.85 std=0.17 min=-20.00 max=-19.54) V(s)(mean=-20.00 std=0.00) reward(mean=-6.581 std=4.769) clip=20.0
+[step 01230] value_loss=0.168796 policy_loss=-1.893840
+[step 01230] VALUE_DEBUG: target(mean=-19.21 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.38 std=2.43) reward(mean=-4.573 std=5.037) clip=20.0
+[step 01240] value_loss=0.125498 policy_loss=0.596382
+[step 01240] VALUE_DEBUG: target(mean=-19.46 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.64 std=2.03) reward(mean=-7.122 std=4.626) clip=20.0
+[step 01250] value_loss=0.128842 policy_loss=-0.752107
+[step 01250] VALUE_DEBUG: target(mean=-18.83 std=3.03 min=-20.00 max=-9.38) V(s)(mean=-18.97 std=3.14) reward(mean=-4.850 std=5.009) clip=20.0
+[step 01250] eval_success_rate=0.320 eval_mean_score=8.850 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01250] PROGRESS: filled=14.52 violations=1.04 zero_cand=0.04
+[step 01250] DEBUG: ep_len=6.5 ep_ret=-7.944 stop_prob=0.000 score_chg=0.4125
+[step 01260] value_loss=2.698947 policy_loss=-2.779465
+[step 01260] VALUE_DEBUG: target(mean=-18.28 std=3.54 min=-20.00 max=-9.38) V(s)(mean=-18.89 std=3.09) reward(mean=-4.846 std=5.101) clip=20.0
+[step 01270] value_loss=1.086682 policy_loss=-3.625730
+[step 01270] VALUE_DEBUG: target(mean=-18.83 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.20 std=2.59) reward(mean=-5.496 std=4.945) clip=20.0
+[step 01280] value_loss=0.092454 policy_loss=-2.024822
+[step 01280] VALUE_DEBUG: target(mean=-19.80 std=0.23 min=-20.00 max=-19.25) V(s)(mean=-20.00 std=0.00) reward(mean=-6.866 std=4.710) clip=20.0
+[step 01290] value_loss=0.720204 policy_loss=0.564804
+[step 01290] VALUE_DEBUG: target(mean=-18.20 std=3.86 min=-20.00 max=-8.75) V(s)(mean=-18.50 std=3.53) reward(mean=-4.490 std=5.157) clip=20.0
+[step 01300] value_loss=0.070818 policy_loss=-3.715342
+[step 01300] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.64 std=1.94) reward(mean=-6.484 std=4.802) clip=20.0
+[step 01300] eval_success_rate=0.320 eval_mean_score=8.850 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01300] PROGRESS: filled=14.52 violations=1.04 zero_cand=0.04
+[step 01300] DEBUG: ep_len=5.8 ep_ret=-6.858 stop_prob=0.000 score_chg=0.4375
+[step 01310] value_loss=0.081683 policy_loss=0.179379
+[step 01310] VALUE_DEBUG: target(mean=-19.26 std=2.56 min=-20.00 max=-9.38) V(s)(mean=-19.37 std=2.46) reward(mean=-5.522 std=4.968) clip=20.0
+[step 01320] value_loss=0.159167 policy_loss=0.656248
+[step 01320] VALUE_DEBUG: target(mean=-19.15 std=2.57 min=-20.00 max=-9.38) V(s)(mean=-19.31 std=2.58) reward(mean=-4.312 std=4.975) clip=20.0
+[step 01330] value_loss=0.112904 policy_loss=-3.812336
+[step 01330] VALUE_DEBUG: target(mean=-18.49 std=3.45 min=-20.00 max=-9.38) V(s)(mean=-18.68 std=3.50) reward(mean=-6.711 std=4.810) clip=20.0
+[step 01340] value_loss=0.256692 policy_loss=-2.086338
+[step 01340] VALUE_DEBUG: target(mean=-18.51 std=3.46 min=-20.00 max=-9.38) V(s)(mean=-18.79 std=3.21) reward(mean=-5.203 std=5.007) clip=20.0
+[step 01350] value_loss=0.318358 policy_loss=1.316701
+[step 01350] VALUE_DEBUG: target(mean=-19.68 std=0.47 min=-20.00 max=-17.53) V(s)(mean=-20.00 std=0.00) reward(mean=-6.816 std=4.797) clip=20.0
+[step 01350] eval_success_rate=0.320 eval_mean_score=8.850 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01350] PROGRESS: filled=14.52 violations=1.04 zero_cand=0.04
+[step 01350] DEBUG: ep_len=6.6 ep_ret=-8.181 stop_prob=0.000 score_chg=0.3625
+[step 01360] value_loss=0.071444 policy_loss=-1.290146
+[step 01360] VALUE_DEBUG: target(mean=-19.53 std=1.80 min=-20.00 max=-9.57) V(s)(mean=-19.70 std=1.66) reward(mean=-5.926 std=4.961) clip=20.0
+[step 01370] value_loss=3.973054 policy_loss=-1.025281
+[step 01370] VALUE_DEBUG: target(mean=-19.21 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-18.92 std=3.37) reward(mean=-4.631 std=5.061) clip=20.0
+[step 01380] value_loss=0.395159 policy_loss=-2.943921
+[step 01380] VALUE_DEBUG: target(mean=-18.81 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.09 std=2.85) reward(mean=-5.804 std=5.040) clip=20.0
+[step 01390] value_loss=0.053363 policy_loss=-2.423582
+[step 01390] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.31 std=2.66) reward(mean=-6.436 std=4.908) clip=20.0
+[step 01400] value_loss=0.158642 policy_loss=0.887549
+[step 01400] VALUE_DEBUG: target(mean=-18.84 std=3.04 min=-20.00 max=-9.38) V(s)(mean=-19.09 std=2.81) reward(mean=-6.138 std=4.936) clip=20.0
+[step 01400] eval_success_rate=0.320 eval_mean_score=8.850 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01400] PROGRESS: filled=14.52 violations=1.04 zero_cand=0.04
+[step 01400] DEBUG: ep_len=6.2 ep_ret=-7.549 stop_prob=0.000 score_chg=0.3625
+[step 01410] value_loss=0.073874 policy_loss=-1.079975
+[step 01410] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.80) reward(mean=-6.104 std=4.938) clip=20.0
+[step 01420] value_loss=0.614051 policy_loss=0.392582
+[step 01420] VALUE_DEBUG: target(mean=-19.13 std=2.59 min=-20.00 max=-8.85) V(s)(mean=-19.38 std=2.19) reward(mean=-7.114 std=4.704) clip=20.0
+[step 01430] value_loss=0.090794 policy_loss=-3.221769
+[step 01430] VALUE_DEBUG: target(mean=-19.17 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.35 std=2.44) reward(mean=-6.478 std=4.975) clip=20.0
+[step 01440] value_loss=3.595579 policy_loss=-0.777302
+[step 01440] VALUE_DEBUG: target(mean=-19.16 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.63 std=1.87) reward(mean=-5.238 std=5.039) clip=20.0
+[step 01450] value_loss=0.235711 policy_loss=-1.410513
+[step 01450] VALUE_DEBUG: target(mean=-19.39 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.79) reward(mean=-6.769 std=4.850) clip=20.0
+[step 01450] eval_success_rate=0.320 eval_mean_score=8.850 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01450] PROGRESS: filled=14.52 violations=1.04 zero_cand=0.04
+[step 01450] DEBUG: ep_len=6.2 ep_ret=-7.532 stop_prob=0.000 score_chg=0.4000
+[step 01460] value_loss=0.060292 policy_loss=-1.191927
+[step 01460] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-5.913 std=4.950) clip=20.0
+[step 01470] value_loss=0.120846 policy_loss=-3.515390
+[step 01470] VALUE_DEBUG: target(mean=-19.48 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.69 std=1.74) reward(mean=-7.076 std=4.643) clip=20.0
+[step 01480] value_loss=0.104222 policy_loss=-2.220694
+[step 01480] VALUE_DEBUG: target(mean=-19.80 std=0.26 min=-20.00 max=-18.95) V(s)(mean=-20.00 std=0.00) reward(mean=-5.616 std=5.009) clip=20.0
+[step 01490] value_loss=0.207273 policy_loss=-1.404405
+[step 01490] VALUE_DEBUG: target(mean=-19.12 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.29 std=2.78) reward(mean=-6.119 std=4.985) clip=20.0
+[step 01500] value_loss=0.281209 policy_loss=0.584775
+[step 01500] VALUE_DEBUG: target(mean=-17.84 std=4.08 min=-20.00 max=-9.38) V(s)(mean=-18.02 std=4.14) reward(mean=-5.072 std=5.123) clip=20.0
+[step 01500] eval_success_rate=0.320 eval_mean_score=8.787 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01500] PROGRESS: filled=14.52 violations=1.30 zero_cand=0.04
+[step 01500] DEBUG: ep_len=6.3 ep_ret=-7.743 stop_prob=0.000 score_chg=0.3875
+[step 01510] value_loss=0.226714 policy_loss=-1.645425
+[step 01510] VALUE_DEBUG: target(mean=-19.17 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.27 std=2.83) reward(mean=-6.096 std=4.938) clip=20.0
+[step 01520] value_loss=3.608640 policy_loss=-1.125337
+[step 01520] VALUE_DEBUG: target(mean=-19.14 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.76) reward(mean=-7.718 std=4.407) clip=20.0
+[step 01530] value_loss=2.540197 policy_loss=-1.185721
+[step 01530] VALUE_DEBUG: target(mean=-19.49 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.35 std=2.52) reward(mean=-5.850 std=4.971) clip=20.0
+[step 01540] value_loss=7.112174 policy_loss=-1.269576
+[step 01540] VALUE_DEBUG: target(mean=-18.56 std=3.47 min=-20.00 max=-9.38) V(s)(mean=-19.31 std=2.55) reward(mean=-4.861 std=5.065) clip=20.0
+[step 01550] value_loss=4.528514 policy_loss=-1.535461
+[step 01550] VALUE_DEBUG: target(mean=-18.53 std=3.52 min=-20.00 max=-8.75) V(s)(mean=-18.77 std=3.75) reward(mean=-4.923 std=5.050) clip=20.0
+[step 01550] eval_success_rate=0.320 eval_mean_score=8.787 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01550] PROGRESS: filled=14.52 violations=1.30 zero_cand=0.04
+[step 01550] DEBUG: ep_len=6.2 ep_ret=-7.567 stop_prob=0.000 score_chg=0.3500
+[step 01560] value_loss=0.055358 policy_loss=0.235985
+[step 01560] VALUE_DEBUG: target(mean=-19.22 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.31 std=2.64) reward(mean=-5.474 std=5.061) clip=20.0
+[step 01570] value_loss=0.064858 policy_loss=-0.557512
+[step 01570] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.32 std=2.57) reward(mean=-4.259 std=5.022) clip=20.0
+[step 01580] value_loss=0.080750 policy_loss=-1.959473
+[step 01580] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.29 std=2.63) reward(mean=-4.914 std=4.995) clip=20.0
+[step 01590] value_loss=0.074886 policy_loss=-1.515244
+[step 01590] VALUE_DEBUG: target(mean=-19.48 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.92) reward(mean=-6.826 std=4.791) clip=20.0
+[step 01600] value_loss=0.151766 policy_loss=1.123384
+[step 01600] VALUE_DEBUG: target(mean=-18.54 std=3.46 min=-20.00 max=-9.38) V(s)(mean=-18.70 std=3.44) reward(mean=-5.445 std=5.068) clip=20.0
+[step 01600] eval_success_rate=0.320 eval_mean_score=8.787 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01600] PROGRESS: filled=14.52 violations=1.30 zero_cand=0.04
+[step 01600] DEBUG: ep_len=6.0 ep_ret=-7.328 stop_prob=0.000 score_chg=0.3875
+[step 01610] value_loss=0.121227 policy_loss=0.393324
+[step 01610] VALUE_DEBUG: target(mean=-19.79 std=0.25 min=-20.00 max=-19.00) V(s)(mean=-19.97 std=0.18) reward(mean=-7.420 std=4.508) clip=20.0
+[step 01620] value_loss=0.156883 policy_loss=-1.784176
+[step 01620] VALUE_DEBUG: target(mean=-19.83 std=0.36 min=-20.00 max=-18.29) V(s)(mean=-20.00 std=0.00) reward(mean=-6.142 std=4.815) clip=20.0
+[step 01630] value_loss=0.064479 policy_loss=-1.804557
+[step 01630] VALUE_DEBUG: target(mean=-19.83 std=0.19 min=-20.00 max=-19.51) V(s)(mean=-20.00 std=0.00) reward(mean=-5.911 std=5.008) clip=20.0
+[step 01640] value_loss=0.066877 policy_loss=-1.245295
+[step 01640] VALUE_DEBUG: target(mean=-19.82 std=0.18 min=-20.00 max=-19.22) V(s)(mean=-20.00 std=0.00) reward(mean=-8.046 std=4.186) clip=20.0
+[step 01650] value_loss=0.088410 policy_loss=-0.613517
+[step 01650] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-18.96 std=3.22) reward(mean=-6.424 std=4.965) clip=20.0
+[step 01650] eval_success_rate=0.320 eval_mean_score=8.787 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01650] PROGRESS: filled=14.52 violations=1.30 zero_cand=0.04
+[step 01650] DEBUG: ep_len=5.5 ep_ret=-6.511 stop_prob=0.000 score_chg=0.3500
+[step 01660] value_loss=4.012261 policy_loss=-3.855369
+[step 01660] VALUE_DEBUG: target(mean=-19.53 std=1.95 min=-20.00 max=-8.75) V(s)(mean=-20.00 std=0.00) reward(mean=-4.906 std=4.987) clip=20.0
+[step 01670] value_loss=0.042068 policy_loss=2.745739
+[step 01670] VALUE_DEBUG: target(mean=-19.89 std=0.17 min=-20.00 max=-19.51) V(s)(mean=-20.00 std=0.00) reward(mean=-4.334 std=4.918) clip=20.0
+[step 01680] value_loss=0.279946 policy_loss=-2.057085
+[step 01680] VALUE_DEBUG: target(mean=-18.90 std=3.07 min=-20.00 max=-9.38) V(s)(mean=-19.12 std=2.76) reward(mean=-4.931 std=4.994) clip=20.0
+[step 01690] value_loss=3.029941 policy_loss=0.174992
+[step 01690] VALUE_DEBUG: target(mean=-19.75 std=0.32 min=-20.00 max=-18.53) V(s)(mean=-19.58 std=1.73) reward(mean=-7.114 std=4.597) clip=20.0
+[step 01700] value_loss=0.240089 policy_loss=-1.688498
+[step 01700] VALUE_DEBUG: target(mean=-18.90 std=3.07 min=-20.00 max=-9.38) V(s)(mean=-19.10 std=2.76) reward(mean=-4.535 std=5.039) clip=20.0
+[step 01700] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01700] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 01700] DEBUG: ep_len=5.8 ep_ret=-6.971 stop_prob=0.000 score_chg=0.3125
+[step 01710] value_loss=3.629091 policy_loss=-1.985173
+[step 01710] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.63 std=2.08) reward(mean=-8.013 std=4.204) clip=20.0
+[step 01720] value_loss=0.062344 policy_loss=-0.381907
+[step 01720] VALUE_DEBUG: target(mean=-19.85 std=0.20 min=-20.00 max=-19.25) V(s)(mean=-20.00 std=0.00) reward(mean=-6.173 std=4.885) clip=20.0
+[step 01730] value_loss=0.083819 policy_loss=-0.757175
+[step 01730] VALUE_DEBUG: target(mean=-19.16 std=2.52 min=-20.00 max=-9.38) V(s)(mean=-19.35 std=2.51) reward(mean=-7.063 std=4.681) clip=20.0
+[step 01740] value_loss=0.197837 policy_loss=-1.315121
+[step 01740] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.73 std=1.51) reward(mean=-6.788 std=4.758) clip=20.0
+[step 01750] value_loss=3.990499 policy_loss=-0.813011
+[step 01750] VALUE_DEBUG: target(mean=-17.91 std=4.15 min=-20.00 max=-8.75) V(s)(mean=-18.32 std=3.90) reward(mean=-4.157 std=5.024) clip=20.0
+[step 01750] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01750] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 01750] DEBUG: ep_len=5.6 ep_ret=-6.708 stop_prob=0.000 score_chg=0.3625
+[step 01760] value_loss=0.077667 policy_loss=-2.675217
+[step 01760] VALUE_DEBUG: target(mean=-19.82 std=0.22 min=-20.00 max=-19.12) V(s)(mean=-19.98 std=0.07) reward(mean=-7.113 std=4.555) clip=20.0
+[step 01770] value_loss=0.073432 policy_loss=0.023306
+[step 01770] VALUE_DEBUG: target(mean=-18.82 std=3.04 min=-20.00 max=-9.38) V(s)(mean=-19.01 std=3.07) reward(mean=-6.165 std=4.991) clip=20.0
+[step 01780] value_loss=0.089413 policy_loss=-1.967856
+[step 01780] VALUE_DEBUG: target(mean=-19.48 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.69 std=1.74) reward(mean=-6.485 std=4.924) clip=20.0
+[step 01790] value_loss=0.076794 policy_loss=-3.426331
+[step 01790] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.36 std=2.46) reward(mean=-5.548 std=5.065) clip=20.0
+[step 01800] value_loss=0.276877 policy_loss=0.782751
+[step 01800] VALUE_DEBUG: target(mean=-19.19 std=2.61 min=-20.00 max=-8.75) V(s)(mean=-19.41 std=2.29) reward(mean=-6.142 std=4.993) clip=20.0
+[step 01800] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01800] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 01800] DEBUG: ep_len=5.9 ep_ret=-7.102 stop_prob=0.000 score_chg=0.4000
+[step 01810] value_loss=0.102691 policy_loss=-0.454760
+[step 01810] VALUE_DEBUG: target(mean=-18.52 std=3.46 min=-20.00 max=-9.38) V(s)(mean=-18.71 std=3.42) reward(mean=-5.780 std=5.096) clip=20.0
+[step 01820] value_loss=0.049186 policy_loss=-0.924458
+[step 01820] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.52) reward(mean=-5.810 std=5.036) clip=20.0
+[step 01830] value_loss=0.057774 policy_loss=-0.853592
+[step 01830] VALUE_DEBUG: target(mean=-19.88 std=0.21 min=-20.00 max=-19.03) V(s)(mean=-19.99 std=0.05) reward(mean=-5.144 std=5.065) clip=20.0
+[step 01840] value_loss=0.066505 policy_loss=-1.003253
+[step 01840] VALUE_DEBUG: target(mean=-18.92 std=3.08 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.06) reward(mean=-4.193 std=4.945) clip=20.0
+[step 01850] value_loss=4.004897 policy_loss=-1.826455
+[step 01850] VALUE_DEBUG: target(mean=-18.88 std=3.13 min=-20.00 max=-8.75) V(s)(mean=-19.35 std=2.52) reward(mean=-5.466 std=5.125) clip=20.0
+[step 01850] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01850] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 01850] DEBUG: ep_len=6.7 ep_ret=-8.451 stop_prob=0.000 score_chg=0.3125
+[step 01860] value_loss=0.063151 policy_loss=-1.804967
+[step 01860] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.65 std=1.95) reward(mean=-7.701 std=4.387) clip=20.0
+[step 01870] value_loss=0.101278 policy_loss=-1.186512
+[step 01870] VALUE_DEBUG: target(mean=-19.16 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.31 std=2.66) reward(mean=-7.017 std=4.714) clip=20.0
+[step 01880] value_loss=0.079382 policy_loss=-0.216449
+[step 01880] VALUE_DEBUG: target(mean=-18.84 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.02 std=3.05) reward(mean=-5.786 std=5.025) clip=20.0
+[step 01890] value_loss=4.210704 policy_loss=-0.330163
+[step 01890] VALUE_DEBUG: target(mean=-18.90 std=2.88 min=-20.00 max=-8.75) V(s)(mean=-19.32 std=2.64) reward(mean=-5.833 std=5.063) clip=20.0
+[step 01900] value_loss=0.097127 policy_loss=-2.073294
+[step 01900] VALUE_DEBUG: target(mean=-19.49 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.62 std=2.00) reward(mean=-7.114 std=4.671) clip=20.0
+[step 01900] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01900] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 01900] DEBUG: ep_len=6.5 ep_ret=-8.035 stop_prob=0.000 score_chg=0.3000
+[step 01910] value_loss=0.115876 policy_loss=-2.177042
+[step 01910] VALUE_DEBUG: target(mean=-18.23 std=3.81 min=-20.00 max=-9.38) V(s)(mean=-18.43 std=3.64) reward(mean=-5.166 std=5.068) clip=20.0
+[step 01920] value_loss=3.595383 policy_loss=-0.912275
+[step 01920] VALUE_DEBUG: target(mean=-18.83 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.61) reward(mean=-6.469 std=4.865) clip=20.0
+[step 01930] value_loss=0.063736 policy_loss=1.487933
+[step 01930] VALUE_DEBUG: target(mean=-19.49 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.85) reward(mean=-6.819 std=4.777) clip=20.0
+[step 01940] value_loss=0.185140 policy_loss=-1.458627
+[step 01940] VALUE_DEBUG: target(mean=-19.16 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.25 std=2.89) reward(mean=-6.761 std=4.852) clip=20.0
+[step 01950] value_loss=0.111382 policy_loss=-4.043437
+[step 01950] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.71 std=1.61) reward(mean=-6.800 std=4.767) clip=20.0
+[step 01950] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 01950] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 01950] DEBUG: ep_len=5.8 ep_ret=-6.882 stop_prob=0.000 score_chg=0.4125
+[step 01960] value_loss=0.053012 policy_loss=-1.381165
+[step 01960] VALUE_DEBUG: target(mean=-19.24 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.30 std=2.70) reward(mean=-4.346 std=4.900) clip=20.0
+[step 01970] value_loss=0.059096 policy_loss=-2.196301
+[step 01970] VALUE_DEBUG: target(mean=-18.87 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.03 std=3.03) reward(mean=-5.787 std=5.075) clip=20.0
+[step 01980] value_loss=0.072123 policy_loss=-0.266590
+[step 01980] VALUE_DEBUG: target(mean=-19.81 std=0.18 min=-20.00 max=-19.48) V(s)(mean=-19.99 std=0.07) reward(mean=-8.138 std=4.131) clip=20.0
+[step 01990] value_loss=0.086412 policy_loss=-0.051112
+[step 01990] VALUE_DEBUG: target(mean=-19.16 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.37 std=2.45) reward(mean=-6.780 std=4.771) clip=20.0
+[step 02000] value_loss=0.075060 policy_loss=-0.022616
+[step 02000] VALUE_DEBUG: target(mean=-19.22 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.29 std=2.75) reward(mean=-6.452 std=4.877) clip=20.0
+[step 02000] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02000] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02000] DEBUG: ep_len=5.8 ep_ret=-6.994 stop_prob=0.000 score_chg=0.2750
+[Checkpoint] Saved to checkpoints/rl_sudoku-4x4-trivial_seed123/rl_checkpoint_step_2000.pt
+[step 02010] value_loss=0.091882 policy_loss=-0.721240
+[step 02010] VALUE_DEBUG: target(mean=-19.45 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.65 std=1.87) reward(mean=-6.882 std=4.710) clip=20.0
+[step 02020] value_loss=0.089587 policy_loss=-1.852804
+[step 02020] VALUE_DEBUG: target(mean=-19.78 std=0.21 min=-20.00 max=-19.25) V(s)(mean=-20.00 std=0.00) reward(mean=-7.145 std=4.667) clip=20.0
+[step 02030] value_loss=3.988300 policy_loss=0.227082
+[step 02030] VALUE_DEBUG: target(mean=-19.22 std=2.63 min=-20.00 max=-8.75) V(s)(mean=-19.66 std=1.82) reward(mean=-5.247 std=5.031) clip=20.0
+[step 02040] value_loss=0.048679 policy_loss=-0.044290
+[step 02040] VALUE_DEBUG: target(mean=-19.19 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.58) reward(mean=-5.527 std=5.082) clip=20.0
+[step 02050] value_loss=0.161695 policy_loss=-3.772478
+[step 02050] VALUE_DEBUG: target(mean=-18.87 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.08 std=2.87) reward(mean=-5.799 std=5.045) clip=20.0
+[step 02050] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02050] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02050] DEBUG: ep_len=6.2 ep_ret=-7.613 stop_prob=0.000 score_chg=0.3000
+[step 02060] value_loss=0.037396 policy_loss=0.918728
+[step 02060] VALUE_DEBUG: target(mean=-19.56 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.79) reward(mean=-8.048 std=4.157) clip=20.0
+[step 02070] value_loss=0.056809 policy_loss=-0.862290
+[step 02070] VALUE_DEBUG: target(mean=-18.86 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.01 std=3.06) reward(mean=-5.227 std=5.068) clip=20.0
+[step 02080] value_loss=0.047551 policy_loss=-1.927077
+[step 02080] VALUE_DEBUG: target(mean=-19.21 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.56) reward(mean=-4.901 std=5.046) clip=20.0
+[step 02090] value_loss=0.323761 policy_loss=-1.646014
+[step 02090] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.12 std=2.75) reward(mean=-6.112 std=4.966) clip=20.0
+[step 02100] value_loss=4.037589 policy_loss=1.294742
+[step 02100] VALUE_DEBUG: target(mean=-19.13 std=2.61 min=-20.00 max=-8.75) V(s)(mean=-19.65 std=1.91) reward(mean=-6.736 std=4.770) clip=20.0
+[step 02100] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02100] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02100] DEBUG: ep_len=5.5 ep_ret=-6.434 stop_prob=0.000 score_chg=0.4250
+[step 02110] value_loss=0.052730 policy_loss=-0.498109
+[step 02110] VALUE_DEBUG: target(mean=-19.53 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.76) reward(mean=-6.779 std=4.840) clip=20.0
+[step 02120] value_loss=0.049547 policy_loss=2.093650
+[step 02120] VALUE_DEBUG: target(mean=-19.85 std=0.16 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.796 std=4.788) clip=20.0
+[step 02130] value_loss=0.155197 policy_loss=0.572178
+[step 02130] VALUE_DEBUG: target(mean=-19.07 std=2.52 min=-20.00 max=-9.38) V(s)(mean=-19.35 std=2.53) reward(mean=-6.820 std=4.767) clip=20.0
+[step 02140] value_loss=0.347547 policy_loss=-1.473671
+[step 02140] VALUE_DEBUG: target(mean=-18.55 std=3.47 min=-20.00 max=-9.38) V(s)(mean=-18.43 std=3.97) reward(mean=-5.143 std=5.078) clip=20.0
+[step 02150] value_loss=0.249796 policy_loss=0.738814
+[step 02150] VALUE_DEBUG: target(mean=-19.52 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.74 std=1.43) reward(mean=-6.789 std=4.808) clip=20.0
+[step 02150] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02150] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02150] DEBUG: ep_len=5.8 ep_ret=-6.980 stop_prob=0.000 score_chg=0.3000
+[step 02160] value_loss=0.163261 policy_loss=-0.292735
+[step 02160] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.36 std=2.50) reward(mean=-5.551 std=5.062) clip=20.0
+[step 02170] value_loss=0.111141 policy_loss=0.919457
+[step 02170] VALUE_DEBUG: target(mean=-19.14 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.37 std=2.44) reward(mean=-6.466 std=4.931) clip=20.0
+[step 02180] value_loss=0.085935 policy_loss=-1.030098
+[step 02180] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-5.898 std=4.923) clip=20.0
+[step 02190] value_loss=4.045516 policy_loss=-2.538156
+[step 02190] VALUE_DEBUG: target(mean=-18.21 std=3.85 min=-20.00 max=-8.75) V(s)(mean=-18.64 std=3.61) reward(mean=-4.228 std=4.982) clip=20.0
+[step 02200] value_loss=4.014372 policy_loss=-1.585853
+[step 02200] VALUE_DEBUG: target(mean=-19.50 std=1.94 min=-20.00 max=-8.75) V(s)(mean=-20.00 std=0.00) reward(mean=-6.122 std=4.972) clip=20.0
+[step 02200] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02200] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02200] DEBUG: ep_len=6.0 ep_ret=-7.327 stop_prob=0.000 score_chg=0.3875
+[step 02210] value_loss=0.062234 policy_loss=-1.850428
+[step 02210] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.65 std=1.93) reward(mean=-5.815 std=5.114) clip=20.0
+[step 02220] value_loss=0.126381 policy_loss=-2.382221
+[step 02220] VALUE_DEBUG: target(mean=-19.79 std=0.29 min=-20.00 max=-18.51) V(s)(mean=-20.00 std=0.00) reward(mean=-7.080 std=4.675) clip=20.0
+[step 02230] value_loss=0.106746 policy_loss=0.482279
+[step 02230] VALUE_DEBUG: target(mean=-19.14 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.30 std=2.72) reward(mean=-6.796 std=4.943) clip=20.0
+[step 02240] value_loss=0.139001 policy_loss=-0.702232
+[step 02240] VALUE_DEBUG: target(mean=-19.15 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.25 std=2.63) reward(mean=-5.540 std=4.974) clip=20.0
+[step 02250] value_loss=0.081562 policy_loss=-2.255316
+[step 02250] VALUE_DEBUG: target(mean=-19.48 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.65 std=1.92) reward(mean=-8.007 std=4.142) clip=20.0
+[step 02250] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02250] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02250] DEBUG: ep_len=5.8 ep_ret=-6.957 stop_prob=0.000 score_chg=0.3250
+[step 02260] value_loss=0.056105 policy_loss=-0.246129
+[step 02260] VALUE_DEBUG: target(mean=-19.88 std=0.20 min=-20.00 max=-19.13) V(s)(mean=-20.00 std=0.00) reward(mean=-5.843 std=4.946) clip=20.0
+[step 02270] value_loss=0.057074 policy_loss=2.745976
+[step 02270] VALUE_DEBUG: target(mean=-19.53 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.76) reward(mean=-5.903 std=4.926) clip=20.0
+[step 02280] value_loss=0.063710 policy_loss=-2.257362
+[step 02280] VALUE_DEBUG: target(mean=-18.83 std=3.04 min=-20.00 max=-9.38) V(s)(mean=-19.01 std=3.09) reward(mean=-6.483 std=4.901) clip=20.0
+[step 02290] value_loss=0.057506 policy_loss=2.382393
+[step 02290] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-6.229 std=4.954) clip=20.0
+[step 02300] value_loss=0.060423 policy_loss=-1.683852
+[step 02300] VALUE_DEBUG: target(mean=-19.84 std=0.18 min=-20.00 max=-19.48) V(s)(mean=-19.99 std=0.03) reward(mean=-6.255 std=4.867) clip=20.0
+[step 02300] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02300] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02300] DEBUG: ep_len=6.2 ep_ret=-7.619 stop_prob=0.000 score_chg=0.3000
+[step 02310] value_loss=2.709552 policy_loss=0.236547
+[step 02310] VALUE_DEBUG: target(mean=-18.54 std=3.47 min=-20.00 max=-9.38) V(s)(mean=-19.01 std=2.95) reward(mean=-4.884 std=5.124) clip=20.0
+[step 02320] value_loss=0.093247 policy_loss=3.345932
+[step 02320] VALUE_DEBUG: target(mean=-19.49 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.90) reward(mean=-6.794 std=4.727) clip=20.0
+[step 02330] value_loss=0.116991 policy_loss=-2.986031
+[step 02330] VALUE_DEBUG: target(mean=-19.19 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.38 std=2.39) reward(mean=-5.791 std=5.079) clip=20.0
+[step 02340] value_loss=0.077149 policy_loss=0.173844
+[step 02340] VALUE_DEBUG: target(mean=-19.13 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.57) reward(mean=-7.125 std=4.692) clip=20.0
+[step 02350] value_loss=0.051422 policy_loss=-0.828738
+[step 02350] VALUE_DEBUG: target(mean=-18.89 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.03 std=3.02) reward(mean=-6.222 std=4.970) clip=20.0
+[step 02350] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02350] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02350] DEBUG: ep_len=5.9 ep_ret=-7.231 stop_prob=0.000 score_chg=0.2500
+[step 02360] value_loss=0.087729 policy_loss=-1.371418
+[step 02360] VALUE_DEBUG: target(mean=-18.83 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.02 std=3.04) reward(mean=-5.223 std=5.029) clip=20.0
+[step 02370] value_loss=0.142093 policy_loss=0.517848
+[step 02370] VALUE_DEBUG: target(mean=-19.46 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.65 std=1.80) reward(mean=-7.024 std=4.661) clip=20.0
+[step 02380] value_loss=0.283317 policy_loss=-2.145775
+[step 02380] VALUE_DEBUG: target(mean=-19.14 std=2.57 min=-20.00 max=-9.38) V(s)(mean=-19.32 std=2.62) reward(mean=-5.467 std=5.127) clip=20.0
+[step 02390] value_loss=0.108645 policy_loss=-1.191247
+[step 02390] VALUE_DEBUG: target(mean=-17.89 std=4.09 min=-20.00 max=-9.38) V(s)(mean=-18.09 std=3.98) reward(mean=-4.243 std=5.006) clip=20.0
+[step 02400] value_loss=0.131631 policy_loss=-0.403376
+[step 02400] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.27 std=2.79) reward(mean=-6.475 std=4.828) clip=20.0
+[step 02400] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02400] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02400] DEBUG: ep_len=5.8 ep_ret=-6.929 stop_prob=0.000 score_chg=0.3500
+[step 02410] value_loss=0.098804 policy_loss=0.924919
+[step 02410] VALUE_DEBUG: target(mean=-19.47 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.77) reward(mean=-6.822 std=4.736) clip=20.0
+[step 02420] value_loss=0.066234 policy_loss=-0.280852
+[step 02420] VALUE_DEBUG: target(mean=-18.88 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-18.97 std=3.21) reward(mean=-5.231 std=5.038) clip=20.0
+[step 02430] value_loss=0.078641 policy_loss=1.219592
+[step 02430] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.80) reward(mean=-6.819 std=4.735) clip=20.0
+[step 02440] value_loss=0.057395 policy_loss=-0.449679
+[step 02440] VALUE_DEBUG: target(mean=-18.53 std=3.46 min=-20.00 max=-9.38) V(s)(mean=-18.67 std=3.52) reward(mean=-6.744 std=4.822) clip=20.0
+[step 02450] value_loss=0.049590 policy_loss=0.560472
+[step 02450] VALUE_DEBUG: target(mean=-19.54 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.86) reward(mean=-4.988 std=4.967) clip=20.0
+[step 02450] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02450] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02450] DEBUG: ep_len=5.8 ep_ret=-6.902 stop_prob=0.000 score_chg=0.3875
+[step 02460] value_loss=0.070057 policy_loss=-1.982645
+[step 02460] VALUE_DEBUG: target(mean=-18.51 std=3.45 min=-20.00 max=-9.38) V(s)(mean=-18.69 std=3.48) reward(mean=-4.923 std=5.071) clip=20.0
+[step 02470] value_loss=0.074546 policy_loss=-0.869520
+[step 02470] VALUE_DEBUG: target(mean=-19.14 std=2.51 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.59) reward(mean=-8.658 std=3.703) clip=20.0
+[step 02480] value_loss=0.057161 policy_loss=-2.117006
+[step 02480] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.85) reward(mean=-6.494 std=4.818) clip=20.0
+[step 02490] value_loss=2.553787 policy_loss=-1.304065
+[step 02490] VALUE_DEBUG: target(mean=-19.51 std=1.85 min=-20.00 max=-9.38) V(s)(mean=-19.38 std=2.43) reward(mean=-7.400 std=4.487) clip=20.0
+[step 02500] value_loss=0.182774 policy_loss=1.248631
+[step 02500] VALUE_DEBUG: target(mean=-19.52 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.57 std=2.06) reward(mean=-7.098 std=4.614) clip=20.0
+[step 02500] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02500] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02500] DEBUG: ep_len=6.2 ep_ret=-7.604 stop_prob=0.000 score_chg=0.3125
+[step 02510] value_loss=0.075223 policy_loss=-0.426567
+[step 02510] VALUE_DEBUG: target(mean=-19.55 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.70 std=1.67) reward(mean=-5.266 std=4.991) clip=20.0
+[step 02520] value_loss=0.098445 policy_loss=-3.170286
+[step 02520] VALUE_DEBUG: target(mean=-19.19 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.29 std=2.75) reward(mean=-5.860 std=5.003) clip=20.0
+[step 02530] value_loss=0.057698 policy_loss=1.107519
+[step 02530] VALUE_DEBUG: target(mean=-18.90 std=2.97 min=-20.00 max=-9.38) V(s)(mean=-19.05 std=2.95) reward(mean=-5.832 std=5.000) clip=20.0
+[step 02540] value_loss=0.793278 policy_loss=-0.017837
+[step 02540] VALUE_DEBUG: target(mean=-19.45 std=1.93 min=-20.00 max=-8.75) V(s)(mean=-19.80 std=1.13) reward(mean=-7.396 std=4.544) clip=20.0
+[step 02550] value_loss=0.054612 policy_loss=-0.524104
+[step 02550] VALUE_DEBUG: target(mean=-19.53 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.69 std=1.74) reward(mean=-6.447 std=4.892) clip=20.0
+[step 02550] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02550] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02550] DEBUG: ep_len=6.7 ep_ret=-8.477 stop_prob=0.000 score_chg=0.2875
+[step 02560] value_loss=0.042252 policy_loss=-1.104113
+[step 02560] VALUE_DEBUG: target(mean=-19.88 std=0.17 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-5.657 std=4.966) clip=20.0
+[step 02570] value_loss=0.268275 policy_loss=-0.423042
+[step 02570] VALUE_DEBUG: target(mean=-19.45 std=1.94 min=-20.00 max=-8.75) V(s)(mean=-19.72 std=1.55) reward(mean=-7.397 std=4.519) clip=20.0
+[step 02580] value_loss=0.064884 policy_loss=-0.839981
+[step 02580] VALUE_DEBUG: target(mean=-19.22 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.37 std=2.46) reward(mean=-4.590 std=5.021) clip=20.0
+[step 02590] value_loss=0.094294 policy_loss=1.294780
+[step 02590] VALUE_DEBUG: target(mean=-19.19 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.29 std=2.74) reward(mean=-6.193 std=4.932) clip=20.0
+[step 02600] value_loss=0.137156 policy_loss=-0.788039
+[step 02600] VALUE_DEBUG: target(mean=-19.55 std=1.82 min=-20.00 max=-9.47) V(s)(mean=-19.73 std=1.52) reward(mean=-5.581 std=4.959) clip=20.0
+[step 02600] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02600] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02600] DEBUG: ep_len=6.2 ep_ret=-7.544 stop_prob=0.000 score_chg=0.3750
+[step 02610] value_loss=0.036315 policy_loss=0.733070
+[step 02610] VALUE_DEBUG: target(mean=-19.90 std=0.16 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-5.863 std=4.963) clip=20.0
+[step 02620] value_loss=0.177330 policy_loss=-0.721244
+[step 02620] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.24 std=2.62) reward(mean=-7.729 std=4.370) clip=20.0
+[step 02630] value_loss=0.070572 policy_loss=-0.302976
+[step 02630] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.04 std=3.00) reward(mean=-6.466 std=4.911) clip=20.0
+[step 02640] value_loss=0.133439 policy_loss=-0.160396
+[step 02640] VALUE_DEBUG: target(mean=-19.15 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.28 std=2.78) reward(mean=-6.481 std=4.866) clip=20.0
+[step 02650] value_loss=0.158961 policy_loss=0.098129
+[step 02650] VALUE_DEBUG: target(mean=-18.20 std=3.80 min=-20.00 max=-9.38) V(s)(mean=-18.38 std=3.77) reward(mean=-5.788 std=5.074) clip=20.0
+[step 02650] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02650] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02650] DEBUG: ep_len=6.2 ep_ret=-7.618 stop_prob=0.000 score_chg=0.3000
+[step 02660] value_loss=0.133172 policy_loss=-1.108016
+[step 02660] VALUE_DEBUG: target(mean=-18.84 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.08 std=2.85) reward(mean=-7.052 std=4.711) clip=20.0
+[step 02670] value_loss=0.050764 policy_loss=-0.898357
+[step 02670] VALUE_DEBUG: target(mean=-18.87 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-18.98 std=3.18) reward(mean=-6.136 std=4.958) clip=20.0
+[step 02680] value_loss=0.070763 policy_loss=-0.488771
+[step 02680] VALUE_DEBUG: target(mean=-19.14 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.57) reward(mean=-7.397 std=4.547) clip=20.0
+[step 02690] value_loss=0.057726 policy_loss=-1.062184
+[step 02690] VALUE_DEBUG: target(mean=-19.52 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.79) reward(mean=-5.920 std=4.915) clip=20.0
+[step 02700] value_loss=1.947121 policy_loss=-1.605885
+[step 02700] VALUE_DEBUG: target(mean=-18.83 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.25 std=2.60) reward(mean=-6.457 std=4.949) clip=20.0
+[step 02700] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02700] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02700] DEBUG: ep_len=5.6 ep_ret=-6.710 stop_prob=0.000 score_chg=0.3625
+[step 02710] value_loss=0.042787 policy_loss=-2.626807
+[step 02710] VALUE_DEBUG: target(mean=-19.52 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-7.135 std=4.636) clip=20.0
+[step 02720] value_loss=0.068252 policy_loss=-0.211368
+[step 02720] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.62 std=1.91) reward(mean=-6.521 std=4.840) clip=20.0
+[step 02730] value_loss=4.007931 policy_loss=2.481083
+[step 02730] VALUE_DEBUG: target(mean=-19.19 std=2.62 min=-20.00 max=-8.75) V(s)(mean=-19.69 std=1.75) reward(mean=-5.217 std=5.037) clip=20.0
+[step 02740] value_loss=0.142792 policy_loss=-0.054108
+[step 02740] VALUE_DEBUG: target(mean=-19.14 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.28 std=2.79) reward(mean=-7.427 std=4.554) clip=20.0
+[step 02750] value_loss=0.088957 policy_loss=-0.646082
+[step 02750] VALUE_DEBUG: target(mean=-19.50 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.85) reward(mean=-5.808 std=4.953) clip=20.0
+[step 02750] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02750] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02750] DEBUG: ep_len=6.3 ep_ret=-7.876 stop_prob=0.000 score_chg=0.2500
+[step 02760] value_loss=0.069849 policy_loss=1.716690
+[step 02760] VALUE_DEBUG: target(mean=-19.84 std=0.21 min=-20.00 max=-19.25) V(s)(mean=-20.00 std=0.00) reward(mean=-4.646 std=4.981) clip=20.0
+[step 02770] value_loss=4.091548 policy_loss=-0.600094
+[step 02770] VALUE_DEBUG: target(mean=-18.77 std=3.11 min=-20.00 max=-8.75) V(s)(mean=-19.34 std=2.57) reward(mean=-6.140 std=4.983) clip=20.0
+[step 02780] value_loss=0.100151 policy_loss=-1.430111
+[step 02780] VALUE_DEBUG: target(mean=-18.86 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.05 std=2.96) reward(mean=-4.856 std=4.993) clip=20.0
+[step 02790] value_loss=0.104966 policy_loss=-1.384813
+[step 02790] VALUE_DEBUG: target(mean=-19.79 std=0.24 min=-20.00 max=-18.92) V(s)(mean=-20.00 std=0.00) reward(mean=-6.880 std=4.668) clip=20.0
+[step 02800] value_loss=4.013216 policy_loss=-0.797266
+[step 02800] VALUE_DEBUG: target(mean=-19.16 std=2.61 min=-20.00 max=-8.75) V(s)(mean=-19.67 std=1.85) reward(mean=-7.054 std=4.732) clip=20.0
+[step 02800] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02800] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02800] DEBUG: ep_len=6.2 ep_ret=-7.647 stop_prob=0.000 score_chg=0.2625
+[step 02810] value_loss=0.055571 policy_loss=-2.995520
+[step 02810] VALUE_DEBUG: target(mean=-19.22 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.31 std=2.68) reward(mean=-5.269 std=4.982) clip=20.0
+[step 02820] value_loss=0.061951 policy_loss=-0.354750
+[step 02820] VALUE_DEBUG: target(mean=-19.83 std=0.18 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-7.780 std=4.336) clip=20.0
+[step 02830] value_loss=0.073238 policy_loss=-0.925581
+[step 02830] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.90) reward(mean=-5.862 std=5.021) clip=20.0
+[step 02840] value_loss=0.088114 policy_loss=-1.428552
+[step 02840] VALUE_DEBUG: target(mean=-18.79 std=3.03 min=-20.00 max=-9.38) V(s)(mean=-19.03 std=3.02) reward(mean=-7.101 std=4.749) clip=20.0
+[step 02850] value_loss=0.052943 policy_loss=1.209749
+[step 02850] VALUE_DEBUG: target(mean=-18.89 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-18.97 std=3.20) reward(mean=-5.527 std=5.007) clip=20.0
+[step 02850] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02850] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02850] DEBUG: ep_len=6.2 ep_ret=-7.581 stop_prob=0.000 score_chg=0.3500
+[step 02860] value_loss=0.066961 policy_loss=-1.121130
+[step 02860] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.31 std=2.58) reward(mean=-4.538 std=4.959) clip=20.0
+[step 02870] value_loss=0.063680 policy_loss=0.757719
+[step 02870] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.32 std=2.64) reward(mean=-6.494 std=4.870) clip=20.0
+[step 02880] value_loss=0.099002 policy_loss=-1.875738
+[step 02880] VALUE_DEBUG: target(mean=-19.23 std=2.56 min=-20.00 max=-9.38) V(s)(mean=-19.38 std=2.41) reward(mean=-3.976 std=4.767) clip=20.0
+[step 02890] value_loss=0.077315 policy_loss=0.004218
+[step 02890] VALUE_DEBUG: target(mean=-19.48 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.81) reward(mean=-6.560 std=4.824) clip=20.0
+[step 02900] value_loss=0.055188 policy_loss=-1.361571
+[step 02900] VALUE_DEBUG: target(mean=-19.85 std=0.18 min=-20.00 max=-19.48) V(s)(mean=-19.99 std=0.03) reward(mean=-7.108 std=4.638) clip=20.0
+[step 02900] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02900] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02900] DEBUG: ep_len=6.0 ep_ret=-7.357 stop_prob=0.000 score_chg=0.3500
+[step 02910] value_loss=0.084872 policy_loss=-1.446520
+[step 02910] VALUE_DEBUG: target(mean=-19.18 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.36 std=2.46) reward(mean=-6.500 std=4.847) clip=20.0
+[step 02920] value_loss=0.108780 policy_loss=-0.918170
+[step 02920] VALUE_DEBUG: target(mean=-19.14 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.31 std=2.68) reward(mean=-6.197 std=4.887) clip=20.0
+[step 02930] value_loss=3.648961 policy_loss=2.100826
+[step 02930] VALUE_DEBUG: target(mean=-18.20 std=3.80 min=-20.00 max=-9.38) V(s)(mean=-18.75 std=3.32) reward(mean=-5.796 std=5.065) clip=20.0
+[step 02940] value_loss=0.055304 policy_loss=0.633206
+[step 02940] VALUE_DEBUG: target(mean=-18.86 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.01 std=3.08) reward(mean=-6.743 std=4.845) clip=20.0
+[step 02950] value_loss=0.046829 policy_loss=1.460407
+[step 02950] VALUE_DEBUG: target(mean=-19.22 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.61) reward(mean=-4.921 std=5.002) clip=20.0
+[step 02950] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 02950] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 02950] DEBUG: ep_len=6.2 ep_ret=-7.555 stop_prob=0.000 score_chg=0.3625
+[step 02960] value_loss=0.048867 policy_loss=-1.313900
+[step 02960] VALUE_DEBUG: target(mean=-19.52 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-6.565 std=4.830) clip=20.0
+[step 02970] value_loss=0.071653 policy_loss=-2.849435
+[step 02970] VALUE_DEBUG: target(mean=-19.49 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.86) reward(mean=-6.547 std=4.854) clip=20.0
+[step 02980] value_loss=0.057545 policy_loss=3.013175
+[step 02980] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.62 std=1.89) reward(mean=-6.836 std=4.711) clip=20.0
+[step 02990] value_loss=0.032851 policy_loss=0.749513
+[step 02990] VALUE_DEBUG: target(mean=-19.23 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.32 std=2.63) reward(mean=-4.903 std=5.018) clip=20.0
+[step 03000] value_loss=0.046563 policy_loss=-0.823314
+[step 03000] VALUE_DEBUG: target(mean=-19.21 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.58) reward(mean=-4.958 std=5.042) clip=20.0
+[step 03000] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03000] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03000] DEBUG: ep_len=5.8 ep_ret=-6.956 stop_prob=0.000 score_chg=0.3250
+[Checkpoint] Saved to checkpoints/rl_sudoku-4x4-trivial_seed123/rl_checkpoint_step_3000.pt
+[step 03010] value_loss=0.056652 policy_loss=-3.834704
+[step 03010] VALUE_DEBUG: target(mean=-19.49 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.78) reward(mean=-7.428 std=4.496) clip=20.0
+[step 03020] value_loss=0.072906 policy_loss=0.139071
+[step 03020] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.02 std=3.05) reward(mean=-5.827 std=5.029) clip=20.0
+[step 03030] value_loss=0.059901 policy_loss=-1.464372
+[step 03030] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.12) reward(mean=-5.819 std=4.983) clip=20.0
+[step 03040] value_loss=0.076958 policy_loss=1.280256
+[step 03040] VALUE_DEBUG: target(mean=-19.49 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.88) reward(mean=-7.080 std=4.644) clip=20.0
+[step 03050] value_loss=0.091447 policy_loss=-0.053785
+[step 03050] VALUE_DEBUG: target(mean=-19.13 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.56) reward(mean=-7.145 std=4.713) clip=20.0
+[step 03050] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03050] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03050] DEBUG: ep_len=5.6 ep_ret=-6.705 stop_prob=0.000 score_chg=0.3750
+[step 03060] value_loss=0.060726 policy_loss=-1.142987
+[step 03060] VALUE_DEBUG: target(mean=-19.84 std=0.18 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-7.400 std=4.537) clip=20.0
+[step 03070] value_loss=0.053662 policy_loss=-0.852533
+[step 03070] VALUE_DEBUG: target(mean=-19.58 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.69 std=1.70) reward(mean=-4.679 std=5.017) clip=20.0
+[step 03080] value_loss=0.080194 policy_loss=-0.180615
+[step 03080] VALUE_DEBUG: target(mean=-18.87 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.04 std=2.99) reward(mean=-5.507 std=5.014) clip=20.0
+[step 03090] value_loss=0.060902 policy_loss=0.757485
+[step 03090] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.03 std=3.01) reward(mean=-6.744 std=4.848) clip=20.0
+[step 03100] value_loss=0.120446 policy_loss=-1.616052
+[step 03100] VALUE_DEBUG: target(mean=-18.53 std=3.47 min=-20.00 max=-9.38) V(s)(mean=-18.69 std=3.49) reward(mean=-5.452 std=5.106) clip=20.0
+[step 03100] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03100] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03100] DEBUG: ep_len=5.5 ep_ret=-6.506 stop_prob=0.000 score_chg=0.3500
+[step 03110] value_loss=0.710691 policy_loss=-2.059748
+[step 03110] VALUE_DEBUG: target(mean=-18.86 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.13 std=2.79) reward(mean=-5.195 std=5.084) clip=20.0
+[step 03120] value_loss=0.070654 policy_loss=-3.044580
+[step 03120] VALUE_DEBUG: target(mean=-19.81 std=0.19 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-7.155 std=4.629) clip=20.0
+[step 03130] value_loss=0.034232 policy_loss=1.261869
+[step 03130] VALUE_DEBUG: target(mean=-19.57 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.86) reward(mean=-5.188 std=5.027) clip=20.0
+[step 03140] value_loss=0.037047 policy_loss=0.337034
+[step 03140] VALUE_DEBUG: target(mean=-19.87 std=0.15 min=-20.00 max=-19.54) V(s)(mean=-20.00 std=0.00) reward(mean=-7.449 std=4.400) clip=20.0
+[step 03150] value_loss=0.097593 policy_loss=0.256576
+[step 03150] VALUE_DEBUG: target(mean=-19.46 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.65 std=1.96) reward(mean=-6.817 std=4.825) clip=20.0
+[step 03150] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03150] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03150] DEBUG: ep_len=5.9 ep_ret=-7.174 stop_prob=0.000 score_chg=0.3125
+[step 03160] value_loss=0.063431 policy_loss=-0.987157
+[step 03160] VALUE_DEBUG: target(mean=-19.22 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.36 std=2.48) reward(mean=-5.217 std=4.967) clip=20.0
+[step 03170] value_loss=0.036267 policy_loss=0.611027
+[step 03170] VALUE_DEBUG: target(mean=-19.57 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.90) reward(mean=-4.971 std=4.944) clip=20.0
+[step 03180] value_loss=0.066442 policy_loss=-0.556077
+[step 03180] VALUE_DEBUG: target(mean=-18.86 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.12) reward(mean=-6.073 std=4.959) clip=20.0
+[step 03190] value_loss=0.037327 policy_loss=0.455016
+[step 03190] VALUE_DEBUG: target(mean=-19.57 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.87) reward(mean=-5.227 std=5.001) clip=20.0
+[step 03200] value_loss=0.068227 policy_loss=-0.733792
+[step 03200] VALUE_DEBUG: target(mean=-19.83 std=0.20 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.250 std=4.983) clip=20.0
+[step 03200] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03200] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03200] DEBUG: ep_len=5.9 ep_ret=-7.182 stop_prob=0.000 score_chg=0.3125
+[step 03210] value_loss=0.086277 policy_loss=-1.775818
+[step 03210] VALUE_DEBUG: target(mean=-18.49 std=3.45 min=-20.00 max=-9.38) V(s)(mean=-18.71 std=3.42) reward(mean=-6.127 std=5.042) clip=20.0
+[step 03220] value_loss=0.085324 policy_loss=-0.105719
+[step 03220] VALUE_DEBUG: target(mean=-18.51 std=3.46 min=-20.00 max=-9.38) V(s)(mean=-18.68 std=3.51) reward(mean=-6.348 std=4.965) clip=20.0
+[step 03230] value_loss=0.039724 policy_loss=0.320119
+[step 03230] VALUE_DEBUG: target(mean=-19.23 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.35 std=2.52) reward(mean=-6.157 std=4.903) clip=20.0
+[step 03240] value_loss=0.111404 policy_loss=-0.574315
+[step 03240] VALUE_DEBUG: target(mean=-19.44 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.81) reward(mean=-6.513 std=4.822) clip=20.0
+[step 03250] value_loss=0.061612 policy_loss=-1.831564
+[step 03250] VALUE_DEBUG: target(mean=-19.83 std=0.18 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.529 std=4.820) clip=20.0
+[step 03250] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03250] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03250] DEBUG: ep_len=6.7 ep_ret=-8.481 stop_prob=0.000 score_chg=0.2750
+[step 03260] value_loss=0.061244 policy_loss=1.523082
+[step 03260] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.87) reward(mean=-5.910 std=4.987) clip=20.0
+[step 03270] value_loss=0.059340 policy_loss=-2.514589
+[step 03270] VALUE_DEBUG: target(mean=-18.87 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.11) reward(mean=-5.279 std=5.016) clip=20.0
+[step 03280] value_loss=0.087791 policy_loss=-0.826600
+[step 03280] VALUE_DEBUG: target(mean=-19.77 std=0.25 min=-20.00 max=-18.95) V(s)(mean=-19.96 std=0.24) reward(mean=-6.822 std=4.763) clip=20.0
+[step 03290] value_loss=0.088987 policy_loss=0.485762
+[step 03290] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.30 std=2.60) reward(mean=-5.864 std=5.013) clip=20.0
+[step 03300] value_loss=0.090236 policy_loss=-1.324056
+[step 03300] VALUE_DEBUG: target(mean=-18.81 std=3.02 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.10) reward(mean=-7.063 std=4.728) clip=20.0
+[step 03300] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03300] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03300] DEBUG: ep_len=6.2 ep_ret=-7.611 stop_prob=0.000 score_chg=0.3125
+[step 03310] value_loss=0.050968 policy_loss=-1.242544
+[step 03310] VALUE_DEBUG: target(mean=-19.86 std=0.18 min=-20.00 max=-19.47) V(s)(mean=-20.00 std=0.00) reward(mean=-5.874 std=4.950) clip=20.0
+[step 03320] value_loss=0.046440 policy_loss=1.404171
+[step 03320] VALUE_DEBUG: target(mean=-19.21 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.35 std=2.53) reward(mean=-4.666 std=4.953) clip=20.0
+[step 03330] value_loss=0.081423 policy_loss=-2.760733
+[step 03330] VALUE_DEBUG: target(mean=-19.16 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.31 std=2.61) reward(mean=-5.601 std=5.034) clip=20.0
+[step 03340] value_loss=0.060893 policy_loss=0.174782
+[step 03340] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.32 std=2.64) reward(mean=-7.411 std=4.506) clip=20.0
+[step 03350] value_loss=0.066133 policy_loss=-0.534699
+[step 03350] VALUE_DEBUG: target(mean=-19.84 std=0.20 min=-20.00 max=-19.24) V(s)(mean=-20.00 std=0.00) reward(mean=-7.394 std=4.467) clip=20.0
+[step 03350] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03350] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03350] DEBUG: ep_len=6.3 ep_ret=-7.810 stop_prob=0.000 score_chg=0.3125
+[step 03360] value_loss=1.592423 policy_loss=-1.469994
+[step 03360] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.44 std=2.23) reward(mean=-7.058 std=4.751) clip=20.0
+[step 03370] value_loss=0.060616 policy_loss=-2.287608
+[step 03370] VALUE_DEBUG: target(mean=-19.53 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.76) reward(mean=-4.671 std=5.003) clip=20.0
+[step 03380] value_loss=0.088013 policy_loss=-0.885058
+[step 03380] VALUE_DEBUG: target(mean=-19.48 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.82) reward(mean=-6.785 std=4.878) clip=20.0
+[step 03390] value_loss=0.044961 policy_loss=0.492981
+[step 03390] VALUE_DEBUG: target(mean=-19.21 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.54) reward(mean=-6.128 std=4.967) clip=20.0
+[step 03400] value_loss=0.085625 policy_loss=0.326560
+[step 03400] VALUE_DEBUG: target(mean=-19.17 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.57) reward(mean=-5.534 std=4.989) clip=20.0
+[step 03400] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03400] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03400] DEBUG: ep_len=5.9 ep_ret=-7.173 stop_prob=0.000 score_chg=0.3250
+[step 03410] value_loss=0.112443 policy_loss=-1.315106
+[step 03410] VALUE_DEBUG: target(mean=-19.47 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-5.564 std=4.979) clip=20.0
+[step 03420] value_loss=0.055636 policy_loss=-1.106144
+[step 03420] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.32 std=2.64) reward(mean=-7.090 std=4.677) clip=20.0
+[step 03430] value_loss=0.071047 policy_loss=-0.121024
+[step 03430] VALUE_DEBUG: target(mean=-19.17 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.35 std=2.50) reward(mean=-5.805 std=5.077) clip=20.0
+[step 03440] value_loss=0.035830 policy_loss=0.161770
+[step 03440] VALUE_DEBUG: target(mean=-19.22 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.58) reward(mean=-5.863 std=4.963) clip=20.0
+[step 03450] value_loss=0.102476 policy_loss=-0.652886
+[step 03450] VALUE_DEBUG: target(mean=-19.44 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.84) reward(mean=-7.425 std=4.499) clip=20.0
+[step 03450] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03450] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03450] DEBUG: ep_len=6.3 ep_ret=-7.788 stop_prob=0.000 score_chg=0.3500
+[step 03460] value_loss=0.139091 policy_loss=-2.007002
+[step 03460] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-18.93 std=3.11) reward(mean=-5.467 std=5.082) clip=20.0
+[step 03470] value_loss=0.042289 policy_loss=-1.121463
+[step 03470] VALUE_DEBUG: target(mean=-18.54 std=3.47 min=-20.00 max=-9.38) V(s)(mean=-18.68 std=3.49) reward(mean=-6.699 std=4.848) clip=20.0
+[step 03480] value_loss=0.055334 policy_loss=0.369318
+[step 03480] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.60) reward(mean=-5.831 std=4.937) clip=20.0
+[step 03490] value_loss=0.047798 policy_loss=-0.802716
+[step 03490] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.35 std=2.53) reward(mean=-5.577 std=4.999) clip=20.0
+[step 03500] value_loss=0.024734 policy_loss=0.609710
+[step 03500] VALUE_DEBUG: target(mean=-19.92 std=0.13 min=-20.00 max=-19.54) V(s)(mean=-20.00 std=0.00) reward(mean=-6.544 std=4.758) clip=20.0
+[step 03500] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03500] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03500] DEBUG: ep_len=6.5 ep_ret=-8.016 stop_prob=0.000 score_chg=0.3250
+[step 03510] value_loss=0.053478 policy_loss=0.995358
+[step 03510] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.87) reward(mean=-7.429 std=4.491) clip=20.0
+[step 03520] value_loss=0.036920 policy_loss=1.288221
+[step 03520] VALUE_DEBUG: target(mean=-19.56 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.81) reward(mean=-5.885 std=4.915) clip=20.0
+[step 03530] value_loss=0.076274 policy_loss=-0.292999
+[step 03530] VALUE_DEBUG: target(mean=-19.81 std=0.21 min=-20.00 max=-19.24) V(s)(mean=-20.00 std=0.00) reward(mean=-5.883 std=4.974) clip=20.0
+[step 03540] value_loss=0.093552 policy_loss=0.621328
+[step 03540] VALUE_DEBUG: target(mean=-19.14 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.35 std=2.53) reward(mean=-5.877 std=4.943) clip=20.0
+[step 03550] value_loss=0.101229 policy_loss=-0.415804
+[step 03550] VALUE_DEBUG: target(mean=-19.79 std=0.24 min=-20.00 max=-18.95) V(s)(mean=-20.00 std=0.00) reward(mean=-6.217 std=4.926) clip=20.0
+[step 03550] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03550] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03550] DEBUG: ep_len=6.2 ep_ret=-7.669 stop_prob=0.000 score_chg=0.2375
+[step 03560] value_loss=0.060307 policy_loss=-1.749926
+[step 03560] VALUE_DEBUG: target(mean=-19.85 std=0.19 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.770 std=4.805) clip=20.0
+[step 03570] value_loss=4.042470 policy_loss=-1.623955
+[step 03570] VALUE_DEBUG: target(mean=-18.54 std=3.53 min=-20.00 max=-8.75) V(s)(mean=-19.06 std=2.93) reward(mean=-5.166 std=5.086) clip=20.0
+[step 03580] value_loss=0.084017 policy_loss=1.605945
+[step 03580] VALUE_DEBUG: target(mean=-19.78 std=0.19 min=-20.00 max=-19.37) V(s)(mean=-20.00 std=0.00) reward(mean=-7.153 std=4.595) clip=20.0
+[step 03590] value_loss=0.134557 policy_loss=-0.512529
+[step 03590] VALUE_DEBUG: target(mean=-19.21 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.41) reward(mean=-6.140 std=4.878) clip=20.0
+[step 03600] value_loss=0.054860 policy_loss=-0.690092
+[step 03600] VALUE_DEBUG: target(mean=-19.19 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.35 std=2.54) reward(mean=-5.291 std=4.996) clip=20.0
+[step 03600] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03600] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03600] DEBUG: ep_len=5.8 ep_ret=-6.914 stop_prob=0.000 score_chg=0.3750
+[step 03610] value_loss=0.069237 policy_loss=-0.509767
+[step 03610] VALUE_DEBUG: target(mean=-19.83 std=0.20 min=-20.00 max=-19.34) V(s)(mean=-20.00 std=0.00) reward(mean=-5.887 std=4.953) clip=20.0
+[step 03620] value_loss=4.062777 policy_loss=-2.965664
+[step 03620] VALUE_DEBUG: target(mean=-19.07 std=2.59 min=-20.00 max=-8.75) V(s)(mean=-19.67 std=1.85) reward(mean=-8.001 std=4.270) clip=20.0
+[step 03630] value_loss=0.037956 policy_loss=-0.512086
+[step 03630] VALUE_DEBUG: target(mean=-19.55 std=1.81 min=-20.00 max=-9.47) V(s)(mean=-19.67 std=1.84) reward(mean=-5.877 std=4.940) clip=20.0
+[step 03640] value_loss=0.045835 policy_loss=-1.551280
+[step 03640] VALUE_DEBUG: target(mean=-19.22 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.32 std=2.63) reward(mean=-5.812 std=4.903) clip=20.0
+[step 03650] value_loss=0.124532 policy_loss=-2.092146
+[step 03650] VALUE_DEBUG: target(mean=-19.50 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.86) reward(mean=-6.166 std=4.858) clip=20.0
+[step 03650] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03650] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03650] DEBUG: ep_len=6.0 ep_ret=-7.389 stop_prob=0.000 score_chg=0.3125
+[step 03660] value_loss=0.051141 policy_loss=-0.933890
+[step 03660] VALUE_DEBUG: target(mean=-19.85 std=0.17 min=-20.00 max=-19.51) V(s)(mean=-20.00 std=0.00) reward(mean=-6.565 std=4.770) clip=20.0
+[step 03670] value_loss=0.047563 policy_loss=-1.110829
+[step 03670] VALUE_DEBUG: target(mean=-19.21 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.60) reward(mean=-6.152 std=4.939) clip=20.0
+[step 03680] value_loss=0.078372 policy_loss=0.593826
+[step 03680] VALUE_DEBUG: target(mean=-19.46 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.84) reward(mean=-7.175 std=4.647) clip=20.0
+[step 03690] value_loss=0.075570 policy_loss=-1.372224
+[step 03690] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.81) reward(mean=-5.283 std=4.963) clip=20.0
+[step 03700] value_loss=0.073657 policy_loss=-2.173999
+[step 03700] VALUE_DEBUG: target(mean=-19.81 std=0.19 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-7.787 std=4.258) clip=20.0
+[step 03700] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03700] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03700] DEBUG: ep_len=5.6 ep_ret=-6.731 stop_prob=0.000 score_chg=0.3375
+[step 03710] value_loss=0.079766 policy_loss=-1.604471
+[step 03710] VALUE_DEBUG: target(mean=-19.12 std=2.52 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.56) reward(mean=-7.145 std=4.677) clip=20.0
+[step 03720] value_loss=0.041051 policy_loss=0.573042
+[step 03720] VALUE_DEBUG: target(mean=-18.89 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-18.99 std=3.15) reward(mean=-5.531 std=4.992) clip=20.0
+[step 03730] value_loss=0.072221 policy_loss=-1.358790
+[step 03730] VALUE_DEBUG: target(mean=-19.83 std=0.20 min=-20.00 max=-19.42) V(s)(mean=-20.00 std=0.00) reward(mean=-6.818 std=4.757) clip=20.0
+[step 03740] value_loss=0.088105 policy_loss=-0.498496
+[step 03740] VALUE_DEBUG: target(mean=-19.13 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.60) reward(mean=-7.127 std=4.714) clip=20.0
+[step 03750] value_loss=0.048816 policy_loss=-1.046895
+[step 03750] VALUE_DEBUG: target(mean=-19.54 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-5.907 std=4.929) clip=20.0
+[step 03750] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03750] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03750] DEBUG: ep_len=6.3 ep_ret=-7.825 stop_prob=0.000 score_chg=0.3125
+[step 03760] value_loss=0.061989 policy_loss=-0.029119
+[step 03760] VALUE_DEBUG: target(mean=-19.84 std=0.19 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.207 std=4.912) clip=20.0
+[step 03770] value_loss=0.046310 policy_loss=-0.509291
+[step 03770] VALUE_DEBUG: target(mean=-19.21 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.57) reward(mean=-5.557 std=4.986) clip=20.0
+[step 03780] value_loss=0.068948 policy_loss=0.560947
+[step 03780] VALUE_DEBUG: target(mean=-19.49 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.84) reward(mean=-5.891 std=5.012) clip=20.0
+[step 03790] value_loss=0.077693 policy_loss=2.106196
+[step 03790] VALUE_DEBUG: target(mean=-19.14 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.32 std=2.63) reward(mean=-6.780 std=4.855) clip=20.0
+[step 03800] value_loss=0.025677 policy_loss=-0.233837
+[step 03800] VALUE_DEBUG: target(mean=-19.24 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.59) reward(mean=-5.207 std=4.991) clip=20.0
+[step 03800] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03800] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03800] DEBUG: ep_len=5.9 ep_ret=-7.154 stop_prob=0.000 score_chg=0.3375
+[step 03810] value_loss=0.059209 policy_loss=-1.697089
+[step 03810] VALUE_DEBUG: target(mean=-19.17 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.36 std=2.49) reward(mean=-7.106 std=4.670) clip=20.0
+[step 03820] value_loss=0.063490 policy_loss=-1.153455
+[step 03820] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-18.98 std=3.17) reward(mean=-5.553 std=5.043) clip=20.0
+[step 03830] value_loss=0.042382 policy_loss=0.218977
+[step 03830] VALUE_DEBUG: target(mean=-19.88 std=0.17 min=-20.00 max=-19.54) V(s)(mean=-20.00 std=0.00) reward(mean=-5.347 std=4.984) clip=20.0
+[step 03840] value_loss=0.115025 policy_loss=-0.906479
+[step 03840] VALUE_DEBUG: target(mean=-19.45 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.81) reward(mean=-6.479 std=4.873) clip=20.0
+[step 03850] value_loss=0.057625 policy_loss=-1.518165
+[step 03850] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.61) reward(mean=-5.879 std=4.981) clip=20.0
+[step 03850] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03850] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03850] DEBUG: ep_len=6.7 ep_ret=-8.513 stop_prob=0.000 score_chg=0.2375
+[step 03860] value_loss=0.025737 policy_loss=-1.094456
+[step 03860] VALUE_DEBUG: target(mean=-18.24 std=3.82 min=-20.00 max=-9.38) V(s)(mean=-18.35 std=3.84) reward(mean=-5.129 std=5.101) clip=20.0
+[step 03870] value_loss=0.107927 policy_loss=-0.258194
+[step 03870] VALUE_DEBUG: target(mean=-19.81 std=0.18 min=-20.00 max=-19.41) V(s)(mean=-19.96 std=0.24) reward(mean=-7.737 std=4.328) clip=20.0
+[step 03880] value_loss=0.061874 policy_loss=-1.868626
+[step 03880] VALUE_DEBUG: target(mean=-19.52 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.65 std=1.82) reward(mean=-6.791 std=4.759) clip=20.0
+[step 03890] value_loss=0.073503 policy_loss=-1.114675
+[step 03890] VALUE_DEBUG: target(mean=-19.17 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.58) reward(mean=-5.834 std=4.984) clip=20.0
+[step 03900] value_loss=0.069670 policy_loss=0.327949
+[step 03900] VALUE_DEBUG: target(mean=-18.84 std=3.03 min=-20.00 max=-9.38) V(s)(mean=-18.98 std=3.12) reward(mean=-5.240 std=5.090) clip=20.0
+[step 03900] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03900] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03900] DEBUG: ep_len=6.0 ep_ret=-7.375 stop_prob=0.000 score_chg=0.3375
+[step 03910] value_loss=0.050098 policy_loss=0.328754
+[step 03910] VALUE_DEBUG: target(mean=-19.52 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.80) reward(mean=-6.529 std=4.802) clip=20.0
+[step 03920] value_loss=0.054295 policy_loss=0.300767
+[step 03920] VALUE_DEBUG: target(mean=-19.19 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.58) reward(mean=-6.162 std=5.020) clip=20.0
+[step 03930] value_loss=0.060803 policy_loss=-0.350034
+[step 03930] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.90) reward(mean=-5.578 std=5.021) clip=20.0
+[step 03940] value_loss=0.058070 policy_loss=0.489171
+[step 03940] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.78) reward(mean=-6.498 std=4.850) clip=20.0
+[step 03950] value_loss=0.049101 policy_loss=0.275585
+[step 03950] VALUE_DEBUG: target(mean=-18.90 std=3.07 min=-20.00 max=-9.38) V(s)(mean=-18.99 std=3.15) reward(mean=-5.749 std=5.002) clip=20.0
+[step 03950] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 03950] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 03950] DEBUG: ep_len=6.3 ep_ret=-7.743 stop_prob=0.000 score_chg=0.4000
+[step 03960] value_loss=0.054525 policy_loss=-0.377704
+[step 03960] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.11) reward(mean=-5.828 std=5.020) clip=20.0
+[step 03970] value_loss=3.298755 policy_loss=-1.316548
+[step 03970] VALUE_DEBUG: target(mean=-18.18 std=3.79 min=-20.00 max=-9.38) V(s)(mean=-18.63 std=3.54) reward(mean=-5.161 std=5.118) clip=20.0
+[step 03980] value_loss=4.020229 policy_loss=-1.130507
+[step 03980] VALUE_DEBUG: target(mean=-18.82 std=3.11 min=-20.00 max=-8.75) V(s)(mean=-19.35 std=2.53) reward(mean=-6.118 std=5.026) clip=20.0
+[step 03990] value_loss=0.069460 policy_loss=-1.654194
+[step 03990] VALUE_DEBUG: target(mean=-19.48 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.85) reward(mean=-7.089 std=4.657) clip=20.0
+[step 04000] value_loss=0.076834 policy_loss=-0.064929
+[step 04000] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.82) reward(mean=-6.503 std=4.797) clip=20.0
+[step 04000] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04000] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04000] DEBUG: ep_len=6.0 ep_ret=-7.329 stop_prob=0.000 score_chg=0.3875
+[Checkpoint] Saved to checkpoints/rl_sudoku-4x4-trivial_seed123/rl_checkpoint_step_4000.pt
+[step 04010] value_loss=0.077604 policy_loss=0.884702
+[step 04010] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.54) reward(mean=-5.196 std=5.025) clip=20.0
+[step 04020] value_loss=0.065842 policy_loss=-3.202248
+[step 04020] VALUE_DEBUG: target(mean=-19.17 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.58) reward(mean=-6.779 std=4.781) clip=20.0
+[step 04030] value_loss=0.058817 policy_loss=-1.025318
+[step 04030] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.12) reward(mean=-5.830 std=5.040) clip=20.0
+[step 04040] value_loss=0.040752 policy_loss=-1.251495
+[step 04040] VALUE_DEBUG: target(mean=-19.53 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.83) reward(mean=-7.092 std=4.658) clip=20.0
+[step 04050] value_loss=4.270323 policy_loss=0.067913
+[step 04050] VALUE_DEBUG: target(mean=-18.86 std=3.16 min=-20.00 max=-8.42) V(s)(mean=-19.37 std=2.44) reward(mean=-4.627 std=5.013) clip=20.0
+[step 04050] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04050] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04050] DEBUG: ep_len=5.9 ep_ret=-7.118 stop_prob=0.000 score_chg=0.3875
+[step 04060] value_loss=0.426758 policy_loss=-0.292952
+[step 04060] VALUE_DEBUG: target(mean=-18.96 std=2.79 min=-20.00 max=-9.38) V(s)(mean=-19.20 std=2.66) reward(mean=-6.156 std=4.939) clip=20.0
+[step 04070] value_loss=0.049749 policy_loss=3.338024
+[step 04070] VALUE_DEBUG: target(mean=-19.85 std=0.16 min=-20.00 max=-19.54) V(s)(mean=-20.00 std=0.00) reward(mean=-6.238 std=4.844) clip=20.0
+[step 04080] value_loss=3.568013 policy_loss=-0.434858
+[step 04080] VALUE_DEBUG: target(mean=-18.89 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.61) reward(mean=-5.220 std=5.017) clip=20.0
+[step 04090] value_loss=0.038309 policy_loss=-1.479726
+[step 04090] VALUE_DEBUG: target(mean=-18.88 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.11) reward(mean=-5.535 std=5.034) clip=20.0
+[step 04100] value_loss=0.074756 policy_loss=0.090051
+[step 04100] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.82) reward(mean=-4.669 std=4.961) clip=20.0
+[step 04100] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04100] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04100] DEBUG: ep_len=5.9 ep_ret=-7.140 stop_prob=0.000 score_chg=0.3625
+[step 04110] value_loss=0.132274 policy_loss=-0.480322
+[step 04110] VALUE_DEBUG: target(mean=-19.42 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.81) reward(mean=-6.754 std=4.769) clip=20.0
+[step 04120] value_loss=0.074697 policy_loss=-1.383697
+[step 04120] VALUE_DEBUG: target(mean=-19.16 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.60) reward(mean=-6.768 std=4.783) clip=20.0
+[step 04130] value_loss=0.056516 policy_loss=1.018441
+[step 04130] VALUE_DEBUG: target(mean=-18.84 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.10) reward(mean=-7.116 std=4.719) clip=20.0
+[step 04140] value_loss=0.049058 policy_loss=-0.398914
+[step 04140] VALUE_DEBUG: target(mean=-18.53 std=3.46 min=-20.00 max=-9.38) V(s)(mean=-18.68 std=3.49) reward(mean=-5.188 std=5.094) clip=20.0
+[step 04150] value_loss=0.024317 policy_loss=-1.759602
+[step 04150] VALUE_DEBUG: target(mean=-19.91 std=0.13 min=-20.00 max=-19.54) V(s)(mean=-20.00 std=0.00) reward(mean=-7.069 std=4.596) clip=20.0
+[step 04150] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04150] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04150] DEBUG: ep_len=5.6 ep_ret=-6.726 stop_prob=0.000 score_chg=0.3500
+[step 04160] value_loss=0.036041 policy_loss=-0.777776
+[step 04160] VALUE_DEBUG: target(mean=-19.21 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.59) reward(mean=-6.823 std=4.805) clip=20.0
+[step 04170] value_loss=0.073004 policy_loss=-0.932871
+[step 04170] VALUE_DEBUG: target(mean=-19.82 std=0.20 min=-20.00 max=-19.37) V(s)(mean=-20.00 std=0.00) reward(mean=-6.873 std=4.646) clip=20.0
+[step 04180] value_loss=0.052557 policy_loss=1.043756
+[step 04180] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.59) reward(mean=-5.504 std=5.039) clip=20.0
+[step 04190] value_loss=0.120657 policy_loss=-1.590293
+[step 04190] VALUE_DEBUG: target(mean=-19.44 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.80) reward(mean=-5.246 std=5.050) clip=20.0
+[step 04200] value_loss=0.107544 policy_loss=-0.730157
+[step 04200] VALUE_DEBUG: target(mean=-19.82 std=0.28 min=-20.00 max=-18.51) V(s)(mean=-20.00 std=0.00) reward(mean=-6.466 std=4.770) clip=20.0
+[step 04200] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04200] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04200] DEBUG: ep_len=6.0 ep_ret=-7.394 stop_prob=0.000 score_chg=0.3000
+[step 04210] value_loss=0.076092 policy_loss=-0.122343
+[step 04210] VALUE_DEBUG: target(mean=-19.47 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.86) reward(mean=-7.774 std=4.325) clip=20.0
+[step 04220] value_loss=0.122268 policy_loss=-0.479301
+[step 04220] VALUE_DEBUG: target(mean=-19.15 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.58) reward(mean=-6.493 std=4.839) clip=20.0
+[step 04230] value_loss=0.079914 policy_loss=-1.388528
+[step 04230] VALUE_DEBUG: target(mean=-19.48 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.65 std=1.86) reward(mean=-7.421 std=4.541) clip=20.0
+[step 04240] value_loss=0.037518 policy_loss=-0.625315
+[step 04240] VALUE_DEBUG: target(mean=-19.56 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.84) reward(mean=-6.131 std=4.950) clip=20.0
+[step 04250] value_loss=0.087283 policy_loss=-1.014566
+[step 04250] VALUE_DEBUG: target(mean=-19.47 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-7.447 std=4.478) clip=20.0
+[step 04250] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04250] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04250] DEBUG: ep_len=5.9 ep_ret=-7.166 stop_prob=0.000 score_chg=0.3250
+[step 04260] value_loss=4.008390 policy_loss=-0.437183
+[step 04260] VALUE_DEBUG: target(mean=-19.16 std=2.61 min=-20.00 max=-8.75) V(s)(mean=-19.67 std=1.85) reward(mean=-6.192 std=4.926) clip=20.0
+[step 04270] value_loss=0.057218 policy_loss=0.144052
+[step 04270] VALUE_DEBUG: target(mean=-19.85 std=0.19 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-5.635 std=4.941) clip=20.0
+[step 04280] value_loss=0.044024 policy_loss=-0.459658
+[step 04280] VALUE_DEBUG: target(mean=-19.86 std=0.15 min=-20.00 max=-19.54) V(s)(mean=-20.00 std=0.00) reward(mean=-7.140 std=4.582) clip=20.0
+[step 04290] value_loss=0.044947 policy_loss=-0.693687
+[step 04290] VALUE_DEBUG: target(mean=-19.87 std=0.17 min=-20.00 max=-19.51) V(s)(mean=-20.00 std=0.00) reward(mean=-5.313 std=4.957) clip=20.0
+[step 04300] value_loss=0.085505 policy_loss=-1.019950
+[step 04300] VALUE_DEBUG: target(mean=-19.48 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.85) reward(mean=-6.213 std=4.887) clip=20.0
+[step 04300] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04300] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04300] DEBUG: ep_len=6.5 ep_ret=-8.077 stop_prob=0.000 score_chg=0.2500
+[step 04310] value_loss=0.058860 policy_loss=-0.408402
+[step 04310] VALUE_DEBUG: target(mean=-19.83 std=0.18 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-7.174 std=4.560) clip=20.0
+[step 04320] value_loss=0.029409 policy_loss=-0.916849
+[step 04320] VALUE_DEBUG: target(mean=-18.23 std=3.81 min=-20.00 max=-9.38) V(s)(mean=-18.33 std=3.87) reward(mean=-5.777 std=5.033) clip=20.0
+[step 04330] value_loss=0.072286 policy_loss=0.816268
+[step 04330] VALUE_DEBUG: target(mean=-18.81 std=3.04 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.12) reward(mean=-6.768 std=4.871) clip=20.0
+[step 04340] value_loss=0.064733 policy_loss=0.493713
+[step 04340] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.85) reward(mean=-5.599 std=5.011) clip=20.0
+[step 04350] value_loss=0.023632 policy_loss=-1.699556
+[step 04350] VALUE_DEBUG: target(mean=-18.94 std=3.08 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.10) reward(mean=-3.632 std=4.755) clip=20.0
+[step 04350] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04350] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04350] DEBUG: ep_len=6.2 ep_ret=-7.614 stop_prob=0.000 score_chg=0.3000
+[step 04360] value_loss=0.036030 policy_loss=-1.045673
+[step 04360] VALUE_DEBUG: target(mean=-19.23 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.56) reward(mean=-5.211 std=5.027) clip=20.0
+[step 04370] value_loss=0.038780 policy_loss=0.838799
+[step 04370] VALUE_DEBUG: target(mean=-19.22 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.55) reward(mean=-6.450 std=4.844) clip=20.0
+[step 04380] value_loss=0.068884 policy_loss=-1.092523
+[step 04380] VALUE_DEBUG: target(mean=-19.16 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.61) reward(mean=-6.834 std=4.764) clip=20.0
+[step 04390] value_loss=0.045269 policy_loss=-2.723893
+[step 04390] VALUE_DEBUG: target(mean=-19.54 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.66 std=1.88) reward(mean=-5.591 std=4.968) clip=20.0
+[step 04400] value_loss=0.069945 policy_loss=-0.498895
+[step 04400] VALUE_DEBUG: target(mean=-19.48 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.85) reward(mean=-7.139 std=4.626) clip=20.0
+[step 04400] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04400] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04400] DEBUG: ep_len=5.8 ep_ret=-6.896 stop_prob=0.000 score_chg=0.3875
+[step 04410] value_loss=0.082689 policy_loss=-2.015808
+[step 04410] VALUE_DEBUG: target(mean=-19.80 std=0.20 min=-20.00 max=-19.30) V(s)(mean=-20.00 std=0.00) reward(mean=-6.540 std=4.829) clip=20.0
+[step 04420] value_loss=0.052639 policy_loss=0.335071
+[step 04420] VALUE_DEBUG: target(mean=-19.86 std=0.18 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-5.919 std=4.930) clip=20.0
+[step 04430] value_loss=0.077465 policy_loss=2.283286
+[step 04430] VALUE_DEBUG: target(mean=-19.81 std=0.20 min=-20.00 max=-19.34) V(s)(mean=-20.00 std=0.00) reward(mean=-7.171 std=4.555) clip=20.0
+[step 04440] value_loss=0.081437 policy_loss=-1.272837
+[step 04440] VALUE_DEBUG: target(mean=-19.81 std=0.22 min=-20.00 max=-19.31) V(s)(mean=-20.00 std=0.00) reward(mean=-5.295 std=4.986) clip=20.0
+[step 04450] value_loss=4.012751 policy_loss=0.202321
+[step 04450] VALUE_DEBUG: target(mean=-19.18 std=2.62 min=-20.00 max=-8.75) V(s)(mean=-19.67 std=1.86) reward(mean=-5.775 std=4.986) clip=20.0
+[step 04450] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04450] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04450] DEBUG: ep_len=5.8 ep_ret=-6.957 stop_prob=0.000 score_chg=0.3250
+[step 04460] value_loss=0.068332 policy_loss=1.781192
+[step 04460] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-5.905 std=4.955) clip=20.0
+[step 04470] value_loss=0.091193 policy_loss=-2.035229
+[step 04470] VALUE_DEBUG: target(mean=-18.77 std=3.18 min=-20.00 max=-8.04) V(s)(mean=-18.99 std=3.15) reward(mean=-7.375 std=4.538) clip=20.0
+[step 04480] value_loss=0.133321 policy_loss=-0.807511
+[step 04480] VALUE_DEBUG: target(mean=-19.17 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.60) reward(mean=-4.882 std=4.961) clip=20.0
+[step 04490] value_loss=0.052665 policy_loss=-0.210304
+[step 04490] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.60) reward(mean=-6.138 std=4.972) clip=20.0
+[step 04500] value_loss=0.055941 policy_loss=0.335379
+[step 04500] VALUE_DEBUG: target(mean=-19.83 std=0.17 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.840 std=4.733) clip=20.0
+[step 04500] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04500] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04500] DEBUG: ep_len=6.5 ep_ret=-8.068 stop_prob=0.000 score_chg=0.2625
+[step 04510] value_loss=0.045220 policy_loss=-2.205636
+[step 04510] VALUE_DEBUG: target(mean=-19.86 std=0.16 min=-20.00 max=-19.51) V(s)(mean=-20.00 std=0.00) reward(mean=-7.129 std=4.614) clip=20.0
+[step 04520] value_loss=0.056900 policy_loss=-1.491790
+[step 04520] VALUE_DEBUG: target(mean=-19.84 std=0.18 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.824 std=4.728) clip=20.0
+[step 04530] value_loss=0.035163 policy_loss=-1.080152
+[step 04530] VALUE_DEBUG: target(mean=-18.91 std=3.07 min=-20.00 max=-9.38) V(s)(mean=-19.01 std=3.06) reward(mean=-5.473 std=5.055) clip=20.0
+[step 04540] value_loss=0.048622 policy_loss=0.868212
+[step 04540] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.55) reward(mean=-6.190 std=4.898) clip=20.0
+[step 04550] value_loss=0.054682 policy_loss=0.658808
+[step 04550] VALUE_DEBUG: target(mean=-19.21 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.32 std=2.62) reward(mean=-5.218 std=5.041) clip=20.0
+[step 04550] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04550] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04550] DEBUG: ep_len=6.5 ep_ret=-8.039 stop_prob=0.000 score_chg=0.3000
+[step 04560] value_loss=0.122087 policy_loss=0.476206
+[step 04560] VALUE_DEBUG: target(mean=-19.08 std=2.51 min=-20.00 max=-9.38) V(s)(mean=-19.30 std=2.71) reward(mean=-7.439 std=4.569) clip=20.0
+[step 04570] value_loss=0.043105 policy_loss=1.171033
+[step 04570] VALUE_DEBUG: target(mean=-19.54 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-6.513 std=4.785) clip=20.0
+[step 04580] value_loss=0.057925 policy_loss=-0.950939
+[step 04580] VALUE_DEBUG: target(mean=-18.87 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.10) reward(mean=-4.592 std=4.999) clip=20.0
+[step 04590] value_loss=0.064360 policy_loss=-0.635581
+[step 04590] VALUE_DEBUG: target(mean=-19.81 std=0.17 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-7.834 std=4.285) clip=20.0
+[step 04600] value_loss=0.048477 policy_loss=-0.584690
+[step 04600] VALUE_DEBUG: target(mean=-18.87 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.10) reward(mean=-5.589 std=4.982) clip=20.0
+[step 04600] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04600] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04600] DEBUG: ep_len=5.9 ep_ret=-7.156 stop_prob=0.000 score_chg=0.3375
+[step 04610] value_loss=0.064604 policy_loss=-1.582536
+[step 04610] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.86) reward(mean=-6.471 std=4.882) clip=20.0
+[step 04620] value_loss=0.078895 policy_loss=-0.127041
+[step 04620] VALUE_DEBUG: target(mean=-19.16 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.59) reward(mean=-5.524 std=5.042) clip=20.0
+[step 04630] value_loss=0.055952 policy_loss=0.771022
+[step 04630] VALUE_DEBUG: target(mean=-19.17 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.56) reward(mean=-6.492 std=4.868) clip=20.0
+[step 04640] value_loss=0.064273 policy_loss=0.249986
+[step 04640] VALUE_DEBUG: target(mean=-18.83 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.01 std=3.09) reward(mean=-6.496 std=4.891) clip=20.0
+[step 04650] value_loss=0.061022 policy_loss=-0.667291
+[step 04650] VALUE_DEBUG: target(mean=-18.53 std=3.47 min=-20.00 max=-9.38) V(s)(mean=-18.67 std=3.52) reward(mean=-5.188 std=5.021) clip=20.0
+[step 04650] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04650] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04650] DEBUG: ep_len=5.9 ep_ret=-7.166 stop_prob=0.000 score_chg=0.3375
+[step 04660] value_loss=0.152696 policy_loss=-2.352979
+[step 04660] VALUE_DEBUG: target(mean=-19.53 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.61 std=1.86) reward(mean=-5.581 std=4.985) clip=20.0
+[step 04670] value_loss=0.064918 policy_loss=-1.806408
+[step 04670] VALUE_DEBUG: target(mean=-18.85 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.01 std=3.07) reward(mean=-4.867 std=5.036) clip=20.0
+[step 04680] value_loss=0.052674 policy_loss=0.427335
+[step 04680] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.82) reward(mean=-7.422 std=4.497) clip=20.0
+[step 04690] value_loss=0.124570 policy_loss=-0.434022
+[step 04690] VALUE_DEBUG: target(mean=-19.40 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.86) reward(mean=-7.757 std=4.364) clip=20.0
+[step 04700] value_loss=0.077495 policy_loss=-1.457738
+[step 04700] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.85) reward(mean=-5.864 std=4.955) clip=20.0
+[step 04700] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04700] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04700] DEBUG: ep_len=5.9 ep_ret=-7.138 stop_prob=0.000 score_chg=0.3625
+[step 04710] value_loss=0.057726 policy_loss=-0.485906
+[step 04710] VALUE_DEBUG: target(mean=-19.85 std=0.19 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.270 std=4.854) clip=20.0
+[step 04720] value_loss=0.052655 policy_loss=-0.511470
+[step 04720] VALUE_DEBUG: target(mean=-19.85 std=0.18 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.254 std=4.887) clip=20.0
+[step 04730] value_loss=0.067003 policy_loss=-1.334783
+[step 04730] VALUE_DEBUG: target(mean=-19.16 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.54) reward(mean=-6.792 std=4.787) clip=20.0
+[step 04740] value_loss=0.039258 policy_loss=-0.421867
+[step 04740] VALUE_DEBUG: target(mean=-18.87 std=3.06 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.12) reward(mean=-6.772 std=4.839) clip=20.0
+[step 04750] value_loss=0.065073 policy_loss=0.673575
+[step 04750] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.84) reward(mean=-6.845 std=4.710) clip=20.0
+[step 04750] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04750] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04750] DEBUG: ep_len=5.6 ep_ret=-6.705 stop_prob=0.000 score_chg=0.3750
+[step 04760] value_loss=0.087633 policy_loss=-1.589092
+[step 04760] VALUE_DEBUG: target(mean=-19.14 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.57) reward(mean=-6.105 std=5.017) clip=20.0
+[step 04770] value_loss=0.072223 policy_loss=-1.489205
+[step 04770] VALUE_DEBUG: target(mean=-19.82 std=0.20 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.574 std=4.816) clip=20.0
+[step 04780] value_loss=0.079336 policy_loss=-0.000000
+[step 04780] VALUE_DEBUG: target(mean=-19.15 std=2.53 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.58) reward(mean=-7.385 std=4.550) clip=20.0
+[step 04790] value_loss=0.041869 policy_loss=-0.104982
+[step 04790] VALUE_DEBUG: target(mean=-19.22 std=2.55 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.57) reward(mean=-4.930 std=5.052) clip=20.0
+[step 04800] value_loss=0.068906 policy_loss=-1.034781
+[step 04800] VALUE_DEBUG: target(mean=-19.82 std=0.19 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-7.136 std=4.608) clip=20.0
+[step 04800] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04800] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04800] DEBUG: ep_len=6.6 ep_ret=-8.286 stop_prob=0.000 score_chg=0.2625
+[step 04810] value_loss=0.016003 policy_loss=1.939100
+[step 04810] VALUE_DEBUG: target(mean=-19.60 std=1.84 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.84) reward(mean=-5.542 std=4.925) clip=20.0
+[step 04820] value_loss=0.058695 policy_loss=-1.129781
+[step 04820] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.56) reward(mean=-6.142 std=4.970) clip=20.0
+[step 04830] value_loss=0.043636 policy_loss=0.000000
+[step 04830] VALUE_DEBUG: target(mean=-19.85 std=0.14 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-8.128 std=4.093) clip=20.0
+[step 04840] value_loss=0.043662 policy_loss=-0.288398
+[step 04840] VALUE_DEBUG: target(mean=-18.55 std=3.47 min=-20.00 max=-9.38) V(s)(mean=-18.67 std=3.53) reward(mean=-5.501 std=5.062) clip=20.0
+[step 04850] value_loss=0.064731 policy_loss=-0.782547
+[step 04850] VALUE_DEBUG: target(mean=-19.50 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.68 std=1.79) reward(mean=-6.807 std=4.758) clip=20.0
+[step 04850] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04850] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04850] DEBUG: ep_len=6.2 ep_ret=-7.597 stop_prob=0.000 score_chg=0.3250
+[step 04860] value_loss=0.058412 policy_loss=-1.511074
+[step 04860] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.85) reward(mean=-6.132 std=4.944) clip=20.0
+[step 04870] value_loss=0.080958 policy_loss=-0.612249
+[step 04870] VALUE_DEBUG: target(mean=-19.83 std=0.23 min=-20.00 max=-18.95) V(s)(mean=-20.00 std=0.00) reward(mean=-7.140 std=4.544) clip=20.0
+[step 04880] value_loss=0.040522 policy_loss=-0.216426
+[step 04880] VALUE_DEBUG: target(mean=-18.23 std=3.81 min=-20.00 max=-9.38) V(s)(mean=-18.34 std=3.86) reward(mean=-4.854 std=5.082) clip=20.0
+[step 04890] value_loss=0.032831 policy_loss=-1.253776
+[step 04890] VALUE_DEBUG: target(mean=-18.57 std=3.48 min=-20.00 max=-9.38) V(s)(mean=-18.67 std=3.53) reward(mean=-5.181 std=5.050) clip=20.0
+[step 04900] value_loss=0.067353 policy_loss=-0.619075
+[step 04900] VALUE_DEBUG: target(mean=-19.48 std=1.82 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.83) reward(mean=-7.170 std=4.661) clip=20.0
+[step 04900] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04900] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04900] DEBUG: ep_len=5.9 ep_ret=-7.214 stop_prob=0.000 score_chg=0.2875
+[step 04910] value_loss=0.070301 policy_loss=-0.454550
+[step 04910] VALUE_DEBUG: target(mean=-19.82 std=0.20 min=-20.00 max=-19.48) V(s)(mean=-20.00 std=0.00) reward(mean=-6.254 std=4.875) clip=20.0
+[step 04920] value_loss=0.045111 policy_loss=-0.540234
+[step 04920] VALUE_DEBUG: target(mean=-19.20 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.33 std=2.59) reward(mean=-5.515 std=5.037) clip=20.0
+[step 04930] value_loss=0.053954 policy_loss=0.231591
+[step 04930] VALUE_DEBUG: target(mean=-19.18 std=2.54 min=-20.00 max=-9.38) V(s)(mean=-19.34 std=2.57) reward(mean=-6.484 std=4.869) clip=20.0
+[step 04940] value_loss=0.063186 policy_loss=-0.788019
+[step 04940] VALUE_DEBUG: target(mean=-19.52 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.84) reward(mean=-5.608 std=4.971) clip=20.0
+[step 04950] value_loss=0.048251 policy_loss=-1.493513
+[step 04950] VALUE_DEBUG: target(mean=-18.26 std=3.83 min=-20.00 max=-9.38) V(s)(mean=-18.31 std=3.93) reward(mean=-4.520 std=5.033) clip=20.0
+[step 04950] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 04950] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 04950] DEBUG: ep_len=6.6 ep_ret=-8.179 stop_prob=0.000 score_chg=0.3750
+[step 04960] value_loss=0.071193 policy_loss=-0.000640
+[step 04960] VALUE_DEBUG: target(mean=-18.82 std=3.04 min=-20.00 max=-9.38) V(s)(mean=-19.01 std=3.08) reward(mean=-5.867 std=5.037) clip=20.0
+[step 04970] value_loss=0.076485 policy_loss=-0.207673
+[step 04970] VALUE_DEBUG: target(mean=-19.51 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.85) reward(mean=-5.241 std=5.000) clip=20.0
+[step 04980] value_loss=0.082819 policy_loss=-0.208802
+[step 04980] VALUE_DEBUG: target(mean=-18.82 std=3.05 min=-20.00 max=-9.38) V(s)(mean=-19.00 std=3.10) reward(mean=-6.097 std=5.016) clip=20.0
+[step 04990] value_loss=0.044336 policy_loss=-0.381250
+[step 04990] VALUE_DEBUG: target(mean=-18.54 std=3.47 min=-20.00 max=-9.38) V(s)(mean=-18.67 std=3.52) reward(mean=-5.219 std=5.047) clip=20.0
+[step 05000] value_loss=0.101139 policy_loss=-0.710361
+[step 05000] VALUE_DEBUG: target(mean=-19.45 std=1.83 min=-20.00 max=-9.38) V(s)(mean=-19.67 std=1.84) reward(mean=-6.815 std=4.733) clip=20.0
+[step 05000] eval_success_rate=0.320 eval_mean_score=8.775 eval_policy_mode=greedy [solved=16/50, score_range=7.50-10.00/10.0, initial=8.45]
+[step 05000] PROGRESS: filled=14.52 violations=1.34 zero_cand=0.06
+[step 05000] DEBUG: ep_len=6.0 ep_ret=-7.376 stop_prob=0.000 score_chg=0.3250
+[Checkpoint] Saved to checkpoints/rl_sudoku-4x4-trivial_seed123/rl_checkpoint_step_5000.pt
+[Checkpoint] Saved to checkpoints/rl_sudoku-4x4-trivial_seed123/rl_checkpoint_step_5000.pt

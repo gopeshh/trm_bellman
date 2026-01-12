@@ -948,3 +948,99 @@ For trivial 4×4 puzzles, the regularization penalty outweighs any stability ben
 
 *Section added: January 10, 2026 - Post contraction-fix rerun with opnorm clamp*
 
+
+---
+
+## Comprehensive Ablation Suite: 6-8 Empties (2026-01-12)
+
+**Purpose**: Validate contraction findings on harder puzzles where random baseline = 0%.
+
+**Dataset**: `sudoku-4x4-easy_6to8empties` (6-8 empty cells per puzzle)
+**Training**: 20,000 steps, n=3 seeds (42, 123, 456), eval every 200 steps, 50 eval episodes
+
+### Experiment Configuration
+
+| Config | Latent Mode | Contraction | Conservative (α) | Notes |
+|--------|-------------|-------------|------------------|-------|
+| upi_trm | Episodic | ON | 0.1 | Full theory-aligned |
+| no_contraction | Episodic | OFF | 0.1 | Tests contraction impact |
+| ablation_persistent_z | Persistent | ON | 0.1 | Tests persistent + contraction |
+| persistent_z_no_contraction | Persistent | OFF | 0.1 | Tests persistent without contraction |
+| ablation_no_conservative | Episodic | ON | 1.0 | Tests α=1 (no conservative) |
+| a2c | Episodic | OFF | N/A | A2C baseline |
+| dqn | Episodic | OFF | N/A | DQN baseline |
+
+### Final Results @ 20k Steps
+
+| Rank | Config | Seed 42 | Seed 123 | Seed 456 | Mean | Std |
+|------|--------|---------|----------|----------|------|-----|
+| **🥇** | **persistent_z_no_contraction** | 60% | 52% | 58% | **56.7%** | 4.2% |
+| **🥈** | **no_contraction** | 42% | 54% | 48% | **48.0%** | 6.0% |
+| 3 | ablation_no_conservative | 2% | 34% | 0% | **12.0%** | 19.0% |
+| 4 | upi_trm | 0% | 0% | 0% | **0.0%** | 0.0% |
+| 5 | ablation_persistent_z | 0% | 0% | 0% | **0.0%** | 0.0% |
+| 6 | a2c | 0% | 0% | 0% | **0.0%** | 0.0% |
+| 7 | dqn | 0% | 0% | 0% | **0.0%** | 0.0% |
+
+### Key Findings
+
+1. **Contraction completely blocks learning on 6-8 empties**
+   - With contraction: 0% across all variants (upi_trm, ablation_persistent_z)
+   - Without contraction: 48-57% success
+
+2. **Persistent latent mode + no contraction is BEST**
+   - persistent_z_no_contraction: **56.7%** mean
+   - no_contraction (episodic): 48.0% mean
+   - Difference: +8.7 percentage points
+
+3. **Baseline algorithms (A2C, DQN) fail completely**
+   - Both achieve 0% success
+   - Confirms UPI-TRM architecture advantage when contraction is disabled
+
+4. **Removing conservative mixture shows high variance**
+   - ablation_no_conservative: 12% mean but seed 123 reached 34%
+   - May be unstable without careful tuning
+
+5. **Random baseline = 0%** on this dataset confirms difficulty
+
+### Contraction Ablation Summary
+
+| Latent Mode | With Contraction | Without Contraction | Gap |
+|-------------|------------------|---------------------|-----|
+| Episodic | 0% (upi_trm) | 48% (no_contraction) | **+48pp** |
+| Persistent | 0% (ablation_persistent_z) | 57% (persistent_z_no_contraction) | **+57pp** |
+
+### Comparison: Trivial (1-4 empties) vs 6-8 Empties
+
+| Config | Trivial (5k steps) | 6-8 Empties (20k steps) |
+|--------|-------------------|-------------------------|
+| persistent_z_no_contraction | 93.3% | 56.7% |
+| episodic + no_contraction | N/A | 48.0% |
+| episodic + contraction | 38.7% | 0.0% |
+| persistent + contraction | 10.0% | 0.0% |
+
+**Observation**: On harder puzzles, contraction is even more damaging (0% vs 10-39% on trivial).
+
+### Implications for Paper
+
+1. **Contraction may need to be disabled** for practical performance
+2. **Persistent latent mode recommended** when contraction is off
+3. **Theory-exact config (with contraction) has practical limitations**
+4. Consider **late-stage contraction**: train without contraction, fine-tune with
+
+### Plots
+
+See `results/plots_6to8empties_all_ablations_20k/`:
+- `feasibility_success_vs_steps.{png,pdf}` - Success rate learning curves
+- `feasibility_score_vs_steps.{png,pdf}` - Mean score learning curves
+- `feasibility_ablations.{png,pdf}` - Ablation comparison
+
+### CSV Data
+
+- `results/plot_data_6to8empties_all_ablations_20k/*.csv` - Per-algorithm data
+- `results/plot_data_6to8empties_all_ablations_20k/summary.csv` - Final results
+- `results/plot_data_6to8empties_all_ablations_20k/plot_data_feasibility_learning_curves.csv` - Merged data
+
+---
+
+*Section added: January 12, 2026 - Comprehensive 6-8 empties ablation suite (7 configs × 3 seeds = 21 runs)*

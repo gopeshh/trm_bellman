@@ -1,0 +1,101 @@
+# BASE CONFIG: Contraction vs SGD Tradeoff Experiment
+#
+# Tests Brett's hypothesis: contraction enforcement may hurt performance
+# because it acts like a hard constraint that fights SGD / shrinks function class.
+#
+# Dataset: 4x4 trivial (1-4 empties)
+# Budget: 5k training steps
+#
+# This is the base config - individual experiment configs override contraction settings.
+
+# ===================================================================
+# CHECKER - Progress based (same as paper)
+# ===================================================================
+use_progress_checker: true
+use_constraint_checker: false
+
+# ===================================================================
+# LATENT MODE - EPISODIC (default, persistent-z is separate experiment)
+# ===================================================================
+episodic_latent: true  # z reinitialized from (x, y) at each step
+
+# ===================================================================
+# CORE RL PARAMETERS
+# ===================================================================
+gamma: 0.99
+K: 1                   # 1-step TD
+inner_unroll_n: 4      # Latent unroll depth
+max_edits: 20          # Episode budget for 4x4 Sudoku
+
+# ===================================================================
+# THEORY-EXACT FEATURES (same as paper)
+# ===================================================================
+exact_k_step_targets: true
+exact_baseline_summation: true   # Enabled for episodic-z
+theory_exact_mixture: true       # Policy-space CPI mixture
+distill_mixture_policy: false
+batch_centered_advantage: true
+
+# ===================================================================
+# CONTRACTION & LIPSCHITZ - TO BE OVERRIDDEN
+# ===================================================================
+enable_contraction: false  # Overridden by experiment configs
+target_Lz: 0.9
+target_Lv: 1.0
+latent_ball_radius: 10.0
+
+# ===================================================================
+# CONSERVATIVE POLICY IMPROVEMENT
+# ===================================================================
+mixture_alpha: 0.05
+
+# ===================================================================
+# REWARD SHAPING
+# ===================================================================
+reward_shaping: true
+fail_terminal_reward: -16.0   # -C_max for rush-to-fail mitigation
+solve_terminal_reward: 0.0
+
+# ===================================================================
+# STOP ACTION
+# ===================================================================
+stop_action_mode: "disabled"  # Force agent to use full budget
+
+# ===================================================================
+# OPTIMIZATION
+# ===================================================================
+value_lr: 3.0e-4
+policy_lr: 1.0e-4
+entropy_coef: 0.05
+value_grad_clip: 5.0
+policy_grad_clip: 1.0
+
+# LR schedule - constant for stability
+lr_schedule: "constant"
+lr_warmup_steps: 0
+lr_min_factor: 1.0
+
+# ===================================================================
+# REPLAY & TRAINING
+# ===================================================================
+replay_capacity: 100000
+batch_size: 128
+num_train_steps: 5000
+rollout_episodes_per_step: 4
+rollout_batch_size: 32
+
+# ===================================================================
+# LOGGING & EVALUATION
+# ===================================================================
+log_interval: 10
+eval_interval: 50
+eval_num_episodes: 50
+use_tqdm: false
+debug_checks: false
+track_theory_metrics: true
+
+# ===================================================================
+# TASK CONFIGURATION
+# ===================================================================
+task_name: "sudoku"
+solved_threshold: 16.0  # For progress checker: 16 = all cells filled (4x4 Sudoku)

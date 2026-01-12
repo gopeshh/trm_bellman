@@ -1,0 +1,10 @@
+# CONDITION 4: Scheduled contraction
+#
+# Off for first 70% (3500 steps), then on with target_Lz=0.90 for last 30% (1500 steps)
+# Tests Brett's hypothesis: late-stage contraction helps without early optimization interference
+#
+# NOTE: This config will be used with a special wrapper script that enables
+# contraction mid-run. Set to off initially.
+
+enable_contraction: false
+target_Lz: 0.90  # Will be used when contraction is enabled at step 3500
