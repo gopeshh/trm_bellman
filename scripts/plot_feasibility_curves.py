@@ -20,6 +20,27 @@ except ImportError:
     MATPLOTLIB_AVAILABLE = False
     print("Warning: matplotlib not available. Install with: pip install matplotlib")
 
+def apply_paper_style():
+    """
+    Make plots readable at ICML single-column scale.
+    We intentionally use larger fonts and a compact legend layout.
+    """
+    if not MATPLOTLIB_AVAILABLE:
+        return
+    plt.rcParams.update({
+        "font.size": 14,
+        "axes.labelsize": 15,
+        "axes.titlesize": 15,
+        "xtick.labelsize": 13,
+        "ytick.labelsize": 13,
+        "legend.fontsize": 12,
+        "lines.linewidth": 2.8,
+        "lines.markersize": 6,
+        "figure.dpi": 200,
+        # Slightly thicker axes for print
+        "axes.linewidth": 1.0,
+    })
+
 
 def apply_paper_style():
     """Apply paper-quality styling: larger fonts, readable at single-column width."""
@@ -154,9 +175,11 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
     if not MATPLOTLIB_AVAILABLE:
         print("Cannot plot: matplotlib not available")
         return
-
     apply_paper_style()
-    fig, ax = plt.subplots(figsize=(8, 5))
+
+    # Tuned for ICML single-column readability (fonts/legend), while still
+    # looking good when used as a wider figure.
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
 
     # Plot main algorithms first
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
@@ -173,14 +196,14 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
         # Plot individual seed curves (thin, semi-transparent)
         for seed, d in seed_data.items():
             ax.plot(d["steps"], d["success_rates"],
-                    color=config["color"], alpha=0.3, linewidth=1.5)
+                    color=config["color"], alpha=0.18, linewidth=0.9)
 
         # Plot mean curve (thick)
         mean_steps, mean_rates = compute_mean_curve(seed_data, "success_rates")
         if mean_steps:
             ax.plot(mean_steps, mean_rates,
                     color=config["color"], linewidth=3.0,
-                    marker=config["marker"], markersize=6, markevery=10,
+                    marker=config["marker"], markersize=6, markevery=8,
                     label=f"{config['name']} (n={len(seed_data)})")
 
     # Add random baseline horizontal line
@@ -193,17 +216,26 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
     ax.set_ylim(0, 1.0)
     ax.set_xlim(0, None)
     ax.grid(True, alpha=0.3)
-
-    # Legend below plot in 2 columns
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=2, frameon=True)
+    # Put legend below plot in two columns (prevents covering curves + improves readability)
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.22),
+        ncol=2,
+        frameon=False,
+        handlelength=2.0,
+        columnspacing=1.2,
+    )
+    ax.tick_params(axis="both", which="major")
 
     # Save
     output_dir.mkdir(parents=True, exist_ok=True)
     png_path = output_dir / "feasibility_success_vs_steps.png"
     pdf_path = output_dir / "feasibility_success_vs_steps.pdf"
 
-    fig.savefig(png_path, dpi=150, bbox_inches='tight')
-    fig.savefig(pdf_path, bbox_inches='tight')
+    # Leave room for legend under axes
+    fig.tight_layout(rect=[0, 0.08, 1, 1])
+    fig.savefig(png_path, dpi=200, bbox_inches="tight", pad_inches=0.02)
+    fig.savefig(pdf_path, bbox_inches="tight", pad_inches=0.02)
     print(f"Saved {png_path}")
     print(f"Saved {pdf_path}")
 
