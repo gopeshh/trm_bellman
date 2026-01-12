@@ -2,6 +2,14 @@
 
 This repository extends the Tiny Recursive Model (TRM) codebase with a plan-space reinforcement learning framework we call **UPI–TRM**. It adds latent value estimation (`U_n(s)`), a configurable K-step value operator, and conservative policy improvement (CPI) mixture updates so that TRMs can be trained and evaluated with lightweight RL loops.
 
+## Latest experiment results (canonical)
+
+For the up-to-date 4×4 Sudoku feasibility-checker results (trivial 1–4 empties and harder 6–8 empties), random baselines, and artifact pointers, see:
+- `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
+
+For the forward-looking plan (baseline tuning + 9×9), see:
+- `EXPERIMENT_PLAN.md`
+
 ## Repository Structure
 - `models/recursive_reasoning/trm.py` – `TinyRecursiveReasoningModel_ACTV1` with RL-specific value/policy heads.
 - `models/value_head.py` – latent value head \(V_\psi\) with spectral normalization utilities from `utils/lipschitz.py`.

@@ -2,9 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Canonical results & current plan
+
+- **Latest 4×4 feasibility-checker results + artifact pointers**: `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
+- **Forward plan (baseline tuning, 9×9)**: `EXPERIMENT_PLAN.md`
+
+> Note: historical “status” sections in this repo may be stale. Prefer the consolidated experiment log above.
+
 ## User Preferences
 
-**IMPORTANT: Always use Meta Buck2 for everything** (building, running, testing). Do not use pip/python directly.
+**Prefer Buck2 for training/runs on Meta devservers**. For local plotting/data munging scripts, using `python` directly is fine.
 
 ```bash
 # Standard Buck2 command pattern for this project
