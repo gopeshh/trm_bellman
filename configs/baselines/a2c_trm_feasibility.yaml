@@ -4,11 +4,13 @@
 #
 # Score = filled - w_v * violations - w_z * zeroCand
 # Success = filled == N AND violations == 0
+#
+# TUNED: Disabled contraction, increased num_steps (was 5, too short!), lowered LR
 
 algorithm: "a2c"
 
 # A2C hyperparameters
-a2c_num_steps: 5
+a2c_num_steps: 32  # FIXED: Increased from 5 (was causing high variance)
 vf_coef: 0.5
 max_grad_norm: 0.5
 
@@ -32,13 +34,13 @@ solved_threshold: null
 
 # Model
 model_type: "trm"
-enable_contraction: true
-target_Lz: 0.9
+enable_contraction: false  # FIXED: Contraction hurts on this task
+target_Lz: 0.9  # Ignored when contraction disabled
 target_Lv: 5.0
-latent_ball_radius: 10.0
+latent_ball_radius: 0.0  # Disabled with contraction
 
 # Optimization
-policy_lr: 3.0e-4
+policy_lr: 1.0e-4  # FIXED: Lowered from 3e-4 for stability
 value_lr: 1.0e-4
 entropy_coef: 0.05
 value_target_clip: 50.0
