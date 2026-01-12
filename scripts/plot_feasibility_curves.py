@@ -21,6 +21,25 @@ except ImportError:
     print("Warning: matplotlib not available. Install with: pip install matplotlib")
 
 
+def apply_paper_style():
+    """Apply paper-quality styling: larger fonts, readable at single-column width."""
+    plt.rcParams.update({
+        'font.size': 14,
+        'axes.labelsize': 16,
+        'axes.titlesize': 18,
+        'xtick.labelsize': 12,
+        'ytick.labelsize': 12,
+        'legend.fontsize': 11,
+        'figure.titlesize': 18,
+        'lines.linewidth': 2.5,
+        'lines.markersize': 6,
+        'axes.linewidth': 1.2,
+        'grid.linewidth': 0.8,
+        'pdf.fonttype': 42,  # TrueType fonts for better PDF rendering
+        'ps.fonttype': 42,
+    })
+
+
 # Algorithm display names and colors
 # All UPI-TRM variants use "UPI-TRM (...)" prefix for clarity
 # Terminology: "Episodic-z" (reset each step) vs "Persistent-z" (carry across steps)
@@ -136,7 +155,8 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
         print("Cannot plot: matplotlib not available")
         return
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    apply_paper_style()
+    fig, ax = plt.subplots(figsize=(8, 5))
 
     # Plot main algorithms first
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
@@ -153,36 +173,37 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
         # Plot individual seed curves (thin, semi-transparent)
         for seed, d in seed_data.items():
             ax.plot(d["steps"], d["success_rates"],
-                    color=config["color"], alpha=0.3, linewidth=1)
+                    color=config["color"], alpha=0.3, linewidth=1.5)
 
         # Plot mean curve (thick)
         mean_steps, mean_rates = compute_mean_curve(seed_data, "success_rates")
         if mean_steps:
             ax.plot(mean_steps, mean_rates,
-                    color=config["color"], linewidth=2.5,
-                    marker=config["marker"], markersize=4, markevery=10,
+                    color=config["color"], linewidth=3.0,
+                    marker=config["marker"], markersize=6, markevery=10,
                     label=f"{config['name']} (n={len(seed_data)})")
 
     # Add random baseline horizontal line
     ax.axhline(y=RANDOM_BASELINE["success_rate"], color='gray', linestyle='--',
-               linewidth=2, alpha=0.7, label=f'Random ({RANDOM_BASELINE["success_rate"]:.0%})')
+               linewidth=2.5, alpha=0.7, label=f'Random ({RANDOM_BASELINE["success_rate"]:.0%})')
 
-    ax.set_xlabel("Training Steps", fontsize=12)
-    ax.set_ylabel("Success Rate", fontsize=12)
-    ax.set_title(f"4×4 Sudoku: Success Rate vs Training Steps\n({title_suffix})", fontsize=14)
+    ax.set_xlabel("Training Steps")
+    ax.set_ylabel("Success Rate")
+    ax.set_title(f"4×4 Sudoku: Success Rate vs Training Steps\n({title_suffix})")
     ax.set_ylim(0, 1.0)
     ax.set_xlim(0, None)
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="lower right", fontsize=10)
+
+    # Legend below plot in 2 columns
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=2, frameon=True)
 
     # Save
     output_dir.mkdir(parents=True, exist_ok=True)
     png_path = output_dir / "feasibility_success_vs_steps.png"
     pdf_path = output_dir / "feasibility_success_vs_steps.pdf"
 
-    fig.tight_layout()
-    fig.savefig(png_path, dpi=150)
-    fig.savefig(pdf_path)
+    fig.savefig(png_path, dpi=150, bbox_inches='tight')
+    fig.savefig(pdf_path, bbox_inches='tight')
     print(f"Saved {png_path}")
     print(f"Saved {pdf_path}")
 
