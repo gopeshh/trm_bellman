@@ -177,9 +177,8 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
         return
     apply_paper_style()
 
-    # Tuned for ICML single-column readability (fonts/legend), while still
-    # looking good when used as a wider figure.
-    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+    # Increased height to accommodate legend below x-axis label
+    fig, ax = plt.subplots(figsize=(7.2, 6.0))
 
     # Plot main algorithms first
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
@@ -219,7 +218,7 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
     # Put legend below plot in two columns (prevents covering curves + improves readability)
     ax.legend(
         loc="upper center",
-        bbox_to_anchor=(0.5, -0.22),
+        bbox_to_anchor=(0.5, -0.12),
         ncol=2,
         frameon=False,
         handlelength=2.0,
@@ -233,7 +232,7 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
     pdf_path = output_dir / "feasibility_success_vs_steps.pdf"
 
     # Leave room for legend under axes
-    fig.tight_layout(rect=[0, 0.08, 1, 1])
+    fig.subplots_adjust(bottom=0.32)
     fig.savefig(png_path, dpi=200, bbox_inches="tight", pad_inches=0.02)
     fig.savefig(pdf_path, bbox_inches="tight", pad_inches=0.02)
     print(f"Saved {png_path}")
