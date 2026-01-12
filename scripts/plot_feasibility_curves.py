@@ -204,7 +204,7 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
             ax.plot(mean_steps, mean_rates,
                     color=config["color"], linewidth=3.0,
                     marker=config["marker"], markersize=6, markevery=8,
-                    label=f"{config['name']} (n={len(seed_data)})")
+                    label=f"{config['name']} (S={len(seed_data)})")
 
     # Add random baseline horizontal line
     ax.axhline(y=RANDOM_BASELINE["success_rate"], color='gray', linestyle='--',
@@ -272,7 +272,7 @@ def plot_score_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feasi
             ax.plot(mean_steps, mean_scores,
                     color=config["color"], linewidth=2.5,
                     marker=config["marker"], markersize=4, markevery=10,
-                    label=f"{config['name']} (n={len(seed_data)})")
+                    label=f"{config['name']} (S={len(seed_data)})")
 
     # Add reference lines
     ax.axhline(y=16, color='green', linestyle='--', alpha=0.5, label='Perfect (16)')
@@ -326,7 +326,7 @@ def plot_filled_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feas
             ax.plot(mean_steps, mean_filled,
                     color=config["color"], linewidth=2.5,
                     marker=config["marker"], markersize=4, markevery=10,
-                    label=f"{config['name']} (n={len(seed_data)})")
+                    label=f"{config['name']} (S={len(seed_data)})")
             plotted_any = True
 
     if not plotted_any:
@@ -386,7 +386,7 @@ def plot_zero_cand_vs_steps(data: dict, output_dir: Path, title_suffix: str = "F
             ax.plot(mean_steps, mean_zero_cand,
                     color=config["color"], linewidth=2.5,
                     marker=config["marker"], markersize=4, markevery=10,
-                    label=f"{config['name']} (n={len(seed_data)})")
+                    label=f"{config['name']} (S={len(seed_data)})")
             plotted_any = True
 
     if not plotted_any:
@@ -449,7 +449,7 @@ def plot_ablations(data: dict, output_dir: Path, title_suffix: str = "Feasibilit
             ax.plot(mean_steps, mean_rates,
                     color=config["color"], linewidth=2.5,
                     marker=config["marker"], markersize=4, markevery=10,
-                    label=f"{config['name']} (n={len(seed_data)})")
+                    label=f"{config['name']} (S={len(seed_data)})")
 
     # Add random baseline
     ax.axhline(y=RANDOM_BASELINE["success_rate"], color='gray', linestyle='--',
