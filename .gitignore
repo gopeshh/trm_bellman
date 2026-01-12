@@ -76,3 +76,8 @@ runs/**
 !runs/**/RESULTS.md
 !runs/**/WAVE*_RESULTS*.md
 !runs/**/COMMANDS*.md
+
+# ----------------------------
+# Claude Code (machine-specific)
+# ----------------------------
+.claude/settings.local.json
