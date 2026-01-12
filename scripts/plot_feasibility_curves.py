@@ -20,24 +20,70 @@ except ImportError:
     MATPLOTLIB_AVAILABLE = False
     print("Warning: matplotlib not available. Install with: pip install matplotlib")
 
+def apply_paper_style():
+    """
+    Make plots readable at ICML single-column scale.
+    We intentionally use larger fonts and a compact legend layout.
+    """
+    if not MATPLOTLIB_AVAILABLE:
+        return
+    plt.rcParams.update({
+        "font.size": 14,
+        "axes.labelsize": 15,
+        "axes.titlesize": 15,
+        "xtick.labelsize": 13,
+        "ytick.labelsize": 13,
+        "legend.fontsize": 12,
+        "lines.linewidth": 2.8,
+        "lines.markersize": 6,
+        "figure.dpi": 200,
+        # Slightly thicker axes for print
+        "axes.linewidth": 1.0,
+    })
+
+
+def apply_paper_style():
+    """Apply paper-quality styling: larger fonts, readable at single-column width."""
+    plt.rcParams.update({
+        'font.size': 14,
+        'axes.labelsize': 16,
+        'axes.titlesize': 18,
+        'xtick.labelsize': 12,
+        'ytick.labelsize': 12,
+        'legend.fontsize': 11,
+        'figure.titlesize': 18,
+        'lines.linewidth': 2.5,
+        'lines.markersize': 6,
+        'axes.linewidth': 1.2,
+        'grid.linewidth': 0.8,
+        'pdf.fonttype': 42,  # TrueType fonts for better PDF rendering
+        'ps.fonttype': 42,
+    })
+
 
 # Algorithm display names and colors
+# All UPI-TRM variants use "UPI-TRM (...)" prefix for clarity
+# Terminology: "Episodic-z" (reset each step) vs "Persistent-z" (carry across steps)
 ALGO_CONFIG = {
-    "upi_trm": {"name": "UPI-TRM", "color": "#1f77b4", "marker": "o"},
+    # Baselines (not UPI-TRM)
     "ppo": {"name": "PPO", "color": "#ff7f0e", "marker": "s"},
     "a2c": {"name": "A2C", "color": "#2ca02c", "marker": "^"},
     "dqn": {"name": "DQN", "color": "#d62728", "marker": "D"},
-    "ablation_no_conservative": {"name": "No Conservative", "color": "#9467bd", "marker": "v"},
-    "ablation_no_contraction": {"name": "Reset-z + No Contraction", "color": "#8c564b", "marker": "<"},
-    "ablation_persistent_z": {"name": "Persistent-z", "color": "#17becf", "marker": ">"},
-    "ablation_persistent_z_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
+    # UPI-TRM main (default = episodic + contraction)
+    "upi_trm": {"name": "UPI-TRM (Episodic-z, contraction)", "color": "#1f77b4", "marker": "o"},
+    # UPI-TRM ablations with "ablation_" prefix
+    "ablation_no_conservative": {"name": "UPI-TRM (no conservative)", "color": "#9467bd", "marker": "v"},
+    "ablation_no_contraction": {"name": "UPI-TRM (Episodic-z, no contraction)", "color": "#8c564b", "marker": "<"},
+    "ablation_persistent_z": {"name": "UPI-TRM (Persistent-z, contraction)", "color": "#17becf", "marker": ">"},
+    "ablation_persistent_z_no_contraction": {"name": "UPI-TRM (Persistent-z, no contraction)", "color": "#e377c2", "marker": "P"},
     # Alternate naming (6-8 empties suite uses these names without "ablation_" prefix)
-    "no_contraction": {"name": "Reset-z + No Contraction", "color": "#8c564b", "marker": "<"},
-    "persistent_z_no_contraction": {"name": "Persistent-z + No Contraction", "color": "#e377c2", "marker": "P"},
-    # Contraction fix rerun naming
-    "episodic_contraction": {"name": "Episodic + Contraction", "color": "#1f77b4", "marker": "o"},
-    "persistent_contraction": {"name": "Persistent + Contraction", "color": "#d62728", "marker": "D"},
-    "persistent_no_contraction": {"name": "Persistent + No Contraction", "color": "#e377c2", "marker": "P"},
+    "no_contraction": {"name": "UPI-TRM (Episodic-z, no contraction)", "color": "#8c564b", "marker": "<"},
+    "persistent_z_no_contraction": {"name": "UPI-TRM (Persistent-z, no contraction)", "color": "#e377c2", "marker": "P"},
+    # Contraction fix rerun naming (2x2 ablation grid)
+    "episodic_contraction": {"name": "UPI-TRM (Episodic-z, contraction)", "color": "#1f77b4", "marker": "o"},
+    "persistent_contraction": {"name": "UPI-TRM (Persistent-z, contraction)", "color": "#d62728", "marker": "D"},
+    "persistent_no_contraction": {"name": "UPI-TRM (Persistent-z, no contraction)", "color": "#e377c2", "marker": "P"},
+    "persistent_z": {"name": "UPI-TRM (Persistent-z, contraction)", "color": "#9467bd", "marker": "v"},
 }
 
 # Random baseline values (from eval_random_baseline.py)
@@ -129,13 +175,15 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
     if not MATPLOTLIB_AVAILABLE:
         print("Cannot plot: matplotlib not available")
         return
+    apply_paper_style()
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # Increased height to accommodate legend below x-axis label
+    fig, ax = plt.subplots(figsize=(7.2, 6.0))
 
     # Plot main algorithms first
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
                   "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction",
-                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction"]
+                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction", "persistent_z"]
 
     for algo in main_algos:
         if algo not in data:
@@ -147,36 +195,46 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
         # Plot individual seed curves (thin, semi-transparent)
         for seed, d in seed_data.items():
             ax.plot(d["steps"], d["success_rates"],
-                    color=config["color"], alpha=0.3, linewidth=1)
+                    color=config["color"], alpha=0.18, linewidth=0.9)
 
         # Plot mean curve (thick)
         mean_steps, mean_rates = compute_mean_curve(seed_data, "success_rates")
         if mean_steps:
             ax.plot(mean_steps, mean_rates,
-                    color=config["color"], linewidth=2.5,
-                    marker=config["marker"], markersize=4, markevery=10,
-                    label=f"{config['name']} (n={len(seed_data)})")
+                    color=config["color"], linewidth=3.0,
+                    marker=config["marker"], markersize=6, markevery=8,
+                    label=f"{config['name']} (S={len(seed_data)})")
 
     # Add random baseline horizontal line
     ax.axhline(y=RANDOM_BASELINE["success_rate"], color='gray', linestyle='--',
-               linewidth=2, alpha=0.7, label=f'Random ({RANDOM_BASELINE["success_rate"]:.0%})')
+               linewidth=2.5, alpha=0.7, label=f'Random ({RANDOM_BASELINE["success_rate"]:.0%})')
 
-    ax.set_xlabel("Training Steps", fontsize=12)
-    ax.set_ylabel("Success Rate", fontsize=12)
-    ax.set_title(f"4×4 Sudoku: Success Rate vs Training Steps\n({title_suffix})", fontsize=14)
+    ax.set_xlabel("Training Steps")
+    ax.set_ylabel("Success Rate")
+    ax.set_title(f"4×4 Sudoku: Success Rate vs Training Steps\n({title_suffix})")
     ax.set_ylim(0, 1.0)
     ax.set_xlim(0, None)
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="lower right", fontsize=10)
+    # Put legend below plot in two columns (prevents covering curves + improves readability)
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.22),
+        ncol=2,
+        frameon=False,
+        handlelength=2.0,
+        columnspacing=1.2,
+    )
+    ax.tick_params(axis="both", which="major")
 
     # Save
     output_dir.mkdir(parents=True, exist_ok=True)
     png_path = output_dir / "feasibility_success_vs_steps.png"
     pdf_path = output_dir / "feasibility_success_vs_steps.pdf"
 
-    fig.tight_layout()
-    fig.savefig(png_path, dpi=150)
-    fig.savefig(pdf_path)
+    # Leave room for legend under axes (increased to prevent overlap with x-axis label)
+    fig.subplots_adjust(bottom=0.38)
+    fig.savefig(png_path, dpi=200, bbox_inches="tight", pad_inches=0.02)
+    fig.savefig(pdf_path, bbox_inches="tight", pad_inches=0.02)
     print(f"Saved {png_path}")
     print(f"Saved {pdf_path}")
 
@@ -213,7 +271,7 @@ def plot_score_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feasi
             ax.plot(mean_steps, mean_scores,
                     color=config["color"], linewidth=2.5,
                     marker=config["marker"], markersize=4, markevery=10,
-                    label=f"{config['name']} (n={len(seed_data)})")
+                    label=f"{config['name']} (S={len(seed_data)})")
 
     # Add reference lines
     ax.axhline(y=16, color='green', linestyle='--', alpha=0.5, label='Perfect (16)')
@@ -267,7 +325,7 @@ def plot_filled_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feas
             ax.plot(mean_steps, mean_filled,
                     color=config["color"], linewidth=2.5,
                     marker=config["marker"], markersize=4, markevery=10,
-                    label=f"{config['name']} (n={len(seed_data)})")
+                    label=f"{config['name']} (S={len(seed_data)})")
             plotted_any = True
 
     if not plotted_any:
@@ -327,7 +385,7 @@ def plot_zero_cand_vs_steps(data: dict, output_dir: Path, title_suffix: str = "F
             ax.plot(mean_steps, mean_zero_cand,
                     color=config["color"], linewidth=2.5,
                     marker=config["marker"], markersize=4, markevery=10,
-                    label=f"{config['name']} (n={len(seed_data)})")
+                    label=f"{config['name']} (S={len(seed_data)})")
             plotted_any = True
 
     if not plotted_any:
@@ -390,7 +448,7 @@ def plot_ablations(data: dict, output_dir: Path, title_suffix: str = "Feasibilit
             ax.plot(mean_steps, mean_rates,
                     color=config["color"], linewidth=2.5,
                     marker=config["marker"], markersize=4, markevery=10,
-                    label=f"{config['name']} (n={len(seed_data)})")
+                    label=f"{config['name']} (S={len(seed_data)})")
 
     # Add random baseline
     ax.axhline(y=RANDOM_BASELINE["success_rate"], color='gray', linestyle='--',

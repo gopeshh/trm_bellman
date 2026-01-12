@@ -157,9 +157,14 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Algorithm directories
-    algo_dirs = ["upi_trm", "ppo", "a2c", "dqn", "ablation_no_conservative", "ablation_no_contraction", "ablation_persistent_z", "ablation_persistent_z_no_contraction", "no_contraction", "persistent_z_no_contraction"]
+    # Auto-discover algorithm directories (ignore hidden dirs and __pycache__)
+    algo_dirs = sorted([
+        p.name for p in log_dir.iterdir()
+        if p.is_dir() and not p.name.startswith(".") and p.name != "__pycache__"
+    ])
     seeds = [42, 123, 456]
+
+    print(f"Discovered algorithm directories: {algo_dirs}")
 
     all_results = []
     learning_curves = []

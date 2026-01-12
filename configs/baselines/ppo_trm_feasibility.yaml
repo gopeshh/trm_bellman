@@ -5,6 +5,8 @@
 #
 # Score = filled - w_v * violations - w_z * zeroCand
 # Success = filled == N AND violations == 0
+#
+# TUNED: Disabled contraction (matches best UPI-TRM variant), lowered policy LR
 
 algorithm: "ppo"
 
@@ -13,7 +15,7 @@ ppo_clip_eps: 0.2
 ppo_epochs: 4
 ppo_minibatch_size: 64
 vf_coef: 0.5
-ppo_num_steps: 128
+ppo_num_steps: 64  # Reduced from 128 for faster updates on short episodes
 normalize_advantages: true
 clip_vf_loss: false
 
@@ -37,13 +39,13 @@ solved_threshold: null  # Use sudoku_is_solved()
 
 # Model
 model_type: "trm"
-enable_contraction: true
-target_Lz: 0.9
+enable_contraction: false  # FIXED: Contraction hurts on this task
+target_Lz: 0.9  # Ignored when contraction disabled
 target_Lv: 5.0
-latent_ball_radius: 10.0
+latent_ball_radius: 0.0  # Disabled with contraction
 
 # Optimization
-policy_lr: 3.0e-4
+policy_lr: 1.0e-4  # FIXED: Lowered from 3e-4 for stability
 value_lr: 1.0e-4
 entropy_coef: 0.05
 max_grad_norm: 0.5
