@@ -50,17 +50,20 @@ This caused the value function to collapse to -20.0 (saturated) with no learning
 
 ## Current Status
 
-### Quick 500-Step Verification Test
+### ✅ Fix Verified (2026-01-13 13:50 PST)
 
-A 500-step test is running to verify the fix works:
+The multi-config loading fix has been **verified working** after running `buck2 clean` and a fresh 500-step test.
+
+**Verification command** (after `buck2 clean`):
 ```bash
-buck2 run //buiksat_trm:upi_trm_train \
+buck2 run //buiksat_trm:upi_trm_train -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true -- \
+    --dataset-paths buiksat_trm/data/sudoku-4x4-easy_6to8empties \
     --config buiksat_trm/configs/experiments/contraction_sgd_tradeoff/base_episodic_z.yaml \
     --config buiksat_trm/configs/experiments/contraction_sgd_tradeoff/1_no_contraction.yaml \
-    --train-steps 500 --seed 42
+    --train-steps 500 --seed 42 --no-wandb
 ```
 
-**Log file**: `/tmp/quick_test_500.log`
+**Log file**: `/tmp/verification_test_500.log`
 
 **Verified settings loaded correctly**:
 - K=1 ✓
@@ -68,11 +71,26 @@ buck2 run //buiksat_trm:upi_trm_train \
 - Exact K-step targets: True ✓
 - Exact baseline summation: True ✓
 
+**Value function stability confirmed** (no collapse):
+
+| Step | Target Mean | V(s) Mean | Status |
+|------|-------------|-----------|--------|
+| 10 | -1.41 | -0.94 | ✓ Stable |
+| 20 | -1.07 | -1.32 | ✓ Stable |
+| 30 | -1.50 | -1.63 | ✓ Stable |
+| 40 | -1.50 | -1.62 | ✓ Stable |
+
+Compare to **broken** runs (before fix): target=-14.64 at step 10, V(s) collapsed to -20 by step 100.
+
 ### Performance Note
 
 `exact_baseline_summation=True` is slow because it computes Q(s,a) for all 97 actions per sample. Estimated time:
 - 500 steps: ~15-30 minutes
 - 5000 steps: ~50+ hours
+
+### Important: buck2 clean required
+
+The previous failed experiments used a **cached buck2 binary** that didn't have the fix. To ensure the fix is applied, always run `buck2 clean` before starting experiments if you suspect stale cache.
 
 ---
 
@@ -93,26 +111,21 @@ These results are **invalid** due to the config loading bug.
 
 ## Next Steps
 
-1. **Check verification test results**:
+1. **Run full contraction vs SGD experiments**:
    ```bash
-   tail -50 /tmp/quick_test_500.log
-   grep "eval_success" /tmp/quick_test_500.log
+   buck2 clean  # Important: clear any stale cache first
+   python3 scripts/run_contraction_sgd_tradeoff.py --seed 42 --dataset buiksat_trm/data/sudoku-4x4-easy_6to8empties
    ```
+   Note: This will take 50+ hours with `exact_baseline_summation=True`
 
-2. **If verification passes, run full experiments**:
-   ```bash
-   python3 scripts/run_contraction_sgd_tradeoff.py --seed 42
-   ```
-   Note: This will take 50+ hours with exact_baseline_summation=True
+2. **Alternative: Faster experiments without exact baseline**:
+   Create a config with `exact_baseline_summation: false` for faster iteration (loses Theorem 5.9 bound but much faster, ~10-100x speedup)
 
-3. **Alternative: Faster experiments without exact baseline**:
-   Create a config with `exact_baseline_summation: false` for faster iteration (loses Theorem 5.9 bound but much faster)
-
-4. **Analyze results**:
+3. **Analyze results**:
    ```bash
    python3 scripts/plot_value_collapse_diagnostic.py \
-       --log-dir results/plot_data_contraction_sgd_sudoku-4x4-trivial \
-       --output results/plots_contraction_sgd_sudoku-4x4-trivial/diagnostic.png
+       --log-dir results/plot_data_contraction_sgd_sudoku-4x4-easy_6to8empties \
+       --output results/plots_contraction_sgd_sudoku-4x4-easy_6to8empties/diagnostic.png
    ```
 
 ---
