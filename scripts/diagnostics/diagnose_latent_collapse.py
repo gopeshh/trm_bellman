@@ -12,7 +12,10 @@ Compares two conditions:
   B) Contraction ON (opnorm clamp + scaling; target_Lz=0.9)
 
 Usage:
-    python scripts/diagnostics/diagnose_latent_collapse.py [--batch-size 128] [--seed 42]
+    buck2 run //buiksat_trm:diagnose_latent_collapse \
+        -c fbcode.nvcc_arch=a100 \
+        -c fbcode.enable_gpu_sections=true \
+        -- --batch-size 128 --seed 42
 """
 
 import argparse
@@ -26,10 +29,6 @@ import warnings
 import numpy as np
 import torch
 import torch.nn.functional as F
-
-# Ensure project root is on path
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 

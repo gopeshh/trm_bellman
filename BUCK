@@ -647,3 +647,16 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+python_binary(
+    name = "diagnose_latent_collapse",
+    srcs = ["scripts/diagnostics/diagnose_latent_collapse.py"],
+    base_module = "",
+    main_module = "scripts.diagnostics.diagnose_latent_collapse",
+    deps = [
+        ":models",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
