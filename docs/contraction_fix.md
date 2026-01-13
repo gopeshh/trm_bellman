@@ -2,6 +2,9 @@
 
 This document describes the fix for the Lipschitz constant explosion issue when using `spectral_norm` for contraction enforcement.
 
+For the latest empirical results/ablations that use this contraction implementation, see:
+- `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
+
 ## Problem: spectral_norm Causes Lz Explosion
 
 The original implementation used PyTorch's `torch.nn.utils.spectral_norm` to enforce per-layer Lipschitz bounds. However, diagnostics revealed that spectral_norm is **numerically unstable** in the TRM architecture:

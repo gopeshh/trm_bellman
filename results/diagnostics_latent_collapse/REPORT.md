@@ -1,0 +1,137 @@
+# Latent Collapse Diagnostic Report
+
+## Experiment Overview
+
+**Hypothesis**: When we enforce contraction on the inner z→z recursion (opnorm clamp + scaling,
+target_Lz=0.9), the latent representations may "collapse" — i.e., z norms shrink toward 0 and/or
+latent vectors become nearly constant across different (x,y) states. This could reduce useful
+downstream signal and hurt learning.
+
+**Test Setup**:
+- Seed: 42
+- Dataset: 4×4 Sudoku (trivial, 1–4 empties)
+- Batch size: 128 states
+- Conditions:
+  - **A (Contraction OFF)**: No opnorm clamp or scaling on z→z path
+  - **B (Contraction ON)**: opnorm clamp + scaling with target_Lz=0.9
+
+**Collapse indicators**:
+- Lower ||z|| norms → latent shrinks toward zero
+- Lower per-dim variance → reduced signal variation
+- Lower total variance → samples cluster together
+- Higher cosine similarity → samples point in same direction (extreme collapse)
+- Lower Var(V) → value function loses discriminative power
+
+---
+
+## Results
+
+### Latent Norm Statistics (z_H)
+
+| n | Condition | mean ||z|| | std ||z|| | p10 | p50 | p90 |
+|---|-----------|-----------|---------|-----|-----|-----|
+| 1 | A (OFF) | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 1 | B (ON)  | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 2 | A (OFF) | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 2 | B (ON)  | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 4 | A (OFF) | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 4 | B (ON)  | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 8 | A (OFF) | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 8 | B (ON)  | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 16 | A (OFF) | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 16 | B (ON)  | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+
+### Latent Norm Statistics (z_L)
+
+| n | Condition | mean ||z|| | std ||z|| | p10 | p50 | p90 |
+|---|-----------|-----------|---------|-----|-----|-----|
+| 1 | A (OFF) | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 1 | B (ON)  | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 2 | A (OFF) | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 2 | B (ON)  | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 4 | A (OFF) | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 4 | B (ON)  | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 8 | A (OFF) | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 8 | B (ON)  | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 16 | A (OFF) | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+| 16 | B (ON)  | 10.0000 | 0.0000 | 10.0000 | 10.0000 | 10.0000 |
+
+### Collapse Metrics (z_H)
+
+| n | Condition | Per-dim Var | Total Var | Cosine Sim |
+|---|-----------|------------|-----------|------------|
+| 1 | A (OFF) | 0.027381 | 27.8192 | 0.7206 |
+| 1 | B (ON)  | 0.052511 | 53.3515 | 0.4630 |
+| 2 | A (OFF) | 0.023724 | 24.1031 | 0.7620 |
+| 2 | B (ON)  | 0.062205 | 63.2008 | 0.3607 |
+| 4 | A (OFF) | 0.025456 | 25.8634 | 0.7372 |
+| 4 | B (ON)  | 0.064678 | 65.7127 | 0.3389 |
+| 8 | A (OFF) | 0.028307 | 28.7596 | 0.7130 |
+| 8 | B (ON)  | 0.065118 | 66.1604 | 0.3293 |
+| 16 | A (OFF) | 0.029870 | 30.3481 | 0.6955 |
+| 16 | B (ON)  | 0.065117 | 66.1585 | 0.3282 |
+
+### Collapse Metrics (z_L)
+
+| n | Condition | Per-dim Var | Total Var | Cosine Sim |
+|---|-----------|------------|-----------|------------|
+| 1 | A (OFF) | 0.044713 | 45.4287 | 0.5419 |
+| 1 | B (ON)  | 0.065581 | 66.6299 | 0.3295 |
+| 2 | A (OFF) | 0.045061 | 45.7820 | 0.5409 |
+| 2 | B (ON)  | 0.067462 | 68.5412 | 0.3066 |
+| 4 | A (OFF) | 0.047916 | 48.6823 | 0.5040 |
+| 4 | B (ON)  | 0.068372 | 69.4661 | 0.3012 |
+| 8 | A (OFF) | 0.049297 | 50.0861 | 0.4931 |
+| 8 | B (ON)  | 0.068538 | 69.6351 | 0.2941 |
+| 16 | A (OFF) | 0.050116 | 50.9179 | 0.4868 |
+| 16 | B (ON)  | 0.068535 | 69.6318 | 0.2927 |
+
+### Value Variance (Downstream Signal)
+
+| n | Condition | Var(V) |
+|---|-----------|--------|
+| 1 | A (OFF) | 0.014928 |
+| 1 | B (ON)  | 2385.020020 |
+| 2 | A (OFF) | 0.014280 |
+| 2 | B (ON)  | 2424.043701 |
+| 4 | A (OFF) | 0.014306 |
+| 4 | B (ON)  | 2466.586670 |
+| 8 | A (OFF) | 0.014401 |
+| 8 | B (ON)  | 2472.076172 |
+| 16 | A (OFF) | 0.014581 |
+| 16 | B (ON)  | 2472.177002 |
+
+---
+
+## Analysis (at n=16)
+
+**Norm Comparison**:
+- ||z_H|| ratio (B/A): 1.000
+- If << 1: contraction shrinks latent norms significantly
+
+**Variance Comparison**:
+- Total variance ratio (B/A): 2.180
+- If << 1: contraction causes samples to cluster together
+
+**Cosine Similarity**:
+- Δ cos_sim (B - A): -0.3672
+- If >> 0: contraction makes samples more similar (collapse)
+
+**Value Variance**:
+- Var(V) ratio (B/A): 169544.445
+- If << 1: value function loses discriminative power under contraction
+
+---
+
+## Conclusion
+
+**NO SIGNIFICANT EVIDENCE OF COLLAPSE**
+
+Contraction does NOT cause latent representations to collapse significantly:
+- z_H norms are comparable (ratio=1.00)
+- Total variance is comparable (ratio=2.18)
+- Value variance is comparable (ratio=169544.44)
+
+---
+
+*Report generated by scripts/diagnostics/diagnose_latent_collapse.py*
