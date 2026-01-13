@@ -6,6 +6,23 @@
 
 ---
 
+## ⚠️ INVALID RESULTS WARNING
+
+**The following results folder contains INVALID data and should NOT be used:**
+
+```
+results/plot_data_contraction_sgd_sudoku-4x4-easy_6to8empties/
+```
+
+**Reason**: These experiments ran with a stale cached buck2 binary that did NOT include the multi-config merge fix (commit `b9968dc`). As a result:
+- Ran with K=5 instead of K=1
+- Ran with exact_baseline_summation=False instead of True
+- Value function collapsed to -20 (saturated) with no learning signal
+
+**See**: `results/plot_data_contraction_sgd_sudoku-4x4-easy_6to8empties/README_INVALID.md` for details.
+
+---
+
 ## Summary
 
 This session investigated why previous contraction vs SGD experiments failed on the 6-8 empties dataset. We discovered and fixed a critical bug in config loading, and started a verification test.

@@ -1,4 +1,7 @@
 {
+  "valid": false,
+  "invalid_reason": "stale buck2 binary; config merge bug; ran with K=5 and exact_baseline_summation=False instead of K=1 and exact_baseline_summation=True",
+  "fix_commit": "b9968dc",
   "1_no_contraction_seed42": {
     "final_success_rate": 0.0,
     "final_mean_score": 5.838,

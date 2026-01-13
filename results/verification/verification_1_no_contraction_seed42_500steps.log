@@ -1,0 +1,128 @@
+[2026-01-13T13:36:16.191-08:00] Buck UI: https://www.internalfb.com/buck2/982fe5d2-0617-45cf-9a29-f6baa8894802
+[2026-01-13T13:36:16.238-08:00] RE Session: reSessionID-c99ee0ae-c764-497d-9d76-bbc087480e3e
+[2026-01-13T13:36:23.283-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_link_group clf/clf.so) [re_upload], and 1362 other actions
+[2026-01-13T13:36:30.283-08:00] Waiting on fbcode//dsi/logger/configs/TritonCompileStatsLoggerConfig:log_entry-py3-default-types/LogEntry/types_fields (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (strip_debug LogEntry/types_fields.cpp.pic_dsi$logger$py3$TritonCompileStats$LogEntry$types_fields_.stripped.o) [re_upload], and 1162 other actions
+[2026-01-13T13:36:37.383-08:00] Waiting on fbcode//dsi/logger/configs/TritonCompileStatsLoggerConfig:log_entry-py3-default-types/LogEntry/types_fields (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (strip_debug LogEntry/types_fields.cpp.pic_dsi$logger$py3$TritonCompileStats$LogEntry$types_fields_.stripped.o) [re_upload], and 707 other actions
+[2026-01-13T13:36:44.483-08:00] Waiting on fbcode//thrift/lib/cpp2/schema:merge (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile detail/Merge.cpp (pic)) [re_upload], and 519 other actions
+[2026-01-13T13:36:51.583-08:00] Waiting on fbsource//third-party/triton/stable/llvm-project/llvm:X86CodeGen (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile lib/Target/X86/X86ISelLowering.cpp (pic)) [re_execute], and 504 other actions
+[2026-01-13T13:36:58.683-08:00] Waiting on fbcode//caffe2:_ATen-cu (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (strip_debug aten/src/ATen/native/cuda/TensorTopK.cu.pic.stripped.o) [re_worker_download], and 277 other actions
+[2026-01-13T13:37:05.683-08:00] Waiting on fbcode//caffe2:_ATen-cu (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (strip_debug aten/src/ATen/native/cuda/TensorTopK.cu.pic.stripped.o) [re_worker_download], and 176 other actions
+[2026-01-13T13:37:12.683-08:00] Waiting on fbcode//caffe2:_ATen-cu (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (strip_debug aten/src/ATen/native/cuda/TensorTopK.cu.pic.stripped.o) [re_worker_download], and 232 other actions
+[2026-01-13T13:37:19.784-08:00] Waiting on fbcode//caffe2:_ATen-cu (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (strip_debug aten/src/ATen/native/cuda/TensorTopK.cu.pic.stripped.o) [re_worker_download], and 144 other actions
+[2026-01-13T13:37:26.883-08:00] Waiting on fbcode//caffe2:_ATen-cu (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (strip_debug aten/src/ATen/native/cuda/TensorTopK.cu.pic.stripped.o) [re_worker_download], and 136 other actions
+[2026-01-13T13:37:33.983-08:00] Waiting on fbcode//caffe2:_ATen-cu (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (strip_debug aten/src/ATen/native/cuda/TensorTopK.cu.pic.stripped.o) [re_worker_download], and 110 other actions
+[2026-01-13T13:37:40.984-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_opt_sm80 csrc/flash_attn/src/flash_bwd_hdim256_fp16_causal_sm80.cu (pic)) [re_execute], and 97 other actions
+[2026-01-13T13:37:48.083-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_opt_sm80 csrc/flash_attn/src/flash_fwd_hdim64_fp16_sm80.cu (pic)) [re_execute], and 88 other actions
+[2026-01-13T13:37:55.083-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_opt_sm80 csrc/flash_attn/src/flash_fwd_hdim64_fp16_sm80.cu (pic)) [re_execute], and 71 other actions
+[2026-01-13T13:38:02.083-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_opt_sm80 csrc/flash_attn/src/flash_bwd_hdim128_fp16_sm80.cu (pic)) [re_execute], and 63 other actions
+[2026-01-13T13:38:09.183-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_opt_sm80 csrc/flash_attn/src/flash_bwd_hdim128_fp16_sm80.cu (pic)) [re_execute], and 47 other actions
+[2026-01-13T13:38:16.283-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_opt_sm80 csrc/flash_attn/src/flash_bwd_hdim256_fp16_sm80.cu (pic)) [re_execute], and 27 other actions
+[2026-01-13T13:38:23.383-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_opt_sm80 csrc/flash_attn/src/flash_fwd_hdim256_fp16_sm80.cu (pic)) [re_execute], and 17 other actions
+[2026-01-13T13:38:30.383-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_opt_sm80 csrc/flash_attn/src/flash_fwd_hdim256_fp16_sm80.cu (pic)) [re_execute], and 10 other actions
+[2026-01-13T13:38:37.483-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_opt_sm80 csrc/flash_attn/src/flash_fwd_hdim256_fp16_sm80.cu (pic)) [re_execute], and 4 other actions
+[2026-01-13T13:38:44.583-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_opt_sm80 csrc/flash_attn/src/flash_fwd_hdim256_fp16_sm80.cu (pic)) [re_execute]
+[2026-01-13T13:38:51.584-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_cubin_lower_sm80 csrc/flash_attn/src/flash_fwd_hdim256_fp16_sm80.cu (pic)) [local_execute]
+[2026-01-13T13:38:58.683-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_cubin_lower_sm80 csrc/flash_attn/src/flash_fwd_hdim256_fp16_sm80.cu (pic)) [local_execute]
+[2026-01-13T13:39:05.783-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_cubin_lower_sm80 csrc/flash_attn/src/flash_fwd_hdim256_fp16_sm80.cu (pic)) [local_execute]
+[2026-01-13T13:39:12.883-08:00] Waiting on fbsource//third-party/flash-attention:flash_attention_2_srcs (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cuda_cxx_compile csrc/flash_attn/src/flash_fwd_hdim256_fp16_sm80.cu (pic)) [local_execute]
+[2026-01-13T13:39:19.983-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_python_exe) [re_upload]
+[2026-01-13T13:39:26.984-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_python_exe) [re_upload]
+[2026-01-13T13:39:34.083-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_python_exe) [local_materialize_inputs]
+[2026-01-13T13:39:41.183-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_python_exe) [local_materialize_inputs]
+[2026-01-13T13:39:48.183-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_python_exe) [re_execute]
+[2026-01-13T13:39:55.283-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_python_exe) [re_execute]
+[2026-01-13T13:40:02.283-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_python_exe) [local_execute]
+[2026-01-13T13:40:09.283-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `upi_trm_train`
+[2026-01-13T13:40:14.298-08:00] Cache hits: 53%
+[2026-01-13T13:40:14.298-08:00] Commands: 7609 (cached: 4052, remote: 3437, local: 120)
+[2026-01-13T13:40:14.298-08:00] Network: Up: 321MiB  Down: 2.9GiB  (reSessionID-c99ee0ae-c764-497d-9d76-bbc087480e3e)
+BUILD SUCCEEDED - starting your binary
+[INFO] Using progress-based Sudoku checker for 4x4 (score = filled_cells, range 0-16)
+[INFO] Training for 500 steps (gamma=0.990, K=1, inner_unroll_n=4)
+[INFO] Terminal rewards: solve=0.000, fail=-16.000
+[INFO] Using TRM backbone (hidden=64, H=2, L=2)
+[DEBUG] Policy head STOP bias: 0.00 (should be 0.0 for uniform init)
+[INFO] Puzzle embeddings DISABLED (set --puzzle-emb-ndim > 0 to enable)
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU0 NVIDIA PG509-210 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU1 NVIDIA PG509-210 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+INFO:2026-01-13 13:40:20 2907556:2907556 CuptiCallbackApi.cpp:74] Callback: domain = 3, cbid = 1
+INFO:2026-01-13 13:40:20 2907556:2907556 CuptiActivityProfiler.cpp:245] CUDA versions. CUPTI: 22; Runtime: 12040; Driver: 12040
+INFO:2026-01-13 13:40:20 2907556:2947966 FBConfig.cpp:330] Perfetto builder enabled: 1
+INFO:2026-01-13 13:40:20 2907556:2947966 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+INFO:2026-01-13 13:40:20 2907556:2947966 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+TritonTraceHandler: disabled because /logs does not exist
+===========[FB_TRITON]=========== Triton Version: 3.3.2+fb
+[INFO] Using UPI-TRM algorithm (K=1, inner_n=4)
+[INFO] Checkpoint directory: checkpoints/rl_sudoku-4x4-easy_6to8empties_seed42
+
+============================================================
+UPI-TRM THEORY ALIGNMENT CHECK
+============================================================
+⚠ Configuration has theory gaps:
+  • enable_contraction=False disables spectral normalization (Assumption 4.2). L_z < 1 contraction not enforced.
+
+Theory status:
+  Forward-invariant projection: ✓
+  Contraction enforced (L_z < 1): ✗
+  Exact baseline (Thm 5.9): ✓
+  Distillation (not in theory): ✓ disabled
+
+Is theory-exact: False
+============================================================
+
+UPI-TRM theoretical dials:
+  L_z target (rl_cfg.target_Lz): 0.9
+  L_V target (rl_cfg.target_Lv): 1.0
+  Inner unroll n (rl_cfg.inner_unroll_n): 4
+  K-step horizon K (rl_cfg.K): 1
+  Mixture alpha (rl_cfg.mixture_alpha): 0.05
+  Latent ball radius (rl_cfg.latent_ball_radius): 10.0
+  Episodic latent: True
+  Exact K-step targets: True
+  Exact baseline summation: True
+
+[INFO] STOP action mode: disabled
+[INFO] Using EXACT baseline summation (Theorem 5.9 O(α·ε_A) bound)
+[INFO] Forward-invariant projection enabled (R=10.0)
+[WandB] Disabled by default (enable with: --wandb)
+[DEBUG] Action mask: 28 valid actions out of 97 total
+[DEBUG] Latent mode: episodic
+[DEBUG] Step 0 probs: STOP=0.000000, edits=1.000000
+[DEBUG] Top 5 action probs: torch.return_types.topk(
+values=tensor([0.0462, 0.0460, 0.0454, 0.0428, 0.0423], device='cuda:0',
+       grad_fn=<TopkBackward0>),
+indices=tensor([69, 68, 64, 33, 70], device='cuda:0'))
+[step 00010] value_loss=20.062170 policy_loss=0.514136
+[step 00010] VALUE_DEBUG: target(mean=-1.41 std=4.46 min=-20.00 max=6.12) V(s)(mean=-0.94 std=0.53) reward(mean=-1.550 std=4.473) clip=20.0
+[step 00020] value_loss=18.505074 policy_loss=0.470957
+[step 00020] VALUE_DEBUG: target(mean=-1.07 std=4.34 min=-20.00 max=6.15) V(s)(mean=-1.32 std=0.60) reward(mean=-1.051 std=4.410) clip=20.0
+[step 00030] value_loss=18.789688 policy_loss=0.635700
+[step 00030] VALUE_DEBUG: target(mean=-1.50 std=4.34 min=-20.00 max=6.09) V(s)(mean=-1.63 std=0.44) reward(mean=-1.397 std=4.414) clip=20.0
+[step 00040] value_loss=16.426186 policy_loss=1.411739
+[step 00040] VALUE_DEBUG: target(mean=-1.50 std=4.00 min=-19.92 max=6.16) V(s)(mean=-1.62 std=0.56) reward(mean=-1.291 std=4.024) clip=20.0
+[step 00050] value_loss=19.189205 policy_loss=1.253487
+[step 00050] VALUE_DEBUG: target(mean=-1.41 std=4.38 min=-20.00 max=5.82) V(s)(mean=-1.84 std=0.50) reward(mean=-1.086 std=4.556) clip=20.0
+[step 00050] eval_success_rate=0.000 eval_mean_score=6.700 eval_policy_mode=greedy [solved=0/50, score_range=0.00-11.00/16.0, initial=9.00]
+[step 00050] PROGRESS: filled=10.22 violations=1.76 zero_cand=0.44
+[step 00050] DEBUG: ep_len=20.0 ep_ret=-30.559 stop_prob=0.000 score_chg=-14.9000
+[step 00060] value_loss=19.418528 policy_loss=0.637428
+[step 00060] VALUE_DEBUG: target(mean=-2.27 std=4.43 min=-20.00 max=5.55) V(s)(mean=-1.89 std=0.61) reward(mean=-1.826 std=4.568) clip=20.0
+[step 00070] value_loss=16.095428 policy_loss=0.892731
+[step 00070] VALUE_DEBUG: target(mean=-2.20 std=4.12 min=-20.00 max=5.45) V(s)(mean=-2.15 std=0.57) reward(mean=-1.647 std=4.196) clip=20.0
+[step 00080] value_loss=20.704344 policy_loss=0.762775
+[step 00080] VALUE_DEBUG: target(mean=-1.99 std=4.54 min=-19.92 max=5.50) V(s)(mean=-1.75 std=0.54) reward(mean=-1.352 std=4.672) clip=20.0
+[step 00090] value_loss=23.224493 policy_loss=0.391789
+[step 00090] VALUE_DEBUG: target(mean=-2.76 std=4.80 min=-18.90 max=5.39) V(s)(mean=-2.36 std=0.64) reward(mean=-2.067 std=4.961) clip=20.0
+[step 00100] value_loss=14.046939 policy_loss=1.119918
+[step 00100] VALUE_DEBUG: target(mean=-2.30 std=3.79 min=-15.92 max=5.54) V(s)(mean=-2.17 std=0.90) reward(mean=-1.473 std=3.860) clip=20.0
+[step 00100] eval_success_rate=0.000 eval_mean_score=6.780 eval_policy_mode=greedy [solved=0/50, score_range=0.00-11.00/16.0, initial=9.00]
+[step 00100] PROGRESS: filled=10.22 violations=1.72 zero_cand=0.42
+[step 00100] DEBUG: ep_len=20.0 ep_ret=-29.954 stop_prob=0.000 score_chg=-14.1850
+[step 00110] value_loss=20.211164 policy_loss=1.302836
+[step 00110] VALUE_DEBUG: target(mean=-2.40 std=4.48 min=-20.00 max=5.84) V(s)(mean=-2.40 std=0.65) reward(mean=-1.549 std=4.684) clip=20.0
