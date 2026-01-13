@@ -560,8 +560,10 @@ def parse_args():
     parser.add_argument(
         "--config",
         type=str,
+        action="append",
         default=None,
-        help="Optional path to YAML config overriding RLConfig defaults.",
+        help="Optional path to YAML config overriding RLConfig defaults. "
+             "Can be specified multiple times to layer configs (later files override earlier).",
     )
     # WandB arguments
     parser.add_argument(
@@ -705,11 +707,16 @@ def main():
         # The override config is expected to be a flat dict with keys matching RLConfig
         # fields, e.g. {"gamma": 0.95, "K": 3}. Nested structures (e.g. trainer: rl: ...)
         # are not currently supported.
-        with open(args.config, "r") as f:
-            override = yaml.safe_load(f) or {}
-        # Pydantic v2 uses model_dump(), v1 uses dict()
+        #
+        # Multiple --config args are layered in order: later files override earlier.
+        # Example: --config base.yaml --config override.yaml
+        #   -> base.yaml settings are loaded first, then override.yaml on top
         base_dict = rl_cfg.model_dump() if hasattr(rl_cfg, "model_dump") else rl_cfg.dict()
-        rl_cfg = RLConfig(**{**base_dict, **override})
+        for config_path in args.config:
+            with open(config_path, "r") as f:
+                override = yaml.safe_load(f) or {}
+            base_dict = {**base_dict, **override}
+        rl_cfg = RLConfig(**base_dict)
     
     # === CLI overrides take priority over YAML ===
     # This ensures --train-steps 100 overrides num_train_steps from YAML

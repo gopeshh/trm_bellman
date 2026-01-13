@@ -28,37 +28,40 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
-# Base config path
-BASE_CONFIG = "configs/experiments/contraction_sgd_tradeoff/base_episodic_z.yaml"
+# Buck2 must run from fbcode directory
+FBCODE_DIR = Path.home() / "fbsource" / "fbcode"
+
+# Base config path (relative to buiksat_trm within fbcode)
+BASE_CONFIG = "buiksat_trm/configs/experiments/contraction_sgd_tradeoff/base_episodic_z.yaml"
 
 # Experiment conditions
 CONDITIONS = {
     "1_no_contraction": {
-        "config_override": "configs/experiments/contraction_sgd_tradeoff/1_no_contraction.yaml",
+        "config_override": "buiksat_trm/configs/experiments/contraction_sgd_tradeoff/1_no_contraction.yaml",
         "scheduled": False,
         "gpu": 0,
     },
     "2_weak_contraction": {
-        "config_override": "configs/experiments/contraction_sgd_tradeoff/2_weak_contraction.yaml",
+        "config_override": "buiksat_trm/configs/experiments/contraction_sgd_tradeoff/2_weak_contraction.yaml",
         "scheduled": False,
         "gpu": 1,
     },
     "3_standard_contraction": {
-        "config_override": "configs/experiments/contraction_sgd_tradeoff/3_standard_contraction.yaml",
+        "config_override": "buiksat_trm/configs/experiments/contraction_sgd_tradeoff/3_standard_contraction.yaml",
         "scheduled": False,
         "gpu": 2,
     },
     "4_scheduled_contraction": {
-        "config_override": "configs/experiments/contraction_sgd_tradeoff/4_scheduled_contraction.yaml",
+        "config_override": "buiksat_trm/configs/experiments/contraction_sgd_tradeoff/4_scheduled_contraction.yaml",
         "scheduled": True,  # Special handling required
         "gpu": 3,
     },
 }
 
-# Dataset and output paths
-DATASET = "data/sudoku-4x4-trivial"
-RESULTS_DIR = "results/plot_data_contraction_sgd_tradeoff_light"
-PLOTS_DIR = "results/plots_contraction_sgd_tradeoff_light"
+# Dataset and output paths (defaults, can be overridden by CLI args)
+DEFAULT_DATASET = "buiksat_trm/data/sudoku-4x4-trivial"
+DEFAULT_RESULTS_DIR = "buiksat_trm/results/plot_data_contraction_sgd_tradeoff"
+DEFAULT_PLOTS_DIR = "buiksat_trm/results/plots_contraction_sgd_tradeoff"
 
 
 def run_standard_experiment(
@@ -68,11 +71,13 @@ def run_standard_experiment(
     base_config: str,
     override_config: str,
     output_dir: str,
+    dataset: str,
 ) -> subprocess.Popen:
     """Launch a standard (non-scheduled) experiment."""
 
     run_name = f"{condition_name}_seed{seed}"
-    output_file = os.path.join(output_dir, f"{run_name}.log")
+    # Use absolute path for output file (FBCODE_DIR / output_dir)
+    output_file = str(FBCODE_DIR / output_dir / f"{run_name}.log")
 
     # Build the command
     cmd = [
@@ -80,7 +85,7 @@ def run_standard_experiment(
         "-c", "fbcode.nvcc_arch=a100",
         "-c", "fbcode.enable_gpu_sections=true",
         "--",
-        "--dataset-paths", DATASET,
+        "--dataset-paths", dataset,
         "--config", base_config,
         "--config", override_config,
         "--seed", str(seed),
@@ -105,7 +110,7 @@ def run_standard_experiment(
             stdout=f,
             stderr=subprocess.STDOUT,
             env=env,
-            cwd=str(Path(__file__).parent.parent),
+            cwd=str(FBCODE_DIR),
         )
 
     return proc
@@ -118,6 +123,7 @@ def run_scheduled_experiment(
     base_config: str,
     override_config: str,
     output_dir: str,
+    dataset: str,
 ) -> subprocess.Popen:
     """
     Launch a scheduled contraction experiment.
@@ -131,8 +137,9 @@ def run_scheduled_experiment(
     """
 
     run_name = f"{condition_name}_seed{seed}"
-    output_file = os.path.join(output_dir, f"{run_name}.log")
-    checkpoint_dir = os.path.join(output_dir, f"ckpt_{run_name}")
+    # Use absolute paths for output files (FBCODE_DIR / output_dir)
+    output_file = str(FBCODE_DIR / output_dir / f"{run_name}.log")
+    checkpoint_dir = str(FBCODE_DIR / output_dir / f"ckpt_{run_name}")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     env = os.environ.copy()
@@ -146,7 +153,7 @@ def run_scheduled_experiment(
         "-c", "fbcode.nvcc_arch=a100",
         "-c", "fbcode.enable_gpu_sections=true",
         "--",
-        "--dataset-paths", DATASET,
+        "--dataset-paths", dataset,
         "--config", base_config,
         "--config", override_config,  # enable_contraction: false
         "--seed", str(seed),
@@ -167,7 +174,7 @@ def run_scheduled_experiment(
             stdout=f,
             stderr=subprocess.STDOUT,
             env=env,
-            cwd=str(Path(__file__).parent.parent),
+            cwd=str(FBCODE_DIR),
         )
 
     # Wait for phase 1 to complete
@@ -188,8 +195,9 @@ def run_scheduled_experiment(
 
     # Phase 2: Resume with contraction ON for remaining 1500 steps
     # Create a temporary config for phase 2 with contraction enabled
-    phase2_config = os.path.join(output_dir, f"phase2_{run_name}.yaml")
-    with open(phase2_config, "w") as f:
+    phase2_config_abs = str(FBCODE_DIR / output_dir / f"phase2_{run_name}.yaml")
+    phase2_config_rel = f"{output_dir}/phase2_{run_name}.yaml"  # Relative path for buck2
+    with open(phase2_config_abs, "w") as f:
         f.write("enable_contraction: true\n")
         f.write("target_Lz: 0.90\n")
 
@@ -198,9 +206,9 @@ def run_scheduled_experiment(
         "-c", "fbcode.nvcc_arch=a100",
         "-c", "fbcode.enable_gpu_sections=true",
         "--",
-        "--dataset-paths", DATASET,
+        "--dataset-paths", dataset,
         "--config", base_config,
-        "--config", phase2_config,  # enable_contraction: true
+        "--config", phase2_config_rel,  # enable_contraction: true
         "--seed", str(seed),
         "--train-steps", "5000",  # Total steps including phase 1
         "--resume-checkpoint", checkpoint_file,
@@ -217,7 +225,7 @@ def run_scheduled_experiment(
             stdout=f,
             stderr=subprocess.STDOUT,
             env=env,
-            cwd=str(Path(__file__).parent.parent),
+            cwd=str(FBCODE_DIR),
         )
 
     return proc2
@@ -281,11 +289,29 @@ def main():
                         help="Comma-separated list of conditions to run (default: all)")
     parser.add_argument("--sequential", action="store_true",
                         help="Run experiments sequentially instead of in parallel")
+    parser.add_argument("--dataset", type=str, default=DEFAULT_DATASET,
+                        help=f"Dataset path (default: {DEFAULT_DATASET})")
+    parser.add_argument("--results-dir", type=str, default=None,
+                        help="Results directory (default: auto-generated based on dataset)")
     args = parser.parse_args()
 
-    # Create output directories
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    os.makedirs(PLOTS_DIR, exist_ok=True)
+    # Auto-generate results directory based on dataset if not specified
+    if args.results_dir:
+        results_dir = args.results_dir
+        plots_dir = args.results_dir.replace("plot_data", "plots")
+    else:
+        # Use dataset name for directory (results go to buiksat_trm/results/)
+        dataset_name = os.path.basename(args.dataset)
+        results_dir = f"buiksat_trm/results/plot_data_contraction_sgd_{dataset_name}"
+        plots_dir = f"buiksat_trm/results/plots_contraction_sgd_{dataset_name}"
+
+    # Create output directories (relative to FBCODE_DIR)
+    os.makedirs(FBCODE_DIR / results_dir, exist_ok=True)
+    os.makedirs(FBCODE_DIR / plots_dir, exist_ok=True)
+
+    print(f"Dataset: {args.dataset}")
+    print(f"Results dir: {results_dir}")
+    print(f"Plots dir: {plots_dir}")
 
     # Determine which conditions to run
     if args.conditions:
@@ -317,7 +343,8 @@ def main():
                     gpu=cond["gpu"],
                     base_config=BASE_CONFIG,
                     override_config=cond["config_override"],
-                    output_dir=RESULTS_DIR,
+                    output_dir=results_dir,
+                    dataset=args.dataset,
                 )
                 if proc:
                     processes[cond_name] = proc
@@ -328,7 +355,8 @@ def main():
                     gpu=cond["gpu"],
                     base_config=BASE_CONFIG,
                     override_config=cond["config_override"],
-                    output_dir=RESULTS_DIR,
+                    output_dir=results_dir,
+                    dataset=args.dataset,
                 )
                 processes[cond_name] = proc
 
@@ -347,14 +375,14 @@ def main():
 
         # Parse results
         for cond_name in condition_names:
-            log_file = os.path.join(RESULTS_DIR, f"{cond_name}_seed{seed}.log")
+            log_file = str(FBCODE_DIR / results_dir / f"{cond_name}_seed{seed}.log")
             results = parse_results(log_file)
             key = f"{cond_name}_seed{seed}"
             all_results[key] = results
             print(f"  [{cond_name}] final_success_rate={results['final_success_rate']}")
 
     # Save summary
-    summary_file = os.path.join(RESULTS_DIR, "summary.json")
+    summary_file = str(FBCODE_DIR / results_dir / "summary.json")
     with open(summary_file, "w") as f:
         json.dump(all_results, f, indent=2)
     print(f"\nSummary saved to {summary_file}")
