@@ -2,6 +2,9 @@
 
 This artifact bundles the code, configs, and scripts needed to reproduce the ICML submission results for **UPI–TRM: Unrolled Policy Iteration in Plan Space for Tiny Recursive Models**. The focus is on fast verification, deterministic reruns, and minimal dependencies.
 
+For the latest experiment summaries and pointers to current plot/CSV artifacts, see:
+- `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
+
 ## Environment Setup
 1. Use Python 3.10+ on Linux or macOS.
 2. (Recommended) Create a clean virtual environment:
