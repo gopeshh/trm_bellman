@@ -41,12 +41,12 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
-def load_4x4_data(data_dir: str, batch_size: int, seed: int) -> Tuple[torch.Tensor, torch.Tensor]:
+def load_4x4_data(data_dir: str, batch_size: int, seed: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
     """
     Load a batch of 4x4 Sudoku puzzles.
 
     Returns:
-        x: [batch_size, 16] puzzle inputs (with some empty cells)
+        batch: dict with 'inputs' and 'puzzle_identifiers'
         y: [batch_size, 16] solutions (fully filled)
     """
     train_dir = Path(data_dir) / "train"
@@ -54,6 +54,7 @@ def load_4x4_data(data_dir: str, batch_size: int, seed: int) -> Tuple[torch.Tens
     # Load numpy arrays
     inputs = np.load(train_dir / "all__inputs.npy")
     labels = np.load(train_dir / "all__labels.npy")
+    puzzle_ids = np.load(train_dir / "all__puzzle_identifiers.npy")
 
     print(f"Loaded dataset: {inputs.shape[0]} puzzles, seq_len={inputs.shape[1]}")
 
@@ -61,10 +62,16 @@ def load_4x4_data(data_dir: str, batch_size: int, seed: int) -> Tuple[torch.Tens
     np.random.seed(seed)
     indices = np.random.choice(len(inputs), size=min(batch_size, len(inputs)), replace=False)
 
-    x = torch.tensor(inputs[indices], dtype=torch.long)
-    y = torch.tensor(labels[indices], dtype=torch.long)
+    x_tensor = torch.tensor(inputs[indices], dtype=torch.long)
+    y_tensor = torch.tensor(labels[indices], dtype=torch.long)
+    id_tensor = torch.tensor(puzzle_ids[indices], dtype=torch.long)
 
-    return x, y
+    # Return as batch dict for model compatibility
+    batch = {
+        "inputs": x_tensor,
+        "puzzle_identifiers": id_tensor,
+    }
+    return batch, y_tensor
 
 
 def build_model(enable_contraction: bool, target_Lz: float = 0.9, seed: int = 42) -> TinyRecursiveReasoningModel_ACTV1:
@@ -79,15 +86,19 @@ def build_model(enable_contraction: bool, target_Lz: float = 0.9, seed: int = 42
         batch_size=256,
         seq_len=16,
         puzzle_emb_ndim=0,  # Disable puzzle embeddings for simplicity
+        puzzle_emb_len=0,   # Must be 0 when puzzle_emb_ndim=0
         num_puzzle_identifiers=500,
         vocab_size=6,
         H_cycles=2,
         L_cycles=2,
+        H_layers=1,  # Required by config (ignored)
         L_layers=2,  # Match typical TRM depth
         hidden_size=64,
         expansion=2.0,
         num_heads=4,
         pos_encodings="rope",
+        halt_max_steps=16,  # Required by config
+        halt_exploration_prob=0.1,  # Required by config
         rl_enable_value_head=True,
         rl_enable_policy_head=False,  # Not needed for this diagnostic
         rl_num_actions=97,
@@ -96,11 +107,15 @@ def build_model(enable_contraction: bool, target_Lz: float = 0.9, seed: int = 42
         rl_target_Lv=1.0,  # Value head Lipschitz
         rl_value_hidden_dim=128,
         rl_latent_ball_radius=10.0,  # Forward-invariant projection
+        forward_dtype="float32",  # Use float32 instead of bfloat16 for stability
     )
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # Suppress contraction warnings
         model = TinyRecursiveReasoningModel_ACTV1(config)
+
+    # Ensure all parameters are float32
+    model = model.float()
 
     return model
 
@@ -116,6 +131,10 @@ def compute_latent_norms(z_H: torch.Tensor, z_L: torch.Tensor) -> Dict[str, floa
     Returns:
         Dict of norm statistics
     """
+    # Convert to float for numerical stability
+    z_H = z_H.float()
+    z_L = z_L.float()
+
     # Flatten to [B, -1] for per-sample norms
     z_H_flat = z_H.view(z_H.shape[0], -1)
     z_L_flat = z_L.view(z_L.shape[0], -1)
@@ -152,6 +171,10 @@ def compute_collapse_metrics(z_H: torch.Tensor, z_L: torch.Tensor, num_pairs: in
     Returns:
         Dict of collapse metrics
     """
+    # Convert to float for numerical stability
+    z_H = z_H.float()
+    z_L = z_L.float()
+
     B = z_H.shape[0]
 
     # Flatten to [B, -1]
@@ -199,18 +222,18 @@ def compute_collapse_metrics(z_H: torch.Tensor, z_L: torch.Tensor, num_pairs: in
     }
 
 
-def compute_value_variance(model: TinyRecursiveReasoningModel_ACTV1, x: torch.Tensor, y: torch.Tensor, n: int) -> float:
+def compute_value_variance(model: TinyRecursiveReasoningModel_ACTV1, batch: Dict[str, torch.Tensor], y: torch.Tensor, n: int) -> float:
     """
     Compute variance of value head output across the batch.
     """
     with torch.no_grad():
-        value, _ = model.used_value(x, y, n)
+        value, _ = model.used_value(batch, y, n)
     return value.var().item()
 
 
 def run_diagnostic(
     model: TinyRecursiveReasoningModel_ACTV1,
-    x: torch.Tensor,
+    batch: Dict[str, torch.Tensor],
     y: torch.Tensor,
     unroll_depths: List[int],
     condition_name: str,
@@ -220,7 +243,9 @@ def run_diagnostic(
     """
     model.eval()
     device = next(model.parameters()).device
-    x = x.to(device)
+
+    # Move batch tensors to device
+    batch_on_device = {k: v.to(device) for k, v in batch.items()}
     y = y.to(device)
 
     results = {"condition": condition_name, "depths": {}}
@@ -229,7 +254,7 @@ def run_diagnostic(
         print(f"  Unroll depth n={n}...")
 
         with torch.no_grad():
-            z_n, z_trajectory = model.unroll_latent(x, y, n)
+            z_n, z_trajectory = model.unroll_latent(batch_on_device, y, n)
 
         z_H = z_n.z_H  # [B, seq_len, hidden_size]
         z_L = z_n.z_L
@@ -237,7 +262,7 @@ def run_diagnostic(
         # Compute metrics
         norm_stats = compute_latent_norms(z_H, z_L)
         collapse_stats = compute_collapse_metrics(z_H, z_L)
-        value_var = compute_value_variance(model, x, y, n)
+        value_var = compute_value_variance(model, batch_on_device, y, n)
 
         results["depths"][n] = {
             **norm_stats,
@@ -263,7 +288,7 @@ downstream signal and hurt learning.
 **Test Setup**:
 - Seed: {seed}
 - Dataset: 4×4 Sudoku (trivial, 1–4 empties)
-- Batch size: {len(results_A.get('batch_size', 128))} states
+- Batch size: {results_A.get('batch_size', 128)} states
 - Conditions:
   - **A (Contraction OFF)**: No opnorm clamp or scaling on z→z path
   - **B (Contraction ON)**: opnorm clamp + scaling with target_Lz=0.9
@@ -464,8 +489,8 @@ def main():
 
     # Load data
     print(f"\nLoading data from {args.data_dir}...")
-    x, y = load_4x4_data(args.data_dir, args.batch_size, args.seed)
-    print(f"Batch: x={x.shape}, y={y.shape}")
+    batch, y = load_4x4_data(args.data_dir, args.batch_size, args.seed)
+    print(f"Batch: inputs={batch['inputs'].shape}, y={y.shape}")
 
     # Unroll depths to test
     unroll_depths = [1, 2, 4, 8, 16]
@@ -483,11 +508,11 @@ def main():
 
     # Run diagnostics
     print("\n--- Running Condition A diagnostics ---")
-    results_A = run_diagnostic(model_A, x, y, unroll_depths, "A_contraction_OFF")
+    results_A = run_diagnostic(model_A, batch, y, unroll_depths, "A_contraction_OFF")
     results_A["batch_size"] = args.batch_size
 
     print("\n--- Running Condition B diagnostics ---")
-    results_B = run_diagnostic(model_B, x, y, unroll_depths, "B_contraction_ON")
+    results_B = run_diagnostic(model_B, batch, y, unroll_depths, "B_contraction_ON")
     results_B["batch_size"] = args.batch_size
 
     # Save results
