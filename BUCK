@@ -673,3 +673,22 @@ python_binary(
         "fbsource//third-party/pypi/torch:torch",
     ],
 )
+
+python_binary(
+    name = "run_contraction_collapse_isolation_2x2",
+    srcs = ["scripts/diagnostics/run_contraction_collapse_isolation_2x2.py"],
+    base_module = "",
+    main_module = "scripts.diagnostics.run_contraction_collapse_isolation_2x2",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        ":puzzle_dataset_lib",
+        ":upi_trm_train_lib",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/omegaconf:omegaconf",
+        "fbsource//third-party/pypi/tqdm:tqdm",
+    ],
+)
