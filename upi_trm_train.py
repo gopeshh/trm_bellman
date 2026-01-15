@@ -857,6 +857,7 @@ def main():
         rl_enable_contraction=rl_cfg.enable_contraction,
         rl_target_Lz=rl_cfg.target_Lz,
         rl_target_Lv=rl_cfg.target_Lv,
+        rl_disable_value_head_norm=getattr(rl_cfg, "disable_value_head_norm", False),
         rl_enable_policy_head=True,
         rl_num_actions=rl_num_actions,
         # Forward-invariant projection (Assumption 4.1)

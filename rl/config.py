@@ -214,6 +214,13 @@ class RLConfig(BaseModel):
     opnorm_clamp_num_power_iters: int = 10  # Power iterations for spectral norm estimation
     opnorm_log_max_sigma: bool = False  # If True, log max σ(W) when clamp fires (adds overhead)
 
+    # === Value head normalization toggle (2x2 ablation finding) ===
+    # When enable_contraction=True, the value head normally gets spectral_norm + Lv scaling.
+    # The 2x2 ablation showed this causes training collapse (targets saturate to ±20).
+    # Set disable_value_head_norm=True to keep z→z contraction ON but skip value head normalization.
+    # This implements Condition B from the 2x2 isolation experiment (stable training).
+    disable_value_head_norm: bool = False
+
     # Replay / data
     replay_capacity: int = 100_000
     batch_size: int = 256

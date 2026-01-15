@@ -84,6 +84,8 @@ ALGO_CONFIG = {
     "persistent_contraction": {"name": "UPI-TRM (Persistent-z, contraction)", "color": "#d62728", "marker": "D"},
     "persistent_no_contraction": {"name": "UPI-TRM (Persistent-z, no contraction)", "color": "#e377c2", "marker": "P"},
     "persistent_z": {"name": "UPI-TRM (Persistent-z, contraction)", "color": "#9467bd", "marker": "v"},
+    # Fixed contraction: z→z contraction ON, value-head normalization OFF
+    "contraction_zonly": {"name": "UPI-TRM (Episodic-z, z→z contraction only)", "color": "#2ca02c", "marker": "H"},
 }
 
 # Random baseline values (from eval_random_baseline.py)
@@ -183,7 +185,8 @@ def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Fea
     # Plot main algorithms first
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
                   "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction",
-                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction", "persistent_z"]
+                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction", "persistent_z",
+                  "contraction_zonly"]
 
     for algo in main_algos:
         if algo not in data:
@@ -251,7 +254,8 @@ def plot_score_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feasi
 
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
                   "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction",
-                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction"]
+                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction",
+                  "contraction_zonly"]
 
     for algo in main_algos:
         if algo not in data:
@@ -309,7 +313,8 @@ def plot_filled_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feas
 
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
                   "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction",
-                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction"]
+                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction",
+                  "contraction_zonly"]
 
     plotted_any = False
     for algo in main_algos:
@@ -369,7 +374,8 @@ def plot_zero_cand_vs_steps(data: dict, output_dir: Path, title_suffix: str = "F
 
     main_algos = ["upi_trm", "ppo", "a2c", "dqn", "ablation_persistent_z", "ablation_persistent_z_no_contraction",
                   "ablation_no_contraction", "no_contraction", "persistent_z_no_contraction",
-                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction"]
+                  "episodic_contraction", "persistent_contraction", "persistent_no_contraction",
+                  "contraction_zonly"]
 
     plotted_any = False
     for algo in main_algos:

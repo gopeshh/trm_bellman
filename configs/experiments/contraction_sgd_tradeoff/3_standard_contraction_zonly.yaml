@@ -1,0 +1,15 @@
+# CONDITION 3z: z→z contraction ON, value-head normalization OFF
+#
+# This implements "Condition B" from the 2x2 ablation experiment:
+# - z→z contraction: ON (target_Lz=0.90)
+# - Value head normalization: OFF (disable_value_head_norm=true)
+#
+# The 2x2 ablation showed that value head normalization (spectral_norm + Lv scaling)
+# causes training collapse, while z→z contraction alone is STABLE.
+#
+# This config tests whether z→z contraction provides any benefit when value head
+# normalization is disabled (comparing to the no_contraction baseline).
+
+enable_contraction: true
+target_Lz: 0.90
+disable_value_head_norm: true
