@@ -209,6 +209,11 @@ class RLConfig(BaseModel):
     enable_contraction: bool = True
     target_Lz: float = 0.9
     target_Lv: float = 1.0
+    # === Value head normalization control (2x2 ablation finding) ===
+    # When True, skip value head normalization even if enable_contraction=True.
+    # The 2x2 ablation showed that value head normalization causes collapse,
+    # while z→z contraction alone is stable (Condition B in verification_2x2).
+    disable_value_head_norm: bool = False
     opnorm_clamp_interval: int = 100  # Re-apply opnorm clamp every N steps (0 = disabled)
     opnorm_clamp_max_norm: float = 1.0  # Per-layer max operator norm for clamping
     opnorm_clamp_num_power_iters: int = 10  # Power iterations for spectral norm estimation

@@ -101,7 +101,7 @@ class TinyRecursiveReasoningModel_ACTV1Config(BaseModel):
     rl_value_hidden_dim: int = 256  # Hidden dimension of value head MLP
     rl_target_Lz: float = 0.9  # Target contraction factor L_z < 1 (Assumption 3.2)
     rl_target_Lv: float = 1.0  # Target Lipschitz of value head w.r.t. z
-    rl_disable_value_head_norm: bool = False  # If True, skip spectral_norm + Lv scaling on value head
+    rl_disable_value_head_norm: bool = False  # Skip value head normalization (2x2 ablation finding)
     rl_enable_policy_head: bool = False  # Add edit policy head π_θ(a|s)
     rl_num_actions: int = 0   # Total discrete actions; must be > 0 if policy head enabled
     rl_enable_z_init_encoder: bool = False  # Use (x,y)-dependent z initialization
@@ -496,16 +496,10 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
                 restrict_to_reasoning_layers=True,
             )
             # Value head normalization: can be disabled independently of z→z contraction
-            # The 2x2 ablation showed value head norm (spectral_norm + Lv scaling) causes
-            # training collapse, while z→z contraction alone is stable (Condition B).
-            if self.value_head is not None:
-                if self.config.rl_disable_value_head_norm:
-                    # Skip value head normalization per config (Condition B: stable training)
-                    print("[INFO] Value head norm: DISABLED by config (rl_disable_value_head_norm=True)")
-                else:
-                    # Apply full value head normalization (default)
-                    apply_spectral_norm_to_value_head(self.value_head)
-                    enforce_global_contraction_on_value_head(self.value_head, self.config.rl_target_Lv)
+            # The 2x2 ablation showed value head norm causes collapse, z→z contraction is stable
+            if self.value_head is not None and not self.config.rl_disable_value_head_norm:
+                apply_spectral_norm_to_value_head(self.value_head)
+                enforce_global_contraction_on_value_head(self.value_head, self.config.rl_target_Lv)
 
     @property
     def puzzle_emb(self):

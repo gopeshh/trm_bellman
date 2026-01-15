@@ -28,12 +28,12 @@ python scripts/diagnostics/run_contraction_collapse_isolation_2x2.py \
 
 ### Collapse Detection
 
-| Condition | Status | Collapse Step |
-|-----------|--------|---------------|
-| A (zconOFF_vheadOFF) | STABLE | - |
-| B (zconON_vheadOFF) | STABLE | - |
-| C (zconOFF_vheadON) | STABLE | - |
-| D (zconON_vheadON) | STABLE | - |
+| Condition | Status | Evidence |
+|-----------|--------|----------|
+| A (zconOFF_vheadOFF) | STABLE | target ∈ [−1.4, −1.8] throughout |
+| B (zconON_vheadOFF) | STABLE | target ∈ [−1.3, −1.9] throughout |
+| C (zconOFF_vheadON) | **UNSTABLE** | targets hit ±20 clamps (step 10 onward, std ∈ [10, 20]) |
+| D (zconON_vheadON) | **COLLAPSE → +20** | target=20.0, std=0.0 by step 60; V(s)=20.0 by step 100 |
 
 ### Comparison Table
 

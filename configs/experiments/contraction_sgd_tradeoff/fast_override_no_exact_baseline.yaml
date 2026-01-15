@@ -1,0 +1,12 @@
+# FAST OVERRIDE: Disable exact baseline summation for speed
+#
+# This config is for PREVIEW runs only - not for paper figures.
+# The exact_baseline_summation=true is required for Theorem 5.9,
+# but it's slow for initial curve-shape checks.
+#
+# Usage: Layer this AFTER the condition config
+#   --config base_episodic_z.yaml
+#   --config 3_standard_contraction_zonly.yaml
+#   --config fast_override_no_exact_baseline.yaml
+
+exact_baseline_summation: false
