@@ -14,6 +14,8 @@ This is a concise, living summary of the 4×4 Sudoku feasibility-checker experim
   - **Trivial suite (1–4 empties):** 5k gradient steps.
   - **Harder suite (6–8 empties):** 20k gradient steps.
 
+**Checker reliability note:** the **feasibility checker is the only reliable checker** in this repo’s Sudoku experiments. Other “checker” variants have not been dependable in practice and are treated as **not useful** for experiments/claims.
+
 ---
 
 ## Datasets

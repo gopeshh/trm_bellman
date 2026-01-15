@@ -9,6 +9,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > Note: historical “status” sections in this repo may be stale. Prefer the consolidated experiment log above.
 
+## Experiments policy: checker choice (important)
+
+For experiments/plots/claims in this repo, **use the feasibility checker only** (`use_feasibility_checker:`). Other checker variants exist in code but are considered **unreliable** and should not be used for experiments.
+
+## Config pruning (important)
+
+This repo intentionally prunes `configs/` down to **feasibility-checker configs only** (anything without `use_feasibility_checker:` is considered old and removed). If you see references below to other YAMLs, treat them as historical/stale.
+
+**The only configs that exist under `configs/` now are:**
+- `configs/pilots/feasibility_trivial.yaml`
+- `configs/pilots/feasibility_low_penalty.yaml`
+- `configs/rl_sudoku_4x4_feasibility.yaml`
+- `configs/baselines/a2c_trm_feasibility.yaml`
+- `configs/baselines/dqn_trm_feasibility.yaml`
+- `configs/baselines/ppo_trm_feasibility.yaml`
+- `configs/ablations/upi_trm_feasibility_no_conservative.yaml`
+- `configs/ablations/upi_trm_feasibility_no_contraction.yaml`
+- `configs/ablations/upi_trm_feasibility_persistent_z.yaml`
+- `configs/ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml`
+
 ## User Preferences
 
 **Prefer Buck2 for training/runs on Meta devservers**. For local plotting/data munging scripts, using `python` directly is fine.
@@ -114,128 +134,27 @@ python upi_trm_train.py --train-steps 100 --batch-size 16 --max-edits 8 --seed 0
 ./scripts/run_rl_dummy.sh
 ```
 
-**4×4 Sudoku (recommended for development):**
+**4×4 Sudoku (trivial, 1–4 empties):**
 ```bash
-# Ultra-easy variant (fastest convergence, 1-4 empty cells)
+python upi_trm_train.py \
+    --dataset-paths data/sudoku-4x4-trivial \
+    --config configs/pilots/feasibility_trivial.yaml \
+    --seed 42
+```
+
+**4×4 Sudoku (harder, 6–8 empties):**
+```bash
 python upi_trm_train.py \
     --dataset-paths data/sudoku-4x4-ultra-easy \
-    --config configs/rl_sudoku_4x4_ultra_easy.yaml \
-    --seed 42
-
-# Full-featured with puzzle embeddings and WandB
-./scripts/run_sudoku_rl_full.sh 4x4
-```
-
-**9×9 Sudoku (extreme difficulty):**
-```bash
-# Baseline K=1
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_k1.yaml \
-    --seed 42
-
-# Theory-exact K=1
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_k1_theory_exact.yaml \
-    --seed 42
-
-# K=3 multi-step
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_k3_baseline.yaml \
+    --config configs/rl_sudoku_4x4_feasibility.yaml \
     --seed 42
 ```
 
-**Shaped Reward Experiments (ICML 2026 Submission):**
+**Baselines (feasibility configs):**
 ```bash
-# Verify all configs are valid
-python scripts/verify_configs.py
-
-# Quick test (single experiment)
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_shaped_theory_exact.yaml \
-    --seed 42
-
-# Full experimental suite (9 configs × 3 seeds = 27 experiments)
-# Dataset: data/sudoku-extreme-1k-aug-1000
-# W&B project: UPI-TRM-ICML-Shaped-Rewards
-./scripts/run_shaped_reward_experiments.sh --seeds 3 --steps 20000
-
-# Pilot run (faster, for testing)
-./scripts/run_shaped_reward_experiments.sh --seeds 1 --steps 5000
-
-# Parallel execution (requires GNU parallel)
-./scripts/run_shaped_reward_experiments.sh --seeds 3 --steps 20000 --parallel
-```
-
-**Bahram's Experimental Requirements** (from paper lines 1426-1429):
-- ✅ Shaped-reward Sudoku setting (checker + potential shaping + absorbing normalization)
-- ✅ Explicit action space, masking, termination, horizon T, discount γ
-- ✅ Ablations removing: (i) contraction, (ii) exact centering, (iii) conservative mixture
-- ⏭️ Run experiments and collect results for paper Section 6
-
-**Baseline Algorithms (PPO, A2C):**
-```bash
-# Use --baseline flag to select algorithm and --backbone for model architecture
-# Available baselines: ppo, a2c
-# Available backbones: trm (default), norec-mlp, norec-transformer
-
-# PPO with MLP backbone (simplest baseline)
-python upi_trm_train.py \
-    --baseline ppo \
-    --backbone norec-mlp \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --train-steps 10000 \
-    --seed 42
-
-# A2C with Transformer backbone
-python upi_trm_train.py \
-    --baseline a2c \
-    --backbone norec-transformer \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --train-steps 10000 \
-    --seed 42
-
-# PPO with TRM backbone (tests if improvement comes from algorithm vs architecture)
-python upi_trm_train.py \
-    --baseline ppo \
-    --backbone trm \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --train-steps 10000 \
-    --seed 42
-
-# Available baseline configs (alternative to CLI flags):
-# - configs/baselines/ppo_trm_sudoku.yaml   (PPO + TRM backbone)
-# - configs/baselines/a2c_trm_sudoku.yaml   (A2C + TRM backbone)
-# - configs/baselines/ppo_norec_sudoku.yaml (PPO + MLP encoder)
-# - configs/baselines/a2c_norec_sudoku.yaml (A2C + MLP encoder)
-```
-
-**UNDO Action Variant:**
-```bash
-# Enable UNDO action that lets agent revert to previous plan states
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_undo.yaml \
-    --seed 42
-```
-
-**Curriculum Training (4×4 → 9×9):**
-```bash
-# Two-stage curriculum: start on 4×4, transfer to 9×9
-python scripts/run_curriculum.py \
-    --stage1-dataset data/sudoku-4x4-ultra-easy \
-    --stage2-dataset data/sudoku-extreme-1k-aug-1000 \
-    --stage1-steps 2000 \
-    --total-steps 10000 \
-    --config configs/rl_sudoku_shaped_theory_exact.yaml
-```
-
-**Imitation learning pretraining:**
-```bash
-python imitation_train.py --dataset-paths data/sudoku-4x4-ultra-easy --num-epochs 100
+python upi_trm_train.py --dataset-paths data/sudoku-4x4-ultra-easy --config configs/baselines/ppo_trm_feasibility.yaml --seed 42
+python upi_trm_train.py --dataset-paths data/sudoku-4x4-ultra-easy --config configs/baselines/a2c_trm_feasibility.yaml --seed 42
+python upi_trm_train.py --dataset-paths data/sudoku-4x4-ultra-easy --config configs/baselines/dqn_trm_feasibility.yaml --seed 42
 ```
 
 ### Supervised Pretraining
@@ -289,8 +208,8 @@ python dataset/build_maze_dataset.py
 # Load pretrained checkpoint and fine-tune with RL
 python upi_trm_train.py \
     --load-checkpoint checkpoints/Sudoku-extreme-1k-aug-1000-ACT-torch/TinyRecursiveReasoningModel_ACTV1/checkpoint.pt \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_k1.yaml
+    --dataset-paths data/sudoku-4x4-ultra-easy \
+    --config configs/rl_sudoku_4x4_feasibility.yaml
 
 # Save RL checkpoints during training
 python upi_trm_train.py \
@@ -400,7 +319,7 @@ Check theory alignment: `RLConfig.validate_theory_alignment()` or `RLConfig.is_t
 **Persistent**: `episodic_latent=False`
 - z initialized once per episode, updated across steps
 - RNN-like behavior, critical for harder tasks
-- See `configs/rl_sudoku_k1_persistent_z.yaml`
+- See `configs/ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml`
 
 ### STOP Action Control
 
@@ -416,12 +335,12 @@ Addresses "rush-to-fail" problem (Remark 2.6):
 - Dense feedback: `r = r_0 + γ·checker(x,y') - checker(x,y)` (Paper Equation 4)
 - Terminal rewards: `fail_terminal_reward`, `solve_terminal_reward`
 - For Sudoku: set `fail_terminal_reward = -10.0` (= -C_max) to prevent rush-to-fail (Remark 2.6)
-- See `configs/rl_sudoku_shaped_theory_exact.yaml` for theory-exact setup
+- See `README.md` for the current feasibility-checker configs.
 
 **Sparse**: `reward_shaping=False`
 - Only terminal reward from checker function
 - Harder credit assignment (slower learning)
-- See `configs/rl_sudoku_sparse_theory_exact.yaml` for baseline comparison
+- Use CLI flags to configure sparse vs shaped reward; legacy YAMLs were removed during config pruning.
 
 **Rush-to-Fail Mitigation** (Paper Remark 2.6):
 - Problem: With shaped rewards, agent may learn to terminate early on failures
@@ -431,7 +350,7 @@ Addresses "rush-to-fail" problem (Remark 2.6):
 
 ### Checker Functions
 
-Three checker types are available for 4×4 Sudoku:
+Checker implementations exist for 4×4 Sudoku, but **the feasibility checker is the only one we use for experiments** (`use_feasibility_checker:`). Other checkers are treated as deprecated/unreliable and should not be used for plots/claims.
 
 **1. Solution Checker** (default): `use_constraint_checker=False, use_progress_checker=False`
 - Compares plan to known solution
@@ -522,41 +441,22 @@ A common concern is that data collected from the mixture policy `π_mix = (1-α)
 
 Example precedence:
 ```bash
-# YAML sets K=3, CLI overrides to train-steps=5000
+# YAML sets various RL knobs, CLI overrides e.g. train-steps
 python upi_trm_train.py \
-    --config configs/rl_sudoku_k3_baseline.yaml \  # K=3 from YAML
+    --config configs/rl_sudoku_4x4_feasibility.yaml \
     --train-steps 5000                             # Overrides YAML
 ```
 
 ### Common Config Combinations
 
-**Fast debugging** (4×4, 80 actions):
-- `configs/rl_sudoku_4x4_ultra_easy.yaml`
-- Small action space, shaped rewards, noop STOP
+**Fast debugging (trivial 4×4):**
+- `configs/pilots/feasibility_trivial.yaml`
 
-**Theory-exact baseline** (9×9):
-- `configs/rl_sudoku_k1_theory_exact.yaml`
-- All paper features: exact baseline, exact targets, theory-exact mixture
+**Harder 4×4 suite (6–8 empties):**
+- `configs/rl_sudoku_4x4_feasibility.yaml`
 
-**Shaped rewards experiments** (ICML 2026 submission):
-- `configs/rl_sudoku_shaped_theory_exact.yaml` - Main contribution (all features ON)
-  - `reward_shaping=true`, `fail_terminal_reward=-10.0` (rush-to-fail mitigation)
-  - All theory-exact features enabled
-- `configs/rl_sudoku_sparse_theory_exact.yaml` - Sparse baseline
-  - `reward_shaping=false`, terminal-only rewards
-- `configs/ablations/ablation_*.yaml` - 7 ablation configs
-  - `ablation_no_exact_baseline.yaml` - **Tests Theorem 5.9 (KEY)**
-  - `ablation_no_contraction.yaml` - Tests Assumption 4.2
-  - `ablation_no_conservative_mixture.yaml` - Tests CPI benefit (α=1.0)
-  - And 4 more systematic ablations
-
-**Stable training** (persistent latent):
-- `configs/rl_sudoku_k1_persistent_z.yaml`
-- High entropy (0.1), disabled STOP, constant LR
-
-**Multi-step unrolling** (K=5):
-- `configs/rl_sudoku_k5_theory_exact.yaml`
-- Higher variance but less bias
+**Best-performing UPI-TRM (from current 4×4 feasibility log):**
+- `configs/ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml`
 
 ### Environment Variables
 
@@ -753,7 +653,7 @@ For the ICML 2026 submission shaped-reward experiments (Bahram's guidance from p
 2. **Use dummy dataset** for API testing: `python upi_trm_train.py --train-steps 100`
 3. **Enable theory metrics** when tuning: `track_theory_metrics=True` in config
 4. **Checkpoint frequently** during long runs: `--save-interval 1000`
-5. **Compare K values** with ablation configs: `configs/ablations/upi_trm_K{1,3,5}.yaml`
+5. **Compare variants** by swapping between the remaining feasibility-checker YAMLs under `configs/ablations/` and `configs/baselines/`.
 6. **Monitor WandB**: `--wandb-project` for experiment tracking
 
 ## WandB Integration

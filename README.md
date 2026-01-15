@@ -124,21 +124,18 @@ This uses the in-memory `DummyPuzzleDataset`, collects short plan-edit episodes,
 
 ### Sudoku UPI-TRM Training
 
-We provide multiple configurations for training UPI-TRM on Sudoku puzzles with varying theory-exactness and K-step horizons.
+This repo previously carried many YAML configs for many experimental branches. **Those configs have been intentionally pruned**: under `configs/`, we now keep only configs that enable the **feasibility checker** (`use_feasibility_checker:`).
 
 #### 4×4 Sudoku (Recommended Starting Point)
 
 For development, debugging, and curriculum learning, we recommend starting with 4×4 Sudoku:
 
 ```bash
-# Ultra-easy: only 1-4 empty cells (fastest convergence)
+# Trivial: 1–4 empties (fastest convergence)
 python upi_trm_train.py \
-    --dataset-paths data/sudoku-4x4-ultra-easy \
-    --config configs/rl_sudoku_4x4_ultra_easy.yaml \
+    --dataset-paths data/sudoku-4x4-trivial \
+    --config configs/pilots/feasibility_trivial.yaml \
     --seed 42
-
-# Full-featured with puzzle embeddings
-./scripts/run_sudoku_rl_full.sh 4x4
 ```
 
 The 4×4 puzzles are ideal because:
@@ -146,116 +143,30 @@ The 4×4 puzzles are ideal because:
 - **Faster episodes**: Max 16 edits needed (vs. 81 for 9×9)
 - **Easier debugging**: Can visually verify solutions
 
-#### Full-Featured Training Script
+#### Harder 4×4 suite (6–8 empties)
 
-For production training with all features (puzzle embeddings, checkpointing, WandB):
+Use the (harder) 6–8 empties suite with a feasibility-enabled config:
 
-```bash
-# 4×4 with puzzle embeddings and WandB logging
-./scripts/run_sudoku_rl_full.sh 4x4
-
-# 9×9 extreme difficulty
-./scripts/run_sudoku_rl_full.sh extreme
-
-# Fine-tune from pretrained checkpoint
-./scripts/run_sudoku_rl_full.sh /path/to/checkpoint.pt
-```
-
-Environment variables for customization:
-```bash
-HIDDEN_SIZE=128 PUZZLE_EMB_NDIM=128 TRAIN_STEPS=20000 ./scripts/run_sudoku_rl_full.sh 4x4
-```
-
-#### 9×9 Sudoku (Extreme Difficulty)
-
-**Quick start:**
-```bash
-./scripts/run_sudoku_rl.sh
-```
-
-This uses the default dataset at `data/sudoku-extreme-1k-aug-1000` with the baseline `configs/rl_sudoku_k1.yaml` config.
-
-#### Manual Commands with Different 9×9 Configs
-
-**Baseline K=1 (simple 1-step TD):**
 ```bash
 python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_k1.yaml \
+    --dataset-paths data/sudoku-4x4-ultra-easy \
+    --config configs/rl_sudoku_4x4_feasibility.yaml \
     --seed 42
 ```
 
-**Theory-exact K=1 (all paper features enabled):**
-```bash
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_k1_theory_exact.yaml \
-    --seed 42
-```
+#### Available `configs/` files (post-prune)
 
-**Practical K=3 baseline (faster learning):**
-```bash
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_k3_baseline.yaml \
-    --seed 42
-```
-
-**K=5 multi-step unrolled (theory-exact):**
-```bash
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_k5_theory_exact.yaml \
-    --seed 42
-```
-
-**Full theory config with GAE + all dials:**
-```bash
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/ablations/upi_trm_full_theory.yaml \
-    --seed 42
-```
-
-#### Stable Training with Persistent Latent (Recommended)
-Our most robust training setup uses **Persistent Latent Mode**, where the latent state $z$ is carried across steps within an episode, mimicking a Recurrent Neural Network (RNN). This mode is critical for stability on harder tasks.
-
-**Key Features:**
-- **Persistent Latent**: The thought vector $z$ is not reset at each step; it evolves as the agent modifies the plan.
-- **Disabled STOP**: The agent is forced to use the full budget (120 steps), preventing "early stop" collapse.
-- **High Entropy**: `entropy_coef: 0.1` ensures continuous exploration and prevents policy degradation.
-- **Constant LR**: Learning rate is kept constant to maintain plasticity.
-
-**Run the stable config:**
-```bash
-python upi_trm_train.py \
-    --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/rl_sudoku_k1_persistent_z.yaml \
-    --seed 47 \
-    --train-steps 20000 \
-    --log-interval 100 \
-    --eval-interval 200
-```
-
-#### Available Sudoku Configs
-
-**9×9 Sudoku (Extreme difficulty):**
-
-| Config | K | Theory Features | Description |
-|--------|---|-----------------|-------------|
-| `rl_sudoku_k1.yaml` | 1 | Baseline | Simple 1-step TD, conservative α=0.01 |
-| `rl_sudoku_k1_theory_exact.yaml` | 1 | All ON | Exact targets + centered adv + distillation |
-| `rl_sudoku_k3_baseline.yaml` | 3 | Partial | Practical K=3, faster learning rates |
-| `rl_sudoku_k5_theory_exact.yaml` | 5 | All ON | Multi-step unrolled with theory features |
-| `ablations/upi_trm_full_theory.yaml` | 5 | All + GAE | Full paper implementation with λ-returns |
-
-**4×4 Sudoku (Curriculum learning / debugging):**
-
-| Config | Reward | Description |
-|--------|--------|-------------|
-| `rl_sudoku_4x4_ultra_easy.yaml` | Shaped | Only 1-4 empty cells, easiest starting point |
-| `rl_sudoku_4x4_full_features.yaml` | Shaped | All features: puzzle embeddings, persistent z |
-| `rl_sudoku_4x4_sparse.yaml` | Sparse | Terminal-only rewards, harder credit assignment |
+These are the only YAML configs under `configs/` after pruning (all are feasibility-checker configs):
+- `configs/pilots/feasibility_trivial.yaml`
+- `configs/pilots/feasibility_low_penalty.yaml`
+- `configs/rl_sudoku_4x4_feasibility.yaml`
+- `configs/baselines/a2c_trm_feasibility.yaml`
+- `configs/baselines/dqn_trm_feasibility.yaml`
+- `configs/baselines/ppo_trm_feasibility.yaml`
+- `configs/ablations/upi_trm_feasibility_no_conservative.yaml`
+- `configs/ablations/upi_trm_feasibility_no_contraction.yaml`
+- `configs/ablations/upi_trm_feasibility_persistent_z.yaml`
+- `configs/ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml`
 
 #### Theory-Exact Features Explained
 
@@ -326,7 +237,7 @@ To track the paper's theoretical quantities (C_z, L_z, L_v, Bellman residual, un
 ```bash
 python upi_trm_train.py \
     --dataset-paths data/sudoku-extreme-1k-aug-1000 \
-    --config configs/ablations/upi_trm_full_theory.yaml \
+    --config configs/ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml \
     --seed 42
 ```
 
@@ -338,13 +249,7 @@ The `upi_trm_full_theory.yaml` config sets `track_theory_metrics: true`, which l
 - `bellman_residual_*`: Empirical Bellman residual statistics
 
 ## Ablation Experiments
-To reproduce the ICML ablation sweeps, point the helper script at any YAML inside `configs/ablations/`. Each YAML only overrides the `RLConfig` fields mentioned inside, so unspecified hyperparameters fall back to the CLI defaults above.
-
-```bash
-./scripts/run_ablation.sh configs/ablations/upi_trm_K3.yaml
-```
-
-Swap the config path to compare different K horizons (`upi_trm_K1.yaml`, `upi_trm_K3.yaml`, `upi_trm_K5.yaml`) or inner-loop depths (`upi_trm_unroll2.yaml`, `upi_trm_unroll4.yaml`). Flip CPI strength (`upi_trm_alpha0.yaml`, `upi_trm_alpha03.yaml`) or contraction penalties (`upi_trm_no_contraction.yaml`) the same way—the wrapper seeds everything to zero for deterministic, reviewer-friendly runs.
+The legacy ablation YAMLs have been removed as part of config pruning. Use the feasibility-checker configs above as starting points, and override additional knobs via CLI flags.
 
 ## Evaluating a Trained Policy (Optional)
 To run policy-only evaluation outside the training loop, load the model checkpoint and call `evaluate_plan_policy` (strict success) or `evaluate_plan_policy_with_scores` (mean score + success):

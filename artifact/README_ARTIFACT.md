@@ -60,3 +60,55 @@ Each run consumes the seeded dummy dataset for determinism.
 ```
 
 For questions, contact the authors through the ICML submission portal.
+
+---
+
+## Appendix: Contraction fix (operator-norm clamping)
+
+This section is merged from the former `docs/contraction_fix.md` so the artifact has a single place that covers both **reproducibility** and the **critical implementation detail** behind contraction enforcement.
+
+### Problem: `spectral_norm` causes \(L_z\) explosion
+
+The original implementation used PyTorch’s `torch.nn.utils.spectral_norm` to enforce per-layer Lipschitz bounds. Diagnostics showed it can be **numerically unstable** in this TRM architecture:
+
+| Variant | Measured \(L_z\) | Status |
+|---------|------------------:|--------|
+| OFF (no contraction) | ~1.0 | OK |
+| SN-only (`spectral_norm`) | 7000 – 600000+ | **EXPLODED** |
+| SN+SCALE (`spectral_norm` + scaling) | 4000 – 65000+ | **EXPLODED** |
+
+### Root cause (high level)
+
+`spectral_norm` reparameterizes weights and updates them via hooks + power iteration. With inner-loop recursion (`L_cycles > 1`) and residual/normalization structure, this interacts poorly and produces pathological effective operator norms.
+
+### Solution: operator-norm clamping
+
+We replaced `spectral_norm` with a more direct, stable approach:
+
+- Estimate spectral norm via power iteration in float32
+- If `||W|| > max_norm`, rescale weights in-place: \(W \leftarrow W \cdot (max\_norm / ||W||)\)
+- Apply selectively to the **z→z path** layers (reasoning stack), not embeddings/heads
+
+### Results after fix (validated Jan 2026)
+
+**With `target_Lz = 0.9` (eps=1e-3):**
+
+| Variant | Measured \(L_z\) | max σ(W) | Status |
+|---------|------------------:|---------:|--------|
+| OFF (no contraction) | 1.39 | 3.81 | OK |
+| CLAMP-only | **0.70** | 1.06 | **Contractive** |
+| SCALE-only | 1.27 | 3.82 | OK |
+| CLAMP+SCALE | **0.70** | 1.03 | **Contractive** |
+| SN-only | 50257 | 3.65 | **EXPLODED** |
+| SN+SCALE | 54055 | 3.81 | **EXPLODED** |
+
+### Where to look in code
+
+- `utils/lipschitz.py`: power-iteration + clamping utilities
+- `models/recursive_reasoning/trm.py`: contraction enforcement uses opnorm clamp (not `spectral_norm`)
+- `rl/upi_trm_trainer.py`: optional periodic re-clamping during training
+
+### Diagnostic commands (optional)
+
+- `scripts/diagnose_contraction_components.py` (old SN behavior)
+- `scripts/diagnose_contraction_fix.py` (validates clamp vs SN)

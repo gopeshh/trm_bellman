@@ -1,6 +1,0 @@
-# CONDITION 1: No contraction
-#
-# Hypothesis test: baseline without contraction enforcement
-# enable_contraction=false means no opnorm clamping or scaling
-
-enable_contraction: false

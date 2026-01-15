@@ -460,7 +460,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         #
         # NOTE: We use opnorm_clamp instead of spectral_norm because PyTorch's
         # spectral_norm is numerically unstable in this architecture (causes Lz
-        # explosion to 10^5+). See docs/contraction_fix.md for details.
+        # explosion to 10^5+). See artifact/README_ARTIFACT.md (Appendix: Contraction fix) for details.
         #
         # If you load a checkpoint that was trained WITHOUT contraction:
         # - The pretrained weights will be rescaled by the contraction factors
