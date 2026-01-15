@@ -1,0 +1,17 @@
+# CONDITION: z→z contraction ONLY (no value head normalization)
+#
+# Based on 2×2 ablation finding (results/verification_2x2/README.md):
+#   - Condition B (zconON, vheadOFF) is STABLE
+#   - Value head normalization causes collapse, not z→z contraction
+#
+# This config enables:
+#   - z→z contraction via opnorm clamp + output scaling (target_Lz=0.90)
+#   - SKIPS value head normalization (disable_value_head_norm=true)
+#
+# Hypothesis: This should allow learning while satisfying L_z < 1 contraction
+# requirement from Assumption 4.2, without the collapse from value head norm.
+
+enable_contraction: true
+target_Lz: 0.90
+target_Lv: 1.0
+disable_value_head_norm: true

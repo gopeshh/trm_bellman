@@ -692,3 +692,15 @@ python_binary(
         "fbsource//third-party/pypi/tqdm:tqdm",
     ],
 )
+
+python_binary(
+    name = "plot_zonly_contraction_preview",
+    srcs = ["scripts/plot_zonly_contraction_preview.py"],
+    base_module = "",
+    main_module = "scripts.plot_zonly_contraction_preview",
+    deps = [
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/pandas:pandas",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
