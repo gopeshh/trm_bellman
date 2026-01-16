@@ -12,7 +12,7 @@ For the forward-looking ICML execution plan (stability dial), see:
 
 ## Repository Structure
 - `models/recursive_reasoning/trm.py` – `TinyRecursiveReasoningModel_ACTV1` with RL-specific value/policy heads.
-- `models/value_head.py` – latent value head \(V_\psi\) with spectral normalization utilities from `utils/lipschitz.py`.
+- `models/value_head.py` – latent value head \(V_\psi\). Spectral normalization is optional and controlled by `disable_value_head_norm` (must be `true` for stability experiments—see `CLAUDE.md`).
 - `models/edit_policy.py` – autoregressive edit policy head that proposes plan-space actions.
 - `rl/config.py` – `RLConfig` for hyperparameters, logging cadence, CPI knobs, and evaluation intervals.
 - `rl/envs/plan_edit_env.py` – plan-space meta-MDP describing edit actions over latent plans.
@@ -289,7 +289,7 @@ print(f"Mean checker score: {mean_score:.3f} | Success rate: {success_rate:.3f}"
 ```
 
 ## Experimental Notes
-- **Latent evaluator** \(U_n(s)\): `TinyRecursiveReasoningModel_ACTV1.used_value()` unrolls the latent state and applies the spectral-normalized `value_head`.
+- **Latent evaluator** \(U_n(s)\): `TinyRecursiveReasoningModel_ACTV1.used_value()` unrolls the latent state and applies the `value_head`. Note: value-head spectral norm is optional and must be disabled (`disable_value_head_norm: true`) for stability-dial experiments due to the known collapse mode.
 - **K-step operator**: `UPITrmTrainer.value_update()` pulls trajectories from replay and mixes 1-step / K-step returns via `RLConfig.K`.
 - **CPI mixture**: `_mixed_policy_dist()` blends the frozen and candidate policies, while `_sync_policy_old_towards_candidate()` softly updates the target head. These are tested in `tests/test_cpi_mixture_policy_smoke.py`.
 - **Logging / evaluation**: `UPITrmTrainer.evaluate_policy_metrics()` (and the success-rate-only alias) surface both strict solves and mean checker scores via `upi_trm_train.py`; `RLConfig` toggles log/eval cadence.
