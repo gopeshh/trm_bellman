@@ -168,9 +168,9 @@ Rule out the biggest confound in your own diagnostics: projection saturation. If
 ### Conditions
 
 Pick one setting (either best A/B checkpoints or short retrains) and sweep:
-- `latent_ball_radius ∈ {10, 30, 100, 0}`
+- `latent_ball_radius ∈ {10, 30, 100, inf}`
 
-where `0` disables projection (no clipping).
+where `inf` disables projection (no clipping).
 
 Run for:
 - No-contraction baseline

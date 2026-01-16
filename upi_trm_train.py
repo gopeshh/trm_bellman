@@ -136,26 +136,32 @@ def save_checkpoint(
     step: int,
     checkpoint_dir: str,
     puzzle_emb_optimizer: Optional[torch.optim.Optimizer] = None,
+    rl_cfg: Optional["RLConfig"] = None,
 ) -> str:
     """
     Save full training state for resumable RL training.
-    
+
     Args:
         model: The TRM model
         trainer: UPITrmTrainer instance (for optimizers)
         step: Current training step
         checkpoint_dir: Directory to save checkpoints
         puzzle_emb_optimizer: Optional optimizer for puzzle embeddings
-        
+        rl_cfg: Optional RLConfig used for training (saved for reproducibility)
+
     Returns:
         Path to saved checkpoint
     """
     os.makedirs(checkpoint_dir, exist_ok=True)
-    
+
     checkpoint = {
         "step": step,
         "model_state_dict": model.state_dict(),
     }
+
+    # Save RL config for reproducibility and correct eval loading
+    if rl_cfg is not None:
+        checkpoint["rl_config"] = rl_cfg.model_dump() if hasattr(rl_cfg, "model_dump") else rl_cfg.dict()
 
     # Save optimizer states - different trainers have different optimizer structures
     if hasattr(trainer, 'value_opt') and hasattr(trainer, 'policy_opt'):
@@ -1359,11 +1365,11 @@ def main():
         
         # === Save checkpoint periodically ===
         if args.save_interval > 0 and checkpoint_dir is not None and (step + 1) % args.save_interval == 0:
-            save_checkpoint(model, trainer, step + 1, checkpoint_dir, puzzle_emb_optimizer)
-    
+            save_checkpoint(model, trainer, step + 1, checkpoint_dir, puzzle_emb_optimizer, rl_cfg)
+
     # === Save final checkpoint ===
     if args.save_interval > 0 and checkpoint_dir is not None:
-        save_checkpoint(model, trainer, total_steps, checkpoint_dir, puzzle_emb_optimizer)
+        save_checkpoint(model, trainer, total_steps, checkpoint_dir, puzzle_emb_optimizer, rl_cfg)
     
     # === WandB: Finish logging ===
     if use_wandb:

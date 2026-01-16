@@ -704,3 +704,71 @@ python_binary(
         "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
+
+# ICML Phase 1: Unroll Sensitivity Evaluation
+python_library(
+    name = "eval_unroll_sensitivity_lib",
+    srcs = ["scripts/eval_unroll_sensitivity.py"],
+    base_module = "",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_binary(
+    name = "eval_unroll_sensitivity",
+    srcs = ["scripts/eval_unroll_sensitivity.py"],
+    base_module = "",
+    main_module = "scripts.eval_unroll_sensitivity",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_unittest(
+    name = "test_unroll_sensitivity",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_unroll_sensitivity_unittest.py",
+        "scripts/eval_unroll_sensitivity.py",
+    ],
+    base_module = "",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+# ICML Phase 1: Plotting scripts
+python_binary(
+    name = "plot_exp1_unroll_sensitivity",
+    srcs = ["scripts/plot_exp1_unroll_sensitivity.py"],
+    base_module = "",
+    main_module = "scripts.plot_exp1_unroll_sensitivity",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)
+
+python_binary(
+    name = "plot_exp1_radius_sweep",
+    srcs = ["scripts/plot_exp1_radius_sweep.py"],
+    base_module = "",
+    main_module = "scripts.plot_exp1_radius_sweep",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)

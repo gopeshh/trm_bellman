@@ -1,0 +1,21 @@
+{
+  "batch_name": "b1",
+  "num_states": 805,
+  "empties_distribution": {
+    "2": 100,
+    "7": 165,
+    "6": 87,
+    "3": 154,
+    "4": 161,
+    "8": 58,
+    "1": 80
+  },
+  "seed": 42,
+  "source_paths": [],
+  "creation_time": "2026-01-16T11:27:09.093348",
+  "git_sha": null,
+  "checkpoint_a_path": "/home/buiksat/trm_bellman/checkpoints/model_a_nc_no_vhead_norm/seed42/model_step_5000.pt",
+  "checkpoint_b_path": "/home/buiksat/trm_bellman/checkpoints/model_b/model_step_5000.pt",
+  "parent_batch": "b0",
+  "cap": 1500
+}
