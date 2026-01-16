@@ -6,7 +6,7 @@ This repo intentionally keeps only a small set of “canonical” docs. Everythi
 
 - **Overview / how to run**: `README.md`
 - **Latest validated 4×4 feasibility results**: `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
-- **Forward-looking plan**: `EXPERIMENT_PLAN.md`
+- **Forward-looking plan**: `EXPERIMENT_PLAN_ICML.md`
 
 ## Supporting docs
 

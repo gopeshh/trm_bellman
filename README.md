@@ -7,8 +7,8 @@ This repository extends the Tiny Recursive Model (TRM) codebase with a plan-spac
 For the up-to-date 4×4 Sudoku feasibility-checker results (trivial 1–4 empties and harder 6–8 empties), random baselines, and artifact pointers, see:
 - `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
 
-For the forward-looking plan (baseline tuning + 9×9), see:
-- `EXPERIMENT_PLAN.md`
+For the forward-looking ICML execution plan (stability dial), see:
+- `EXPERIMENT_PLAN_ICML.md`
 
 ## Repository Structure
 - `models/recursive_reasoning/trm.py` – `TinyRecursiveReasoningModel_ACTV1` with RL-specific value/policy heads.

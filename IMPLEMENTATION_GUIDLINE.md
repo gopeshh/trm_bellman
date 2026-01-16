@@ -3,7 +3,7 @@
 > NOTE: This document is a historical implementation plan and may be stale.
 > For the current experiment results and next steps, see:
 > - `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
-> - `EXPERIMENT_PLAN.md`
+> - `EXPERIMENT_PLAN_ICML.md`
 
 **Goal:** Extend the official TinyRecursiveModels codebase into a plan-space RL framework implementing UPI–TRM (Unrolled Policy Iteration for TRMs) and producing ICML 2026 submission-ready experiments (Sudoku plan-editing + ablations + diagnostics + figures/tables).
 

@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Canonical results & current plan
 
 - **Latest 4×4 feasibility-checker results + artifact pointers**: `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
-- **Forward plan (baseline tuning, 9×9)**: `EXPERIMENT_PLAN.md`
+- **Forward plan (ICML execution: stability dial)**: `EXPERIMENT_PLAN_ICML.md`
 
 > Note: historical “status” sections in this repo may be stale. Prefer the consolidated experiment log above.
 
