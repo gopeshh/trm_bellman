@@ -804,3 +804,14 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+python_binary(
+    name = "make_paper_figures_exp1_split",
+    srcs = ["scripts/make_paper_figures_exp1_split.py"],
+    base_module = "",
+    main_module = "scripts.make_paper_figures_exp1_split",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)
