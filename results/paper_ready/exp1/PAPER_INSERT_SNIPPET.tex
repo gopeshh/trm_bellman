@@ -1,0 +1,65 @@
+% =============================================================================
+% Experiment 1 Paper Integration Snippet
+% =============================================================================
+% Copy these lines into UPI_TRM_ICML.tex
+% Assumes figures/ and tables/ directories at paper root contain these files
+% =============================================================================
+
+% -----------------------------------------------------------------------------
+% MAIN PAPER (Section 7.4: Unroll Sensitivity & Radius Sweep)
+% -----------------------------------------------------------------------------
+
+% Figure: Unroll Sensitivity (B0 initial states)
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/fig_exp1_unroll_sensitivity_main.pdf}
+    \caption{Unroll sensitivity on B0 (initial states). Contraction reduces
+    value drift ($\Delta_V$) by 4.1$\times$, policy divergence ($\Delta_\pi$)
+    by 33$\times$, and latent drift ($\Delta_z$) by 3.1$\times$ at 8$\times$
+    training depth.}
+    \label{fig:unroll_sensitivity}
+\end{figure}
+
+% Figure: Radius Sweep (B0 initial states)
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/fig_exp1_radius_sweep_main.pdf}
+    \caption{Radius sweep on B0 (initial states). Even with projection disabled
+    (R=0), contraction provides 4.8$\times$ value stability improvement
+    ($\Delta_V$: 1.084 $\to$ 0.225), demonstrating stability comes from
+    contraction, not projection clipping.}
+    \label{fig:radius_sweep}
+\end{figure}
+
+% Table: Unroll Sensitivity
+\input{tables/table_exp1_unroll_sensitivity.tex}
+
+% Table: Radius Sweep (Main - B0)
+\input{tables/table_exp1_radius_sweep_main.tex}
+
+% -----------------------------------------------------------------------------
+% APPENDIX (B1 successor states)
+% -----------------------------------------------------------------------------
+
+% Figure: Unroll Sensitivity Appendix (B1)
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/fig_exp1_unroll_sensitivity_appendix.pdf}
+    \caption{Unroll sensitivity on B1 (successor states). Latent drift and
+    action agreement improve with contraction, but value estimates show
+    higher variance than B0.}
+    \label{fig:unroll_sensitivity_appendix}
+\end{figure}
+
+% Figure: Radius Sweep Appendix (B1)
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/fig_exp1_radius_sweep_appendix.pdf}
+    \caption{Radius sweep on B1 (successor states). With R=0 (projection
+    disabled), $\Delta_V$ does \emph{not} improve with contraction on B1,
+    unlike B0. The main R=0 claim is scoped to B0 initial states only.}
+    \label{fig:radius_sweep_appendix}
+\end{figure}
+
+% Table: Radius Sweep Appendix (B1)
+\input{tables/table_exp1_radius_sweep_appendix.tex}
