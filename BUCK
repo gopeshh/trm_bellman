@@ -815,3 +815,14 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+python_binary(
+    name = "make_paper_figures_exp1_final",
+    srcs = ["scripts/make_paper_figures_exp1_final.py"],
+    base_module = "",
+    main_module = "scripts.make_paper_figures_exp1_final",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)

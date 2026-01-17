@@ -1,48 +1,60 @@
 # Experiment 1 Provenance
 
-**Generated**: 2026-01-16T17:07:13.477838
+**Generated**: 2026-01-16T23:35:06.447344
+**Commit**: 
+
+## Input CSVs
+
+| Purpose | Path |
+|---------|------|
+| Unroll B0 | `results/tables/unroll_sensitivity_b0_mismatch.csv` |
+| Unroll B1 | `results/tables/unroll_sensitivity_b1_mismatch.csv` |
+| Radius B0 | `results/tables/radius_sweep_b0_aggregated.csv` |
+| Radius B1 | `results/tables/radius_sweep_b1_aggregated.csv` |
 
 ## Checkpoints
 
-| Seed | Model A (No Contraction) | Model B (Contraction) |
-|------|--------------------------|----------------------|
-| 41 | checkpoints/exp1_v4/model_a_prime_seed41.pt | checkpoints/exp1_v4/model_b_seed41.pt |
-| 42 | checkpoints/exp1_v4/model_a_prime_seed42.pt | checkpoints/exp1_v4/model_b_seed42.pt |
-| 43 | checkpoints/exp1_v4/model_a_prime_seed43.pt | checkpoints/exp1_v4/model_b_seed43.pt |
+| Seed | No Contraction | Contraction |
+|------|----------------|-------------|
+| 41 | `checkpoints/exp1_v4/model_a_prime_seed41.pt` | `checkpoints/exp1_v4/model_b_seed41.pt` |
+| 42 | `checkpoints/exp1_v4/model_a_prime_seed42.pt` | `checkpoints/exp1_v4/model_b_seed42.pt` |
+| 43 | `checkpoints/exp1_v4/model_a_prime_seed43.pt` | `checkpoints/exp1_v4/model_b_seed43.pt` |
 
 ## YAML Configs
 
-- Model A (No Contraction): `configs/ablations/upi_trm_feasibility_no_contraction.yaml`
-- Model B (Contraction): `configs/ablations/upi_trm_feasibility_contraction.yaml`
+- No Contraction: `configs/ablations/upi_trm_feasibility_no_contraction.yaml`
+- Contraction: `configs/ablations/upi_trm_feasibility_contraction.yaml`
 
-## Key Config Differences
+## Key Parameters
 
-| Setting | No Contraction | Contraction |
-|---------|----------------|-------------|
-| enable_contraction | false | true |
-| target_Lz | N/A | 0.9 |
-| disable_value_head_norm | true | true |
-| latent_ball_radius | 10.0 | 10.0 |
-| inner_unroll_n | 2 | 2 |
-
-## Batch Artifacts
-
-- B0: `buiksat_trm/results/validation/exp1_v4/seed42/b0.pt` (100 initial states)
-- B1: `buiksat_trm/results/validation/exp1_v4/seed42/b1.pt` (successor closure)
+| Parameter | Value |
+|-----------|-------|
+| n_train | 2 |
+| n2 (eval depths) | [4, 8, 16] |
+| Radii | [0.0, 10.0, 100.0] |
+| Seeds | [41, 42, 43] |
+| disable_value_head_norm | true |
+| target_Lz (contraction) | 0.9 |
 
 ## Regeneration Commands
 
 ```bash
-# Evaluation (already done, per-state CSVs exist)
-buck2 run //buiksat_trm:eval_unroll_sensitivity -- compare \
-    --checkpoint_a checkpoints/exp1_v4/model_a_prime_seed42.pt \
-    --checkpoint_b checkpoints/exp1_v4/model_b_seed42.pt \
-    --batch_b0 artifacts/eval_batches/b0.pt \
-    --batch_b1 artifacts/eval_batches/b1.pt \
-    --n_mults 1,2,4,8
+# Generate all paper-ready artifacts
+buck2 run //buiksat_trm:make_paper_figures_exp1_final
 
-# Paper figures
-buck2 run //buiksat_trm:make_paper_figures_exp1 -- \
-    --results_dir results/validation/exp1_v4 \
-    --out_dir results/paper_ready/exp1
+# Or directly with Python
+python scripts/make_paper_figures_exp1_final.py
 ```
+
+## Output Artifacts
+
+### Main Paper
+- `fig_exp1_unroll_sensitivity_main.pdf` (B0, 1×3)
+- `fig_exp1_radius_sweep_main.pdf` (B0, 1×3)
+- `table_exp1_unroll_sensitivity.tex`
+- `table_exp1_radius_sweep_main.tex`
+
+### Appendix
+- `fig_exp1_unroll_sensitivity_appendix.pdf` (B1, 1×3)
+- `fig_exp1_radius_sweep_appendix.pdf` (B1, 1×3)
+- `table_exp1_radius_sweep_appendix.tex`
