@@ -772,3 +772,23 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+# ICML Phase 1 v4.1: Post-processing with fixes
+python_binary(
+    name = "postprocess_exp1_v4_1",
+    srcs = ["scripts/postprocess_exp1_v4_1.py"],
+    base_module = "",
+    main_module = "scripts.postprocess_exp1_v4_1",
+    deps = [],
+)
+
+python_binary(
+    name = "plot_exp1_v4_1",
+    srcs = ["scripts/plot_exp1_v4_1.py"],
+    base_module = "",
+    main_module = "scripts.plot_exp1_v4_1",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)
