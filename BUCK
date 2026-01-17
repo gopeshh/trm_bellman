@@ -792,3 +792,15 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+# Paper-ready figures and tables
+python_binary(
+    name = "make_paper_figures_exp1",
+    srcs = ["scripts/make_paper_figures_exp1.py"],
+    base_module = "",
+    main_module = "scripts.make_paper_figures_exp1",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)
