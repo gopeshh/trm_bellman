@@ -141,13 +141,109 @@ def estimate_achieved_lz(
     n_train: int,
     config: Dict,
     device: str = "cpu",
-    num_samples: int = 128,
+    num_samples: int = 64,
+    num_perturbations: int = 4,
+    eps: float = 1e-3,
 ) -> float:
-    """Estimate the achieved Lipschitz constant (hat_Lz)."""
-    from scripts.eval_unroll_sensitivity import estimate_hat_Lz_batch
+    """
+    Estimate the achieved Lipschitz constant (hat_Lz) using finite differences.
 
-    result = estimate_hat_Lz_batch(model, states, n_train, config, device, num_samples)
-    return result["mean"]
+    Uses the CORRECT method: perturb z by δ and measure ||f(z+δ) - f(z)|| / ||δ||.
+    This is the local Lipschitz constant of the z->z mapping.
+
+    Args:
+        model: The TRM model
+        states: List of PuzzleState objects
+        n_train: Number of unroll steps (measures L_z at this depth)
+        config: Model config dict
+        device: Device string
+        num_samples: Max number of states to sample
+        num_perturbations: Number of random perturbations per state
+        eps: Perturbation magnitude
+
+    Returns:
+        Mean estimated Lipschitz constant across states and perturbations.
+    """
+    from models.recursive_reasoning.trm import (
+        TinyRecursiveReasoningModel_ACTV1InnerCarry,
+    )
+    import numpy as np
+
+    rng = np.random.default_rng(42)
+
+    # Sample states if needed
+    if len(states) > num_samples:
+        indices = rng.choice(len(states), size=num_samples, replace=False)
+        sample_states = [states[i] for i in indices]
+    else:
+        sample_states = states
+
+    lz_estimates = []
+
+    model.eval()
+    with torch.no_grad():
+        for state in sample_states:
+            x = {
+                "inputs": state.inputs.unsqueeze(0).to(device),
+                "puzzle_identifiers": state.puzzle_identifier.unsqueeze(0).to(device),
+            }
+            y = state.plan.unsqueeze(0).to(device)
+
+            try:
+                # Get baseline latent after n_train steps
+                _, z_base = model.used_value(x, y, n_train)
+                if not hasattr(z_base, 'z_H'):
+                    continue
+
+                z_H = z_base.z_H  # [1, seq_len, hidden]
+                z_L = z_base.z_L  # [1, seq_len, hidden]
+
+                # Apply one latent step to base using outer model's API
+                z_next_base = model.update_latent(z_base, y, x)
+
+                # Now apply perturbations and measure response
+                for _ in range(num_perturbations):
+                    # Create random perturbation
+                    noise_H = torch.randn_like(z_H)
+                    noise_L = torch.randn_like(z_L)
+
+                    # Normalize to eps magnitude
+                    noise_norm = torch.sqrt(
+                        (noise_H ** 2).sum() + (noise_L ** 2).sum()
+                    ).clamp(min=1e-12)
+                    noise_H = noise_H * (eps / noise_norm)
+                    noise_L = noise_L * (eps / noise_norm)
+
+                    # Perturbed latent
+                    z_pert = TinyRecursiveReasoningModel_ACTV1InnerCarry(
+                        z_H=z_H + noise_H,
+                        z_L=z_L + noise_L,
+                    )
+
+                    # Apply one latent step to perturbed using outer model's API
+                    z_next_pert = model.update_latent(z_pert, y, x)
+
+                    # Compute output difference: ||f(z+δ) - f(z)||
+                    diff_H = z_next_pert.z_H - z_next_base.z_H
+                    diff_L = z_next_pert.z_L - z_next_base.z_L
+                    diff_norm = torch.sqrt(
+                        (diff_H ** 2).sum() + (diff_L ** 2).sum()
+                    ).item()
+
+                    # L_z estimate = ||f(z+δ) - f(z)|| / ||δ||
+                    lz = diff_norm / eps
+                    lz_estimates.append(lz)
+
+            except Exception as e:
+                # Log error for debugging
+                print(f"[Lz estimate] Error on state {state.state_id}: {e}")
+                continue
+
+    if not lz_estimates:
+        print(f"[Lz estimate] WARNING: No valid estimates collected from {len(sample_states)} states")
+        return 0.0
+
+    return float(np.mean(lz_estimates))
 
 
 def evaluate_checkpoint(
@@ -429,31 +525,44 @@ $L_z^*$ (target) & $\hat{L}_z$ (achieved) & Success & $\Delta_V$ & $\Delta_\pi$ 
 # =============================================================================
 
 def generate_claims(results: List[SweepResults], out_path: Path):
-    """Generate CLAIMS.md."""
+    """Generate CLAIMS.md with scientifically honest interpretations."""
     results = sorted(results, key=lambda r: r.target_lz)
 
-    # Find the "knee" - best trade-off point
-    best_trade_off = max(results, key=lambda r: r.success_rate_mean - r.delta_V_mean)
-    strongest = min(results, key=lambda r: r.achieved_lz_mean)
-    weakest = max(results, key=lambda r: r.achieved_lz_mean)
+    # Calculate key statistics
+    achieved_lz_values = [r.achieved_lz_mean for r in results]
+    delta_V_values = [r.delta_V_mean for r in results]
+    delta_V_stds = [r.delta_V_std for r in results]
+
+    achieved_lz_range = max(achieved_lz_values) - min(achieved_lz_values)
+    achieved_lz_mean = sum(achieved_lz_values) / len(achieved_lz_values)
+
+    # Check if monotonicity holds
+    is_monotonic = all(
+        delta_V_values[i] >= delta_V_values[i+1]
+        for i in range(len(delta_V_values)-1)
+    )
+
+    # Find best and worst
+    best_delta_v = min(results, key=lambda r: r.delta_V_mean)
+    worst_delta_v = max(results, key=lambda r: r.delta_V_mean)
 
     content = f"""# Experiment 2: Paper Claims
 
 All claims are from the contraction-strength sweep on B0 (initial states).
 
-## Main Claim: Contraction is a Dial
+## Key Finding: Contraction Enforcement Saturates
 
-1. **Claim**: Contraction strength acts as a continuous dial between performance and stability.
-   **Evidence**: As target $L_z$ decreases from {weakest.target_lz} to {strongest.target_lz}:
-   - Achieved $\\hat{{L}}_z$: {weakest.achieved_lz_mean:.3f} → {strongest.achieved_lz_mean:.3f}
-   - $\\Delta_V$: {weakest.delta_V_mean:.3f} → {strongest.delta_V_mean:.3f} ({weakest.delta_V_mean/strongest.delta_V_mean:.1f}× improvement)
-   - Success rate: {weakest.success_rate_mean:.2f} → {strongest.success_rate_mean:.2f}
+1. **Observation**: All target $L_z$ values achieve similar measured Lipschitz constants.
+   **Evidence**: Achieved $\\hat{{L}}_z$ ranges from {min(achieved_lz_values):.3f} to {max(achieved_lz_values):.3f} (range: {achieved_lz_range:.3f})
+   **Interpretation**: The contraction enforcement mechanism saturates at $\\hat{{L}}_z \\approx {achieved_lz_mean:.2f}$
 
-2. **Claim**: Strong contraction ($L_z^* = {strongest.target_lz}$) provides {weakest.delta_V_mean/strongest.delta_V_mean:.1f}× value stability improvement.
-   **Evidence**: $\\Delta_V$ {weakest.delta_V_mean:.3f} → {strongest.delta_V_mean:.3f}
+2. **Observation**: Value stability ($\\Delta_V$) has high variance across seeds.
+   **Evidence**: Standard deviations range from {min(delta_V_stds):.3f} to {max(delta_V_stds):.3f}
+   **Best point**: target $L_z^* = {best_delta_v.target_lz}$ with $\\Delta_V = {best_delta_v.delta_V_mean:.3f}\\pm{best_delta_v.delta_V_std:.3f}$
 
-3. **Claim**: The stability-performance trade-off is monotonic.
-   **Evidence**: All intermediate points ({', '.join(f'{r.target_lz}' for r in results)}) follow the trend.
+3. **Observation**: The monotonic dial relationship is {"supported" if is_monotonic else "NOT supported"} by this data.
+   **Evidence**: $\\Delta_V$ values are {delta_V_values}
+   **Note**: {"Trend is monotonic as expected." if is_monotonic else "Non-monotonic pattern suggests high seed variance dominates the target_Lz effect."}
 
 ## Sweep Results Summary
 
@@ -465,13 +574,13 @@ All claims are from the contraction-strength sweep on B0 (initial states).
         content += f"| {r.target_lz} | {r.achieved_lz_mean:.3f}±{r.achieved_lz_std:.3f} | {r.success_rate_mean:.2f}±{r.success_rate_std:.2f} | {r.delta_V_mean:.3f}±{r.delta_V_std:.3f} | {r.n_seeds} |\n"
 
     content += f"""
-## Interpretation
+## Scoped Interpretation
 
-The contraction target $L_z^*$ provides a **dial** for trading off:
-- **Lower $L_z^*$**: More stable (lower $\\Delta_V$), potentially lower success rate
-- **Higher $L_z^*$**: Less stable, potentially higher success rate
+Given that achieved $\\hat{{L}}_z$ is similar across all targets (~{achieved_lz_mean:.2f}), the primary effect of varying target $L_z^*$ is:
+- **Indirect**: Different optimization trajectories lead to different models
+- **High variance**: Seed-to-seed variation in $\\Delta_V$ exceeds target-to-target variation
 
-Best trade-off point: $L_z^* = {best_trade_off.target_lz}$ (success={best_trade_off.success_rate_mean:.2f}, $\\Delta_V$={best_trade_off.delta_V_mean:.3f})
+**Conservative claim**: Contraction enforcement achieves $\\hat{{L}}_z \\approx {achieved_lz_mean:.2f}$ regardless of target, with $\\Delta_V$ varying significantly (range: {min(delta_V_values):.3f} to {max(delta_V_values):.3f}).
 """
 
     out_path.write_text(content)
