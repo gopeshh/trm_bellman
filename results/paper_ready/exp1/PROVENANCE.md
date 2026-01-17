@@ -1,7 +1,9 @@
 # Experiment 1 Provenance
 
-**Generated**: 2026-01-16T23:35:06.447344
-**Commit**: 
+**Generated**: 2026-01-17T00:07:10.295172
+**Git Commit**: 35b3d8ad2db7cb74572b1c8b76ebad7cfd75698b
+**Python Version**: 3.12.12+meta
+**Torch Version**: not available
 
 ## Input CSVs
 
@@ -35,15 +37,20 @@
 | Seeds | [41, 42, 43] |
 | disable_value_head_norm | true |
 | target_Lz (contraction) | 0.9 |
+| latent_ball_radius | 10.0 |
 
 ## Regeneration Commands
 
 ```bash
-# Generate all paper-ready artifacts
+# One-command regeneration
+cd /data/repos/fbsource/fbcode
 buck2 run //buiksat_trm:make_paper_figures_exp1_final
 
-# Or directly with Python
+# Or directly with Python (from trm_bellman root)
 python scripts/make_paper_figures_exp1_final.py
+
+# Full audit
+python scripts/audit_exp1_paper_ready.py
 ```
 
 ## Output Artifacts
@@ -58,3 +65,8 @@ python scripts/make_paper_figures_exp1_final.py
 - `fig_exp1_unroll_sensitivity_appendix.pdf` (B1, 1×3)
 - `fig_exp1_radius_sweep_appendix.pdf` (B1, 1×3)
 - `table_exp1_radius_sweep_appendix.tex`
+
+### Documentation
+- `CLAIMS.md` - Scoped claims with evidence
+- `PROVENANCE.md` - This file
+- `AUDIT.md` - Validation report

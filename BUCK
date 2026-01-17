@@ -826,3 +826,11 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+python_binary(
+    name = "audit_exp1_paper_ready",
+    srcs = ["scripts/audit_exp1_paper_ready.py"],
+    base_module = "",
+    main_module = "scripts.audit_exp1_paper_ready",
+    deps = [],
+)
