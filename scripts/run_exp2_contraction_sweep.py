@@ -36,11 +36,19 @@ SWEEP_CONFIG = {
 
 CHECKPOINT_BASE = "checkpoints/exp2_contraction_sweep"
 
+# Map target_lz to directory suffix (consistent naming)
+LZ_TO_DIR = {
+    0.999: "lz_0999",
+    0.99: "lz_099",
+    0.95: "lz_095",
+    0.90: "lz_0900",
+}
+
 
 def get_checkpoint_path(target_lz: float, seed: int) -> Path:
     """Get checkpoint path for a given target_Lz and seed."""
-    lz_str = f"{target_lz:.3f}".replace(".", "")
-    return PROJECT_ROOT / CHECKPOINT_BASE / f"lz_{lz_str}" / f"seed{seed}" / "model_step_5000.pt"
+    dir_name = LZ_TO_DIR.get(target_lz, f"lz_{target_lz:.3f}".replace(".", ""))
+    return PROJECT_ROOT / CHECKPOINT_BASE / dir_name / f"seed{seed}" / "model_step_5000.pt"
 
 
 def check_status() -> Dict[Tuple[float, int], bool]:
@@ -75,11 +83,14 @@ def print_status():
 def run_training(target_lz: float, seed: int, use_buck: bool = True, dry_run: bool = False):
     """Run a single training job."""
     config_file, _ = SWEEP_CONFIG[target_lz]
-    lz_str = f"{target_lz:.3f}".replace(".", "")
-    out_dir = PROJECT_ROOT / CHECKPOINT_BASE / f"lz_{lz_str}" / f"seed{seed}"
+    dir_name = LZ_TO_DIR.get(target_lz, f"lz_{target_lz:.3f}".replace(".", ""))
+    out_dir = PROJECT_ROOT / CHECKPOINT_BASE / dir_name / f"seed{seed}"
 
     # Create output directory
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Dataset path - use 4x4 trivial sudoku for consistency with Exp1
+    dataset_path = PROJECT_ROOT / "data/sudoku-4x4-trivial"
 
     if use_buck:
         cmd = [
@@ -91,6 +102,7 @@ def run_training(target_lz: float, seed: int, use_buck: bool = True, dry_run: bo
             "--config", str(PROJECT_ROOT / config_file),
             "--seed", str(seed),
             "--checkpoint-dir", str(out_dir),
+            "--dataset-paths", str(dataset_path),
         ]
     else:
         cmd = [
@@ -98,6 +110,7 @@ def run_training(target_lz: float, seed: int, use_buck: bool = True, dry_run: bo
             "--config", str(PROJECT_ROOT / config_file),
             "--seed", str(seed),
             "--checkpoint-dir", str(out_dir),
+            "--dataset-paths", str(dataset_path),
         ]
 
     print(f"\n[Exp2] Running: target_Lz={target_lz}, seed={seed}")

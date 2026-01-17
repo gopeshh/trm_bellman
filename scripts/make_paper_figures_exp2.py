@@ -24,8 +24,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-# Add project root
-PROJECT_ROOT = Path(__file__).parent.parent
+# Add project root - use absolute path for Buck2 compatibility
+PROJECT_ROOT = Path("/home/buiksat/trm_bellman")
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # =============================================================================
@@ -40,9 +40,9 @@ SWEEP_CONFIG = {
     0.90: ("configs/exp2_contraction_sweep/target_lz_090.yaml", [41, 42, 43]),
 }
 
-CHECKPOINT_BASE = PROJECT_ROOT / "checkpoints/exp2_contraction_sweep"
-OUT_DIR = PROJECT_ROOT / "results/paper_ready/exp2"
-BATCH_DIR = PROJECT_ROOT / "artifacts/eval_batches"
+CHECKPOINT_BASE = Path("/home/buiksat/trm_bellman/checkpoints/exp2_contraction_sweep")
+OUT_DIR = Path("/home/buiksat/trm_bellman/results/paper_ready/exp2")
+BATCH_DIR = Path("/home/buiksat/trm_bellman/artifacts/eval_batches")
 
 N_TRAIN = 2
 N_EVAL = 16  # 8× training depth
@@ -103,11 +103,18 @@ class SweepResults:
 def find_checkpoints() -> Dict[float, List[Path]]:
     """Find all available checkpoints."""
     result = {}
+    # Map target_lz to directory suffix
+    lz_to_dir = {
+        0.999: "lz_0999",
+        0.99: "lz_099",
+        0.95: "lz_095",
+        0.90: "lz_0900",
+    }
     for target_lz, (config, seeds) in SWEEP_CONFIG.items():
-        lz_str = f"{target_lz:.3f}".replace(".", "")
+        dir_name = lz_to_dir.get(target_lz, f"lz_{target_lz:.3f}".replace(".", ""))
         ckpts = []
         for seed in seeds:
-            ckpt = CHECKPOINT_BASE / f"lz_{lz_str}" / f"seed{seed}" / "model_step_5000.pt"
+            ckpt = CHECKPOINT_BASE / dir_name / f"seed{seed}" / "model_step_5000.pt"
             if ckpt.exists():
                 ckpts.append(ckpt)
         if ckpts:

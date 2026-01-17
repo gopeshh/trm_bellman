@@ -867,3 +867,11 @@ python_binary(
     main_module = "scripts.audit_exp2_paper_ready",
     deps = [],
 )
+
+python_binary(
+    name = "inspect_checkpoint",
+    srcs = ["scripts/inspect_checkpoint.py"],
+    base_module = "",
+    main_module = "scripts.inspect_checkpoint",
+    deps = ["fbsource//third-party/pypi/torch:torch"],
+)
