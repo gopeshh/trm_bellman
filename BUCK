@@ -834,3 +834,36 @@ python_binary(
     main_module = "scripts.audit_exp1_paper_ready",
     deps = [],
 )
+
+# ============================================================================
+# Experiment 2: Contraction Sweep
+# ============================================================================
+
+python_binary(
+    name = "run_exp2_contraction_sweep",
+    srcs = ["scripts/run_exp2_contraction_sweep.py"],
+    base_module = "",
+    main_module = "scripts.run_exp2_contraction_sweep",
+    deps = [],
+)
+
+python_binary(
+    name = "make_paper_figures_exp2",
+    srcs = ["scripts/make_paper_figures_exp2.py"],
+    base_module = "",
+    main_module = "scripts.make_paper_figures_exp2",
+    deps = [
+        ":eval_unroll_sensitivity_lib",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
+    name = "audit_exp2_paper_ready",
+    srcs = ["scripts/audit_exp2_paper_ready.py"],
+    base_module = "",
+    main_module = "scripts.audit_exp2_paper_ready",
+    deps = [],
+)

@@ -290,8 +290,12 @@ def audit_labels():
     checks = []
     all_passed = True
 
-    # Check all .tex files
+    # Check all .tex files (except PAPER_INSERT_SNIPPET.tex which is just integration code)
     for tex_file in OUT_DIR.glob("*.tex"):
+        # Skip integration snippet - it's not a data table
+        if tex_file.name == "PAPER_INSERT_SNIPPET.tex":
+            continue
+
         content = tex_file.read_text()
         if "No Contraction" in content and "Contraction" in content:
             checks.append(f"OK: {tex_file.name} uses correct labels")

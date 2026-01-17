@@ -1,7 +1,7 @@
 # Experiment 1 Audit Report
 
-**Generated**: 2026-01-17T00:49:17.975502
-**Git Commit**: 77f3c72f2f11102d58af5210f1f967b70774177e
+**Generated**: 2026-01-17T08:05:46.275065
+**Git Commit**: 9f7c4acb3f25632746e2fbb4ba702dc326096c8c
 
 ## Overall Result: ✓ PASS (4/4 checks passed)
 
@@ -59,10 +59,11 @@ All artifacts were validated for:
 
 ## Files in Bundle
 
-- `AUDIT.md` (2443 bytes)
+- `AUDIT.md` (2538 bytes)
 - `CLAIMS.md` (1386 bytes)
+- `PAPER_INSERT_SNIPPET.tex` (2823 bytes)
 - `PROVENANCE.md` (2137 bytes)
-- `exp1_paper_ready_bundle.zip` (136250 bytes)
+- `exp1_paper_ready_bundle.zip` (137244 bytes)
 - `fig_exp1_radius_sweep.pdf` (31860 bytes)
 - `fig_exp1_radius_sweep_appendix.pdf` (31459 bytes)
 - `fig_exp1_radius_sweep_main.pdf` (31988 bytes)
