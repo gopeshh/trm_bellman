@@ -1,0 +1,58 @@
+[2026-01-18T13:29:19.316-08:00] Buck UI: https://www.internalfb.com/buck2/ac59c69f-cc1e-44b2-bb5d-3cb6ad788328
+[2026-01-18T13:29:26.314-08:00] RE Session: reSessionID-2c88a968-9f75-48e5-9e34-18cda3f543e0
+[2026-01-18T13:29:29.905-08:00] Cache hits: 0%
+[2026-01-18T13:29:29.905-08:00] Commands: 31 (cached: 0, remote: 0, local: 31)
+[2026-01-18T13:29:29.905-08:00] Network: Up: 115KiB  Down: 282KiB  (reSessionID-2c88a968-9f75-48e5-9e34-18cda3f543e0)
+BUILD SUCCEEDED - starting your binary
+============================================================
+Exp3: Training-Time Projection Ablation Evaluation
+============================================================
+
+Evaluating nc_r10...
+/data/repos/fbsource/buck-out/v2/gen/fbcode/19d540f4a8ecebd1/buiksat_trm/__eval_exp3_projection_ablation__/eval_exp3_projection_ablation#link-tree/numpy/_core/fromnumeric.py:3860: RuntimeWarning: Mean of empty slice.
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/data/repos/fbsource/buck-out/v2/gen/fbcode/19d540f4a8ecebd1/buiksat_trm/__eval_exp3_projection_ablation__/eval_exp3_projection_ablation#link-tree/numpy/_core/_methods.py:145: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+  Success: 0.940
+  NaN: False
+  G1: PASS
+
+Evaluating nc_r100...
+  Success: 0.960
+  NaN: False
+  G1: PASS
+
+Evaluating nc_rdis...
+  Success: 0.960
+  NaN: False
+  G1: PASS
+
+Evaluating c_r10...
+  Success: 0.980
+  NaN: False
+  G1: PASS
+
+Evaluating c_r100...
+  Success: 0.960
+  NaN: False
+  G1: PASS
+
+Evaluating c_rdis...
+  Success: 0.960
+  NaN: False
+  G1: PASS
+
+============================================================
+Outputs written to: /home/buiksat/trm_bellman/results/paper_ready/exp3_projection_ablation
+============================================================
+
+SUMMARY TABLE
+------------------------------------------------------------
+Condition    Contraction  R        Success    G1    
+------------------------------------------------------------
+nc_r10       False        10.0     0.940      PASS  
+nc_r100      False        100.0    0.960      PASS  
+nc_rdis      False        0.0      0.960      PASS  
+c_r10        True         10.0     0.980      PASS  
+c_r100       True         100.0    0.960      PASS  
+c_rdis       True         0.0      0.960      PASS  

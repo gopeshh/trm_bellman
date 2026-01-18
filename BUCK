@@ -940,3 +940,17 @@ python_binary(
     base_module = "",
     main_module = "scripts.audit_exp1_lipschitz_diag",
 )
+
+# ============================================================================
+# Experiment 3: Projection Ablation
+# ============================================================================
+
+python_binary(
+    name = "eval_exp3_projection_ablation",
+    srcs = ["scripts/eval_exp3_projection_ablation.py"],
+    base_module = "",
+    main_module = "scripts.eval_exp3_projection_ablation",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)

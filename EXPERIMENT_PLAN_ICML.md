@@ -556,6 +556,174 @@ Add targets:
 
 ---
 
+---
+
+## Exp3: Training-Time Projection Ablation Under Fixed Contraction Setting
+
+**Date Added:** 2026-01-18
+**Status:** IN PROGRESS
+**Context:** Exp2 final showed projection at R=10 dominates (100% active) and masks contraction effects. We now test whether training-time projection helps or harms learning, and whether "contraction-only" (no projection) produces stable training.
+
+### Goal
+
+Determine whether:
+1. Training-time projection (R=10) is necessary for stable training, or if R=100/disabled works
+2. Contraction-only (no projection) can produce both stable training AND meaningful mismatch stability
+3. There is a tradeoff between projection strength and learning performance
+
+**This is NOT a dial-claim resurrection** unless we see real achieved-Lz separation.
+
+### Non-Negotiable Controls
+
+- `disable_value_head_norm: true` in ALL runs (value-head spectral_norm OFF)
+- Same architecture variant (`episodic_latent: true` fixed)
+- Same checker-only reward (`use_feasibility_checker: true`)
+- Same env, same training steps (5000)
+- No "Model A/B" labels; conditions must be explicit
+
+### Experiment Matrix (2×3)
+
+| Condition | enable_contraction | latent_ball_radius | Description |
+|-----------|-------------------|-------------------|-------------|
+| NC-R10 | false | 10.0 | No contraction, default projection |
+| NC-R100 | false | 100.0 | No contraction, weak projection |
+| NC-Rdis | false | 0 (disabled) | No contraction, no projection |
+| C-R10 | true | 10.0 | Contraction + default projection |
+| C-R100 | true | 100.0 | Contraction + weak projection |
+| C-Rdis | true | 0 (disabled) | Contraction only, no projection |
+
+### Seeds
+
+- **Phase 1:** 1 seed per cell (seed=42) for fast diagnostic
+- **Phase 2:** If stable and interpretable, expand to 3 seeds {41, 42, 43}
+
+### Decision Gates (Pre-Registered)
+
+**G1 (Stability):**
+- Training does not collapse (no NaNs, value targets not saturating)
+- Success rate > random baseline (~5%) for trivial suite
+- If any cell fails G1, abort that cell and document as unstable
+
+**G2 (Projection Activity):**
+- Confirm R=10 is ~100% projection_active_rate
+- Confirm R=100 is ~0% projection_active_rate (or quantify)
+
+**G3 (Contraction-Only Viability):**
+- If C-Rdis (contraction only, no projection) is stable AND yields reasonable success, document as viable
+- If unstable, document as negative result (contraction alone insufficient)
+
+**G4 (Interpretation):**
+- Does removing/loosening projection improve success but worsen mismatch stability?
+- Or does projection hurt learning while providing stability?
+- State the tradeoff explicitly with numbers
+
+### Metrics to Log
+
+**Training Metrics (per checkpoint):**
+- success rate curve
+- latent norm stats: pre-proj ∥z∥ mean/p95/max, post-proj ∥z∥
+- projection_active_rate: fraction of samples where projection changes z
+- Lipschitz proxies: L_preproj and L_postproj (finite-difference)
+- NaN/inf events; gradient norms if available
+- value target clamp rate
+
+**Evaluation Metrics (reuse Exp1 machinery):**
+- Unroll sensitivity mismatch: n_train=2, n2 ∈ {4, 8, 16}
+- Batches: B0 (initial states) primary, B1 (successor closure) secondary
+- ΔV, Δπ, argmax agreement, Δz
+- Evaluate under BOTH:
+  * eval R = training R (native behavior)
+  * eval R = 100 (to remove clipping at eval time)
+
+This separates "training-time projection effects" from "eval-time clipping effects".
+
+### Execution Protocol
+
+**Step 1: Create configs**
+- `configs/exp3_projection_ablation/nc_r10.yaml` (NC-R10)
+- `configs/exp3_projection_ablation/nc_r100.yaml` (NC-R100)
+- `configs/exp3_projection_ablation/nc_rdis.yaml` (NC-Rdis)
+- `configs/exp3_projection_ablation/c_r10.yaml` (C-R10)
+- `configs/exp3_projection_ablation/c_r100.yaml` (C-R100)
+- `configs/exp3_projection_ablation/c_rdis.yaml` (C-Rdis)
+
+**Step 2: Run training (seed=42)**
+```bash
+for config in nc_r10 nc_r100 nc_rdis c_r10 c_r100 c_rdis; do
+  python upi_trm_train.py \
+    --config configs/exp3_projection_ablation/${config}.yaml \
+    --seed 42 \
+    --log-dir results/exp3/${config}_s42/
+done
+```
+
+**Step 3: Check G1 (stability gate)**
+- Inspect logs for NaN/inf
+- Check final success rate > random
+- If any cell fails, document and exclude from further analysis
+
+**Step 4: Run evaluation**
+```bash
+python scripts/eval_exp3_projection_ablation.py \
+  --exp_dir results/exp3/ \
+  --out_dir results/paper_ready/exp3_projection_ablation/
+```
+
+**Step 5: Generate paper-ready artifacts**
+- Figures, tables, CLAIMS.md, PROVENANCE.md, AUDIT.md
+
+### Deliverables
+
+Create `results/paper_ready/exp3_projection_ablation/` with:
+
+| File | Content |
+|------|---------|
+| `fig_exp3_success_vs_radius.pdf` | Success rate across conditions |
+| `fig_exp3_stability_vs_radius.pdf` | Mismatch stability (ΔV, argmax agree) |
+| `table_exp3_summary.tex` | LaTeX table: success, projection_active_rate, L_preproj, ΔV |
+| `CLAIMS.md` | Scoped claims based on G1-G4 outcomes |
+| `PROVENANCE.md` | Commit hash, checkpoint paths, commands |
+| `AUDIT.md` | Verification results |
+| `summary.json` | Machine-readable summary |
+
+### Audit Checks
+
+1. **G1 verified:** All reported cells passed stability (or documented as failed)
+2. **projection_active_rate thresholds:** R=10 ~100%, R=100 ~0%
+3. **Value-head norm OFF:** All configs have `disable_value_head_norm: true`
+4. **Claims match data:** No unsupported monotonicity or dial claims
+5. **Eval R separation:** Both eval_R=native and eval_R=100 reported
+
+### Expected Outcomes
+
+**Scenario A (Projection Helps Learning):**
+- R=10 conditions have higher success than R=100/disabled
+- Trade-off: better learning but projection masks contraction effects
+
+**Scenario B (Projection Hurts Learning):**
+- R=100/disabled conditions have higher success
+- Trade-off: better learning but potentially worse stability
+
+**Scenario C (Contraction-Only Viable):**
+- C-Rdis is stable with reasonable success
+- Contraction provides stability without projection artifacts
+
+**Scenario D (Contraction-Only Fails):**
+- C-Rdis is unstable (NaN/collapse)
+- Projection is required for stable training
+
+### Failure Modes
+
+If ALL projection-disabled cells fail G1:
+- Document: "Projection is required for stable training in this architecture"
+- Keep R=10 vs R=100 comparison as main result
+
+If contraction cells show no stability benefit:
+- Document: "Contraction does not improve mismatch stability independent of projection"
+- This is consistent with Exp2 negative result
+
+---
+
 ## Exp2 FINAL: Paper-Ready Bundle (Path B - Negative Result)
 
 **Status**: ✅ FINALIZED
