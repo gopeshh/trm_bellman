@@ -920,3 +920,23 @@ python_binary(
     base_module = "",
     main_module = "scripts.audit_exp2_final_paper_ready",
 )
+
+python_binary(
+    name = "exp1_lipschitz_diag",
+    srcs = ["scripts/exp1_lipschitz_diag.py"],
+    base_module = "",
+    main_module = "scripts.exp1_lipschitz_diag",
+    deps = [
+        ":models",
+        ":rl",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
+    name = "audit_exp1_lipschitz_diag",
+    srcs = ["scripts/audit_exp1_lipschitz_diag.py"],
+    base_module = "",
+    main_module = "scripts.audit_exp1_lipschitz_diag",
+)

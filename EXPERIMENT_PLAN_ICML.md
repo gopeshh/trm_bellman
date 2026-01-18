@@ -558,8 +558,32 @@ Add targets:
 
 ## Exp2 FINAL: Paper-Ready Bundle (Path B - Negative Result)
 
-**Status**: COMPLETE (Path B)
+**Status**: ✅ FINALIZED
+**Commit**: b804e2b (Exp2 final: dial failure + projection dominance)
 **Decision**: The spectral-norm "target_Lz" dial is NOT an effective contraction control in this TRM architecture.
+
+### ⚠️ DEPRECATION NOTICE
+
+**All prior "monotonic dial" or "contraction dial controls stability" claims from earlier Exp2 iterations are SUPERSEDED.** The only valid Exp2 claims for citation are the Exp2_final scoped claims below.
+
+Prior claims to deprecate:
+- "Target L_z provides a controllable stability dial" — FALSE
+- "Lower target L_z produces lower achieved L_z" — FALSE (ordering non-monotonic)
+- "Spectral norm clamping controls contraction" — MISLEADING (projection dominates at R=10)
+
+### Reviewer Attack Model
+
+**Why the dial fails (architectural/measurement fact, not plotting artifact):**
+
+1. **Projection dominance**: At R=10, the latent-ball projection Π_R is active 100% of the time. This projection compresses all latent updates to ‖z‖ ≤ R, artificially limiting post-projection Lipschitz to ~R/‖z_pre‖.
+
+2. **Masking effect**: Even if spectral-norm clamping produces different pre-projection L_z values (it does: 0.69–0.77), the projection normalizes them all to ~0.23, making the "dial" invisible in post-projection metrics.
+
+3. **Insufficient control range**: When projection is disabled, pre-projection L_z spread is only 0.064 (threshold ≥0.08). The spectral-norm mechanism simply doesn't produce enough variation to constitute a "dial."
+
+4. **Non-monotonicity**: Even the limited variation is non-monotonic: target 0.9→0.95→0.99→0.999 yields L_preproj 0.473→0.409→0.448→0.440. This is not a calibration issue; the mechanism is fundamentally unsuitable for dial control.
+
+**Implication for reviewers**: Any critique assuming "the dial should work if you tune it better" is misguided. The failure is architectural. The paper honestly reports this negative result and pivots to the positive finding (projection stabilizes).
 
 ### Summary of Findings
 
@@ -627,7 +651,7 @@ buck2 run //buiksat_trm:audit_exp2_final_paper_ready   # Verify claims
 
 ### Commit
 
-When complete:
+✅ **COMPLETED**: b804e2b
 ```
 Exp2 final: dial failure + projection dominance (paper-ready, audited)
 
@@ -642,5 +666,13 @@ Positive result: projection provides strong stabilization
 Artifacts: results/paper_ready/exp2_final/
 Audit: PASSED
 ```
+
+### Paper Assets Location
+
+Figures and tables copied to paper directory:
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp2_dial_does_not_control_Lz.pdf`
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp2_projection_is_primary_stabilizer.pdf`
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/tables/table_exp2_dial_does_not_control_Lz.tex`
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/tables/table_exp2_projection_effect.tex`
 
 
