@@ -433,3 +433,125 @@ If distinct achieved_Lz cannot be produced without destabilizing training:
   - (B) exp2 negative-result bundle with diagnostics + scoped claims + audit pass
 - [ ] Clean commit: "Exp2b: calibrate contraction dial (or document saturation)"
 
+---
+
+## Exp2c: Unmask Stability Dial by Disabling Projection Dominance
+
+### Context
+
+Exp2b diagnostics revealed:
+- L_preproj varies (0.69-0.77) across target_Lz values
+- L_postproj saturates (~0.22-0.24) at R=10 with projection_active_rate=100%
+- Root cause: Projection to R=10 dominates and masks the underlying network contraction
+
+### Hypothesis
+
+When projection is mostly inactive (projection_active_rate ≪ 1), achieved Lipschitz (measured on the actual update map used at eval) should:
+1. Vary with contraction setting (target_Lz)
+2. Predict unroll-sensitivity metrics (ΔV, Δπ, argmax agreement) under depth mismatch
+
+### Decision Gates
+
+**Gate G1 (Projection Dominance Check):**
+- For chosen R_eval, projection_active_rate < 20% on B0 (preferably < 5%)
+- If not, increase R_eval until it holds (30→100→300) or switch to R=disabled
+
+**Gate G2 (Dial Range Check):**
+- Achieved L_preproj must have non-trivial spread across sweep points
+- Threshold: ≥ 0.08 absolute range across conditions averaged over seeds
+- If not, widen target_Lz range (e.g., include 0.6/0.7) or adjust enforcement scaling
+
+**Gate G3 (Stability Linkage):**
+- Stability metrics under mismatch (ΔV at n_train=2 vs n_eval=16 on B0) must correlate with achieved L_preproj in expected direction:
+  - Lower L_preproj ⇒ lower ΔV/Δπ and higher argmax agreement
+- If correlation is absent, treat Exp2c as negative result (no "dial works" claim)
+
+### Step 1: Exp2c-lite (Evaluation-Only, No Retraining)
+
+Use existing Exp2 checkpoints and re-evaluate under radii that make projection inactive.
+
+**Evaluation Protocol:**
+1. For each checkpoint (lz_{0900,095,099,0999}/seed{41,42,43}):
+   - Evaluate at R_eval ∈ {10, 100, disabled}
+   - Compute and log:
+     - L_preproj: finite-diff Lipschitz of f_θ without Π_R
+     - L_postproj: finite-diff Lipschitz of Π_R∘f_θ under R_eval
+     - projection_active_rate: fraction of updates where Π_R changed z
+     - mean pre-projection and post-projection latent norms
+
+2. Compute dial target metrics under depth mismatch:
+   - Use same unroll-sensitivity protocol as Exp1 (for comparability)
+   - n_train=2; evaluate at n2 ∈ {4, 8, 16}
+   - Batch: B0 (primary for strong claims)
+   - Metrics: ΔV, Δπ, argmax agreement
+
+3. CRITICAL: Keep disable_value_head_norm: true (load models with value-head norm OFF)
+
+**Output:** Internal report answering:
+- At what R_eval does projection_active_rate drop <20%?
+- Does achieved L_preproj vary meaningfully across target_Lz?
+- Do stability metrics vs depth mismatch track achieved L_preproj?
+
+**Decision:**
+- If G1-G3 pass → proceed to Step 3 (paper-ready packaging)
+- If G2 or G3 fail → proceed to Step 2 (retraining) or document negative result
+
+### Step 2: Exp2c-full (Retraining, Only If Needed)
+
+Train contraction sweep with projection not dominating during BOTH training and eval:
+
+**Training Configuration:**
+- rl_latent_ball_radius: 100 (or higher if projection_active_rate still high)
+- disable_value_head_norm: true
+- use_feasibility_checker: true
+- Sweep: target_Lz ∈ {OFF (no contraction), 0.9, 0.7, 0.6}
+- Seeds: 3 per condition (match Exp1 discipline)
+- Training budget: identical across conditions
+
+### Step 3: Paper-Ready Artifact Generation
+
+Create `results/paper_ready/exp2c/` with:
+
+**Figure: Stability Dial (Unmasked)**
+- Panel A: achieved L_preproj vs target_Lz (error bars over seeds)
+- Panel B: ΔV at deepest mismatch (n2=16 vs n_train=2) on B0
+- Panel C: Δπ at deepest mismatch on B0
+- Panel D (optional): argmax agreement at deepest mismatch
+
+**Table:** Per target_Lz (and OFF if included):
+- achieved L_preproj
+- projection_active_rate
+- ΔV (deep mismatch)
+- Δπ (deep mismatch)
+- R_eval used (explicit)
+
+**CLAIMS.md:**
+- If G1-G3 pass: "Dial works ONLY when projection is mostly inactive; projection masks dial at R=10"
+- If not: Negative result; no monotonicity claim; explain failure mode
+
+**PROVENANCE.md:**
+- Commands, commit hash, checkpoints, exact R_eval, seeds
+
+**AUDIT.md + audit script:**
+- Check projection_active_rate thresholds reported
+- Claims match tables
+- "Dial works" claim conditioned on projection inactive
+- Value-head norm OFF in all runs
+- No "Model A/B" labels
+
+### Step 4: Buck Targets
+
+Add targets:
+- `//buiksat_trm:eval_exp2c_lite` - run evaluation-only analysis
+- `//buiksat_trm:make_paper_figures_exp2c` - generate paper artifacts
+- `//buiksat_trm:audit_exp2c_paper_ready` - run audit
+
+### Deliverables Checklist
+
+- [ ] EXPERIMENT_PLAN_ICML.md updated with Exp2c plan
+- [ ] Exp2c-lite evaluation completed with gate analysis
+- [ ] Paper-ready artifacts in results/paper_ready/exp2c/
+- [ ] Audit passes (projection thresholds, claims match, value-head norm OFF)
+- [ ] Clean commit: "Exp2c: Unmask stability dial (projection inactive) + paper-ready artifacts"
+
+

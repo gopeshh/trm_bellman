@@ -80,3 +80,46 @@ buck2 run //buiksat_trm:diagnose_contraction_saturation
 - `DIAGNOSTICS_saturation.json`: Full results
 - `DIAGNOSTICS_saturation.md`: Summary table
 
+## Exp2c-Lite: Unmasking Evaluation
+
+**Generated**: 2026-01-17
+
+### Purpose
+
+Test whether the contraction "dial" works when projection is not dominating by evaluating existing checkpoints at different radii.
+
+### Method
+
+For each checkpoint, evaluate at R_eval ∈ {10, 100, disabled}:
+- $\hat{L}_{pre-proj}$: Lipschitz constant WITHOUT projection
+- $\hat{L}_{post-proj}$: Lipschitz constant WITH projection at R_eval
+- Projection active rate
+- Unroll sensitivity metrics (ΔV, Δπ, argmax agreement) at n_train=2 vs n_eval={4, 8, 16}
+
+Decision gates:
+- G1: projection_active_rate < 20%
+- G2: L_preproj spread ≥ 0.08
+- G3: Lower L_preproj ⇒ lower ΔV/Δπ, higher argmax agreement
+
+### Results
+
+| Gate | R=100 | R=disabled |
+|------|-------|------------|
+| G1 | ✅ PASSED (0%) | ✅ PASSED (0%) |
+| G2 | ❌ FAILED (0.064) | ❌ FAILED (0.064) |
+| G3 | INCONCLUSIVE | INCONCLUSIVE |
+
+**Path**: B (Negative result - dial has insufficient range)
+
+### Regeneration Command
+
+```bash
+buck2 run //buiksat_trm:eval_exp2c_lite
+```
+
+### Output Files
+
+- `../exp2c/DIAGNOSTICS_exp2c_lite.json`: Full results
+- `../exp2c/DIAGNOSTICS_exp2c_lite.md`: Summary table
+- `../exp2c/GATES.md`: Decision gate analysis
+

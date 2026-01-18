@@ -882,6 +882,20 @@ python_binary(
 )
 
 python_binary(
+    name = "eval_exp2c_lite",
+    srcs = ["scripts/eval_exp2c_lite.py"],
+    base_module = "",
+    main_module = "scripts.eval_exp2c_lite",
+    deps = [
+        ":eval_unroll_sensitivity_lib",
+        ":models",
+        ":rl",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
     name = "inspect_checkpoint",
     srcs = ["scripts/inspect_checkpoint.py"],
     base_module = "",

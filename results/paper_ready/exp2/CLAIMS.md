@@ -54,6 +54,47 @@ The "contraction dial" is **not controllable** with current hyperparameters beca
 2. **Evaluate at R=∞** to measure true network contraction ($\hat{L}_{pre-proj}$)
 3. **Consider alternative architectures** where latent norms stay within a reasonable ball
 
-## Conservative Paper Claim
+## Exp2c-Lite: Unmasking the Dial
 
-**The contraction enforcement mechanism achieves $\hat{L}_z \approx 0.23$ at R=10 regardless of target $L_z^*$, due to latent-space projection dominating the measured Lipschitz constant. The underlying spectral-norm-clamped networks achieve $\hat{L}_{pre-proj} \in [0.69, 0.77]$, indicating that the dial can work if projection is relaxed.**
+**Goal**: Evaluate checkpoints at R=100 and R=disabled to test whether the dial works when projection is not dominating.
+
+### Decision Gates
+
+| Gate | Threshold | R=100 | R=disabled |
+|------|-----------|-------|------------|
+| G1 (Projection Dominance) | <20% | ✅ 0% | ✅ 0% |
+| G2 (Dial Range) | ≥0.08 | ❌ 0.064 | ❌ 0.064 |
+
+### Key Finding: Dial Has Insufficient Range
+
+When projection is disabled, $\hat{L}_{preproj}$ shows:
+
+| Target $L_z^*$ | $\hat{L}_{preproj}$ | ΔV (2→16) | Argmax Agree |
+|----------------|---------------------|-----------|--------------|
+| 0.9 | 0.473±0.002 | 10.5 | 90.7% |
+| 0.95 | 0.409±0.029 | 10.0 | 89.3% |
+| 0.99 | 0.448±0.016 | 7.7 | 88.0% |
+| 0.999 | 0.440±0.044 | 10.0 | 89.7% |
+
+**Observations**:
+1. $\hat{L}_{preproj}$ spread = 0.064 (0.473 - 0.409), below 0.08 threshold
+2. Ordering is non-monotonic: 0.9 > 0.99 > 0.999 > 0.95
+3. No clear stability linkage: ΔV and argmax agreement don't correlate with $\hat{L}_{preproj}$
+
+### Unexpected Finding: Projection Provides Stability
+
+Comparing R=10 (projection active) vs R=disabled:
+
+| Metric | R=10 (100% proj) | R=disabled (0% proj) |
+|--------|------------------|----------------------|
+| ΔV range | 0.5 - 2.2 | 7.7 - 14.8 |
+| Argmax agree | 97-99% | 88-91% |
+| $\hat{L}_{postproj}$ | ~0.23 | ~0.44 |
+
+**Interpretation**: The R=10 projection constrains latent space dynamics, providing stability even when the spectral-norm dial is ineffective. Disabling projection exposes the underlying instability.
+
+## Conservative Paper Claim (Updated)
+
+**The spectral-norm-based contraction dial does NOT effectively control $\hat{L}_z$ in the TRM architecture.** When projection is disabled, $\hat{L}_{preproj} \in [0.41, 0.47]$ with spread only 0.064, insufficient for dial control. However, **latent-ball projection at R=10 provides significant stabilization**: ΔV improves from 7.7-14.8 (no projection) to 0.5-2.2 (with projection), and argmax agreement improves from 88-91% to 97-99%.
+
+This suggests that projection-based regularization, rather than spectral-norm contraction enforcement, is the dominant stabilization mechanism in this architecture.
