@@ -1,0 +1,102 @@
+{
+  "experiment": "Exp4",
+  "description": "Projection-free contraction dial range test",
+  "generated_at": "2026-01-18T14:48:54.936113",
+  "checkpoint": "/home/buiksat/trm_bellman/results/exp3/nc_rdis_s42/model_step_5000.pt",
+  "config": {
+    "hidden_size": 64,
+    "vocab_size": 6,
+    "seq_len": 16,
+    "num_actions": 97,
+    "inner_unroll_n": 4,
+    "enable_contraction": false,
+    "target_Lz": 0.9,
+    "disable_value_head_norm": true,
+    "latent_ball_radius": 0.0
+  },
+  "scaling_factors": [
+    1.0,
+    0.9,
+    0.8,
+    0.7,
+    0.6
+  ],
+  "results": [
+    {
+      "scaling_factor": 1.0,
+      "L_preproj": 0.9482747263973579,
+      "delta_V@4x": 0.5205513834953308,
+      "argmax_agree@4x": 0.699999988079071,
+      "delta_V@8x": 0.5662893652915955,
+      "argmax_agree@8x": 0.6599999666213989,
+      "delta_V@16x": 0.6369708776473999,
+      "argmax_agree@16x": 0.6299999952316284
+    },
+    {
+      "scaling_factor": 0.9,
+      "L_preproj": 0.7191784898168407,
+      "delta_V@4x": 0.3900367021560669,
+      "argmax_agree@4x": 0.699999988079071,
+      "delta_V@8x": 0.491791307926178,
+      "argmax_agree@8x": 0.6599999666213989,
+      "delta_V@16x": 0.5164784789085388,
+      "argmax_agree@16x": 0.6200000047683716
+    },
+    {
+      "scaling_factor": 0.8,
+      "L_preproj": 0.5876391151105054,
+      "delta_V@4x": 0.37665855884552,
+      "argmax_agree@4x": 0.7699999809265137,
+      "delta_V@8x": 0.4174141585826874,
+      "argmax_agree@8x": 0.699999988079071,
+      "delta_V@16x": 0.46732524037361145,
+      "argmax_agree@16x": 0.6699999570846558
+    },
+    {
+      "scaling_factor": 0.7,
+      "L_preproj": 0.5194899058551528,
+      "delta_V@4x": 0.4331500232219696,
+      "argmax_agree@4x": 0.7899999618530273,
+      "delta_V@8x": 0.43892112374305725,
+      "argmax_agree@8x": 0.7400000095367432,
+      "delta_V@16x": 0.4021260738372803,
+      "argmax_agree@16x": 0.7199999690055847
+    },
+    {
+      "scaling_factor": 0.6,
+      "L_preproj": 0.521194982866291,
+      "delta_V@4x": 0.5584276914596558,
+      "argmax_agree@4x": 0.7599999904632568,
+      "delta_V@8x": 0.6385267376899719,
+      "argmax_agree@8x": 0.6899999976158142,
+      "delta_V@16x": 0.5402440428733826,
+      "argmax_agree@16x": 0.6800000071525574
+    }
+  ],
+  "gates": {
+    "g0_projection_inactive": {
+      "passed": true,
+      "rate": 0.0
+    },
+    "g1_stability": {
+      "passed": true
+    },
+    "g2_dial_range": {
+      "passed": true,
+      "threshold": 0.1,
+      "L_preproj_min": 0.5194899058551528,
+      "L_preproj_max": 0.9482747263973579,
+      "L_preproj_spread": 0.4287848205422051
+    },
+    "g3_monotonic_linkage": {
+      "passed": false,
+      "status": "INCONCLUSIVE",
+      "spearman_rho": 0.19999999999999998,
+      "p_value": 0.747060078104662
+    }
+  },
+  "decision": "INCONCLUSIVE: Dial has range but no clear monotonicity",
+  "claim": "Contraction scaling produces L_preproj spread \u22650.10 but does not show clear monotonic relationship with stability metrics.",
+  "proceed_to_full_sweep": true,
+  "git_sha": null
+}

@@ -954,3 +954,22 @@ python_binary(
         "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
+
+# ============================================================================
+# Experiment 4: Projection-free Contraction Dial
+# ============================================================================
+
+python_binary(
+    name = "exp4_range_test",
+    srcs = ["scripts/exp4_range_test.py"],
+    base_module = "",
+    main_module = "scripts.exp4_range_test",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/scipy:scipy",
+    ],
+)

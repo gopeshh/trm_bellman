@@ -843,4 +843,162 @@ Figures and tables copied to paper directory:
 - `/home/buiksat/UPI_TRM/UPI_TRM_ICML/tables/table_exp2_dial_does_not_control_Lz.tex`
 - `/home/buiksat/UPI_TRM/UPI_TRM_ICML/tables/table_exp2_projection_effect.tex`
 
+---
+
+## Exp4: Projection-free Contraction Dial (Range Test → Full Sweep)
+
+**Date Added:** 2026-01-18
+**Status:** IN PROGRESS
+**Context:** Exp2_final shows the spectral-norm dial fails and projection at small R can dominate/mask contraction. Exp3 shows training is stable even with projection disabled. We now test whether a contraction-only dial exists when projection is disabled/inactive.
+
+### Hypothesis
+
+When projection is disabled (or inactive), varying contraction strength of the z→z recursion produces a measurable, monotonic change in mismatch stability metrics (ΔV, Δπ, argmax agreement) as a function of achieved pre-projection Lipschitz proxy L_preproj.
+
+### Non-Negotiable Controls (To Avoid Confounds)
+
+- `disable_value_head_norm: true` for ALL conditions
+- Same architecture variant as Exp1 (`episodic_latent: true`)
+- Same checker/reward setup as Exp1/Exp3
+- Projection must be disabled OR provably inactive (log `projection_active_rate` and require ~0%)
+
+### Primary Metrics
+
+1. **L_preproj**: Finite-difference Lipschitz proxy of f_θ WITHOUT projection
+2. **Mismatch stability**: ΔV, Δπ, argmax agreement under depth mismatch
+   - n_train=2; eval n2 ∈ {4, 8, 16} on B0 and B1
+3. **Success rate**: Secondary, to catch catastrophic regressions
+4. **Latent norm stats**: Pre/post projection norms (post should equal pre if projection disabled)
+
+### Decision Gates (Pre-Registered)
+
+**G0 (Projection Inactivity):**
+- `projection_active_rate < 1%` on eval batches
+- If FAIL → Abort experiment (projection is interfering)
+- Must PASS to continue
+
+**G1 (Training Stability):**
+- No NaNs/collapse across all seeds
+- Must PASS to continue
+
+**G2 (Dial Range):**
+- `max(L_preproj) - min(L_preproj) ≥ 0.10` across sweep points
+- If FAIL → Declare "dial has insufficient range" and STOP
+- This is the key go/no-go gate for the full sweep
+
+**G3 (Monotonic Linkage - Soft):**
+- Spearman ρ(L_preproj, ΔV@8×) should be > 0.5 in magnitude (directionally consistent)
+- If FAIL → Report as "inconclusive" (not a hard stop)
+
+### Step 1: Range-Test Before Full Sweep (Cheap, Abortable)
+
+**Objective:** Verify that inference-time contraction scaling produces sufficient L_preproj spread before committing to expensive training.
+
+**Option A (Preferred): Inference-Time Contraction Scaling**
+
+1. Take a single trained checkpoint with contraction OFF and projection disabled/inactive
+   - Use Exp3 `nc_rdis_s42` (no contraction, R=disabled) or similar
+
+2. Apply global contraction scaling to z→z layers at evaluation time:
+   - Use `enforce_global_contraction()` with scaling factors s ∈ {1.0, 0.9, 0.8, 0.7, 0.6}
+   - This directly scales the L_level pathway output
+
+3. For each scaling factor, measure:
+   - L_preproj (finite-difference Lipschitz without projection)
+   - Mismatch metrics: ΔV, Δπ, argmax agreement at n_train=2 vs n2 ∈ {4, 8, 16}
+   - projection_active_rate (should be ~0%)
+
+4. **Decision:**
+   - If G2 fails (L_preproj spread < 0.10) → Stop Exp4, write up as negative: "No practical dial range even under direct scaling"
+   - If G2 passes → Proceed to Step 2 (Full Sweep)
+
+**Option B (Fallback): Short Training Sweep**
+
+If Option A is not feasible:
+1. Train for 1k steps (not 5k) for 3 scaling settings
+2. Check if L_preproj moves at all
+3. If L_preproj spread < 0.10, stop
+
+### Step 2: Full Experiment (Only If Range-Test Passes)
+
+**Training Configuration:**
+- 3 seeds: {41, 42, 43}
+- 3-4 contraction settings chosen to span the observed L_preproj range
+  - NOT target_Lz values; pick settings that actually change L_preproj
+- Train to 5k steps (to match Exp1 comparability)
+- `disable_value_head_norm: true`
+- `latent_ball_radius: 0` (projection disabled)
+- `use_feasibility_checker: true`
+
+**Evaluation Protocol:**
+- Mismatch stability exactly like Exp1:
+  - B0 (initial states) and B1 (successor closure)
+  - n_train=2; n2 ∈ {4, 8, 16}
+  - Metrics: ΔV, Δπ, argmax agreement
+
+### Step 3: Paper-Ready Artifacts + Audit
+
+Create `results/paper_ready/exp4_projection_free_dial/` containing:
+
+| File | Content |
+|------|---------|
+| `fig_exp4_projection_free_dial.pdf` | Panel: ΔV vs achieved L_preproj; optionally Δπ/argmax |
+| `table_exp4_projection_free_dial.tex` | Settings → achieved L_preproj → stability metrics |
+| `CLAIMS.md` | Scoped claims based on gate outcomes |
+| `PROVENANCE.md` | Commit references, checkpoint paths, commands |
+| `AUDIT.md` | Audit verification results |
+| `summary.json` | Machine-readable summary |
+
+### Audit Checks
+
+The audit script must verify:
+
+1. **G0 (Projection inactive):** `projection_active_rate < 1%` for all conditions
+2. **Value-head norm OFF:** All conditions have `disable_value_head_norm: true`
+3. **G2 (Dial range):** Report L_preproj spread and pass/fail status
+4. **G3 (Monotonicity):** Report Spearman ρ and "monotonic"/"inconclusive" status
+5. **No overclaims:** If G2 fails, CLAIMS.md explicitly states dial-range failure
+
+### Expected Outcomes
+
+**Scenario A (Dial Works):**
+- L_preproj spread ≥ 0.10 (G2 passes)
+- ΔV decreases as L_preproj decreases (G3 passes)
+- Claim: "Projection-free contraction dial is viable"
+
+**Scenario B (Dial Has Insufficient Range):**
+- L_preproj spread < 0.10 (G2 fails)
+- Document: "Even with projection disabled, L_preproj cannot be varied enough to constitute a dial"
+- This is consistent with Exp2_final but rules out the "projection masking" hypothesis
+
+**Scenario C (Dial Has Range But No Monotonicity):**
+- L_preproj spread ≥ 0.10 (G2 passes)
+- But Spearman ρ < 0.5 (G3 fails)
+- Document: "Dial range exists but does not predict stability metrics"
+
+### Commit Message Template
+
+```
+Exp4: projection-free contraction dial (range test + [positive/negative] result, audited)
+
+[Positive result: dial viable / Negative result: dial has insufficient range]
+- L_preproj spread: X.XX (threshold ≥0.10)
+- Spearman ρ(L_preproj, ΔV): X.XX ([passes/fails] >0.5 threshold)
+
+Gate status: G0=[PASS/FAIL], G1=[PASS/FAIL], G2=[PASS/FAIL], G3=[PASS/FAIL/INCONCLUSIVE]
+
+Artifacts: results/paper_ready/exp4_projection_free_dial/
+Audit: [PASSED/FAILED]
+```
+
+### Buck Targets
+
+```bash
+buck2 run //buiksat_trm:exp4_range_test           # Run range-test (Option A)
+buck2 run //buiksat_trm:eval_exp4_projection_free # Full evaluation
+buck2 run //buiksat_trm:audit_exp4_paper_ready    # Audit verification
+```
+
+---
+
 
