@@ -902,3 +902,21 @@ python_binary(
     main_module = "scripts.inspect_checkpoint",
     deps = ["fbsource//third-party/pypi/torch:torch"],
 )
+
+python_binary(
+    name = "make_paper_figures_exp2_final",
+    srcs = ["scripts/make_paper_figures_exp2_final.py"],
+    base_module = "",
+    main_module = "scripts.make_paper_figures_exp2_final",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)
+
+python_binary(
+    name = "audit_exp2_final_paper_ready",
+    srcs = ["scripts/audit_exp2_final_paper_ready.py"],
+    base_module = "",
+    main_module = "scripts.audit_exp2_final_paper_ready",
+)

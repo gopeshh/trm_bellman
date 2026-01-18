@@ -554,4 +554,93 @@ Add targets:
 - [ ] Audit passes (projection thresholds, claims match, value-head norm OFF)
 - [ ] Clean commit: "Exp2c: Unmask stability dial (projection inactive) + paper-ready artifacts"
 
+---
+
+## Exp2 FINAL: Paper-Ready Bundle (Path B - Negative Result)
+
+**Status**: COMPLETE (Path B)
+**Decision**: The spectral-norm "target_Lz" dial is NOT an effective contraction control in this TRM architecture.
+
+### Summary of Findings
+
+| Experiment | Key Finding |
+|------------|-------------|
+| Exp2 (a460efd) | target_Lz sweep achieves similar L_postproj (~0.22-0.24) across all settings |
+| Exp2b (0d32097) | Root cause: projection at R=10 dominates (100% active), masking network differences |
+| Exp2c (db3de70) | Even with projection disabled, L_preproj spread only 0.064 (fails ≥0.08 threshold); ordering non-monotonic |
+
+### Final Paper-Facing Claims (Scoped)
+
+**Claim 1 (Negative - Dial Failure):**
+> "In this TRM setup, targeting spectral-norm-based contraction does not provide a reliable 'stability dial': achieved L_preproj varies only weakly (spread 0.064) and non-monotonically across target_Lz values (0.9→0.95→0.99→0.999 yields L_preproj 0.473→0.409→0.448→0.440). At the default projection radius R=10, post-projection dynamics saturate (projection active ~100%), masking any underlying differences."
+
+**Claim 2 (Positive - Projection Stabilizes):**
+> "Latent-ball projection is a strong stabilizer: enabling projection at R=10 improves deep-unroll mismatch stability substantially on B0 (ΔV improves from 7.7–14.8 to 0.5–2.2, ~6–10× reduction; argmax agreement improves from 88–91% to 97–99%, +8–10pp) in the evaluated setting (n_train=2, n_eval=16)."
+
+**Scope limitations:**
+- Results on B0 (initial states) only; B1 not evaluated
+- Mismatch protocol: n_train=2 vs n_eval∈{4,8,16}
+- No monotonicity claim for projection-vs-R relationship (not tested as sweep)
+
+### Stop Condition
+
+**Do NOT pursue further training** to achieve dial monotonicity under the current spectral-norm targeting mechanism. The failure is architectural: the mechanism does not provide sufficient control.
+
+If a controllable dial is needed in future work, consider:
+- Explicit L_z scaling loss (not spectral norm clamping)
+- Different network architecture where latent norms naturally stay bounded
+- Direct regularization on finite-diff Lipschitz estimates
+
+### Deliverables
+
+Create `results/paper_ready/exp2_final/` containing:
+
+| File | Content |
+|------|---------|
+| `fig_exp2_dial_does_not_control_Lz.pdf` | target_Lz vs L_preproj/L_postproj, projection_active_rate |
+| `fig_exp2_projection_is_primary_stabilizer.pdf` | R=10 vs R=disabled stability comparison |
+| `table_exp2_dial_does_not_control_Lz.tex` | LaTeX table with sweep results |
+| `table_exp2_projection_effect.tex` | LaTeX table with projection comparison |
+| `CLAIMS.md` | Final scoped claims |
+| `PROVENANCE.md` | Commit references, checkpoint paths, regeneration commands |
+| `AUDIT.md` | Audit results |
+| `PAPER_INSERT_SNIPPET.tex` | Appendix text + figure/table includes |
+| `summary.json` | Machine-readable summary for audit |
+
+### Audit Checks
+
+The audit script (`scripts/audit_exp2_final_paper_ready.py`) must verify:
+
+1. **Projection dominance at R=10**: projection_active_rate ≈ 100%
+2. **Projection inactive at R≥100**: projection_active_rate ≈ 0%
+3. **Dial range failure**: L_preproj spread < 0.08 (currently 0.064)
+4. **No monotonicity claims**: grep for "monotonic" and fail if found (unless "NOT supported" context)
+5. **Claims match summary.json**: numerical values in CLAIMS.md match generated data
+6. **Value-head norm OFF**: All checkpoints have disable_value_head_norm: true
+
+### Buck Targets
+
+```bash
+buck2 run //buiksat_trm:make_paper_figures_exp2_final  # Generate all artifacts
+buck2 run //buiksat_trm:audit_exp2_final_paper_ready   # Verify claims
+```
+
+### Commit
+
+When complete:
+```
+Exp2 final: dial failure + projection dominance (paper-ready, audited)
+
+Negative result: spectral-norm dial does NOT control L_z effectively
+- L_preproj spread only 0.064 (threshold ≥0.08), non-monotonic ordering
+- At R=10: projection dominates (100% active), L_postproj saturates ~0.23
+
+Positive result: projection provides strong stabilization
+- ΔV improves 6-10× with R=10 projection vs disabled
+- Argmax agreement +8-10pp
+
+Artifacts: results/paper_ready/exp2_final/
+Audit: PASSED
+```
+
 
