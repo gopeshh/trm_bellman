@@ -315,3 +315,121 @@ But do not burn cycles here if Phase 1–3 aren't complete.
 - [ ] **Phase 5:** Exact-centering α diagnostic.
 - [ ] **Phase 6:** Random + greedy baseline sanity.
 
+---
+
+## Exp2b: Diagnosing and Calibrating the Contraction Dial
+
+**Date Added:** 2026-01-17
+**Context:** Exp2 (commit a460efd) shows achieved_Lz saturates at ~0.23 regardless of target_Lz, with high seed variance dominating. The "dial" claim is not supported by current data.
+
+### Goal
+
+Either:
+- **(A)** Demonstrate a controllable contraction dial where achieved_Lz spans a meaningful range (e.g., 0.4→0.95) and stability metrics improve as achieved_Lz decreases, OR
+- **(B)** Prove the current enforcement cannot realize distinct achieved_Lz (projection/architecture saturation) and document as a negative/limitations result.
+
+### Hard Constraint
+
+**`disable_value_head_norm: true`** everywhere. No exceptions.
+
+---
+
+### Step 1: Diagnose WHY achieved_Lz saturates
+
+**Instrumentation required** (in `scripts/diagnose_contraction_saturation.py`):
+
+1. **L_hat_preproj**: max ||f(z+δ)-f(z)||/||δ|| WITHOUT projection (ΠR disabled)
+2. **L_hat_postproj**: max ||ΠR(f(z+δ)) - ΠR(f(z))||/||δ|| WITH projection
+3. **projection_active_rate**: fraction of samples where ||f(z)||₂ > R
+4. **Norm distributions**: mean/median/p95 of ||z||, ||f(z)||, ||ΠR(f(z))||, (||f(z)||-R)⁺
+5. **clamp_activity**: how often operator-norm clamping triggers
+
+**Run on:**
+- Existing Exp2 checkpoints: target_Lz ∈ {0.9, 0.95, 0.99, 0.999}
+- All 3 seeds per target
+- Eval-time R ∈ {10, 100, 1000, disabled} (without retraining)
+
+**Output:**
+- `results/paper_ready/exp2/DIAGNOSTICS_saturation.json`
+- `results/paper_ready/exp2/DIAGNOSTICS_saturation.md`
+
+**Decision Gate:**
+
+| Condition | Root Cause | Action |
+|-----------|------------|--------|
+| L_hat_preproj varies, L_hat_postproj saturates, projection_active_rate > 80% | Projection dominates | Increase R or disable projection for dial |
+| Both L_hat saturate, clamp_activity high | Enforcement/clamp saturates | Add explicit z→z scaling knob |
+| Neither explains | Unknown | Document and stop |
+
+---
+
+### Step 2: Attempt ONE clean fix (if dial is broken)
+
+**Case A: Projection dominates**
+- Train/eval with rl_latent_ball_radius = 1000 or R=0 (disabled)
+- Keep z→z contraction enforcement for stability
+- Verify L_hat_preproj varies with target
+
+**Case B: Clamp/schedule saturates**
+- Add explicit `contraction_lambda` knob that scales z→z pathway output
+- Verify knob changes L_hat_preproj measurably on fixed batch BEFORE training
+
+**Validation before sweep:**
+- Dry-run (forward-only) must show ≥3 separated achieved_Lz bands (e.g., ~0.4, ~0.6, ~0.8, ~0.95)
+- Must NOT rely on projection to create separation
+
+---
+
+### Step 3: Exp2b sweep (only if achieved_Lz can be varied)
+
+**Training config:**
+- Same architecture as Exp1/Exp2 (episodic_latent fixed)
+- use_feasibility_checker: true
+- **disable_value_head_norm: true**
+- 4 dial settings yielding distinct achieved_Lz
+- 3 seeds minimum (match Exp1 seeds: 41, 42, 43)
+
+**Evaluation:**
+- achieved_Lz (both preproj and postproj, plus projection_active_rate)
+- success rate
+- Stability under depth mismatch (Exp1 protocol):
+  - n_train=2, evaluate n2 ∈ {4, 8, 16}
+  - B0 (initial states) primary
+  - Metrics: ΔV, Δπ, argmax agreement
+
+**Output artifacts:**
+- `results/paper_ready/exp2b/fig_exp2b_dial_vs_stability.pdf`
+- `results/paper_ready/exp2b/table_exp2b_dial_vs_stability.tex`
+- `results/paper_ready/exp2b/CLAIMS.md` (scoped claims only)
+- `results/paper_ready/exp2b/PROVENANCE.md`
+- `results/paper_ready/exp2b/AUDIT.md`
+
+**Audit checks:**
+- [ ] achieved_Lz spans ≥0.25 range across dial settings
+- [ ] value-head norm OFF confirmed in all configs
+- [ ] projection_active_rate reported (flag if >80%)
+- [ ] Claims match table values (no unsupported monotonicity)
+
+---
+
+### Step 4: If Exp2b fails → finalize negative result
+
+If distinct achieved_Lz cannot be produced without destabilizing training:
+
+1. Keep Exp2 (a460efd) as negative/limitations result
+2. Update `results/paper_ready/exp2/CLAIMS.md`:
+   - "Target-Lz is not a reliable dial; achieved_Lz saturates; variance dominates"
+3. Add diagnostics (DIAGNOSTICS_saturation.*) explaining "why"
+4. Ensure audit passes and CLAIMS.md does NOT use "monotonic" language
+
+---
+
+### Deliverables Checklist
+
+- [ ] EXPERIMENT_PLAN_ICML.md updated with Exp2b plan
+- [ ] DIAGNOSTICS_saturation.json/.md created
+- [ ] Either:
+  - (A) exp2b paper-ready bundle + audit pass, OR
+  - (B) exp2 negative-result bundle with diagnostics + scoped claims + audit pass
+- [ ] Clean commit: "Exp2b: calibrate contraction dial (or document saturation)"
+

@@ -51,3 +51,32 @@
 ```bash
 buck2 run //buiksat_trm:make_paper_figures_exp2
 ```
+
+## Exp2b Diagnostics
+
+**Generated**: 2026-01-17
+
+### Purpose
+
+Investigate WHY achieved $\hat{L}_z$ saturates at ~0.23 across all target $L_z$ values.
+
+### Method
+
+For each checkpoint, compute:
+- $\hat{L}_{pre-proj}$: Lipschitz constant WITHOUT projection
+- $\hat{L}_{post-proj}$: Lipschitz constant WITH projection at radius R
+- Projection active rate: fraction where $\|f(z)\| > R$
+
+Evaluated at R ∈ {10, 100, 1000, ∞ (disabled)}.
+
+### Regeneration Command
+
+```bash
+buck2 run //buiksat_trm:diagnose_contraction_saturation
+```
+
+### Output Files
+
+- `DIAGNOSTICS_saturation.json`: Full results
+- `DIAGNOSTICS_saturation.md`: Summary table
+

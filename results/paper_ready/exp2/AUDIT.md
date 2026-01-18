@@ -1,7 +1,7 @@
 # Experiment 2 Audit Report
 
-**Generated**: 2026-01-17T15:21:27.936332
-**Git Commit**: 8c6994a44bbe7204d1c883b9e93a3c4b1f2c3cd9
+**Generated**: 2026-01-17T16:54:52.172460
+**Git Commit**: a460efd9b4ecb718d9ce837f1d3503b46f12e280
 
 ## Overall Result: ✓ PASS (3/3 checks passed)
 
@@ -12,8 +12,8 @@
 ```
 OK: fig_exp2_stability_dial.pdf (25082 bytes)
 OK: table_exp2_contraction_sweep.tex (797 bytes)
-OK: CLAIMS.md (1837 bytes)
-OK: PROVENANCE.md (2067 bytes)
+OK: CLAIMS.md (3057 bytes)
+OK: PROVENANCE.md (2710 bytes)
 ```
 
 ### Claims vs Table: ✓ PASS
@@ -53,9 +53,11 @@ buck2 run //buiksat_trm:audit_exp2_paper_ready
 
 ## Files in Bundle
 
-- `AUDIT.md` (1645 bytes)
-- `CLAIMS.md` (1837 bytes)
-- `PROVENANCE.md` (2067 bytes)
-- `exp2_paper_ready_bundle.zip` (18932 bytes)
+- `AUDIT.md` (1724 bytes)
+- `CLAIMS.md` (3057 bytes)
+- `DIAGNOSTICS_saturation.json` (51069 bytes)
+- `DIAGNOSTICS_saturation.md` (1763 bytes)
+- `PROVENANCE.md` (2710 bytes)
+- `exp2_paper_ready_bundle.zip` (19319 bytes)
 - `fig_exp2_stability_dial.pdf` (25082 bytes)
 - `table_exp2_contraction_sweep.tex` (797 bytes)

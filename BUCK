@@ -869,6 +869,19 @@ python_binary(
 )
 
 python_binary(
+    name = "diagnose_contraction_saturation",
+    srcs = ["scripts/diagnose_contraction_saturation.py"],
+    base_module = "",
+    main_module = "scripts.diagnose_contraction_saturation",
+    deps = [
+        ":eval_unroll_sensitivity_lib",
+        ":models",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
     name = "inspect_checkpoint",
     srcs = ["scripts/inspect_checkpoint.py"],
     base_module = "",
