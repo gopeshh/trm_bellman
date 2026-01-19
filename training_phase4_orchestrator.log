@@ -1,0 +1,92 @@
+============================================================
+Phase 4: 2x2 Norm Ablation Training
+============================================================
+
+Conditions: ['nc_nv', 'nc_yv', 'yc_nv', 'yc_yv']
+Seeds: [41, 42, 43]
+Total jobs: 12
+GPUs: 4
+
+Job queue: 12 jobs
+  [0] nc_nv seed=41
+  [1] nc_nv seed=42
+  [2] nc_nv seed=43
+  [3] nc_yv seed=41
+  [4] nc_yv seed=42
+  [5] nc_yv seed=43
+  [6] yc_nv seed=41
+  [7] yc_nv seed=42
+  [8] yc_nv seed=43
+  [9] yc_yv seed=41
+  [10] yc_yv seed=42
+  [11] yc_yv seed=43
+
+[GPU 0] Starting nc_nv seed=41
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/nc_nv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_nv_s41
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_nc_nv_s41.log
+[GPU 1] Starting nc_nv seed=42
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/nc_nv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_nv_s42
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_nc_nv_s42.log
+[GPU 2] Starting nc_nv seed=43
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/nc_nv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_nv_s43
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_nc_nv_s43.log
+[GPU 3] Starting nc_yv seed=41
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/nc_yv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_yv_s41
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_nc_yv_s41.log
+[GPU 0] COMPLETED: nc_nv seed=41
+[GPU 1] COMPLETED: nc_nv seed=42
+[GPU 2] COMPLETED: nc_nv seed=43
+[GPU 3] COMPLETED: nc_yv seed=41
+[GPU 0] Starting nc_yv seed=42
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/nc_yv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_yv_s42
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_nc_yv_s42.log
+[GPU 1] Starting nc_yv seed=43
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/nc_yv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_yv_s43
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_nc_yv_s43.log
+[GPU 2] Starting yc_nv seed=41
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/yc_nv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/yc_nv_s41
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_yc_nv_s41.log
+[GPU 3] Starting yc_nv seed=42
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/yc_nv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/yc_nv_s42
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_yc_nv_s42.log
+[GPU 0] COMPLETED: nc_yv seed=42
+[GPU 1] COMPLETED: nc_yv seed=43
+[GPU 2] Starting yc_nv seed=43
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/yc_nv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/yc_nv_s43
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_yc_nv_s43.log
+[GPU 3] Starting yc_yv seed=41
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/yc_yv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/yc_yv_s41
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_yc_yv_s41.log
+[GPU 2] COMPLETED: yc_nv seed=41
+[GPU 3] COMPLETED: yc_nv seed=42
+[GPU 2] Starting yc_yv seed=42
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/yc_yv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/yc_yv_s42
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_yc_yv_s42.log
+[GPU 3] Starting yc_yv seed=43
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/phase4_2x2_norm_ablation/yc_yv.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/yc_yv_s43
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_phase4_yc_yv_s43.log
+[GPU 2] COMPLETED: yc_nv seed=43
+[GPU 3] COMPLETED: yc_yv seed=41
+[GPU 2] COMPLETED: yc_yv seed=42
+[GPU 3] COMPLETED: yc_yv seed=43
+
+============================================================
+Training Complete
+============================================================
+Completed: 12/12
+Failed: 0/12
+
+All jobs completed successfully!
+Checkpoints saved to: /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation

@@ -1,0 +1,713 @@
+[2026-01-19T08:08:17.040-08:00] Starting new buck2 daemon...
+[2026-01-19T08:08:17.420-08:00] Connected to new buck2 daemon.
+[2026-01-19T08:08:17.429-08:00] Buck UI: https://www.internalfb.com/buck2/3c6de5e9-b948-4299-8eae-02ccfd4d72b3
+[2026-01-19T08:08:18.990-08:00] File changed: fbcode//buiksat_trm
+[2026-01-19T08:08:18.990-08:00] File changed: fbcode//checkpoints/rl_dummy_seed0/model_step_10.pt
+[2026-01-19T08:08:18.990-08:00] File changed: fbcode//checkpoints/rl_dummy_seed0/model_step_100.pt
+[2026-01-19T08:08:18.990-08:00] 71 additional file change events
+[2026-01-19T08:08:18.990-08:00] File Watcher fresh instance: new mergebase, cleared graph state, cleared dep files
+[2026-01-19T08:08:26.020-08:00] Waiting on fbsource//third-party/pypi/cython/3.0.8:BUCK -- evaluating build file, and 109 other actions
+[2026-01-19T08:08:28.824-08:00] [2m2026-01-19T16:08:28.671934Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-19T08:08:28.824-08:00] [2m2026-01-19T16:08:28.671975Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.25.1' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.25 instead
+[2026-01-19T08:08:28.824-08:00] [2m2026-01-19T16:08:28.672000Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-19T08:08:28.824-08:00] [2m2026-01-19T16:08:28.672008Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-19T08:08:28.824-08:00] [2m2026-01-19T16:08:28.672017Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-19T08:08:34.828-08:00] [2m2026-01-19T16:08:34.636322Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform platform010-aarch64-compat
+[2026-01-19T08:08:34.828-08:00] [2m2026-01-19T16:08:34.636350Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform platform010-compat
+[2026-01-19T08:08:34.828-08:00] [2m2026-01-19T16:08:34.636355Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform platform010-libcxx
+[2026-01-19T08:08:34.828-08:00] [2m2026-01-19T16:08:34.636360Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform antlir-distro
+[2026-01-19T08:08:41.921-08:00] Waiting on fbcode//configerator/structs/data_access_policies/if:BUCK -- evaluating build file, and 81 other actions
+[2026-01-19T08:08:49.021-08:00] Waiting on fbcode//configerator/structs/data_access_policies/if:BUCK -- evaluating build file, and 3 other actions
+[2026-01-19T08:08:56.121-08:00] Waiting on fbsource//third-party/magma:magma (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- running analysis [evaluate_rule], and 84 other actions
+[2026-01-19T08:09:02.207-08:00] RE Session: reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60
+[2026-01-19T08:09:09.221-08:00] Waiting on fbsource//third-party/python/3.12:libpython-weak-symbols-stub (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link libpython3.12.so.1.0) [local_execute], and 13 other actions
+[2026-01-19T08:09:16.221-08:00] Waiting on fbsource//third-party/triton/stable/llvm-project/llvm:DebugInfoMSF (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (archive_thin libDebugInfoMSF.stripped.pic.a) [local_prepare_outputs], and 36 other actions
+[2026-01-19T08:09:23.320-08:00] Waiting on fbsource//third-party/triton/stable/llvm-project/llvm:attributes_gen_filegroup___gen_attrs_-1584583080_genrule (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (nothing) [local_prepare_outputs], and 49 other actions
+[2026-01-19T08:09:30.420-08:00] Waiting on fbsource//third-party/triton/stable/llvm-project/llvm:AMDGPUAsmParser (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (archive_thin libAMDGPUAsmParser.stripped.pic.a) [local_materialize_inputs], and 63 other actions
+[2026-01-19T08:09:37.421-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `__link_groups__/triton/_C/libtriton.so`
+[2026-01-19T08:09:44.521-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:09:44.521-08:00] Network: Up: 876MiB  70KiB/s  Down: 1.7GiB  12MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:09:44.521-08:00] Resource usage: RSS: 17GiB CPU: 490%
+[2026-01-19T08:09:44.521-08:00] IO: Copy: 1 Symlink: 2
+[2026-01-19T08:09:51.621-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:09:51.621-08:00] Network: Up: 879MiB 322KiB/s  Down: 1.7GiB  17MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:09:51.621-08:00] Resource usage: RSS: 17GiB CPU: 399%
+[2026-01-19T08:09:51.621-08:00] IO: Copy: 12 MkDir: 7 ReadDir: 2 Stat: 1
+[2026-01-19T08:09:58.720-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:09:58.721-08:00] Network: Up: 880MiB           Down: 1.8GiB 3.7MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:09:58.721-08:00] Resource usage: RSS: 17GiB CPU: 637%
+[2026-01-19T08:09:58.721-08:00] IO: Copy: 1 Symlink: 1 MkDir: 6
+[2026-01-19T08:10:05.721-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:10:05.721-08:00] Network: Up: 880MiB  53KiB/s  Down: 1.8GiB 2.9MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:10:05.721-08:00] Resource usage: RSS: 18GiB CPU: 650%
+[2026-01-19T08:10:05.721-08:00] IO: Symlink: 3 MkDir: 1
+[2026-01-19T08:10:12.721-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:10:12.721-08:00] Network: Up: 880MiB           Down: 1.9GiB  24MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:10:12.721-08:00] Resource usage: RSS: 17GiB CPU: 445%
+[2026-01-19T08:10:12.721-08:00] IO: none
+[2026-01-19T08:10:19.724-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `__link_groups__/libevict-thrift-py3-extensions-fblearner.so`
+[2026-01-19T08:10:26.820-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:10:26.820-08:00] Network: Up: 911MiB           Down: 2.1GiB  10MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:10:26.820-08:00] Resource usage: RSS: 17GiB CPU: 518%
+[2026-01-19T08:10:26.820-08:00] IO: MkDir: 4
+[2026-01-19T08:10:33.821-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:10:33.821-08:00] Network: Up: 912MiB 181KiB/s  Down: 2.1GiB 3.1MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:10:33.821-08:00] Resource usage: RSS: 17GiB CPU: 323%
+[2026-01-19T08:10:33.821-08:00] IO: Copy: 3 Symlink: 2 MkDir: 2
+[2026-01-19T08:10:40.921-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:10:40.921-08:00] Network: Up: 912MiB 7.9KiB/s  Down: 2.3GiB 6.9MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:10:40.921-08:00] Resource usage: RSS: 18GiB CPU: 779%
+[2026-01-19T08:10:40.921-08:00] IO: MkDir: 7 Write: 1
+[2026-01-19T08:10:48.030-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:10:48.030-08:00] Network: Up: 917MiB 679KiB/s  Down: 2.5GiB  14MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:10:48.030-08:00] Resource usage: RSS: 18GiB CPU: 408%
+[2026-01-19T08:10:48.030-08:00] IO: none
+[2026-01-19T08:10:55.121-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:10:55.121-08:00] Network: Up: 918MiB           Down: 2.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:10:55.121-08:00] Resource usage: RSS: 17GiB CPU: 119%
+[2026-01-19T08:10:55.121-08:00] IO: none
+[2026-01-19T08:11:02.121-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:11:02.121-08:00] Network: Up: 920MiB 2.5MiB/s  Down: 2.6GiB 4.2MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:11:02.121-08:00] Resource usage: RSS: 18GiB CPU: 4211%
+[2026-01-19T08:11:02.121-08:00] IO: MkDir: 1 ReadDir: 1 Stat: 4
+[2026-01-19T08:11:09.122-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `manifest/__manifest__.py`
+[2026-01-19T08:11:16.220-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `manifest/__manifest__.py`, and 642 other actions
+[2026-01-19T08:11:23.231-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:11:23.231-08:00] Network: Up: 1.3GiB 2.3KiB/s  Down: 3.3GiB 1.2MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:11:23.231-08:00] Resource usage: RSS: 18GiB CPU: 487%
+[2026-01-19T08:11:23.231-08:00] IO: Symlink: 2 MkDir: 2 Read: 2
+[2026-01-19T08:11:30.323-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `__link_groups__/libevict-thrift-py3-extensions.so`, and 1 other actions
+[2026-01-19T08:11:37.327-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:11:37.327-08:00] Network: Up: 1.3GiB  61KiB/s  Down: 3.4GiB  12MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:11:37.327-08:00] Resource usage: RSS: 18GiB CPU: 478%
+[2026-01-19T08:11:37.327-08:00] IO: MkDir: 5 Stat: 1
+[2026-01-19T08:11:44.421-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:11:44.421-08:00] Network: Up: 1.3GiB           Down: 3.4GiB  21KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:11:44.421-08:00] Resource usage: RSS: 18GiB CPU: 135%
+[2026-01-19T08:11:44.421-08:00] IO: MkDir: 4
+[2026-01-19T08:11:51.426-08:00] Waiting on fbcode//caffe2:_torch (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `bytecode_CHECKED_HASH`, and 216 other actions
+[2026-01-19T08:11:58.528-08:00] Waiting on fbcode//caffe2:_torch (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `bytecode_CHECKED_HASH`, and 18 other actions
+[2026-01-19T08:12:05.621-08:00] Waiting on fbcode//caffe2:_torch (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `bytecode_CHECKED_HASH`
+[2026-01-19T08:12:12.628-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:12:12.628-08:00] Network: Up: 1.3GiB  96KiB/s  Down: 3.5GiB  96KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:12:12.628-08:00] Resource usage: RSS: 18GiB CPU: 385%
+[2026-01-19T08:12:12.628-08:00] IO: Copy: 3
+[2026-01-19T08:12:19.726-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:12:19.726-08:00] Network: Up: 1.3GiB 111KiB/s  Down: 3.5GiB 551B/s    (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:12:19.726-08:00] Resource usage: RSS: 18GiB CPU: 577%
+[2026-01-19T08:12:19.726-08:00] IO: MkDir: 2 Stat: 4
+[2026-01-19T08:12:26.730-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:12:26.730-08:00] Network: Up: 1.3GiB 190KiB/s  Down: 3.5GiB 325KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:12:26.730-08:00] Resource usage: RSS: 17GiB CPU: 303%
+[2026-01-19T08:12:26.730-08:00] IO: none
+[2026-01-19T08:12:33.821-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:12:33.821-08:00] Network: Up: 1.3GiB  47KiB/s  Down: 3.5GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:12:33.821-08:00] Resource usage: RSS: 18GiB CPU: 223%
+[2026-01-19T08:12:33.821-08:00] IO: none
+[2026-01-19T08:12:40.829-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:12:40.829-08:00] Network: Up: 1.3GiB           Down: 3.5GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:12:40.829-08:00] Resource usage: RSS: 17GiB CPU: 291%
+[2026-01-19T08:12:40.829-08:00] IO: none
+[2026-01-19T08:12:47.926-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:12:47.926-08:00] Network: Up: 1.3GiB 299KiB/s  Down: 3.5GiB 595KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:12:47.926-08:00] Resource usage: RSS: 18GiB CPU: 432%
+[2026-01-19T08:12:47.926-08:00] IO: none
+[2026-01-19T08:12:55.021-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:12:55.021-08:00] Network: Up: 1.3GiB 193KiB/s  Down: 3.6GiB 369KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:12:55.021-08:00] Resource usage: RSS: 18GiB CPU: 674%
+[2026-01-19T08:12:55.021-08:00] IO: none
+[2026-01-19T08:13:02.126-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:13:02.126-08:00] Network: Up: 1.3GiB 208KiB/s  Down: 3.6GiB 872KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:13:02.126-08:00] Resource usage: RSS: 18GiB CPU: 442%
+[2026-01-19T08:13:02.126-08:00] IO: none
+[2026-01-19T08:13:09.224-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:13:09.224-08:00] Network: Up: 1.3GiB 297KiB/s  Down: 3.6GiB 929KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:13:09.224-08:00] Resource usage: RSS: 18GiB CPU: 474%
+[2026-01-19T08:13:09.224-08:00] IO: MkDir: 4
+[2026-01-19T08:13:16.225-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:13:16.225-08:00] Network: Up: 1.3GiB 532KiB/s  Down: 4.0GiB 3.5MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:13:16.225-08:00] Resource usage: RSS: 18GiB CPU: 607%
+[2026-01-19T08:13:16.225-08:00] IO: Copy: 4 MkDir: 1
+[2026-01-19T08:13:23.321-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:13:23.321-08:00] Network: Up: 1.3GiB           Down: 4.0GiB 1.1MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:13:23.321-08:00] Resource usage: RSS: 18GiB CPU: 1219%
+[2026-01-19T08:13:23.321-08:00] IO: MkDir: 3 Stat: 1
+[2026-01-19T08:13:30.329-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:13:30.329-08:00] Network: Up: 1.3GiB  72KiB/s  Down: 4.1GiB 1.6MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:13:30.329-08:00] Resource usage: RSS: 18GiB CPU: 440%
+[2026-01-19T08:13:30.329-08:00] IO: none
+[2026-01-19T08:13:37.428-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:13:37.428-08:00] Network: Up: 1.3GiB  46KiB/s  Down: 4.1GiB 3.7KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:13:37.428-08:00] Resource usage: RSS: 18GiB CPU: 730%
+[2026-01-19T08:13:37.428-08:00] IO: Symlink: 1 MkDir: 1
+[2026-01-19T08:13:44.521-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:13:44.521-08:00] Network: Up: 1.3GiB           Down: 4.1GiB 862KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:13:44.521-08:00] Resource usage: RSS: 18GiB CPU: 184%
+[2026-01-19T08:13:44.521-08:00] IO: Stat: 1
+[2026-01-19T08:13:51.621-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:13:51.621-08:00] Network: Up: 1.3GiB           Down: 4.1GiB 433KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:13:51.621-08:00] Resource usage: RSS: 18GiB CPU: 476%
+[2026-01-19T08:13:51.621-08:00] IO: Symlink: 2 MkDir: 2
+[2026-01-19T08:13:58.625-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:13:58.625-08:00] Network: Up: 1.3GiB           Down: 4.1GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:13:58.625-08:00] Resource usage: RSS: 18GiB CPU: 496%
+[2026-01-19T08:13:58.625-08:00] IO: none
+[2026-01-19T08:14:05.721-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:14:05.721-08:00] Network: Up: 1.3GiB 213KiB/s  Down: 4.1GiB  16KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:14:05.721-08:00] Resource usage: RSS: 18GiB CPU: 686%
+[2026-01-19T08:14:05.721-08:00] IO: none
+[2026-01-19T08:14:12.730-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:14:12.730-08:00] Network: Up: 1.3GiB           Down: 4.1GiB 1.1MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:14:12.730-08:00] Resource usage: RSS: 18GiB CPU: 671%
+[2026-01-19T08:14:12.730-08:00] IO: none
+[2026-01-19T08:14:19.821-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:14:19.821-08:00] Network: Up: 1.3GiB 281KiB/s  Down: 4.1GiB  14MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:14:19.821-08:00] Resource usage: RSS: 18GiB CPU: 261%
+[2026-01-19T08:14:19.821-08:00] IO: none
+[2026-01-19T08:14:26.829-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:14:26.830-08:00] Network: Up: 1.3GiB 135KiB/s  Down: 4.2GiB 5.8MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:14:26.830-08:00] Resource usage: RSS: 18GiB CPU: 262%
+[2026-01-19T08:14:26.830-08:00] IO: none
+[2026-01-19T08:14:33.925-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:14:33.925-08:00] Network: Up: 1.3GiB           Down: 4.3GiB 6.6MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:14:33.925-08:00] Resource usage: RSS: 18GiB CPU: 326%
+[2026-01-19T08:14:33.925-08:00] IO: Read: 1
+[2026-01-19T08:14:41.024-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:14:41.024-08:00] Network: Up: 1.3GiB 118KiB/s  Down: 4.4GiB 4.9MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:14:41.024-08:00] Resource usage: RSS: 18GiB CPU: 388%
+[2026-01-19T08:14:41.024-08:00] IO: none
+[2026-01-19T08:14:48.025-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:14:48.025-08:00] Network: Up: 1.3GiB           Down: 4.5GiB  52MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:14:48.025-08:00] Resource usage: RSS: 18GiB CPU: 379%
+[2026-01-19T08:14:48.025-08:00] IO: none
+[2026-01-19T08:14:55.121-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:14:55.121-08:00] Network: Up: 1.4GiB 293B/s    Down: 4.6GiB 343KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:14:55.121-08:00] Resource usage: RSS: 17GiB CPU: 148%
+[2026-01-19T08:14:55.121-08:00] IO: none
+[2026-01-19T08:15:02.220-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:15:02.220-08:00] Network: Up: 1.4GiB 248KiB/s  Down: 4.6GiB 347KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:15:02.220-08:00] Resource usage: RSS: 17GiB CPU: 137%
+[2026-01-19T08:15:02.220-08:00] IO: none
+[2026-01-19T08:15:09.220-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:15:09.221-08:00] Network: Up: 1.4GiB 496KiB/s  Down: 4.6GiB 180KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:15:09.221-08:00] Resource usage: RSS: 17GiB CPU: 137%
+[2026-01-19T08:15:09.221-08:00] IO: none
+[2026-01-19T08:15:16.321-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:15:16.321-08:00] Network: Up: 1.4GiB           Down: 4.6GiB 9.3KiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:15:16.321-08:00] Resource usage: RSS: 17GiB CPU: 130%
+[2026-01-19T08:15:16.321-08:00] IO: none
+[2026-01-19T08:15:23.321-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:15:23.321-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:15:23.321-08:00] Resource usage: RSS: 17GiB CPU: 109%
+[2026-01-19T08:15:23.321-08:00] IO: none
+[2026-01-19T08:15:30.420-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:15:30.420-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:15:30.420-08:00] Resource usage: RSS: 17GiB CPU: 116%
+[2026-01-19T08:15:30.420-08:00] IO: none
+[2026-01-19T08:15:37.421-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:15:37.421-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:15:37.421-08:00] Resource usage: RSS: 17GiB CPU: 111%
+[2026-01-19T08:15:37.421-08:00] IO: none
+[2026-01-19T08:15:44.520-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:15:44.520-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:15:44.520-08:00] Resource usage: RSS: 17GiB CPU: 110%
+[2026-01-19T08:15:44.520-08:00] IO: none
+[2026-01-19T08:15:51.521-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:15:51.521-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:15:51.521-08:00] Resource usage: RSS: 17GiB CPU: 108%
+[2026-01-19T08:15:51.521-08:00] IO: none
+[2026-01-19T08:15:58.621-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:15:58.621-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:15:58.621-08:00] Resource usage: RSS: 17GiB CPU: 108%
+[2026-01-19T08:15:58.621-08:00] IO: none
+[2026-01-19T08:16:05.621-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:16:05.621-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:16:05.621-08:00] Resource usage: RSS: 17GiB CPU: 108%
+[2026-01-19T08:16:05.621-08:00] IO: none
+[2026-01-19T08:16:12.721-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:16:12.721-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:16:12.721-08:00] Resource usage: RSS: 17GiB CPU: 113%
+[2026-01-19T08:16:12.721-08:00] IO: none
+[2026-01-19T08:16:19.721-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:16:19.721-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:16:19.721-08:00] Resource usage: RSS: 17GiB CPU: 110%
+[2026-01-19T08:16:19.721-08:00] IO: none
+[2026-01-19T08:16:26.820-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:16:26.820-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:16:26.820-08:00] Resource usage: RSS: 17GiB CPU: 112%
+[2026-01-19T08:16:26.820-08:00] IO: none
+[2026-01-19T08:16:33.821-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:16:33.821-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:16:33.821-08:00] Resource usage: RSS: 17GiB CPU: 108%
+[2026-01-19T08:16:33.821-08:00] IO: none
+[2026-01-19T08:16:40.920-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:16:40.920-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:16:40.920-08:00] Resource usage: RSS: 17GiB CPU: 110%
+[2026-01-19T08:16:40.920-08:00] IO: none
+[2026-01-19T08:16:47.921-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:16:47.921-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:16:47.921-08:00] Resource usage: RSS: 17GiB CPU: 110%
+[2026-01-19T08:16:47.921-08:00] IO: none
+[2026-01-19T08:16:55.021-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:16:55.021-08:00] Network: Up: 1.4GiB           Down: 4.6GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:16:55.021-08:00] Resource usage: RSS: 17GiB CPU: 112%
+[2026-01-19T08:16:55.021-08:00] IO: none
+[2026-01-19T08:17:02.120-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:17:02.120-08:00] Network: Up: 1.4GiB           Down: 4.7GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:17:02.120-08:00] Resource usage: RSS: 17GiB CPU: 109%
+[2026-01-19T08:17:02.120-08:00] IO: none
+[2026-01-19T08:17:09.220-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:17:09.220-08:00] Network: Up: 1.4GiB           Down: 4.7GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:17:09.220-08:00] Resource usage: RSS: 18GiB CPU: 211%
+[2026-01-19T08:17:09.220-08:00] IO: none
+[2026-01-19T08:17:16.321-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:17:16.321-08:00] Network: Up: 1.4GiB           Down: 5.0GiB  94MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:17:16.321-08:00] Resource usage: RSS: 19GiB CPU: 1270%
+[2026-01-19T08:17:16.321-08:00] IO: Symlink: 1 MkDir: 2 Stat: 1
+[2026-01-19T08:17:23.420-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:17:23.420-08:00] Network: Up: 1.4GiB           Down: 5.6GiB  95MiB/s  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:17:23.420-08:00] Resource usage: RSS: 19GiB CPU: 1286%
+[2026-01-19T08:17:23.420-08:00] IO: MkDir: 1 Stat: 3
+[2026-01-19T08:17:30.421-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:17:30.421-08:00] Network: Up: 1.4GiB           Down: 6.1GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:17:30.421-08:00] Resource usage: RSS: 18GiB CPU: 112%
+[2026-01-19T08:17:30.421-08:00] IO: none
+[2026-01-19T08:17:37.521-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:17:37.521-08:00] Network: Up: 1.4GiB           Down: 6.1GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:17:37.521-08:00] Resource usage: RSS: 18GiB CPU: 109%
+[2026-01-19T08:17:37.521-08:00] IO: none
+[2026-01-19T08:17:44.620-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:17:44.621-08:00] Network: Up: 1.4GiB           Down: 6.1GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:17:44.621-08:00] Resource usage: RSS: 18GiB CPU: 109%
+[2026-01-19T08:17:44.621-08:00] IO: none
+[2026-01-19T08:17:51.621-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:17:51.621-08:00] Network: Up: 1.4GiB           Down: 6.1GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:17:51.621-08:00] Resource usage: RSS: 18GiB CPU: 108%
+[2026-01-19T08:17:51.621-08:00] IO: none
+[2026-01-19T08:17:58.720-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:17:58.720-08:00] Network: Up: 1.4GiB           Down: 6.1GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:17:58.720-08:00] Resource usage: RSS: 18GiB CPU: 113%
+[2026-01-19T08:17:58.720-08:00] IO: none
+[2026-01-19T08:18:03.388-08:00] Cache hits: 99%
+[2026-01-19T08:18:03.388-08:00] Commands: 7935 (cached: 7816, remote: 0, local: 119)
+[2026-01-19T08:18:03.388-08:00] Network: Up: 1.4GiB  Down: 6.1GiB  (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:18:05.721-08:00] Waiting on buck2 daemon 3c6de5e9-b948-4299-8eae-02ccfd4d72b3...
+[2026-01-19T08:18:05.721-08:00] Network: Up: 1.4GiB           Down: 6.1GiB           (reSessionID-952cc2e5-a58c-4a18-a4e3-173781562f60)
+[2026-01-19T08:18:05.721-08:00] Resource usage: RSS: 18GiB CPU: 241%
+[2026-01-19T08:18:05.721-08:00] IO: none
+BUILD SUCCEEDED - starting your binary
+[INFO] Using feasibility-aware Sudoku checker for 4x4
+       score = filled - 2.0*violations - 5.0*zeroCand
+       Max score: 16 (all filled, no violations)
+[INFO] Training for 5000 steps (gamma=0.990, K=1, inner_unroll_n=2)
+[INFO] Terminal rewards: solve=1.000, fail=-16.000
+[INFO] Using TRM backbone (hidden=64, H=2, L=2)
+[DEBUG] Policy head STOP bias: 0.00 (should be 0.0 for uniform init)
+[INFO] Puzzle embeddings DISABLED (set --puzzle-emb-ndim > 0 to enable)
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU0 NVIDIA A100-PG509-200 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+INFO:2026-01-19 08:18:12 2616789:2616789 CuptiCallbackApi.cpp:74] Callback: domain = 3, cbid = 1
+INFO:2026-01-19 08:18:12 2616789:2616789 CuptiActivityProfiler.cpp:245] CUDA versions. CUPTI: 22; Runtime: 12040; Driver: 12040
+INFO:2026-01-19 08:18:12 2616789:2795743 FBConfig.cpp:330] Perfetto builder enabled: 1
+INFO:2026-01-19 08:18:12 2616789:2795743 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+INFO:2026-01-19 08:18:12 2616789:2795743 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+TritonTraceHandler: disabled because /logs does not exist
+===========[FB_TRITON]=========== Triton Version: 3.3.2+fb
+[INFO] Using UPI-TRM algorithm (K=1, inner_n=2)
+
+============================================================
+UPI-TRM THEORY ALIGNMENT CHECK
+============================================================
+⚠ Configuration has theory gaps:
+  • enable_contraction=False disables spectral normalization (Assumption 4.2). L_z < 1 contraction not enforced.
+  • exact_baseline_summation=False: Using approximate baseline. This gives O(ε_A/(1-γ)) bound instead of O(α·ε_A) from Theorem 5.9. For discrete action spaces (Sudoku), enable for tighter bounds.
+  • theory_exact_mixture=False: Using parameter-space interpolation for CPI, which is NOT equivalent to policy-space mixture. The CPI improvement guarantee does not strictly apply. Set theory_exact_mixture=True for theory-exact behavior (but slower due to evaluating two networks).
+
+Theory status:
+  Forward-invariant projection: ✓
+  Contraction enforced (L_z < 1): ✗
+  Exact baseline (Thm 5.9): ✗
+  Distillation (not in theory): ✓ disabled
+
+Is theory-exact: False
+============================================================
+
+UPI-TRM theoretical dials:
+  L_z target (rl_cfg.target_Lz): 0.9
+  L_V target (rl_cfg.target_Lv): 1.0
+  Inner unroll n (rl_cfg.inner_unroll_n): 2
+  K-step horizon K (rl_cfg.K): 1
+  Mixture alpha (rl_cfg.mixture_alpha): 0.1
+  Latent ball radius (rl_cfg.latent_ball_radius): 10.0
+  Episodic latent: True
+  Exact K-step targets: False
+  Exact baseline summation: False
+
+[INFO] STOP action mode: disabled
+[INFO] Forward-invariant projection enabled (R=10.0)
+[WandB] Disabled by default (enable with: --wandb)
+[DEBUG] Action mask: 60 valid actions out of 513 total
+[DEBUG] Latent mode: episodic
+[DEBUG] Step 0 probs: STOP=0.000000, edits=1.000000
+[DEBUG] Top 5 action probs: torch.return_types.topk(
+values=tensor([0.0231, 0.0216, 0.0211, 0.0208, 0.0207], device='cuda:0',
+       grad_fn=<TopkBackward0>),
+indices=tensor([243, 247, 336, 236, 339], device='cuda:0'))
+[step 00050] value_loss=0.006045 policy_loss=-0.211460
+[step 00050] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.77 std=0.04) reward(mean=0.840 std=0.000) clip=50.0
+[step 00100] value_loss=0.000300 policy_loss=-0.231666
+[step 00100] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 00100] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 00100] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 00100] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 00150] value_loss=0.000095 policy_loss=-0.231275
+[step 00150] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 00200] value_loss=0.000036 policy_loss=-0.217921
+[step 00200] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 00200] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 00200] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 00200] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 00250] value_loss=0.002878 policy_loss=-0.231963
+[step 00250] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.87 std=0.05) reward(mean=0.840 std=0.000) clip=50.0
+[step 00300] value_loss=0.003035 policy_loss=-0.284241
+[step 00300] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.06) reward(mean=0.840 std=0.000) clip=50.0
+[step 00300] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 00300] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 00300] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 00350] value_loss=0.000294 policy_loss=-0.242846
+[step 00350] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.02) reward(mean=0.840 std=0.000) clip=50.0
+[step 00400] value_loss=0.000163 policy_loss=-0.234212
+[step 00400] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 00400] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 00400] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 00400] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.000 score_chg=0.0000
+[step 00450] value_loss=0.000155 policy_loss=-0.226330
+[step 00450] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 00500] value_loss=0.000189 policy_loss=-0.218557
+[step 00500] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.83 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 00500] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 00500] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 00500] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 00550] value_loss=0.000491 policy_loss=-0.249670
+[step 00550] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.83 std=0.02) reward(mean=0.840 std=0.000) clip=50.0
+[step 00600] value_loss=0.002631 policy_loss=-0.226036
+[step 00600] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.88 std=0.04) reward(mean=0.840 std=0.000) clip=50.0
+[step 00600] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 00600] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 00600] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 00650] value_loss=0.000213 policy_loss=-0.217432
+[step 00650] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 00700] value_loss=0.000015 policy_loss=-0.248411
+[step 00700] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 00700] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 00700] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 00700] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 00750] value_loss=0.000007 policy_loss=-0.208632
+[step 00750] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 00800] value_loss=0.000050 policy_loss=-0.224178
+[step 00800] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 00800] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 00800] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 00800] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 00850] value_loss=0.000055 policy_loss=-0.206053
+[step 00850] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 00900] value_loss=0.000077 policy_loss=-0.224786
+[step 00900] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.83 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 00900] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 00900] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 00900] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 00950] value_loss=0.000148 policy_loss=-0.231405
+[step 00950] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01000] value_loss=0.000174 policy_loss=-0.250106
+[step 01000] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01000] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 01000] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 01000] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[Checkpoint] Saved to /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_nv_s41/rl_checkpoint_step_1000.pt
+[step 01050] value_loss=0.000088 policy_loss=-0.245006
+[step 01050] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01100] value_loss=0.000195 policy_loss=-0.236640
+[step 01100] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01100] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 01100] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 01100] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 01150] value_loss=0.000113 policy_loss=-0.242699
+[step 01150] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.83 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01200] value_loss=0.000049 policy_loss=-0.233833
+[step 01200] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01200] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 01200] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 01200] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 01250] value_loss=0.000085 policy_loss=-0.239199
+[step 01250] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01300] value_loss=0.000054 policy_loss=-0.224080
+[step 01300] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01300] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 01300] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 01300] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 01350] value_loss=0.000209 policy_loss=-0.235345
+[step 01350] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.83 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01400] value_loss=0.001256 policy_loss=-0.254850
+[step 01400] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.81 std=0.02) reward(mean=0.840 std=0.000) clip=50.0
+[step 01400] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 01400] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 01400] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 01450] value_loss=0.000288 policy_loss=-0.231981
+[step 01450] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01500] value_loss=0.000060 policy_loss=-0.207516
+[step 01500] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01500] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 01500] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 01500] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 01550] value_loss=0.000038 policy_loss=-0.225977
+[step 01550] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01600] value_loss=0.000032 policy_loss=-0.231845
+[step 01600] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 01600] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 01600] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 01600] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 01650] value_loss=0.000338 policy_loss=-0.219865
+[step 01650] VALUE_DEBUG: target(mean=0.84 std=0.02 min=0.74 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.837 std=0.017) clip=50.0
+[step 01700] value_loss=0.000092 policy_loss=-0.228728
+[step 01700] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01700] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 01700] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 01700] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 01750] value_loss=0.000024 policy_loss=-0.214497
+[step 01750] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 01800] value_loss=0.000046 policy_loss=-0.237933
+[step 01800] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 01800] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 01800] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 01800] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 01850] value_loss=0.000009 policy_loss=-0.219678
+[step 01850] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 01900] value_loss=0.000015 policy_loss=-0.223012
+[step 01900] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 01900] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 01900] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 01900] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 01950] value_loss=0.000124 policy_loss=-0.230391
+[step 01950] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 02000] value_loss=0.000034 policy_loss=-0.231178
+[step 02000] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02000] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 02000] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 02000] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.000 score_chg=0.0000
+[Checkpoint] Saved to /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_nv_s41/rl_checkpoint_step_2000.pt
+[step 02050] value_loss=0.000006 policy_loss=-0.233123
+[step 02050] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02100] value_loss=0.000002 policy_loss=-0.221450
+[step 02100] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02100] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 02100] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 02100] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 02150] value_loss=0.000123 policy_loss=-0.245475
+[step 02150] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 02200] value_loss=0.000018 policy_loss=-0.231142
+[step 02200] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02200] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 02200] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 02200] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 02250] value_loss=0.000010 policy_loss=-0.248085
+[step 02250] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02300] value_loss=0.000012 policy_loss=-0.223295
+[step 02300] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02300] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 02300] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 02300] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.000 score_chg=0.0000
+[step 02350] value_loss=0.000014 policy_loss=-0.241661
+[step 02350] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02400] value_loss=0.000251 policy_loss=-0.227347
+[step 02400] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 02400] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 02400] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 02400] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 02450] value_loss=0.000208 policy_loss=-0.206880
+[step 02450] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.83 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 02500] value_loss=0.000055 policy_loss=-0.229723
+[step 02500] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 02500] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 02500] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 02500] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 02550] value_loss=0.000012 policy_loss=-0.223870
+[step 02550] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02600] value_loss=0.000005 policy_loss=-0.245524
+[step 02600] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02600] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 02600] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 02600] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 02650] value_loss=0.000058 policy_loss=-0.226466
+[step 02650] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 02700] value_loss=0.000022 policy_loss=-0.207402
+[step 02700] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02700] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 02700] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 02700] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 02750] value_loss=0.000055 policy_loss=-0.233446
+[step 02750] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 02800] value_loss=0.000089 policy_loss=-0.224466
+[step 02800] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.85 std=0.01) reward(mean=0.840 std=0.000) clip=50.0
+[step 02800] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 02800] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 02800] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 02850] value_loss=0.000015 policy_loss=-0.231814
+[step 02850] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02900] value_loss=0.000004 policy_loss=-0.232757
+[step 02900] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 02900] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 02900] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 02900] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 02950] value_loss=0.000002 policy_loss=-0.221544
+[step 02950] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03000] value_loss=0.000003 policy_loss=-0.227817
+[step 03000] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03000] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 03000] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 03000] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[Checkpoint] Saved to /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_nv_s41/rl_checkpoint_step_3000.pt
+[step 03050] value_loss=0.000004 policy_loss=-0.240431
+[step 03050] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03100] value_loss=0.000029 policy_loss=-0.224030
+[step 03100] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03100] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 03100] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 03100] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 03150] value_loss=0.000006 policy_loss=-0.240083
+[step 03150] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03200] value_loss=0.000002 policy_loss=-0.215549
+[step 03200] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03200] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 03200] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 03200] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.000 score_chg=0.0000
+[step 03250] value_loss=0.000034 policy_loss=-0.230343
+[step 03250] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03300] value_loss=0.000004 policy_loss=-0.228355
+[step 03300] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03300] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 03300] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 03300] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 03350] value_loss=0.000011 policy_loss=-0.223368
+[step 03350] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03400] value_loss=0.000020 policy_loss=-0.222746
+[step 03400] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03400] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 03400] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 03400] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 03450] value_loss=0.000001 policy_loss=-0.223847
+[step 03450] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03500] value_loss=0.000021 policy_loss=-0.236925
+[step 03500] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03500] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 03500] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 03500] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 03550] value_loss=0.000006 policy_loss=-0.219976
+[step 03550] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03600] value_loss=0.000001 policy_loss=-0.222621
+[step 03600] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03600] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 03600] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 03600] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 03650] value_loss=0.000001 policy_loss=-0.235565
+[step 03650] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03700] value_loss=0.000004 policy_loss=-0.216370
+[step 03700] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03700] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 03700] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 03700] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 03750] value_loss=0.000021 policy_loss=-0.231496
+[step 03750] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03800] value_loss=0.000001 policy_loss=-0.247074
+[step 03800] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03800] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 03800] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 03800] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 03850] value_loss=0.000000 policy_loss=-0.216685
+[step 03850] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03900] value_loss=0.000012 policy_loss=-0.231070
+[step 03900] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 03900] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 03900] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 03900] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 03950] value_loss=0.000000 policy_loss=-0.227156
+[step 03950] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04000] value_loss=0.000003 policy_loss=-0.236215
+[step 04000] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04000] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 04000] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 04000] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[Checkpoint] Saved to /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_nv_s41/rl_checkpoint_step_4000.pt
+[step 04050] value_loss=0.000001 policy_loss=-0.223529
+[step 04050] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04100] value_loss=0.000002 policy_loss=-0.236768
+[step 04100] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04100] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 04100] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 04100] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 04150] value_loss=0.000000 policy_loss=-0.218599
+[step 04150] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04200] value_loss=0.000000 policy_loss=-0.242989
+[step 04200] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04200] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 04200] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 04200] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 04250] value_loss=0.000003 policy_loss=-0.233321
+[step 04250] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04300] value_loss=0.000000 policy_loss=-0.215244
+[step 04300] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04300] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 04300] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 04300] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 04350] value_loss=0.000000 policy_loss=-0.212175
+[step 04350] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04400] value_loss=0.000000 policy_loss=-0.247316
+[step 04400] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04400] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 04400] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 04400] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 04450] value_loss=0.000014 policy_loss=-0.239188
+[step 04450] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04500] value_loss=0.000005 policy_loss=-0.231177
+[step 04500] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04500] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 04500] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 04500] DEBUG: ep_len=1.0 ep_ret=0.839 stop_prob=0.001 score_chg=0.0000
+[step 04550] value_loss=0.000000 policy_loss=-0.219414
+[step 04550] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04600] value_loss=0.000000 policy_loss=-0.222520
+[step 04600] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04600] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 04600] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 04600] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 04650] value_loss=0.000002 policy_loss=-0.236408
+[step 04650] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04700] value_loss=0.000000 policy_loss=-0.216889
+[step 04700] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04700] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 04700] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 04700] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 04750] value_loss=0.000001 policy_loss=-0.240663
+[step 04750] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04800] value_loss=0.000000 policy_loss=-0.217871
+[step 04800] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04800] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 04800] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 04800] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 04850] value_loss=0.000001 policy_loss=-0.236066
+[step 04850] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04900] value_loss=0.000001 policy_loss=-0.218908
+[step 04900] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 04900] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 04900] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 04900] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[step 04950] value_loss=0.000003 policy_loss=-0.222804
+[step 04950] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 05000] value_loss=0.000000 policy_loss=-0.230774
+[step 05000] VALUE_DEBUG: target(mean=0.84 std=0.00 min=0.84 max=0.84) V(s)(mean=0.84 std=0.00) reward(mean=0.840 std=0.000) clip=50.0
+[step 05000] eval_success_rate=1.000 eval_mean_score=16.000 eval_policy_mode=greedy [solved=50/50, score_range=16.00-16.00/11.0, initial=16.00]
+[step 05000] PROGRESS: filled=16.00 violations=0.00 zero_cand=0.00
+[step 05000] DEBUG: ep_len=1.0 ep_ret=0.840 stop_prob=0.001 score_chg=0.0000
+[Checkpoint] Saved to /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_nv_s41/rl_checkpoint_step_5000.pt
+[Checkpoint] Saved to /data/repos/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/nc_nv_s41/rl_checkpoint_step_5000.pt
