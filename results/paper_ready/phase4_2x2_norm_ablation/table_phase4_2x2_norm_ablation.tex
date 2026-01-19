@@ -1,0 +1,15 @@
+\begin{table}[t]
+\centering
+\caption{Phase 4: 2×2 Norm Ablation across 3 seeds. C=z$\to$z contraction, V=value-head spectral norm.}
+\label{tab:phase4-2x2-ablation}
+\begin{tabular}{lcccccc}
+\toprule
+Condition & C & V & Var($V$) & Argmax@4$\times$ & Success (trivial) \\
+\midrule
+C-OFF, V-OFF & OFF & OFF & $0.015 \pm 0.003$ & $0.833 \pm 0.033$ & $0.000 \pm 0.000$ \\
+C-OFF, V-ON & OFF & ON & $0.015 \pm 0.003$ & $0.833 \pm 0.033$ & $0.000 \pm 0.000$ \\
+C-ON, V-OFF & ON & OFF & $0.014 \pm 0.003$ & $0.977 \pm 0.017$ & $0.000 \pm 0.000$ \\
+C-ON, V-ON & ON & ON & $0.006 \pm 0.002$ & $0.977 \pm 0.009$ & $0.000 \pm 0.000$ \\
+\bottomrule
+\end{tabular}
+\end{table}

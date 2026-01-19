@@ -1075,3 +1075,44 @@ python_binary(
     base_module = "",
     main_module = "scripts.audit_exp5_tradeoff_curve",
 )
+
+# ============================================================================
+# Phase 4: 2×2 Norm Ablation (Multi-seed)
+# ============================================================================
+
+python_binary(
+    name = "eval_phase4_2x2_norm_ablation",
+    srcs = ["scripts/eval_phase4_2x2_norm_ablation.py"],
+    base_module = "",
+    main_module = "scripts.eval_phase4_2x2_norm_ablation",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/scipy:scipy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_binary(
+    name = "make_paper_figures_phase4",
+    srcs = ["scripts/make_paper_figures_phase4.py"],
+    base_module = "",
+    main_module = "scripts.make_paper_figures_phase4",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)
+
+python_binary(
+    name = "audit_phase4_paper_ready",
+    srcs = ["scripts/audit_phase4_paper_ready.py"],
+    base_module = "",
+    main_module = "scripts.audit_phase4_paper_ready",
+    deps = [
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
