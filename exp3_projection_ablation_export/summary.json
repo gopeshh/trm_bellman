@@ -1,0 +1,149 @@
+{
+  "experiment": "Exp3",
+  "description": "Training-time projection ablation",
+  "generated_at": "2026-01-18T13:29:30.622028",
+  "conditions": [
+    {
+      "name": "nc_r10",
+      "enable_contraction": false,
+      "latent_ball_radius": 10.0,
+      "seeds": [
+        42
+      ],
+      "training": {
+        "final_success_rate": 0.94,
+        "max_success_rate": 0.96,
+        "had_nan": false,
+        "final_value_loss": 6.826702,
+        "projection_active_rate": NaN,
+        "L_preproj": NaN,
+        "L_postproj": NaN,
+        "mean_latent_norm": null
+      },
+      "unroll_metrics": [],
+      "delta_V_2_16": 0.0,
+      "argmax_agree_2_16": 0.0,
+      "g1_passed": 1,
+      "g2_passed": 0
+    },
+    {
+      "name": "nc_r100",
+      "enable_contraction": false,
+      "latent_ball_radius": 100.0,
+      "seeds": [
+        42
+      ],
+      "training": {
+        "final_success_rate": 0.96,
+        "max_success_rate": 0.96,
+        "had_nan": false,
+        "final_value_loss": 0.773846,
+        "projection_active_rate": NaN,
+        "L_preproj": NaN,
+        "L_postproj": NaN,
+        "mean_latent_norm": null
+      },
+      "unroll_metrics": [],
+      "delta_V_2_16": 0.0,
+      "argmax_agree_2_16": 0.0,
+      "g1_passed": 1,
+      "g2_passed": 0
+    },
+    {
+      "name": "nc_rdis",
+      "enable_contraction": false,
+      "latent_ball_radius": 0.0,
+      "seeds": [
+        42
+      ],
+      "training": {
+        "final_success_rate": 0.96,
+        "max_success_rate": 0.96,
+        "had_nan": false,
+        "final_value_loss": 0.773846,
+        "projection_active_rate": NaN,
+        "L_preproj": NaN,
+        "L_postproj": NaN,
+        "mean_latent_norm": null
+      },
+      "unroll_metrics": [],
+      "delta_V_2_16": 0.0,
+      "argmax_agree_2_16": 0.0,
+      "g1_passed": 1,
+      "g2_passed": true
+    },
+    {
+      "name": "c_r10",
+      "enable_contraction": true,
+      "latent_ball_radius": 10.0,
+      "seeds": [
+        42
+      ],
+      "training": {
+        "final_success_rate": 0.98,
+        "max_success_rate": 1.0,
+        "had_nan": false,
+        "final_value_loss": 11.325722,
+        "projection_active_rate": NaN,
+        "L_preproj": NaN,
+        "L_postproj": NaN,
+        "mean_latent_norm": null
+      },
+      "unroll_metrics": [],
+      "delta_V_2_16": 0.0,
+      "argmax_agree_2_16": 0.0,
+      "g1_passed": 1,
+      "g2_passed": 0
+    },
+    {
+      "name": "c_r100",
+      "enable_contraction": true,
+      "latent_ball_radius": 100.0,
+      "seeds": [
+        42
+      ],
+      "training": {
+        "final_success_rate": 0.96,
+        "max_success_rate": 0.96,
+        "had_nan": false,
+        "final_value_loss": 21.734909,
+        "projection_active_rate": NaN,
+        "L_preproj": NaN,
+        "L_postproj": NaN,
+        "mean_latent_norm": null
+      },
+      "unroll_metrics": [],
+      "delta_V_2_16": 0.0,
+      "argmax_agree_2_16": 0.0,
+      "g1_passed": 1,
+      "g2_passed": 0
+    },
+    {
+      "name": "c_rdis",
+      "enable_contraction": true,
+      "latent_ball_radius": 0.0,
+      "seeds": [
+        42
+      ],
+      "training": {
+        "final_success_rate": 0.96,
+        "max_success_rate": 0.96,
+        "had_nan": false,
+        "final_value_loss": 21.734909,
+        "projection_active_rate": NaN,
+        "L_preproj": NaN,
+        "L_postproj": NaN,
+        "mean_latent_norm": null
+      },
+      "unroll_metrics": [],
+      "delta_V_2_16": 0.0,
+      "argmax_agree_2_16": 0.0,
+      "g1_passed": 1,
+      "g2_passed": true
+    }
+  ],
+  "gates": {
+    "g1_passed": 6,
+    "g1_total": 6
+  }
+}
