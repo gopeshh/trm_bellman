@@ -973,3 +973,33 @@ python_binary(
         "fbsource//third-party/pypi/scipy:scipy",
     ],
 )
+
+python_binary(
+    name = "exp4_final",
+    srcs = ["scripts/exp4_final.py"],
+    base_module = "",
+    main_module = "scripts.exp4_final",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/scipy:scipy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_binary(
+    name = "audit_exp4_range_test",
+    srcs = ["scripts/audit_exp4_range_test.py"],
+    base_module = "",
+    main_module = "scripts.audit_exp4_range_test",
+)
+
+python_binary(
+    name = "audit_exp4_final_paper_ready",
+    srcs = ["scripts/audit_exp4_final_paper_ready.py"],
+    base_module = "",
+    main_module = "scripts.audit_exp4_final_paper_ready",
+)
