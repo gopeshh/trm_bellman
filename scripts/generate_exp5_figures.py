@@ -26,10 +26,21 @@ def load_summary(summary_path: str) -> Dict[str, Any]:
 
 
 def generate_tradeoff_plot(summary: Dict[str, Any], out_path: Path) -> None:
-    """Generate stability vs expressivity tradeoff plot."""
+    """Generate stability vs expressivity tradeoff plot.
+    
+    Axes (explicit n-values, not "8×"):
+    - X: Argmax agreement (n_train=2 → n_eval=16) [%]
+    - Y: Task success on trivial 4×4 suite (1–4 empties; N=100; T=20) [%]
+    
+    Visual design:
+    - Per-seed points: faint gray (background)
+    - Scale means: colored markers with error bars (foreground)
+    - Dashed line connecting means ordered by scale
+    """
     try:
         import matplotlib.pyplot as plt
         import matplotlib
+        import matplotlib.ticker as mticker
         matplotlib.use('Agg')
     except ImportError:
         print("[Warning] matplotlib not available, skipping plot")
@@ -40,61 +51,115 @@ def generate_tradeoff_plot(summary: Dict[str, Any], out_path: Path) -> None:
         print("[Warning] No results to plot")
         return
 
+    # Get eval parameters from summary
+    params = summary.get("parameters", {})
+    n_train = params.get("n_train", 2)
+    n_episodes = params.get("success_n_episodes", 100)
+    max_steps = params.get("success_max_steps", 20)
+    # n_eval = 8 * n_train for "8×" mismatch
+    n_eval = 8 * n_train
+
     # Extract data
     scales = sorted(set(r["scale"] for r in all_results), reverse=True)
-    seeds = sorted(set(r["checkpoint_seed"] for r in all_results))
 
-    # Colors and markers by scale
+    # Colors for scale means (viridis palette)
     colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(scales)))
     scale_to_color = {s: c for s, c in zip(scales, colors)}
     markers = ['o', 's', '^', 'D']
     scale_to_marker = {s: m for s, m in zip(scales, markers)}
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    # ICML single-column: 3.25 in wide
+    ICML_COL_IN = 3.25
+    fig, ax = plt.subplots(figsize=(ICML_COL_IN, 2.2), constrained_layout=True)
 
-    # Plot individual points
+    # Convert to percentage
+    x_all = np.array([100.0 * r["argmax_b0_8x"] for r in all_results])
+    y_all = np.array([100.0 * r["success_trivial"] for r in all_results])
+
+    # 1) Plot individual per-seed points: FAINT GRAY (background)
     for r in all_results:
         ax.scatter(
-            r["argmax_b0_8x"], r["success_trivial"],
-            c=[scale_to_color[r["scale"]]],
-            marker=scale_to_marker[r["scale"]],
-            s=80, alpha=0.7, edgecolors='black', linewidth=0.5
+            100.0 * r["argmax_b0_8x"], 100.0 * r["success_trivial"],
+            c='0.7',  # light gray
+            marker='o',
+            s=18, alpha=0.5, edgecolors='0.5', linewidth=0.3,
+            zorder=1
         )
 
-    # Plot scale means with error bars
+    # 2) Compute scale means and plot: COLORED with error bars (foreground)
     scale_sums = summary.get("scale_summaries", [])
-    for s in scale_sums:
+    # Sort by scale descending for connecting line
+    scale_sums_sorted = sorted(scale_sums, key=lambda x: -x["scale"])
+
+    means_x = []
+    means_y = []
+    for s in scale_sums_sorted:
+        xm = 100.0 * s["argmax_b0_8x_mean"]
+        ym = 100.0 * s["success_trivial_mean"]
+        xerr = 100.0 * s["argmax_b0_8x_std"]
+        yerr = 100.0 * s["success_trivial_std"]
+        means_x.append(xm)
+        means_y.append(ym)
+
+        # Error bars
         ax.errorbar(
-            s["argmax_b0_8x_mean"], s["success_trivial_mean"],
-            xerr=s["argmax_b0_8x_std"], yerr=s["success_trivial_std"],
-            fmt='none', color='gray', alpha=0.5, capsize=3
+            xm, ym,
+            xerr=xerr, yerr=yerr,
+            fmt='none', color=scale_to_color[s["scale"]], alpha=0.8,
+            capsize=2, elinewidth=1.0, capthick=0.8,
+            zorder=3
+        )
+        # Colored mean marker
+        ax.scatter(
+            xm, ym,
+            c=[scale_to_color[s["scale"]]],
+            marker=scale_to_marker[s["scale"]],
+            s=50, edgecolors='black', linewidth=0.6,
+            zorder=4
         )
 
-    # Connect means with line
-    means_x = [s["argmax_b0_8x_mean"] for s in sorted(scale_sums, key=lambda x: -x["scale"])]
-    means_y = [s["success_trivial_mean"] for s in sorted(scale_sums, key=lambda x: -x["scale"])]
-    ax.plot(means_x, means_y, 'k--', alpha=0.5, linewidth=1)
+    # 3) Connect means with dashed line (ordered by scale)
+    ax.plot(means_x, means_y, 'k--', alpha=0.4, linewidth=1.0, zorder=2)
 
-    # Labels
-    ax.set_xlabel('Stability: Argmax Agreement @ 4× Depth Mismatch', fontsize=12)
-    ax.set_ylabel('Expressivity: Success Rate (trivial)', fontsize=12)
-    ax.set_title('Stability–Expressivity Tradeoff Curve', fontsize=14)
-
-    # Legend for scales
-    legend_elements = []
-    for scale in scales:
-        legend_elements.append(
-            plt.Line2D([0], [0], marker=scale_to_marker[scale], color='w',
-                      markerfacecolor=scale_to_color[scale],
-                      markersize=10, label=f'Scale {scale:.2f}')
+    # 4) Annotate scale values near means
+    for s in scale_sums_sorted:
+        xm = 100.0 * s["argmax_b0_8x_mean"]
+        ym = 100.0 * s["success_trivial_mean"]
+        ax.annotate(
+            f's={s["scale"]:.2f}',
+            (xm, ym),
+            xytext=(4, 4),
+            textcoords="offset points",
+            fontsize=6,
+            color='0.15',
+            zorder=5
         )
-    ax.legend(handles=legend_elements, loc='best', fontsize=10)
 
-    ax.grid(True, alpha=0.3)
-    ax.set_xlim([0.7, 1.0])
-    ax.set_ylim([0.0, 1.0])
+    # Axis labels: explicit n-values, units in brackets
+    ax.set_xlabel(
+        f'Argmax agreement ($n_{{\\mathrm{{train}}}}$={n_train} → $n_{{\\mathrm{{eval}}}}$={n_eval}) [%]',
+        fontsize=8
+    )
+    ax.set_ylabel(
+        f'Task success (4×4 trivial; N={n_episodes}; T={max_steps}) [%]',
+        fontsize=8
+    )
 
-    plt.tight_layout()
+    ax.grid(True, alpha=0.3, linewidth=0.6)
+
+    # Tight y-axis limits based on data
+    ymin, ymax = y_all.min(), y_all.max()
+    pad = max(0.5, 0.15 * (ymax - ymin))  # at least 0.5 pp padding
+    ax.set_ylim(max(0.0, ymin - pad), min(100.0, ymax + pad))
+    ax.yaxis.set_major_locator(mticker.MaxNLocator(5))
+
+    # Tight x-axis limits
+    xmin, xmax = x_all.min(), x_all.max()
+    ax.set_xlim(max(0.0, xmin - 2), min(100.0, xmax + 2))
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(5))
+
+    # Tick font sizes for single-column
+    ax.tick_params(axis='both', labelsize=7)
 
     # Save
     pdf_path = out_path / "fig_exp5_tradeoff_curve.pdf"
@@ -109,10 +174,15 @@ def generate_tradeoff_plot(summary: Dict[str, Any], out_path: Path) -> None:
 
 
 def generate_L_vs_metrics_plot(summary: Dict[str, Any], out_path: Path) -> None:
-    """Generate L_preproj vs stability/success dual-axis plot."""
+    """Generate L_preproj vs stability/success dual-axis plot.
+    
+    Shows how achieved Lipschitz constant relates to both stability and success.
+    Uses explicit n-values in axis labels for consistency.
+    """
     try:
         import matplotlib.pyplot as plt
         import matplotlib
+        import matplotlib.ticker as mticker
         matplotlib.use('Agg')
     except ImportError:
         return
@@ -121,41 +191,56 @@ def generate_L_vs_metrics_plot(summary: Dict[str, Any], out_path: Path) -> None:
     if not scale_sums:
         return
 
+    # Get eval parameters from summary
+    params = summary.get("parameters", {})
+    n_train = params.get("n_train", 2)
+    n_eval = 8 * n_train
+
     # Sort by scale (descending)
     scale_sums = sorted(scale_sums, key=lambda x: -x["scale"])
 
-    L_preproj = [s["L_preproj_mean"] for s in scale_sums]
-    stability = [s["argmax_b0_8x_mean"] for s in scale_sums]
-    success = [s["success_trivial_mean"] for s in scale_sums]
+    L_preproj = np.array([s["L_preproj_mean"] for s in scale_sums])
+    stability_pct = np.array([100.0 * s["argmax_b0_8x_mean"] for s in scale_sums])
+    success_pct = np.array([100.0 * s["success_trivial_mean"] for s in scale_sums])
     scales = [s["scale"] for s in scale_sums]
 
-    fig, ax1 = plt.subplots(figsize=(8, 5))
+    # ICML single-column width
+    ICML_COL_IN = 3.25
+    fig, ax1 = plt.subplots(figsize=(ICML_COL_IN, 2.2), constrained_layout=True)
 
-    # Plot stability on left axis
+    # Plot stability on left axis (percentage)
     color1 = 'steelblue'
-    ax1.set_xlabel('$\\hat{L}_{\\text{preproj}}$ (Achieved Lipschitz)', fontsize=12)
-    ax1.set_ylabel('Stability (Argmax Agreement)', color=color1, fontsize=12)
-    line1, = ax1.plot(L_preproj, stability, 'o-', color=color1, linewidth=2, markersize=8, label='Stability')
-    ax1.tick_params(axis='y', labelcolor=color1)
+    ax1.set_xlabel(r'$\hat{L}_{\mathrm{preproj}}$ (achieved Lipschitz)', fontsize=8)
+    ax1.set_ylabel(
+        f'Argmax agreement [%]\n($n$={n_train}→{n_eval})',
+        color=color1, fontsize=7
+    )
+    line1, = ax1.plot(L_preproj, stability_pct, 'o-', color=color1, linewidth=1.5, markersize=5)
+    ax1.tick_params(axis='y', labelcolor=color1, labelsize=7)
+    ax1.tick_params(axis='x', labelsize=7)
 
     # Create second y-axis for success
     ax2 = ax1.twinx()
     color2 = 'darkgreen'
-    ax2.set_ylabel('Success Rate', color=color2, fontsize=12)
-    line2, = ax2.plot(L_preproj, success, 's--', color=color2, linewidth=2, markersize=8, label='Success')
-    ax2.tick_params(axis='y', labelcolor=color2)
+    ax2.set_ylabel('Task success [%]', color=color2, fontsize=8)
+    line2, = ax2.plot(L_preproj, success_pct, 's--', color=color2, linewidth=1.5, markersize=5)
+    ax2.tick_params(axis='y', labelcolor=color2, labelsize=7)
 
-    # Add scale annotations
-    for i, (lp, stab, succ, s) in enumerate(zip(L_preproj, stability, success, scales)):
-        ax1.annotate(f's={s}', (lp, stab), textcoords="offset points", xytext=(5, 5), fontsize=8)
+    # Zoom success axis to observed range
+    pad = max(0.5, 0.15 * (success_pct.max() - success_pct.min()))
+    ax2.set_ylim(max(0.0, success_pct.min() - pad), min(100.0, success_pct.max() + pad))
+    ax2.yaxis.set_major_locator(mticker.MaxNLocator(4))
 
-    # Combined legend
-    ax1.legend([line1, line2], ['Stability', 'Success'], loc='center right')
+    # Add scale annotations (on stability line)
+    for lp, stab, s in zip(L_preproj, stability_pct, scales):
+        ax1.annotate(f's={s}', (lp, stab), textcoords="offset points", xytext=(3, 3), fontsize=6)
 
-    ax1.set_title('Stability–Expressivity vs Achieved Lipschitz', fontsize=14)
-    ax1.grid(True, alpha=0.3)
+    # Compact legend
+    ax1.legend([line1, line2], ['Stability', 'Success'],
+               loc='lower right', fontsize=6, frameon=True, borderpad=0.3,
+               handlelength=1.2, handletextpad=0.4)
 
-    plt.tight_layout()
+    ax1.grid(True, alpha=0.3, linewidth=0.6)
 
     pdf_path = out_path / "fig_exp5_L_vs_metrics.pdf"
     plt.savefig(pdf_path, format='pdf', bbox_inches='tight', dpi=300)

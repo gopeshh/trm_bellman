@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-19
 **Branch:** `feature/upi-trm-clean`
-**Latest Commit:** `3dd04c6` - Exp5: Stability–Expressivity Tradeoff Curve (9/9 audit PASS)
+**Latest Commit:** `637711d` - Phase 4: 2x2 Norm Ablation (11/11 audit PASS)
 
 ---
 
@@ -16,6 +16,16 @@ Spectral-norm contraction on the z→z update map should provide stable value fu
 ---
 
 ## Current State: Experiments Finalized
+
+### Phase 4: 2×2 Norm Ablation (COMPLETE ✅) - NEW
+- **Location:** `results/paper_ready/phase4_2x2_norm_ablation/`
+- **Status:** 11/11 audit checks pass
+- **Design:** 2×2 factorial (z→z contraction × value-head norm) × 3 seeds = 12 runs
+- **Critical Finding:** **z→z contraction is the primary stabilizer**
+  - Contraction ON: ~97% argmax agreement, L_preproj ~0.46
+  - Contraction OFF: ~78-83% argmax agreement, L_preproj ~0.58
+  - Value-head norm effect minimal in this training regime
+  - No NaNs in any condition
 
 ### Exp1: No Contraction vs Contraction (COMPLETE ✅)
 - **Location:** `results/paper_ready/exp1/`
@@ -64,23 +74,39 @@ Spectral-norm contraction on the z→z update map should provide stable value fu
 
 ---
 
+## Phase 4 Summary Table
+
+| Condition | z→z | V-head | L̂_z | Argmax@4× | Argmax@8× |
+|-----------|-----|--------|-----|-----------|-----------|
+| nc_nv | OFF | OFF | 0.585 | 83.3% | 77.7% |
+| nc_yv | OFF | ON | 0.589 | 83.3% | 77.7% |
+| yc_nv | ON | OFF | 0.465 | **97.7%** | **97.7%** |
+| yc_yv | ON | ON | 0.460 | **97.7%** | 97.0% |
+
+**Conclusion:** z→z contraction is the dominant factor for stability.
+
+---
+
 ## Key Technical Findings
 
-### 1. Projection Dominance (Exp2)
+### 1. z→z Contraction is Primary Stabilizer (Phase 4) ⭐ NEW
+The 2×2 ablation definitively shows that z→z contraction provides ~97% argmax agreement vs ~78-83% without, regardless of value-head normalization setting.
+
+### 2. Projection Dominance (Exp2)
 At training radius R=10, projection is **always active** (100%), masking underlying contraction differences. This is the primary stabilizer when projection is on.
 
-### 2. Dial Failure WITH Projection (Exp2)
+### 3. Dial Failure WITH Projection (Exp2)
 The spectral-norm "dial" on target_Lz does not produce proportional changes in observed L_z when projection is active:
 - L_preproj varies only ~0.064 across dial settings
 - Architecture prevents meaningful L_z control through this mechanism
 
-### 3. Dial SUCCESS WITHOUT Projection (Exp4) ⭐
+### 4. Dial SUCCESS WITHOUT Projection (Exp4) ⭐
 When projection is disabled (R=0):
 - L_preproj varies 0.695 across scale factors {1.0, 0.85, 0.70, 0.55}
 - Strong negative correlation between L_preproj and argmax agreement
 - The dial provides meaningful control over contraction strength
 
-### 4. Training Stability Without Projection (Exp3)
+### 5. Training Stability Without Projection (Exp3)
 Models can be trained stably without projection (R=0), enabling the Exp4 dial experiment.
 
 ---
@@ -95,26 +121,53 @@ Figures and tables copied to paper directory:
 │   ├── fig_exp2_projection_is_primary_stabilizer.pdf
 │   ├── fig_exp4_dial_scatter.pdf           # L_preproj vs argmax scatter
 │   ├── fig_exp4_scale_comparison.pdf       # bar chart by scale
-│   ├── fig_exp5_tradeoff_curve.pdf         # NEW: stability vs expressivity tradeoff
-│   └── fig_exp5_L_vs_metrics.pdf           # NEW: L_preproj vs metrics dual-axis
+│   ├── fig_exp5_tradeoff_curve.pdf         # stability vs expressivity tradeoff
+│   ├── fig_exp5_L_vs_metrics.pdf           # L_preproj vs metrics dual-axis
+│   ├── fig_phase4_2x2_norm_ablation.pdf    # NEW: Phase 4 main figure
+│   └── fig_phase4_bar_comparison.pdf       # NEW: Phase 4 bar chart
 └── tables/
     ├── table_exp2_dial_does_not_control_Lz.tex
     ├── table_exp2_projection_effect.tex
-    ├── table_exp4_projection_free_dial_v2.tex  # Exp4 dial results
-    └── table_exp5_tradeoff_curve.tex       # NEW: Exp5 scale results
+    ├── table_exp4_projection_free_dial_v2.tex
+    ├── table_exp5_tradeoff_curve.tex
+    └── table_phase4_2x2_norm_ablation.tex  # NEW: Phase 4 results
 ```
 
 **Note:** `fig_exp4_projection_free_dial_v2.pdf` is stale/duplicate - use `fig_exp4_dial_scatter.pdf` instead.
 
 ---
 
-## Exp4 Figures Summary
+## Phase 4 Scripts
 
-| Figure | Content | Use |
-|--------|---------|-----|
-| `fig_exp4_dial_scatter.pdf` | L_preproj vs Argmax scatter (B0, B1 panels), colored by seed, shaped by scale, with trend line | Main figure |
-| `fig_exp4_scale_comparison.pdf` | Bar chart of L_preproj and Argmax by scale (aggregated means ± std) | Supplementary |
-| `fig_exp4_projection_free_dial_v2.pdf` | Older version, superseded | DELETE |
+| Script | Purpose |
+|--------|---------|
+| `scripts/run_phase4_training.py` | GPU-parallelized training (4 GPUs, 12 jobs) |
+| `scripts/eval_phase4_2x2_norm_ablation.py` | Evaluation: stability metrics |
+| `scripts/make_paper_figures_phase4.py` | Generate Phase 4 figures and table |
+| `scripts/audit_phase4_paper_ready.py` | Audit script (11 checks) |
+
+### BUCK Targets
+- `//buiksat_trm:eval_phase4_2x2_norm_ablation`
+- `//buiksat_trm:make_paper_figures_phase4`
+- `//buiksat_trm:audit_phase4_paper_ready`
+
+---
+
+## Key Scripts (All Experiments)
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/run_phase4_training.py` | Phase 4 training with GPU parallelization |
+| `scripts/eval_phase4_2x2_norm_ablation.py` | Phase 4 evaluation |
+| `scripts/exp5_tradeoff_curve.py` | Exp5 stability-expressivity tradeoff evaluation |
+| `scripts/generate_exp5_figures.py` | Generate Exp5 tradeoff curve and dual-axis plots |
+| `scripts/audit_exp5_tradeoff_curve.py` | Audit for Exp5 (9 checks) |
+| `scripts/exp4_final_v2.py` | Exp4 multi-checkpoint evaluation with cluster bootstrap |
+| `scripts/generate_exp4_figures.py` | Generate Exp4 scatter plot and bar chart |
+| `scripts/audit_exp4_final_v2.py` | Audit for Exp4 (11 checks) |
+| `scripts/exp1_lipschitz_diag.py` | Exp1 L_preproj/L_postproj diagnostic |
+| `scripts/make_paper_figures_exp2_final.py` | Generate Exp2 paper figures |
+| `scripts/eval_unroll_sensitivity.py` | Core evaluation infrastructure |
 
 ---
 
@@ -147,25 +200,11 @@ checkpoints/
 │   └── model_b/seed{41,42,43}/model_step_5000.pt        # Contraction
 ├── exp2_contraction_sweep/
 │   └── lz{0999,099,095}/seed{41,42,43}/model_step_5000.pt
-└── results/exp3_v2/                                      # Exp3 no-projection models
-    └── nc_rdis_s{41,42,43}/model_step_5000.pt           # Used for Exp4
+├── results/exp3_v2/                                      # Exp3 no-projection models
+│   └── nc_rdis_s{41,42,43}/model_step_5000.pt           # Used for Exp4
+└── /home/buiksat/fbsource/fbcode/buiksat_trm/results/phase4_2x2_norm_ablation/
+    └── {nc_nv,nc_yv,yc_nv,yc_yv}_s{41,42,43}/model_step_5000.pt  # Phase 4
 ```
-
----
-
-## Key Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `scripts/exp5_tradeoff_curve.py` | Exp5 stability-expressivity tradeoff evaluation |
-| `scripts/generate_exp5_figures.py` | Generate Exp5 tradeoff curve and dual-axis plots |
-| `scripts/audit_exp5_tradeoff_curve.py` | Audit for Exp5 (9 checks) |
-| `scripts/exp4_final_v2.py` | Exp4 multi-checkpoint evaluation with cluster bootstrap |
-| `scripts/generate_exp4_figures.py` | Generate Exp4 scatter plot and bar chart |
-| `scripts/audit_exp4_final_v2.py` | Audit for Exp4 (11 checks) |
-| `scripts/exp1_lipschitz_diag.py` | Exp1 L_preproj/L_postproj diagnostic |
-| `scripts/make_paper_figures_exp2_final.py` | Generate Exp2 paper figures |
-| `scripts/eval_unroll_sensitivity.py` | Core evaluation infrastructure |
 
 ---
 
@@ -183,13 +222,40 @@ checkpoints/
 
 ## What's Next (Potential)
 
-1. **Paper Writing:** Integrate Exp5 tradeoff curve as submission-critical deliverable
-2. **Clean up paper repo:** Delete stale `fig_exp4_projection_free_dial_v2.pdf`
-3. **Success Rate Investigation:** Exp5 shows tradeoff exists but success variation is shallow (0.01 range)
+1. **Paper Writing:** Integrate Phase 4 ablation and Exp5 tradeoff curve as submission-critical deliverables
+2. **Push Commit:** `git push` (blocked by network restrictions in this session)
+3. **Export to Paper Repo:** Copy Phase 4 figures/tables to paper directory
+4. **Success Rate Investigation:** Exp5 shows tradeoff exists but success variation is shallow (0.01 range)
 
 ---
 
 ## Commands Reference
+
+### Run Phase 4 Evaluation
+```bash
+cd ~/fbsource/fbcode
+buck2 run //buiksat_trm:eval_phase4_2x2_norm_ablation \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only \
+  -- --checkpoint_dir /path/to/checkpoints \
+     --config_dir /path/to/configs/phase4_2x2_norm_ablation \
+     --data_dir /path/to/data \
+     --out_dir results/paper_ready/phase4_2x2_norm_ablation
+```
+
+### Generate Phase 4 Figures
+```bash
+buck2 run //buiksat_trm:make_paper_figures_phase4 \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true \
+  -- --summary_json results/paper_ready/phase4_2x2_norm_ablation/summary.json
+```
+
+### Run Phase 4 Audit
+```bash
+buck2 run //buiksat_trm:audit_phase4_paper_ready \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true \
+  -- --results_dir results/paper_ready/phase4_2x2_norm_ablation \
+     --config_dir configs/phase4_2x2_norm_ablation
+```
 
 ### Run Exp5 Evaluation
 ```bash
@@ -234,9 +300,10 @@ buck2 run //buiksat_trm:audit_exp2_final_paper_ready ...
 
 1. `CLAUDE.md` - Operational guidance, non-negotiables
 2. `EXPERIMENT_PLAN_ICML.md` - Full experiment plan with status
-3. `results/paper_ready/exp5_tradeoff_curve/CLAIMS.md` - Exp5 tradeoff curve claims
-4. `results/paper_ready/exp4_projection_free_dial_v2/CLAIMS.md` - Exp4 positive claims
-5. `results/paper_ready/exp2_final/CLAIMS.md` - Exp2 negative claims
+3. `results/paper_ready/phase4_2x2_norm_ablation/CLAIMS.md` - Phase 4 ablation claims (NEW)
+4. `results/paper_ready/exp5_tradeoff_curve/CLAIMS.md` - Exp5 tradeoff curve claims
+5. `results/paper_ready/exp4_projection_free_dial_v2/CLAIMS.md` - Exp4 positive claims
+6. `results/paper_ready/exp2_final/CLAIMS.md` - Exp2 negative claims
 
 ---
 
@@ -244,7 +311,9 @@ buck2 run //buiksat_trm:audit_exp2_final_paper_ready ...
 
 | Commit | Description |
 |--------|-------------|
-| `3dd04c6` | Exp5: Stability–Expressivity Tradeoff Curve (9/9 audit PASS) |
+| `637711d` | Phase 4: 2x2 Norm Ablation (11/11 audit PASS) - NEW |
+| `3ce240f` | Merge remote changes, resolve conflict in EXPERIMENT_PLAN_ICML.md |
+| `231f019` | Exp5: Stability–Expressivity Tradeoff Curve (9/9 audit PASS) |
 | `b308272` | Fix Exp4 LaTeX table: use bootstrap rho/CI instead of missing legacy keys |
 | `6b7e8bb` | Exp4 v2: Paper-defensible dial with cluster bootstrap (11/11 audit PASS) |
 | `6fede63` | Exp4 v2: Multi-checkpoint dial (N=12, 10/10 audit PASS) |
@@ -256,13 +325,17 @@ buck2 run //buiksat_trm:audit_exp2_final_paper_ready ...
 
 ---
 
-## Bug Fixed This Session
+## This Session Summary
 
-**Issue:** LaTeX table `table_exp4_projection_free_dial_v2.tex` showed ρ=0.000 instead of ρ=-0.866
+**Completed Phase 4: 2×2 Norm Ablation**
+- Created 4 config files: `nc_nv.yaml`, `nc_yv.yaml`, `yc_nv.yaml`, `yc_yv.yaml`
+- Ran 12 training jobs (4 conditions × 3 seeds) on 4 GPUs
+- Evaluated all checkpoints for stability metrics
+- Generated figures and LaTeX table
+- Passed 11/11 audit checks
+- Key finding: **z→z contraction is the primary stabilizer** (~97% vs ~78% argmax agreement)
 
-**Cause:** `generate_exp4_figures.py` was looking for old keys (`mono["rho_aa_b0"]`) that didn't exist in bootstrap format (`mono["boot_aa_b0"]["rho_point"]`)
-
-**Fix:** Updated script to read bootstrap format with 95% CIs, falls back to legacy p-value format for backwards compatibility.
+**Pending:** `git push` (blocked by network restrictions - push manually)
 
 ---
 
