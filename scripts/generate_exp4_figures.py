@@ -137,13 +137,35 @@ def generate_latex_table(summary: Dict[str, Any], out_path: Path) -> None:
     scale_sums = summary.get("scale_summaries", [])
     mono = summary.get("monotonicity", {})
 
+    # Extract bootstrap results (new format) or fall back to old format
+    boot_b0 = mono.get("boot_aa_b0", {})
+    boot_b1 = mono.get("boot_aa_b1", {})
+
+    # Check which format we have
+    if boot_b0:
+        # New bootstrap format with CIs
+        rho_b0 = boot_b0.get("rho_point", 0)
+        ci_lo_b0 = boot_b0.get("rho_ci_lower", 0)
+        ci_hi_b0 = boot_b0.get("rho_ci_upper", 0)
+        rho_b1 = boot_b1.get("rho_point", 0)
+        ci_lo_b1 = boot_b1.get("rho_ci_lower", 0)
+        ci_hi_b1 = boot_b1.get("rho_ci_upper", 0)
+        use_bootstrap = True
+    else:
+        # Legacy format with p-values
+        rho_b0 = mono.get("rho_aa_b0", 0)
+        rho_b1 = mono.get("rho_aa_b1", 0)
+        p_b0 = mono.get("p_aa_b0", 1)
+        p_b1 = mono.get("p_aa_b1", 1)
+        use_bootstrap = False
+
     content = r"""\begin{table}[t]
 \centering
 \caption{Exp4: Inference-time contraction dial results. %s}
 \label{tab:exp4-dial}
 \begin{tabular}{lccccc}
 \toprule
-Scale & $\hat{L}_{\text{preproj}}$ & Argmax@8$\times$ (B0) & Argmax@8$\times$ (B1) & $\Delta V$@8$\times$ (B0) & Entropy \\
+Scale & $\hat{L}_{\text{preproj}}$ & Argmax (n2=8) B0 & Argmax (n2=8) B1 & $\Delta V$ (n2=8) B0 & Entropy \\
 \midrule
 """ % summary.get("decision", "")
 
@@ -155,14 +177,22 @@ Scale & $\hat{L}_{\text{preproj}}$ & Argmax@8$\times$ (B0) & Argmax@8$\times$ (B
         content += f"${s['delta_V_b0_8x_mean']:.3f}$ & "
         content += f"${s['entropy_train_mean']:.2f}$ \\\\\n"
 
-    content += r"""\midrule
-\multicolumn{6}{l}{\small Spearman $\rho$ (B0 Argmax@8$\times$): $\rho=%.3f$ ($p=%.4f$)} \\
-\multicolumn{6}{l}{\small Spearman $\rho$ (B1 Argmax@8$\times$): $\rho=%.3f$ ($p=%.4f$)} \\
+    if use_bootstrap:
+        content += r"""\midrule
+\multicolumn{6}{l}{\small Spearman $\rho$ (B0 Argmax, n2=8): $\rho=%.3f$ [95\%% CI: %.3f, %.3f]} \\
+\multicolumn{6}{l}{\small Spearman $\rho$ (B1 Argmax, n2=8): $\rho=%.3f$ [95\%% CI: %.3f, %.3f]} \\
 \bottomrule
 \end{tabular}
 \end{table}
-""" % (mono.get("rho_aa_b0", 0), mono.get("p_aa_b0", 1),
-       mono.get("rho_aa_b1", 0), mono.get("p_aa_b1", 1))
+""" % (rho_b0, ci_lo_b0, ci_hi_b0, rho_b1, ci_lo_b1, ci_hi_b1)
+    else:
+        content += r"""\midrule
+\multicolumn{6}{l}{\small Spearman $\rho$ (B0 Argmax, n2=8): $\rho=%.3f$ ($p=%.4f$)} \\
+\multicolumn{6}{l}{\small Spearman $\rho$ (B1 Argmax, n2=8): $\rho=%.3f$ ($p=%.4f$)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+""" % (rho_b0, p_b0, rho_b1, p_b1)
 
     tex_path = out_path / "fig_exp4_dial_latex.tex"
     with open(tex_path, "w") as f:
