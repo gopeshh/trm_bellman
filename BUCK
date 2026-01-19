@@ -1003,3 +1003,38 @@ python_binary(
     base_module = "",
     main_module = "scripts.audit_exp4_final_paper_ready",
 )
+
+python_binary(
+    name = "exp4_final_v2",
+    srcs = ["scripts/exp4_final_v2.py"],
+    base_module = "",
+    main_module = "scripts.exp4_final_v2",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/scipy:scipy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_binary(
+    name = "generate_exp4_figures",
+    srcs = ["scripts/generate_exp4_figures.py"],
+    base_module = "",
+    main_module = "scripts.generate_exp4_figures",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/scipy:scipy",
+    ],
+)
+
+python_binary(
+    name = "audit_exp4_final_v2",
+    srcs = ["scripts/audit_exp4_final_v2.py"],
+    base_module = "",
+    main_module = "scripts.audit_exp4_final_v2",
+)
