@@ -1026,9 +1026,119 @@ buck2 run //buiksat_trm:audit_exp4_final_v2   # Audit verification (11 checks)
 ### Paper Export
 
 Figures and tables exported to:
-- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp4_projection_free_dial_v2.pdf`
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp4_dial_scatter.pdf`
 - `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp4_scale_comparison.pdf`
 - `/home/buiksat/UPI_TRM/UPI_TRM_ICML/tables/table_exp4_projection_free_dial_v2.tex`
+
+---
+
+## Exp5: Stability–Expressivity Tradeoff Curve (Submission-Critical)
+
+**Date Added:** 2026-01-18
+**Status:** IN PROGRESS
+**Context:** Exp4 v2 established a working projection-free dial via inference-time scaling. This experiment produces the submission-critical "stability vs expressivity tradeoff curve" deliverable.
+
+### Goal
+
+Produce a single figure showing the tradeoff between stability (argmax agreement at depth mismatch) and expressivity (Sudoku solve success rate at matched compute) across the working contraction dial.
+
+**This is the "stability dial" plot required for submission.**
+
+### Non-Negotiable Controls
+
+- `disable_value_head_norm: true` for ALL conditions
+- `latent_ball_radius: 0` (projection disabled)
+- `projection_active_rate < 1%` verified in audit
+- Same eval batches (B0, B1) with provenance hashes
+
+### Dial Mechanism
+
+Use inference-time contraction scaling (same as Exp4 v2):
+- Scaling factors: s ∈ {1.00, 0.85, 0.70, 0.55}
+- Applied to z→z recursion weights at eval time
+- No retraining required
+
+### Checkpoints
+
+Use existing Exp4 v2 checkpoints (3 seeds, projection-free):
+- `/home/buiksat/trm_bellman/results/exp3_v2/nc_rdis_s41/model_step_5000.pt`
+- `/home/buiksat/trm_bellman/results/exp3/nc_rdis_s42/model_step_5000.pt`
+- `/home/buiksat/trm_bellman/results/exp3_v2/nc_rdis_s43/model_step_5000.pt`
+
+### Metrics
+
+**Stability Metrics (from Exp4 v2):**
+- L_preproj: Finite-difference Lipschitz proxy
+- Argmax agreement at n2=8 (4× mismatch) on B0 and B1
+- ΔV at n2=8 (optional, secondary)
+
+**Expressivity Metrics (NEW):**
+- Sudoku solve success rate at matched compute (n=2)
+- Evaluated on:
+  - (a) Trivial suite: 1–4 empties (100 puzzles)
+  - (b) Hard suite: 6–8 empties (if available; document and skip if not)
+
+### Decision Gates
+
+**G0 (Projection inactive):** projection_active_rate < 1% — MUST PASS
+**G1 (Stability):** No NaN values — MUST PASS
+**G2 (Dial range):** L_preproj spread ≥ 0.10 — Already verified in Exp4 (0.695)
+**G3 (Tradeoff exists):** Success rate varies across dial settings
+
+### Deliverables
+
+Create `results/paper_ready/exp5_tradeoff_curve/` containing:
+
+| File | Content |
+|------|---------|
+| `fig_exp5_tradeoff_curve.pdf` | X: stability (argmax@8×), Y: success rate; points by scale s |
+| `table_exp5_tradeoff_curve.tex` | LaTeX table: scale → L_preproj → stability → success |
+| `CLAIMS.md` | Scoped claims |
+| `PROVENANCE.md` | Commit, checkpoint paths, commands |
+| `AUDIT.md` | Audit verification (all checks) |
+| `summary.json` | Machine-readable summary |
+
+### Audit Checks
+
+1. **disable_value_head_norm: true** for all configs
+2. **projection_active_rate < 1%** for all conditions
+3. **B0/B1 provenance hashes match** Exp4 v2 (9ceab78310f3, fca64be3b53c)
+4. **strict YAML loading** confirmed
+5. **summary.json matches plotted values** (no key-missing regressions)
+6. **git SHA captured and non-empty**
+
+### Expected Outcome
+
+A curve showing:
+- Higher contraction (lower scale s, lower L_preproj) → higher stability but lower success
+- Lower contraction (higher scale s, higher L_preproj) → lower stability but higher success
+
+This demonstrates the "dial" concept: practitioners can choose their operating point on the stability–expressivity frontier.
+
+### Buck Targets
+
+```bash
+buck2 run //buiksat_trm:exp5_tradeoff_curve \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only
+
+buck2 run //buiksat_trm:audit_exp5_tradeoff_curve_paper_ready \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only
+```
+
+### Commit Message Template
+
+```
+Exp5: Stability–Expressivity tradeoff curve (paper-ready, audited)
+
+Tradeoff demonstrated: [describe key finding]
+- Scale 1.0: success=X.XX, stability=X.XX
+- Scale 0.55: success=X.XX, stability=X.XX
+
+Gate status: G0=PASS, G1=PASS, G2=PASS (inherited), G3=[PASS/FAIL]
+
+Artifacts: results/paper_ready/exp5_tradeoff_curve/
+Audit: [PASSED/FAILED]
+```
 
 ---
 

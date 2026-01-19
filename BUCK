@@ -1038,3 +1038,40 @@ python_binary(
     base_module = "",
     main_module = "scripts.audit_exp4_final_v2",
 )
+
+# ============================================================================
+# Experiment 5: Stability–Expressivity Tradeoff Curve
+# ============================================================================
+
+python_binary(
+    name = "exp5_tradeoff_curve",
+    srcs = ["scripts/exp5_tradeoff_curve.py"],
+    base_module = "",
+    main_module = "scripts.exp5_tradeoff_curve",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_binary(
+    name = "generate_exp5_figures",
+    srcs = ["scripts/generate_exp5_figures.py"],
+    base_module = "",
+    main_module = "scripts.generate_exp5_figures",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)
+
+python_binary(
+    name = "audit_exp5_tradeoff_curve",
+    srcs = ["scripts/audit_exp5_tradeoff_curve.py"],
+    base_module = "",
+    main_module = "scripts.audit_exp5_tradeoff_curve",
+)
