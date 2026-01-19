@@ -493,29 +493,40 @@ def compute_success_rate(
     n_episodes: int = 100,
     max_steps: int = 20,
 ) -> float:
-    """Compute Sudoku solve success rate.
+    """Compute Sudoku solve success rate using the same evaluator as training.
 
-    A puzzle is solved when all empty cells are correctly filled.
-    Uses greedy policy (argmax) at each step.
+    Uses the training evaluator's evaluate_plan_policy_with_scores function
+    to ensure identical success rate computation.
     """
     from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+    from rl.evaluator import evaluate_plan_policy_with_scores
+    from rl.sudoku_utils import sudoku_get_stats
+
+    # Define the feasibility checker locally (same as in upi_trm_train.py)
+    def make_feasibility_checker(w_v: float = 2.0, w_z: float = 5.0):
+        """Create a feasibility checker function with the given weights."""
+        def checker(x, y):
+            """
+            Feasibility-aware Sudoku checker.
+            Score = filled - w_v*violations - w_z*zeroCand
+            """
+            if torch.is_tensor(y):
+                plan = y
+            elif isinstance(y, dict):
+                plan = y.get("plan", y.get("labels"))
+            else:
+                plan = torch.as_tensor(y)
+
+            total_cells, filled, violations, zero_cand = sudoku_get_stats(plan)
+            score = float(filled) - w_v * float(violations) - w_z * float(zero_cand)
+            return score
+        return checker
 
     model.eval()
     vocab_size = config["vocab_size"]
     seq_len = config["seq_len"]
     num_actions = config["num_actions"]
     stop_action_id = num_actions - 1
-
-    # Dummy env for action application
-    class DummyDataset:
-        def __len__(self):
-            return 1
-        def __getitem__(self, idx):
-            return {"inputs": torch.ones(seq_len, dtype=torch.long)}
-
-    env_config = PlanEditEnvConfig(max_edits=max_steps, gamma=0.99, vocab_size=vocab_size)
-    env = PlanEditEnv(DummyDataset(), lambda x, y: 0.0, env_config)
-    env.set_stop_action_id(stop_action_id)
 
     # Sample puzzles for evaluation
     rng = np.random.default_rng(42)
@@ -525,62 +536,55 @@ def compute_success_rate(
     else:
         eval_puzzles = puzzles
 
-    successes = 0
+    # Create a dataset from the puzzles (same format as training)
+    class PuzzleListDataset:
+        def __init__(self, puzzles_list):
+            self.puzzles = puzzles_list
 
-    with torch.no_grad():
-        for puzzle in eval_puzzles:
-            current_plan = puzzle.plan.clone()
-            inputs = puzzle.inputs.clone()
+        def __len__(self):
+            return len(self.puzzles)
 
-            for step in range(max_steps):
-                x = {
-                    "inputs": inputs.unsqueeze(0).to(device),
-                    "puzzle_identifiers": puzzle.puzzle_identifier.unsqueeze(0).to(device),
-                }
-                y = current_plan.unsqueeze(0).to(device)
+        def __getitem__(self, idx):
+            p = self.puzzles[idx]
+            return {
+                "inputs": p.inputs.clone(),
+                "puzzle_identifiers": p.puzzle_identifier.clone() if p.puzzle_identifier.ndim > 0 else p.puzzle_identifier.unsqueeze(0),
+                "initial_plan": p.plan.clone(),
+                "solution": p.plan.clone(),  # Placeholder - not used for sudoku_is_solved criterion
+            }
 
-                # Get action mask
-                action_mask = PlanEditEnv.compute_batch_action_mask(
-                    inputs.unsqueeze(0), vocab_size, stop_action_id, stop_mode="disabled"
-                ).to(device)
+    dataset = PuzzleListDataset(eval_puzzles)
 
-                # Get policy
-                dist, _ = model.policy_dist(x, y, n=n_unroll, action_mask=action_mask)
-                probs = dist.probs[0].cpu()
+    # Create checker (feasibility-based, same as training)
+    checker = make_feasibility_checker(
+        w_v=2.0,
+        w_z=5.0,
+    )
 
-                # Greedy action
-                action = probs.argmax().item()
+    # Create environment config (same as training)
+    env_cfg = PlanEditEnvConfig(
+        max_edits=max_steps,
+        gamma=0.99,
+        vocab_size=vocab_size,
+        reward_shaping=True,
+        stop_action_mode="disabled",
+        task_type="sudoku",
+    )
 
-                if action == stop_action_id:
-                    break
+    # Use the training evaluator function
+    mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
+        model=model,
+        dataset=dataset,
+        checker=checker,
+        env_cfg=env_cfg,
+        num_episodes=len(eval_puzzles),
+        inner_unroll_n=n_unroll,
+        episodic_latent=True,  # Match training config
+        greedy=True,
+        use_sudoku_solved_criterion=True,
+    )
 
-                # Apply action
-                current_plan = env.apply_edit(current_plan, action, {"inputs": inputs})
-
-            # Check if solved: current_plan matches inputs where inputs are not empty
-            # In 4x4 Sudoku, a valid solution has no empty cells and satisfies constraints
-            # Here we use a simple check: all originally empty cells are now filled
-            empty_mask = (inputs == 1)  # Empty cells in original
-            filled = (current_plan[empty_mask] != 1).all()  # All empties are filled
-
-            # Simple validity check: no duplicate values in rows (4x4 grid)
-            plan_grid = current_plan.view(4, 4)
-            valid = True
-            for row in plan_grid:
-                non_empty = row[row != 1]
-                if len(non_empty) != len(set(non_empty.tolist())):
-                    valid = False
-                    break
-            for col in plan_grid.t():
-                non_empty = col[col != 1]
-                if len(non_empty) != len(set(non_empty.tolist())):
-                    valid = False
-                    break
-
-            if filled and valid:
-                successes += 1
-
-    return float(successes) / len(eval_puzzles) if eval_puzzles else 0.0
+    return success_rate
 
 
 # =============================================================================

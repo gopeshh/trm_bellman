@@ -1,0 +1,301 @@
+{
+  "experiment": "Exp5_tradeoff_curve",
+  "description": "Stability\u2013Expressivity tradeoff curve",
+  "generated_at": "2026-01-19T15:26:08.389973",
+  "git_sha": "857adcd13b77",
+  "checkpoints": [
+    "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt",
+    "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt",
+    "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt"
+  ],
+  "config_yaml": "/data/repos/fbsource/fbcode/buiksat_trm/configs/exp3_projection_ablation/nc_rdis.yaml",
+  "config": {
+    "hidden_size": 64,
+    "vocab_size": 6,
+    "seq_len": 16,
+    "num_actions": 97,
+    "inner_unroll_n": 2,
+    "enable_contraction": false,
+    "target_Lz": 0.9,
+    "disable_value_head_norm": true,
+    "latent_ball_radius": 0.0
+  },
+  "parameters": {
+    "dial_scales": [
+      1.0,
+      0.85,
+      0.7,
+      0.55
+    ],
+    "checkpoint_seeds": [
+      41,
+      42,
+      43
+    ],
+    "n_train": 2,
+    "success_n_episodes": 100,
+    "success_max_steps": 20
+  },
+  "batches": {
+    "b0_trivial_count": 100,
+    "b0_hash": "6eb05a7ca77a",
+    "has_hard_suite": true
+  },
+  "scale_summaries": [
+    {
+      "scale": 1.0,
+      "L_preproj_mean": 0.7975434126031663,
+      "L_preproj_std": 0.24097502230979825,
+      "argmax_b0_8x_mean": 0.6999999999999998,
+      "argmax_b0_8x_std": 0.08485281374238572,
+      "delta_V_b0_8x_mean": 0.528218130034705,
+      "delta_V_b0_8x_std": 0.271738218293413,
+      "success_trivial_mean": 0.06666666666666667,
+      "success_trivial_std": 0.016996731711975948,
+      "entropy_mean": 2.577192607223988,
+      "success_hard_mean": 0.0,
+      "success_hard_std": 0.0
+    },
+    {
+      "scale": 0.85,
+      "L_preproj_mean": 0.561737529351376,
+      "L_preproj_std": 0.13517871870545986,
+      "argmax_b0_8x_mean": 0.73,
+      "argmax_b0_8x_std": 0.0565685424949238,
+      "delta_V_b0_8x_mean": 0.4385625954593222,
+      "delta_V_b0_8x_std": 0.2130784142799091,
+      "success_trivial_mean": 0.06999999999999999,
+      "success_trivial_std": 0.01414213562373095,
+      "entropy_mean": 2.5327391314009824,
+      "success_hard_mean": 0.0,
+      "success_hard_std": 0.0
+    },
+    {
+      "scale": 0.7,
+      "L_preproj_mean": 0.4865011882551092,
+      "L_preproj_std": 0.07219113352306855,
+      "argmax_b0_8x_mean": 0.77,
+      "argmax_b0_8x_std": 0.09797958971132711,
+      "delta_V_b0_8x_mean": 0.4583835962166389,
+      "delta_V_b0_8x_std": 0.09715596521269616,
+      "success_trivial_mean": 0.06666666666666667,
+      "success_trivial_std": 0.016996731711975948,
+      "entropy_mean": 2.582662868599097,
+      "success_hard_mean": 0.0,
+      "success_hard_std": 0.0
+    },
+    {
+      "scale": 0.55,
+      "L_preproj_mean": 0.5239826760710761,
+      "L_preproj_std": 0.03172223928854319,
+      "argmax_b0_8x_mean": 0.73,
+      "argmax_b0_8x_std": 0.10708252269472673,
+      "delta_V_b0_8x_mean": 0.6796889940152565,
+      "delta_V_b0_8x_std": 0.09871282648816664,
+      "success_trivial_mean": 0.06666666666666667,
+      "success_trivial_std": 0.012472191289246471,
+      "entropy_mean": 2.7170415122310323,
+      "success_hard_mean": 0.0,
+      "success_hard_std": 0.0
+    }
+  ],
+  "gates": {
+    "g0_projection_inactive": {
+      "passed": true
+    },
+    "g1_stability": {
+      "passed": true
+    },
+    "g2_dial_range": {
+      "passed": true,
+      "spread": 0.6576597514504101
+    },
+    "g3_tradeoff_exists": {
+      "passed": false,
+      "success_range": 0.003333333333333327
+    }
+  },
+  "decision": "POSITIVE: Tradeoff curve generated successfully",
+  "all_results": [
+    {
+      "checkpoint_seed": 41,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt",
+      "scale": 1.0,
+      "L_preproj": 1.0352592577692121,
+      "L_preproj_std": 0.19907689549281027,
+      "argmax_b0_8x": 0.58,
+      "argmax_b1_8x": 0.6,
+      "delta_V_b0_8x": 0.816119020730257,
+      "delta_V_b1_8x": 0.8398385168612004,
+      "entropy_train": 2.370056377053261,
+      "success_trivial": 0.05,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 41,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt",
+      "scale": 0.85,
+      "L_preproj": 0.6983017129823565,
+      "L_preproj_std": 0.10194587672202715,
+      "argmax_b0_8x": 0.65,
+      "argmax_b1_8x": 0.64,
+      "delta_V_b0_8x": 0.6809398619830609,
+      "delta_V_b1_8x": 0.5040559574961663,
+      "entropy_train": 2.357335761487484,
+      "success_trivial": 0.06,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 41,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt",
+      "scale": 0.7,
+      "L_preproj": 0.5654813120054314,
+      "L_preproj_std": 0.054746870807395466,
+      "argmax_b0_8x": 0.65,
+      "argmax_b1_8x": 0.58,
+      "delta_V_b0_8x": 0.5872356632351875,
+      "delta_V_b1_8x": 0.5115645387768746,
+      "entropy_train": 2.4956597751379013,
+      "success_trivial": 0.05,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 41,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt",
+      "scale": 0.55,
+      "L_preproj": 0.5572652313276194,
+      "L_preproj_std": 0.0263434659926046,
+      "argmax_b0_8x": 0.61,
+      "argmax_b1_8x": 0.53,
+      "delta_V_b0_8x": 0.6040425704419613,
+      "delta_V_b1_8x": 0.6525339640676975,
+      "entropy_train": 2.690743774175644,
+      "success_trivial": 0.05,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 42,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt",
+      "scale": 1.0,
+      "L_preproj": 0.8901608426822349,
+      "L_preproj_std": 0.22110592453593958,
+      "argmax_b0_8x": 0.76,
+      "argmax_b1_8x": 0.7,
+      "delta_V_b0_8x": 0.6047156304121017,
+      "delta_V_b1_8x": 0.6670979212224484,
+      "entropy_train": 2.676712952554226,
+      "success_trivial": 0.06,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 42,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt",
+      "scale": 0.85,
+      "L_preproj": 0.6093113687529694,
+      "L_preproj_std": 0.11048429734949713,
+      "argmax_b0_8x": 0.77,
+      "argmax_b1_8x": 0.79,
+      "delta_V_b0_8x": 0.472433826290071,
+      "delta_V_b1_8x": 0.3924068941175938,
+      "entropy_train": 2.642372183203697,
+      "success_trivial": 0.06,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 42,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt",
+      "scale": 0.7,
+      "L_preproj": 0.5030374119814951,
+      "L_preproj_std": 0.0644459680990879,
+      "argmax_b0_8x": 0.77,
+      "argmax_b1_8x": 0.76,
+      "delta_V_b0_8x": 0.4352707686275244,
+      "delta_V_b1_8x": 0.49641294702887534,
+      "entropy_train": 2.6887477749586104,
+      "success_trivial": 0.06,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 42,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt",
+      "scale": 0.55,
+      "L_preproj": 0.5333923933358165,
+      "L_preproj_std": 0.034567143843770215,
+      "argmax_b0_8x": 0.71,
+      "argmax_b1_8x": 0.69,
+      "delta_V_b0_8x": 0.8191219844669103,
+      "delta_V_b1_8x": 0.9478516356647014,
+      "entropy_train": 2.8157182908058167,
+      "success_trivial": 0.07,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 43,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt",
+      "scale": 1.0,
+      "L_preproj": 0.4672101373580517,
+      "L_preproj_std": 0.14416479216786215,
+      "argmax_b0_8x": 0.76,
+      "argmax_b1_8x": 0.72,
+      "delta_V_b0_8x": 0.16381973896175622,
+      "delta_V_b1_8x": 0.13550761248916388,
+      "entropy_train": 2.684808492064476,
+      "success_trivial": 0.09,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 43,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt",
+      "scale": 0.85,
+      "L_preproj": 0.377599506318802,
+      "L_preproj_std": 0.07935872523478536,
+      "argmax_b0_8x": 0.77,
+      "argmax_b1_8x": 0.75,
+      "delta_V_b0_8x": 0.16231409810483455,
+      "delta_V_b1_8x": 0.19377834213897585,
+      "entropy_train": 2.5985094495117664,
+      "success_trivial": 0.09,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 43,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt",
+      "scale": 0.7,
+      "L_preproj": 0.3909848407784011,
+      "L_preproj_std": 0.04988146313844712,
+      "argmax_b0_8x": 0.89,
+      "argmax_b1_8x": 0.76,
+      "delta_V_b0_8x": 0.35264435678720474,
+      "delta_V_b1_8x": 0.5021373285353183,
+      "entropy_train": 2.5635810557007788,
+      "success_trivial": 0.09,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    },
+    {
+      "checkpoint_seed": 43,
+      "checkpoint_path": "/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt",
+      "scale": 0.55,
+      "L_preproj": 0.48129040354979225,
+      "L_preproj_std": 0.04313032409378767,
+      "argmax_b0_8x": 0.87,
+      "argmax_b1_8x": 0.8,
+      "delta_V_b0_8x": 0.615902427136898,
+      "delta_V_b1_8x": 0.8833023501932621,
+      "entropy_train": 2.6446624717116354,
+      "success_trivial": 0.08,
+      "success_hard": 0.0,
+      "projection_active_rate": 0.0
+    }
+  ]
+}

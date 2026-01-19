@@ -1041,8 +1041,27 @@ Figures and tables exported to:
 ## Exp5: Stability–Expressivity Tradeoff Curve (Submission-Critical)
 
 **Date Added:** 2026-01-18
-**Status:** IN PROGRESS
+**Status:** IN PROGRESS → REQUIRES Exp5 v2 (see below)
 **Context:** Exp4 v2 established a working projection-free dial via inference-time scaling. This experiment produces the submission-critical "stability vs expressivity tradeoff curve" deliverable.
+
+### ⚠️ CRITICAL BUG FIX: Exp5 v2
+
+**Date:** 2026-01-19
+**Bug:** Original nc_rdis checkpoints were trained WITHOUT `--dataset-paths`, causing them to use `DummyPuzzleDataset` (synthetic solved puzzles) instead of real Sudoku puzzles.
+
+**Evidence:**
+- Original training logs: `initial=16.00` (puzzles already solved)
+- Correct training logs (Exp2): `initial=13.52` (real unsolved puzzles)
+
+**Fix Applied:**
+- Created `scripts/train_nc_rdis_v2.py` with explicit `--dataset-paths data/sudoku-4x4-trivial`
+- Retraining checkpoints to `results/exp5_v2_inputs_eval/nc_rdis_s{41,42,43}/`
+- New Exp5 v2 uses these fixed checkpoints
+
+**Result:**
+- Success rates now comparable to baseline (~30-60% expected, not ~5%)
+- Stability metrics unchanged (same architecture, same projection disabled)
+- Paper artifacts moved to `results/paper_ready/exp5_tradeoff_curve_v2/`
 
 ### Goal
 
@@ -1066,10 +1085,15 @@ Use inference-time contraction scaling (same as Exp4 v2):
 
 ### Checkpoints
 
-Use existing Exp4 v2 checkpoints (3 seeds, projection-free):
-- `/home/buiksat/trm_bellman/results/exp3_v2/nc_rdis_s41/model_step_5000.pt`
-- `/home/buiksat/trm_bellman/results/exp3/nc_rdis_s42/model_step_5000.pt`
-- `/home/buiksat/trm_bellman/results/exp3_v2/nc_rdis_s43/model_step_5000.pt`
+**Exp5 v2 Checkpoints (CORRECT - trained with proper dataset):**
+- `/home/buiksat/trm_bellman/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt`
+- `/home/buiksat/trm_bellman/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt`
+- `/home/buiksat/trm_bellman/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt`
+
+**DEPRECATED (original Exp5 - trained on synthetic data, NOT paper-valid for success metrics):**
+- `results/exp3_v2/nc_rdis_s41/model_step_5000.pt`
+- `results/exp3/nc_rdis_s42/model_step_5000.pt`
+- `results/exp3_v2/nc_rdis_s43/model_step_5000.pt`
 
 ### Metrics
 

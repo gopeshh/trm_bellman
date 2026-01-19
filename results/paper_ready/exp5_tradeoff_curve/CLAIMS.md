@@ -3,7 +3,23 @@
 **Generated:** 2026-01-19T00:33:32.384726
 **Git SHA:** b3082724f6c3
 
-## Summary
+## ⛔ DEPRECATION NOTICE
+
+**This artifact set is DEPRECATED for success rate claims.**
+
+The checkpoints used were trained WITHOUT `--dataset-paths`, causing them to use
+synthetic solved puzzles instead of real Sudoku puzzles. As a result:
+- `success_trivial` values (~5%) are NOT comparable to baseline (~93%)
+- Training never learned to fill empty cells
+
+**Use `exp5_tradeoff_curve_v2/` for paper-valid success metrics.**
+
+Stability metrics (argmax agreement, ΔV, L_preproj) remain valid because they
+measure z→z dynamics, not task success.
+
+---
+
+## Summary (STABILITY METRICS ONLY)
 
 - **Decision:** POSITIVE: Tradeoff curve generated successfully
 - **G0 (Projection inactive):** PASS
