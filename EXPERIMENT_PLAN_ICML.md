@@ -848,8 +848,32 @@ Figures and tables copied to paper directory:
 ## Exp4: Projection-free Contraction Dial (Range Test → Full Sweep)
 
 **Date Added:** 2026-01-18
-**Status:** IN PROGRESS
+**Status:** COMPLETED
+**Commit SHA:** 6fede631455e (initial), b6d98b6 (final v2 with cluster bootstrap)
+**Artifacts:** `results/paper_ready/exp4_projection_free_dial_v2/`
 **Context:** Exp2_final shows the spectral-norm dial fails and projection at small R can dominate/mask contraction. Exp3 shows training is stable even with projection disabled. We now test whether a contraction-only dial exists when projection is disabled/inactive.
+
+### Final Execution Summary (v2)
+
+**Protocol:** Inference-time contraction scaling on 3 independently trained checkpoints (seeds 41, 42, 43) with 4 dial scales (1.0, 0.85, 0.70, 0.55). This avoids expensive per-scale retraining while still producing N=12 observations across checkpoints × scales.
+
+**Statistical Methodology:** Cluster bootstrap (1000 iterations, 3 clusters) to properly handle repeated measures (scales) on the same checkpoint. Reports 95% CIs instead of i.i.d. p-values.
+
+**Results:**
+- **Decision:** POSITIVE - Dial viable with statistically significant monotonicity
+- **G0 (Projection inactive):** PASS
+- **G1 (Stability):** PASS
+- **G2 (Dial range):** PASS (spread=0.695)
+- **G3 (Monotonicity):**
+  - B0 argmax (n2=8, 4× mismatch): ρ=-0.866 [-1.000, -0.542] ✓
+  - B1 argmax (n2=8, 4× mismatch): ρ=-0.923 [-1.000, -0.787] ✓
+  - B1 ΔV (n2=8): ρ=0.657 [0.553, 0.800] ✓
+
+**Depth Notation Clarification:** n_train=2; "n2=8" means evaluation at depth 8, which is **4× mismatch** (not 8×).
+
+**Audit:** 11/11 checks PASSED
+
+---
 
 ### Hypothesis
 
@@ -994,10 +1018,17 @@ Audit: [PASSED/FAILED]
 ### Buck Targets
 
 ```bash
-buck2 run //buiksat_trm:exp4_range_test           # Run range-test (Option A)
-buck2 run //buiksat_trm:eval_exp4_projection_free # Full evaluation
-buck2 run //buiksat_trm:audit_exp4_paper_ready    # Audit verification
+buck2 run //buiksat_trm:exp4_final_v2        # Run evaluation with cluster bootstrap
+buck2 run //buiksat_trm:generate_exp4_figures # Generate figures
+buck2 run //buiksat_trm:audit_exp4_final_v2   # Audit verification (11 checks)
 ```
+
+### Paper Export
+
+Figures and tables exported to:
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp4_projection_free_dial_v2.pdf`
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp4_scale_comparison.pdf`
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/tables/table_exp4_projection_free_dial_v2.tex`
 
 ---
 

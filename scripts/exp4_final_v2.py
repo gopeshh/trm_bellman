@@ -55,8 +55,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 DIAL_SCALES = [1.0, 0.85, 0.70, 0.55]
 
 # Evaluation depths
+# IMPORTANT: n_train=2, eval at n2∈{4,8,16} means depth mismatch of 2×, 4×, 8× respectively
+# Variable names use "@Nx" where N is the absolute depth (n2=N), NOT the mismatch ratio
+# For paper: n2=4 is 2× mismatch, n2=8 is 4× mismatch, n2=16 is 8× mismatch
 N_TRAIN = 2  # Training depth
-EVAL_N_LIST = [4, 8, 16]  # 2×, 4×, 8× multipliers
+EVAL_N_LIST = [4, 8, 16]  # eval at n2=4, 8, 16 (2×, 4×, 8× training depth)
+MISMATCH_RATIOS = {4: 2, 8: 4, 16: 8}  # n2 -> mismatch ratio
 
 # B0/B1 parameters
 B0_TARGET_EASY = 70
@@ -67,6 +71,10 @@ B1_CAP = 1500
 G0_PROJECTION_THRESHOLD = 0.01  # projection_active_rate < 1%
 G2_SPREAD_THRESHOLD = 0.10  # L_preproj spread >= 0.10
 G3_MONOTONICITY_THRESHOLD = 0.5  # |Spearman ρ| > 0.5
+
+# Bootstrap parameters for cluster-aware inference
+N_BOOTSTRAP = 1000  # Number of bootstrap iterations
+BOOTSTRAP_SEED = 42  # For reproducibility
 
 
 # =============================================================================
@@ -165,6 +173,133 @@ def extract_seed_from_path(checkpoint_path: str) -> int:
     if match:
         return int(match.group(1))
     return 0
+
+
+def cluster_bootstrap_spearman(
+    x: List[float],
+    y: List[float],
+    cluster_ids: List[int],
+    n_bootstrap: int = 1000,
+    seed: int = 42,
+) -> Dict[str, float]:
+    """
+    Compute Spearman ρ with cluster-aware bootstrap for proper inference.
+
+    Since scales are repeated measures on the same checkpoint, we cannot treat
+    all N=12 samples as i.i.d. Instead, we resample checkpoints (clusters) with
+    replacement and recompute ρ for each bootstrap sample.
+
+    Args:
+        x: First variable (e.g., L_preproj values)
+        y: Second variable (e.g., argmax values)
+        cluster_ids: Cluster/checkpoint ID for each sample
+        n_bootstrap: Number of bootstrap iterations
+        seed: Random seed for reproducibility
+
+    Returns:
+        dict with 'rho_point', 'rho_ci_lower', 'rho_ci_upper', 'n_clusters'
+    """
+    from scipy.stats import spearmanr
+
+    x = np.array(x)
+    y = np.array(y)
+    cluster_ids = np.array(cluster_ids)
+
+    unique_clusters = np.unique(cluster_ids)
+    n_clusters = len(unique_clusters)
+
+    # Point estimate
+    rho_point, _ = spearmanr(x, y)
+
+    # Bootstrap: resample clusters with replacement
+    rng = np.random.RandomState(seed)
+    bootstrap_rhos = []
+
+    for _ in range(n_bootstrap):
+        # Resample clusters (checkpoints) with replacement
+        sampled_clusters = rng.choice(unique_clusters, size=n_clusters, replace=True)
+
+        # Collect all observations from sampled clusters
+        boot_x = []
+        boot_y = []
+        for c in sampled_clusters:
+            mask = cluster_ids == c
+            boot_x.extend(x[mask])
+            boot_y.extend(y[mask])
+
+        # Compute Spearman ρ for this bootstrap sample
+        if len(boot_x) >= 3:  # Need at least 3 points for correlation
+            rho_boot, _ = spearmanr(boot_x, boot_y)
+            if not np.isnan(rho_boot):
+                bootstrap_rhos.append(rho_boot)
+
+    # Compute 95% CI from bootstrap distribution
+    if len(bootstrap_rhos) > 0:
+        ci_lower = float(np.percentile(bootstrap_rhos, 2.5))
+        ci_upper = float(np.percentile(bootstrap_rhos, 97.5))
+    else:
+        ci_lower = ci_upper = float('nan')
+
+    return {
+        'rho_point': float(rho_point),
+        'rho_ci_lower': ci_lower,
+        'rho_ci_upper': ci_upper,
+        'n_clusters': n_clusters,
+        'n_bootstrap': n_bootstrap,
+    }
+
+
+def per_checkpoint_trends(
+    all_results: List,
+) -> Dict[str, Dict[str, str]]:
+    """
+    Compute per-checkpoint monotonicity trends.
+
+    For each checkpoint, check if L_preproj increases as scale decreases
+    (which we expect) and if argmax/ΔV follow expected directions.
+
+    Returns dict mapping checkpoint_seed to trend descriptions.
+    """
+    from collections import defaultdict
+
+    by_seed = defaultdict(list)
+    for r in all_results:
+        by_seed[r.checkpoint_seed].append(r)
+
+    trends = {}
+    for seed, results in by_seed.items():
+        # Sort by scale (descending, so 1.0 -> 0.55)
+        results = sorted(results, key=lambda r: -r.scale)
+
+        L_preproj_vals = [r.L_preproj for r in results]
+        argmax_vals = [r.argmax_b0_8x for r in results]
+        delta_V_vals = [r.delta_V_b0_8x for r in results]
+
+        # Check if L_preproj is monotonically increasing as scale decreases
+        L_monotonic = all(L_preproj_vals[i] <= L_preproj_vals[i+1]
+                          for i in range(len(L_preproj_vals)-1))
+
+        # Check if argmax is monotonically decreasing as L_preproj increases
+        argmax_monotonic = all(argmax_vals[i] >= argmax_vals[i+1]
+                               for i in range(len(argmax_vals)-1))
+
+        # Overall trend direction (even if not strictly monotonic)
+        L_trend = "↑" if L_preproj_vals[-1] > L_preproj_vals[0] else "↓"
+        argmax_trend = "↓" if argmax_vals[-1] < argmax_vals[0] else "↑"
+        delta_V_trend = "↑" if delta_V_vals[-1] > delta_V_vals[0] else "↓"
+
+        trends[seed] = {
+            'L_preproj_trend': L_trend,
+            'L_preproj_monotonic': L_monotonic,
+            'L_preproj_range': f"{L_preproj_vals[0]:.3f}→{L_preproj_vals[-1]:.3f}",
+            'argmax_trend': argmax_trend,
+            'argmax_monotonic': argmax_monotonic,
+            'argmax_range': f"{argmax_vals[0]:.3f}→{argmax_vals[-1]:.3f}",
+            'delta_V_trend': delta_V_trend,
+            'delta_V_range': f"{delta_V_vals[0]:.3f}→{delta_V_vals[-1]:.3f}",
+        }
+
+    return trends
 
 
 # =============================================================================
@@ -829,9 +964,13 @@ def run_exp4_final_v2(
         # Restore original weights
         restore_weights(model, original_weights)
 
-    # Compute monotonicity statistics with N=12 truly independent samples
+    # Compute monotonicity statistics with cluster-aware bootstrap
+    # NOTE: We have 3 checkpoints × 4 scales = 12 observations, but scales are
+    # repeated measures on the same checkpoint, so we use cluster bootstrap
+    # (resampling checkpoints) rather than assuming i.i.d. samples.
     print("\n" + "=" * 70)
-    print("MONOTONICITY ANALYSIS (N=12 independent samples)")
+    print("MONOTONICITY ANALYSIS")
+    print("(Cluster bootstrap: 3 checkpoints × 4 scales, resampling checkpoints)")
     print("=" * 70)
 
     from scipy.stats import spearmanr
@@ -841,17 +980,37 @@ def run_exp4_final_v2(
     argmax_b1_8x_all = [r.argmax_b1_8x for r in all_results]
     delta_V_b0_8x_all = [r.delta_V_b0_8x for r in all_results]
     delta_V_b1_8x_all = [r.delta_V_b1_8x for r in all_results]
+    cluster_ids = [r.checkpoint_seed for r in all_results]
 
+    # Cluster bootstrap for proper inference
+    boot_aa_b0 = cluster_bootstrap_spearman(L_preproj_all, argmax_b0_8x_all, cluster_ids, N_BOOTSTRAP, BOOTSTRAP_SEED)
+    boot_aa_b1 = cluster_bootstrap_spearman(L_preproj_all, argmax_b1_8x_all, cluster_ids, N_BOOTSTRAP, BOOTSTRAP_SEED)
+    boot_dv_b0 = cluster_bootstrap_spearman(L_preproj_all, delta_V_b0_8x_all, cluster_ids, N_BOOTSTRAP, BOOTSTRAP_SEED)
+    boot_dv_b1 = cluster_bootstrap_spearman(L_preproj_all, delta_V_b1_8x_all, cluster_ids, N_BOOTSTRAP, BOOTSTRAP_SEED)
+
+    # For backwards compatibility, also compute i.i.d. p-values (but mark as reference only)
     rho_aa_b0, p_aa_b0 = spearmanr(L_preproj_all, argmax_b0_8x_all)
     rho_aa_b1, p_aa_b1 = spearmanr(L_preproj_all, argmax_b1_8x_all)
     rho_dv_b0, p_dv_b0 = spearmanr(L_preproj_all, delta_V_b0_8x_all)
     rho_dv_b1, p_dv_b1 = spearmanr(L_preproj_all, delta_V_b1_8x_all)
 
-    print(f"\nSpearman correlations (L_preproj vs metric, N={len(all_results)}):")
-    print(f"  B0 argmax@8x:  ρ={rho_aa_b0:.4f}, p={p_aa_b0:.4f}")
-    print(f"  B1 argmax@8x:  ρ={rho_aa_b1:.4f}, p={p_aa_b1:.4f}")
-    print(f"  B0 ΔV@8x:      ρ={rho_dv_b0:.4f}, p={p_dv_b0:.4f}")
-    print(f"  B1 ΔV@8x:      ρ={rho_dv_b1:.4f}, p={p_dv_b1:.4f}")
+    print(f"\nSpearman correlations with cluster bootstrap 95% CI:")
+    print(f"  (n_train={N_TRAIN}, n2=8 means 4× mismatch)")
+    print(f"  B0 argmax (n2=8):  ρ={boot_aa_b0['rho_point']:.3f} [{boot_aa_b0['rho_ci_lower']:.3f}, {boot_aa_b0['rho_ci_upper']:.3f}]")
+    print(f"  B1 argmax (n2=8):  ρ={boot_aa_b1['rho_point']:.3f} [{boot_aa_b1['rho_ci_lower']:.3f}, {boot_aa_b1['rho_ci_upper']:.3f}]")
+    print(f"  B0 ΔV (n2=8):      ρ={boot_dv_b0['rho_point']:.3f} [{boot_dv_b0['rho_ci_lower']:.3f}, {boot_dv_b0['rho_ci_upper']:.3f}]")
+    print(f"  B1 ΔV (n2=8):      ρ={boot_dv_b1['rho_point']:.3f} [{boot_dv_b1['rho_ci_lower']:.3f}, {boot_dv_b1['rho_ci_upper']:.3f}]")
+    print(f"  (i.i.d. p-values for reference: p_aa_b0={p_aa_b0:.4f}, p_aa_b1={p_aa_b1:.4f})")
+
+    # Per-checkpoint monotonicity trends
+    trends = per_checkpoint_trends(all_results)
+    print(f"\n[Per-checkpoint trends (scale 1.0→0.55)]")
+    for seed, t in sorted(trends.items()):
+        print(f"  Seed {seed}: L_preproj {t['L_preproj_trend']} ({t['L_preproj_range']}), "
+              f"argmax {t['argmax_trend']} ({t['argmax_range']}), "
+              f"ΔV {t['delta_V_trend']} ({t['delta_V_range']})")
+        status = "✓ monotonic" if t['L_preproj_monotonic'] and t['argmax_monotonic'] else "partial"
+        print(f"         L_preproj monotonic: {t['L_preproj_monotonic']}, argmax monotonic: {t['argmax_monotonic']} → {status}")
 
     # Anti-degenerate check: entropy should not collapse
     entropy_train_all = [r.entropy_b0_train for r in all_results]
@@ -898,20 +1057,40 @@ def run_exp4_final_v2(
     g2_passed = L_spread >= G2_SPREAD_THRESHOLD
     print(f"G2 (Dial range >= 0.10):  {'PASS' if g2_passed else 'FAIL'} (spread={L_spread:.4f})")
 
-    # G3: monotonicity
-    g3_aa_b0_passed = bool(abs(rho_aa_b0) > G3_MONOTONICITY_THRESHOLD and p_aa_b0 < 0.05)
-    g3_aa_b1_passed = bool(abs(rho_aa_b1) > G3_MONOTONICITY_THRESHOLD and p_aa_b1 < 0.05)
-    g3_dv_b0_passed = bool(abs(rho_dv_b0) > G3_MONOTONICITY_THRESHOLD and p_dv_b0 < 0.05)
-    g3_dv_b1_passed = bool(abs(rho_dv_b1) > G3_MONOTONICITY_THRESHOLD and p_dv_b1 < 0.05)
+    # G3: monotonicity using bootstrap CIs
+    # A metric passes if |ρ| > 0.5 AND the 95% CI does not include 0
+    def boot_ci_significant(boot: Dict, threshold: float = 0.5) -> bool:
+        """Check if correlation is significant using bootstrap CI."""
+        rho = boot['rho_point']
+        ci_lo = boot['rho_ci_lower']
+        ci_hi = boot['rho_ci_upper']
+        # Passes if: |ρ| > threshold AND CI doesn't cross 0
+        if abs(rho) <= threshold:
+            return False
+        # If ρ is negative, CI should be entirely negative (ci_hi < 0)
+        # If ρ is positive, CI should be entirely positive (ci_lo > 0)
+        if rho < 0:
+            return ci_hi < 0
+        else:
+            return ci_lo > 0
+
+    g3_aa_b0_passed = boot_ci_significant(boot_aa_b0, G3_MONOTONICITY_THRESHOLD)
+    g3_aa_b1_passed = boot_ci_significant(boot_aa_b1, G3_MONOTONICITY_THRESHOLD)
+    g3_dv_b0_passed = boot_ci_significant(boot_dv_b0, G3_MONOTONICITY_THRESHOLD)
+    g3_dv_b1_passed = boot_ci_significant(boot_dv_b1, G3_MONOTONICITY_THRESHOLD)
 
     g3_any_passed = g3_aa_b0_passed or g3_aa_b1_passed or g3_dv_b0_passed or g3_dv_b1_passed
     g3_status = "PASS" if g3_any_passed else "INCONCLUSIVE"
 
-    print(f"G3 (Monotonicity |ρ|>0.5, p<0.05): {g3_status}")
-    print(f"    B0 argmax@8x: {'PASS' if g3_aa_b0_passed else 'FAIL'} (ρ={rho_aa_b0:.4f}, p={p_aa_b0:.4f})")
-    print(f"    B1 argmax@8x: {'PASS' if g3_aa_b1_passed else 'FAIL'} (ρ={rho_aa_b1:.4f}, p={p_aa_b1:.4f})")
-    print(f"    B0 ΔV@8x:     {'PASS' if g3_dv_b0_passed else 'FAIL'} (ρ={rho_dv_b0:.4f}, p={p_dv_b0:.4f})")
-    print(f"    B1 ΔV@8x:     {'PASS' if g3_dv_b1_passed else 'FAIL'} (ρ={rho_dv_b1:.4f}, p={p_dv_b1:.4f})")
+    print(f"G3 (Monotonicity |ρ|>0.5, 95% CI excludes 0): {g3_status}")
+    print(f"    B0 argmax (n2=8): {'PASS' if g3_aa_b0_passed else 'FAIL'} "
+          f"(ρ={boot_aa_b0['rho_point']:.3f} [{boot_aa_b0['rho_ci_lower']:.3f}, {boot_aa_b0['rho_ci_upper']:.3f}])")
+    print(f"    B1 argmax (n2=8): {'PASS' if g3_aa_b1_passed else 'FAIL'} "
+          f"(ρ={boot_aa_b1['rho_point']:.3f} [{boot_aa_b1['rho_ci_lower']:.3f}, {boot_aa_b1['rho_ci_upper']:.3f}])")
+    print(f"    B0 ΔV (n2=8):     {'PASS' if g3_dv_b0_passed else 'FAIL'} "
+          f"(ρ={boot_dv_b0['rho_point']:.3f} [{boot_dv_b0['rho_ci_lower']:.3f}, {boot_dv_b0['rho_ci_upper']:.3f}])")
+    print(f"    B1 ΔV (n2=8):     {'PASS' if g3_dv_b1_passed else 'FAIL'} "
+          f"(ρ={boot_dv_b1['rho_point']:.3f} [{boot_dv_b1['rho_ci_lower']:.3f}, {boot_dv_b1['rho_ci_upper']:.3f}])")
 
     # Overall decision
     if not g0_passed:
@@ -979,15 +1158,26 @@ def run_exp4_final_v2(
         "scale_summaries": scale_summaries,
         "monotonicity": {
             "n_samples": len(all_results),
-            "rho_aa_b0": float(rho_aa_b0),
-            "p_aa_b0": float(p_aa_b0),
-            "rho_aa_b1": float(rho_aa_b1),
-            "p_aa_b1": float(p_aa_b1),
-            "rho_dv_b0": float(rho_dv_b0),
-            "p_dv_b0": float(p_dv_b0),
-            "rho_dv_b1": float(rho_dv_b1),
-            "p_dv_b1": float(p_dv_b1),
+            "n_clusters": boot_aa_b0['n_clusters'],
+            "n_bootstrap": N_BOOTSTRAP,
+            "stat_method": "cluster_bootstrap",
+            "stat_note": "Scales are repeated measures; CIs from checkpoint-level resampling",
+            # Bootstrap results with CIs
+            "boot_aa_b0": boot_aa_b0,
+            "boot_aa_b1": boot_aa_b1,
+            "boot_dv_b0": boot_dv_b0,
+            "boot_dv_b1": boot_dv_b1,
+            # Legacy i.i.d. p-values (for reference only)
+            "iid_rho_aa_b0": float(rho_aa_b0),
+            "iid_p_aa_b0": float(p_aa_b0),
+            "iid_rho_aa_b1": float(rho_aa_b1),
+            "iid_p_aa_b1": float(p_aa_b1),
+            "iid_rho_dv_b0": float(rho_dv_b0),
+            "iid_p_dv_b0": float(p_dv_b0),
+            "iid_rho_dv_b1": float(rho_dv_b1),
+            "iid_p_dv_b1": float(p_dv_b1),
         },
+        "per_checkpoint_trends": {str(k): v for k, v in trends.items()},
         "anti_degenerate": {
             "mean_entropy_train": float(mean_entropy_train),
             "mean_entropy_eval": float(mean_entropy_eval),
@@ -1037,6 +1227,13 @@ def generate_claims_v2(summary: Dict[str, Any], out_path: Path) -> None:
     gates = summary["gates"]
     anti_deg = summary["anti_degenerate"]
     scale_sums = summary["scale_summaries"]
+    trends = summary.get("per_checkpoint_trends", {})
+
+    # Extract bootstrap results
+    boot_aa_b0 = mono.get("boot_aa_b0", {})
+    boot_aa_b1 = mono.get("boot_aa_b1", {})
+    boot_dv_b0 = mono.get("boot_dv_b0", {})
+    boot_dv_b1 = mono.get("boot_dv_b1", {})
 
     content = f"""# Exp4 Claims: Projection-free Contraction Dial (Final v2)
 
@@ -1046,15 +1243,36 @@ def generate_claims_v2(summary: Dict[str, Any], out_path: Path) -> None:
 ## Summary
 
 - **Decision:** {decision}
-- **N (independent samples):** {mono['n_samples']} (checkpoints × scales)
+- **N (observations):** {mono['n_samples']} (3 checkpoints × 4 scales)
+- **Statistical Method:** Cluster bootstrap (checkpoints as clusters)
 - **G0 (Projection inactive):** {'PASS' if gates['g0_projection_inactive']['passed'] else 'FAIL'}
 - **G1 (Stability):** {'PASS' if gates['g1_stability']['passed'] else 'FAIL'}
 - **G2 (Dial range ≥0.10):** {'PASS' if gates['g2_dial_range']['passed'] else 'FAIL'} (spread={gates['g2_dial_range']['L_preproj_spread']:.4f})
-- **G3 (Monotonicity |ρ|>0.5, p<0.05):** {gates['g3_monotonicity']['status']}
-  - B0 argmax@8x: ρ={mono['rho_aa_b0']:.4f} (p={mono['p_aa_b0']:.4f}) {'✓' if gates['g3_monotonicity']['aa_b0_passed'] else ''}
-  - B1 argmax@8x: ρ={mono['rho_aa_b1']:.4f} (p={mono['p_aa_b1']:.4f}) {'✓' if gates['g3_monotonicity']['aa_b1_passed'] else ''}
-  - B0 ΔV@8x: ρ={mono['rho_dv_b0']:.4f} (p={mono['p_dv_b0']:.4f}) {'✓' if gates['g3_monotonicity']['dv_b0_passed'] else ''}
-  - B1 ΔV@8x: ρ={mono['rho_dv_b1']:.4f} (p={mono['p_dv_b1']:.4f}) {'✓' if gates['g3_monotonicity']['dv_b1_passed'] else ''}
+- **G3 (Monotonicity |ρ|>0.5, 95% CI excludes 0):** {gates['g3_monotonicity']['status']}
+  - B0 argmax (n2=8, 4× mismatch): ρ={boot_aa_b0.get('rho_point', 0):.3f} [{boot_aa_b0.get('rho_ci_lower', 0):.3f}, {boot_aa_b0.get('rho_ci_upper', 0):.3f}] {'✓' if gates['g3_monotonicity']['aa_b0_passed'] else ''}
+  - B1 argmax (n2=8, 4× mismatch): ρ={boot_aa_b1.get('rho_point', 0):.3f} [{boot_aa_b1.get('rho_ci_lower', 0):.3f}, {boot_aa_b1.get('rho_ci_upper', 0):.3f}] {'✓' if gates['g3_monotonicity']['aa_b1_passed'] else ''}
+  - B0 ΔV (n2=8, 4× mismatch): ρ={boot_dv_b0.get('rho_point', 0):.3f} [{boot_dv_b0.get('rho_ci_lower', 0):.3f}, {boot_dv_b0.get('rho_ci_upper', 0):.3f}] {'✓' if gates['g3_monotonicity']['dv_b0_passed'] else ''}
+  - B1 ΔV (n2=8, 4× mismatch): ρ={boot_dv_b1.get('rho_point', 0):.3f} [{boot_dv_b1.get('rho_ci_lower', 0):.3f}, {boot_dv_b1.get('rho_ci_upper', 0):.3f}] {'✓' if gates['g3_monotonicity']['dv_b1_passed'] else ''}
+
+## Depth Mismatch Notation
+
+- **n_train = {summary['parameters']['n_train']}** (training unroll depth)
+- **n2 = 4** means 2× mismatch (evaluating at 2× training depth)
+- **n2 = 8** means 4× mismatch (evaluating at 4× training depth)
+- **n2 = 16** means 8× mismatch (evaluating at 8× training depth)
+
+## Statistical Methodology
+
+**Why cluster bootstrap?** Dial scales (1.0, 0.85, 0.70, 0.55) are repeated measures on the
+same trained checkpoint. This violates the i.i.d. assumption required by standard Spearman
+p-values. We address this by:
+
+1. Treating each checkpoint as a cluster (3 clusters total)
+2. Bootstrap resampling at the cluster level ({mono.get('n_bootstrap', 1000)} iterations)
+3. Computing 95% confidence intervals from the bootstrap distribution
+4. A correlation "passes" if |ρ| > 0.5 AND the 95% CI excludes 0
+
+This is more conservative than i.i.d. inference and accounts for within-checkpoint correlation.
 
 ## Anti-Degenerate Checks
 
@@ -1068,8 +1286,8 @@ def generate_claims_v2(summary: Dict[str, Any], out_path: Path) -> None:
 
 ## Results by Scale (Pooled Across Checkpoints)
 
-| Scale | L_preproj | B0 argmax@8x | B1 argmax@8x | B0 ΔV@8x | B1 ΔV@8x | Entropy (train) |
-|-------|-----------|--------------|--------------|----------|----------|-----------------|
+| Scale | L_preproj | B0 argmax (n2=8) | B1 argmax (n2=8) | B0 ΔV (n2=8) | B1 ΔV (n2=8) | Entropy |
+|-------|-----------|------------------|------------------|--------------|--------------|---------|
 """
     for s in scale_sums:
         content += f"| {s['scale']:.2f} | {s['L_preproj_mean']:.3f}±{s['L_preproj_std']:.3f} | "
@@ -1079,6 +1297,19 @@ def generate_claims_v2(summary: Dict[str, Any], out_path: Path) -> None:
         content += f"{s['delta_V_b1_8x_mean']:.3f}±{s['delta_V_b1_8x_std']:.3f} | "
         content += f"{s['entropy_train_mean']:.2f} |\n"
 
+    # Per-checkpoint trends section
+    content += """
+## Per-Checkpoint Trends (scale 1.0→0.55)
+
+| Seed | L_preproj | Argmax | ΔV | Monotonic |
+|------|-----------|--------|-----|-----------|
+"""
+    for seed, t in sorted(trends.items()):
+        mono_status = "✓" if t.get('L_preproj_monotonic') and t.get('argmax_monotonic') else "partial"
+        content += f"| {seed} | {t.get('L_preproj_trend', '?')} ({t.get('L_preproj_range', '?')}) | "
+        content += f"{t.get('argmax_trend', '?')} ({t.get('argmax_range', '?')}) | "
+        content += f"{t.get('delta_V_trend', '?')} ({t.get('delta_V_range', '?')}) | {mono_status} |\n"
+
     content += f"""
 ## Scoped Claims
 
@@ -1087,12 +1318,13 @@ def generate_claims_v2(summary: Dict[str, Any], out_path: Path) -> None:
         content += f"""**Claim (Positive):** Inference-time contraction scaling on z→z layers produces a measurable,
 controllable "dial" for the achieved Lipschitz constant (L_preproj) when projection is disabled.
 
-**Statistical Support:** With N={mono['n_samples']} independent samples (3 checkpoints × 4 scales),
+**Statistical Support:** With {mono['n_samples']} observations from {mono.get('n_clusters', 3)} independently trained checkpoints,
+using cluster bootstrap for proper inference:
 """
         if gates['g3_monotonicity']['aa_b0_passed']:
-            content += f"Spearman ρ={mono['rho_aa_b0']:.3f} (p={mono['p_aa_b0']:.4f}) for L_preproj vs B0 argmax@8x.\n"
+            content += f"- Spearman ρ={boot_aa_b0.get('rho_point', 0):.3f} (95% CI: [{boot_aa_b0.get('rho_ci_lower', 0):.3f}, {boot_aa_b0.get('rho_ci_upper', 0):.3f}]) for L_preproj vs B0 argmax at n2=8 (4× mismatch).\n"
         if gates['g3_monotonicity']['aa_b1_passed']:
-            content += f"Spearman ρ={mono['rho_aa_b1']:.3f} (p={mono['p_aa_b1']:.4f}) for L_preproj vs B1 argmax@8x.\n"
+            content += f"- Spearman ρ={boot_aa_b1.get('rho_point', 0):.3f} (95% CI: [{boot_aa_b1.get('rho_ci_lower', 0):.3f}, {boot_aa_b1.get('rho_ci_upper', 0):.3f}]) for L_preproj vs B1 argmax at n2=8 (4× mismatch).\n"
     elif "NEGATIVE" in decision:
         content += """**Claim (Negative):** Inference-time contraction scaling does not produce sufficient
 L_preproj variation to constitute a meaningful stability dial.
@@ -1100,14 +1332,14 @@ L_preproj variation to constitute a meaningful stability dial.
     else:
         content += f"""**Claim (Inconclusive):** Dial range exists (L_preproj varies with scaling factor),
 but no statistically significant monotonic relationship with mismatch metrics was observed
-at p<0.05 with N={mono['n_samples']} samples.
+(bootstrap 95% CI crosses 0) with {mono['n_samples']} observations from {mono.get('n_clusters', 3)} checkpoints.
 """
 
     content += f"""
 ## Scope Limitations
 
-- Results from inference-time scaling only (no retraining)
-- Checkpoints: {summary['checkpoints']}
+- Results from inference-time scaling only (no retraining per-scale)
+- Checkpoints: 3 independently trained models with seeds 41, 42, 43
 - Trivial 4×4 Sudoku suite only
 - Training depth n_train={summary['parameters']['n_train']}, eval depths: {summary['parameters']['eval_n_list']}
 
@@ -1116,12 +1348,6 @@ at p<0.05 with N={mono['n_samples']} samples.
 - **B0:** {summary['batches']['b0_count']} initial states (hash: {summary['batches']['b0_hash']})
 - **B1:** {summary['batches']['b1_count']} successor states (hash: {summary['batches']['b1_hash']})
 - B1 constructed using union of top-5 actions across ALL checkpoints × ALL scales (avoids selection bias)
-
-## Statistical Notes
-
-This evaluation uses N={mono['n_samples']} truly independent samples from 3 separately trained checkpoints,
-each evaluated at 4 dial scales. This addresses the pseudo-replication issue in v1 where
-only L_preproj varied (due to random perturbations) while stability metrics were constant.
 """
 
     claims_path = out_path / "CLAIMS.md"

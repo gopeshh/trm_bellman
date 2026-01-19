@@ -1,7 +1,7 @@
 # Exp4 Provenance: Projection-free Contraction Dial (Final v2)
 
-**Generated:** 2026-01-18T20:25:17.188744
-**Git SHA:** 1f13a5425835
+**Generated:** 2026-01-18T21:46:46.262096
+**Git SHA:** 6fede631455e
 
 ## Checkpoints
 

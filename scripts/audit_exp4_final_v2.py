@@ -216,25 +216,67 @@ def check_decision_gates(summary: Dict[str, Any]) -> Tuple[bool, str]:
 
 
 def check_statistical_reporting(summary: Dict[str, Any]) -> Tuple[bool, str]:
-    """Check that Spearman correlations are reported with p-values."""
+    """Check that Spearman correlations are reported with proper inference."""
     mono = summary.get("monotonicity", {})
 
-    required = ["rho_aa_b0", "p_aa_b0", "rho_aa_b1", "p_aa_b1"]
+    # Check for cluster bootstrap (preferred method)
+    stat_method = mono.get("stat_method", "unknown")
 
-    for key in required:
-        if key not in mono:
-            return False, f"FAIL: Missing {key} in monotonicity stats"
-        if mono[key] is None:
-            return False, f"FAIL: {key} is None"
+    if stat_method == "cluster_bootstrap":
+        # Check for bootstrap fields
+        boot_aa_b0 = mono.get("boot_aa_b0", {})
+        if not boot_aa_b0:
+            return False, "FAIL: Missing boot_aa_b0 in cluster bootstrap results"
 
-    rho_aa_b0 = mono["rho_aa_b0"]
-    p_aa_b0 = mono["p_aa_b0"]
+        rho = boot_aa_b0.get("rho_point", None)
+        ci_lo = boot_aa_b0.get("rho_ci_lower", None)
+        ci_hi = boot_aa_b0.get("rho_ci_upper", None)
 
-    return True, f"PASS: ρ={rho_aa_b0:.3f} (p={p_aa_b0:.4f})"
+        if rho is None or ci_lo is None or ci_hi is None:
+            return False, "FAIL: Incomplete bootstrap results"
+
+        n_bootstrap = mono.get("n_bootstrap", 0)
+        n_clusters = mono.get("n_clusters", 0)
+
+        return True, f"PASS: ρ={rho:.3f} [{ci_lo:.3f}, {ci_hi:.3f}] (cluster bootstrap, {n_bootstrap} iter, {n_clusters} clusters)"
+    else:
+        # Legacy i.i.d. method - check but warn about non-i.i.d.
+        required = ["iid_rho_aa_b0", "iid_p_aa_b0"]
+        for key in required:
+            if key not in mono:
+                # Try old field names
+                old_key = key.replace("iid_", "")
+                if old_key not in mono:
+                    return False, f"FAIL: Missing {key} in monotonicity stats"
+                mono[key] = mono[old_key]
+
+        rho = mono.get("iid_rho_aa_b0", mono.get("rho_aa_b0", 0))
+        p = mono.get("iid_p_aa_b0", mono.get("p_aa_b0", 0))
+
+        return True, f"PASS: ρ={rho:.3f} (p={p:.4f}) WARNING: i.i.d. p-value may be invalid for repeated measures"
+
+
+def check_stat_method(summary: Dict[str, Any]) -> Tuple[bool, str]:
+    """Check that proper statistical method is used for repeated measures."""
+    mono = summary.get("monotonicity", {})
+
+    stat_method = mono.get("stat_method", None)
+
+    if stat_method == "cluster_bootstrap":
+        n_bootstrap = mono.get("n_bootstrap", 0)
+        n_clusters = mono.get("n_clusters", 0)
+        return True, f"PASS: cluster_bootstrap ({n_bootstrap} iterations, {n_clusters} clusters)"
+    elif stat_method is None:
+        # Legacy - check if using i.i.d. p-values without caveat
+        return False, "WARN: No statistical method specified; i.i.d. p-values may be invalid for repeated measures"
+    else:
+        return False, f"WARN: Unknown statistical method: {stat_method}"
 
 
 def run_audit(summary_path: str) -> int:
     """Run full audit and return exit code."""
+    from datetime import datetime
+
     with open(summary_path, "r") as f:
         summary = json.load(f)
 
@@ -256,12 +298,14 @@ def run_audit(summary_path: str) -> int:
         ("7. Batch provenance", check_batch_provenance),
         ("8. Git SHA tracking", check_git_sha),
         ("9. Decision gates", check_decision_gates),
-        ("10. Statistical reporting", check_statistical_reporting),
+        ("10. Statistical method", check_stat_method),
+        ("11. Statistical reporting", check_statistical_reporting),
     ]
 
     passed = 0
     failed = 0
     warnings = 0
+    results = []  # Store results for AUDIT.md
 
     print("-" * 60)
     for name, check_fn in checks:
@@ -277,10 +321,12 @@ def run_audit(summary_path: str) -> int:
                 failed += 1
             print(f"[{status}] {name}")
             print(f"    {msg}")
+            results.append((name, status, msg, ok))
         except Exception as e:
             print(f"[✗] {name}")
             print(f"    ERROR: {e}")
             failed += 1
+            results.append((name, "✗", f"ERROR: {e}", False))
 
     print("-" * 60)
     print()
@@ -291,12 +337,91 @@ def run_audit(summary_path: str) -> int:
     if warnings > 0:
         print(f"               {warnings} warnings")
 
-    if failed > 0:
+    audit_passed = failed == 0
+
+    # Generate AUDIT.md
+    audit_path = Path(summary_path).parent / "AUDIT.md"
+    generate_audit_md(audit_path, summary, results, passed, total, warnings, audit_passed)
+    print(f"\nGenerated: {audit_path}")
+
+    if not audit_passed:
         print("\n❌ AUDIT FAILED")
         return 1
     else:
         print("\n✅ AUDIT PASSED")
         return 0
+
+
+def generate_audit_md(
+    audit_path: Path,
+    summary: Dict[str, Any],
+    results: List[Tuple[str, str, str, bool]],
+    passed: int,
+    total: int,
+    warnings: int,
+    audit_passed: bool,
+) -> None:
+    """Generate AUDIT.md file."""
+    from datetime import datetime
+
+    mono = summary.get("monotonicity", {})
+    gates = summary.get("gates", {})
+
+    content = f"""# Exp4 v2 Audit Report
+
+**Audit Date:** {datetime.now().isoformat()}
+**Summary File:** {summary.get('experiment', 'Exp4_final_v2')}
+**Generated At:** {summary.get('generated_at', 'unknown')}
+**Git SHA:** {summary.get('git_sha', 'unknown')}
+
+## Audit Result
+
+**Status:** {'✅ PASSED' if audit_passed else '❌ FAILED'}
+**Checks Passed:** {passed}/{total}
+**Warnings:** {warnings}
+
+## Check Details
+
+| # | Check | Status | Result |
+|---|-------|--------|--------|
+"""
+    for name, status, msg, ok in results:
+        # Escape pipes in msg
+        msg_escaped = msg.replace("|", "\\|")
+        content += f"| {name} | {status} | {msg_escaped} |\n"
+
+    content += f"""
+
+## Statistical Methodology
+
+- **Method:** {mono.get('stat_method', 'unknown')}
+- **N Observations:** {mono.get('n_samples', 'unknown')}
+- **N Clusters (checkpoints):** {mono.get('n_clusters', 'unknown')}
+- **Bootstrap Iterations:** {mono.get('n_bootstrap', 'N/A')}
+- **Rationale:** Scales are repeated measures on the same checkpoint; cluster bootstrap accounts for within-checkpoint correlation
+
+## Decision Gates
+
+| Gate | Status | Details |
+|------|--------|---------|
+| G0 (Projection inactive) | {'PASS' if gates.get('g0_projection_inactive', {}).get('passed') else 'FAIL'} | latent_ball_radius=0 |
+| G1 (Stability) | {'PASS' if gates.get('g1_stability', {}).get('passed') else 'FAIL'} | No NaN values |
+| G2 (Dial range) | {'PASS' if gates.get('g2_dial_range', {}).get('passed') else 'FAIL'} | spread={gates.get('g2_dial_range', {}).get('L_preproj_spread', 0):.4f} (threshold ≥0.10) |
+| G3 (Monotonicity) | {gates.get('g3_monotonicity', {}).get('status', 'UNKNOWN')} | |ρ|>0.5, 95% CI excludes 0 |
+
+## Depth Mismatch Notation
+
+Metrics labeled "(n2=8)" refer to evaluation at depth n2=8, which is **4× the training depth** (n_train=2).
+This is NOT "8× mismatch" - the mismatch multiplier is n2/n_train = 8/2 = 4.
+
+## Non-Negotiables Verified
+
+- `disable_value_head_norm: true` (value-head spectral norm OFF)
+- `latent_ball_radius: 0.0` (projection disabled)
+"""
+
+    with open(audit_path, "w") as f:
+        f.write(content)
 
 
 def main():
