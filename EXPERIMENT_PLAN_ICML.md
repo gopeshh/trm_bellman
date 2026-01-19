@@ -966,7 +966,8 @@ Create `results/paper_ready/exp4_projection_free_dial/` containing:
 
 | File | Content |
 |------|---------|
-| `fig_exp4_projection_free_dial.pdf` | Panel: ΔV vs achieved L_preproj; optionally Δπ/argmax |
+| `fig_exp4_dial_scatter.pdf` | L_preproj vs Argmax Agreement (n₂=8) scatter with trend line |
+| `fig_exp4_scale_comparison.pdf` | Bar chart comparing L_preproj and Argmax by scale (supplement) |
 | `table_exp4_projection_free_dial.tex` | Settings → achieved L_preproj → stability metrics |
 | `CLAIMS.md` | Scoped claims based on gate outcomes |
 | `PROVENANCE.md` | Commit references, checkpoint paths, commands |
@@ -1026,9 +1027,14 @@ buck2 run //buiksat_trm:audit_exp4_final_v2   # Audit verification (11 checks)
 ### Paper Export
 
 Figures and tables exported to:
-- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp4_projection_free_dial_v2.pdf`
-- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp4_scale_comparison.pdf`
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp4_dial_scatter.pdf` **(main figure)**
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_exp4_scale_comparison.pdf` **(supplement)**
 - `/home/buiksat/UPI_TRM/UPI_TRM_ICML/tables/table_exp4_projection_free_dial_v2.tex`
+
+**Canonical naming contract:**
+- `fig_exp4_dial_scatter.pdf`: L_preproj vs Argmax Agreement (n₂=8) scatter with Spearman ρ and 95% CI
+- `fig_exp4_scale_comparison.pdf`: Bar chart of metrics by scale factor (for supplement)
+- Any `\includegraphics` referencing Exp4 MUST use one of these two filenames
 
 ---
 

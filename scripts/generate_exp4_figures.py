@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Figure generation for Exp4: L_preproj vs argmax@8x scatter plot.
+Figure generation for Exp4: L_preproj vs Argmax Agreement (n₂=8) scatter plot.
 
 Usage:
     python scripts/generate_exp4_figures.py \
@@ -8,7 +8,8 @@ Usage:
         --out_dir results/paper_ready/exp4_projection_free_dial_final
 
 Outputs:
-    - fig_exp4_dial_scatter.pdf: L_preproj vs argmax@8x scatter with trend line
+    - fig_exp4_dial_scatter.pdf: L_preproj vs Argmax Agreement (n₂=8) scatter with Spearman ρ and 95% CI
+    - fig_exp4_scale_comparison.pdf: Bar chart of metrics by scale factor (supplement)
     - fig_exp4_dial_latex.tex: LaTeX table of results
 """
 
@@ -27,7 +28,7 @@ def load_summary(summary_path: str) -> Dict[str, Any]:
 
 
 def generate_scatter_plot(summary: Dict[str, Any], out_path: Path) -> None:
-    """Generate L_preproj vs argmax@8x scatter plot."""
+    """Generate L_preproj vs Argmax Agreement (n₂=8) scatter plot with Spearman ρ and 95% CI."""
     try:
         import matplotlib.pyplot as plt
         import matplotlib
@@ -66,17 +67,31 @@ def generate_scatter_plot(summary: Dict[str, Any], out_path: Path) -> None:
         ax1.scatter(lp, aa, c=[seed_to_color[seed]], marker=scale_to_marker[scale],
                    s=100, edgecolors='black', linewidth=0.5)
 
-    # Trend line for B0
+    # Trend line for B0 - use bootstrap CI if available, otherwise just ρ (no i.i.d. p-values)
     from scipy.stats import spearmanr
-    rho_b0, p_b0 = spearmanr(L_preproj, argmax_b0)
+    rho_b0, _ = spearmanr(L_preproj, argmax_b0)
     z = np.polyfit(L_preproj, argmax_b0, 1)
     p = np.poly1d(z)
     x_line = np.linspace(min(L_preproj), max(L_preproj), 100)
-    ax1.plot(x_line, p(x_line), 'k--', alpha=0.5,
-             label=f'Trend (ρ={rho_b0:.3f}, p={p_b0:.4f})')
+
+    # Check for bootstrap CI data (cluster-valid)
+    mono = summary.get("monotonicity", {})
+    boot_b0 = mono.get("boot_aa_b0", {})
+    boot_b1 = mono.get("boot_aa_b1", {})
+
+    if boot_b0 and "rho_ci_lower" in boot_b0:
+        # Use cluster bootstrap CI (statistically valid for repeated-measures)
+        ci_lo = boot_b0.get("rho_ci_lower", 0)
+        ci_hi = boot_b0.get("rho_ci_upper", 0)
+        label_b0 = f'Trend (ρ={rho_b0:.3f} [95% CI: {ci_lo:.3f}, {ci_hi:.3f}])'
+    else:
+        # No bootstrap data - show ρ only, do NOT show i.i.d. p-values
+        label_b0 = f'Trend (ρ={rho_b0:.3f})'
+
+    ax1.plot(x_line, p(x_line), 'k--', alpha=0.5, label=label_b0)
 
     ax1.set_xlabel('L_preproj (Lipschitz estimate)')
-    ax1.set_ylabel('Argmax Agreement @ 8× depth')
+    ax1.set_ylabel('Argmax Agreement (n₂=8)')
     ax1.set_title('B0: Initial States')
     ax1.legend(loc='best')
     ax1.grid(True, alpha=0.3)
@@ -86,15 +101,22 @@ def generate_scatter_plot(summary: Dict[str, Any], out_path: Path) -> None:
         ax2.scatter(lp, aa, c=[seed_to_color[seed]], marker=scale_to_marker[scale],
                    s=100, edgecolors='black', linewidth=0.5)
 
-    # Trend line for B1
-    rho_b1, p_b1 = spearmanr(L_preproj, argmax_b1)
+    # Trend line for B1 - use bootstrap CI if available
+    rho_b1, _ = spearmanr(L_preproj, argmax_b1)
     z = np.polyfit(L_preproj, argmax_b1, 1)
     p = np.poly1d(z)
-    ax2.plot(x_line, p(x_line), 'k--', alpha=0.5,
-             label=f'Trend (ρ={rho_b1:.3f}, p={p_b1:.4f})')
+
+    if boot_b1 and "rho_ci_lower" in boot_b1:
+        ci_lo = boot_b1.get("rho_ci_lower", 0)
+        ci_hi = boot_b1.get("rho_ci_upper", 0)
+        label_b1 = f'Trend (ρ={rho_b1:.3f} [95% CI: {ci_lo:.3f}, {ci_hi:.3f}])'
+    else:
+        label_b1 = f'Trend (ρ={rho_b1:.3f})'
+
+    ax2.plot(x_line, p(x_line), 'k--', alpha=0.5, label=label_b1)
 
     ax2.set_xlabel('L_preproj (Lipschitz estimate)')
-    ax2.set_ylabel('Argmax Agreement @ 8× depth')
+    ax2.set_ylabel('Argmax Agreement (n₂=8)')
     ax2.set_title('B1: Successor States')
     ax2.legend(loc='best')
     ax2.grid(True, alpha=0.3)
@@ -237,7 +259,7 @@ def generate_scale_comparison(summary: Dict[str, Any], out_path: Path) -> None:
     # Argmax agreement by scale
     ax2.bar(x, argmax_b0, width, yerr=argmax_b0_std, capsize=3, color='darkgreen')
     ax2.set_xlabel('Scale Factor')
-    ax2.set_ylabel('Argmax Agreement @ 8×')
+    ax2.set_ylabel('Argmax Agreement (n₂=8)')
     ax2.set_title('Policy Stability by Scale')
     ax2.set_xticks(x)
     ax2.set_xticklabels([f'{s:.2f}' for s in scales])
