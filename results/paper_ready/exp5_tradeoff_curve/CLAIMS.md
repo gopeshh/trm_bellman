@@ -35,6 +35,19 @@ stability (policy consistency under depth mismatch) and expressivity (task succe
 - Stability measured as argmax agreement at n2=8 (4× mismatch)
 - 3 independently trained checkpoints
 
+## ⚠️ Important: Success Rate Qualification
+
+**The ~5% success rate is expected and NOT a bug.** These checkpoints (`nc_rdis_*`) were trained
+using an evaluation dataset where puzzles appeared already-solved (`initial=16.00/16`). As a result:
+
+1. **Models did not learn to fill empty cells** during training
+2. **Low success (~5%) on real puzzles** is the expected consequence
+3. **Stability metrics remain valid** as they measure z→z dynamics, not task success
+
+For task success claims, use Exp2-style checkpoints trained on actual unsolved puzzles (which achieve 86-92% success).
+
+See `results/paper_ready/SUCCESS_RATE_RECONCILIATION.md` for full root cause analysis.
+
 ## Non-Negotiables Verified
 
 - `disable_value_head_norm: true`
