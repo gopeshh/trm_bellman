@@ -1,0 +1,75 @@
+[2026-01-19T15:16:31.368-08:00] Buck UI: https://www.internalfb.com/buck2/9bea0e88-a518-4498-9238-6a89dddf9fd3
+[2026-01-19T15:16:31.653-08:00] Network: Up: 0B  Down: 0B
+BUILD SUCCEEDED - starting your binary
+======================================================================
+Exp5: Stability–Expressivity Tradeoff Curve
+======================================================================
+
+[Config] Checkpoints: ['/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt', '/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt', '/data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt']
+[Config] YAML: /data/repos/fbsource/fbcode/buiksat_trm/configs/exp3_projection_ablation/nc_rdis.yaml
+[Config] Output: /data/repos/fbsource/fbcode/buiksat_trm/results/paper_ready/exp5_tradeoff_curve_v2
+[Config] Device: cuda
+[Config] Dial scales: [1.0, 0.85, 0.7, 0.55]
+
+[Load] Loading checkpoint seed 41: /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU0 NVIDIA A100-PG509-200 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU1 NVIDIA A100-PG509-200 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU2 NVIDIA A100-PG509-200 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU3 NVIDIA A100-PG509-200 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+INFO:2026-01-19 15:16:36 1446889:1446889 CuptiCallbackApi.cpp:74] Callback: domain = 3, cbid = 1
+INFO:2026-01-19 15:16:36 1446889:1446889 CuptiActivityProfiler.cpp:245] CUDA versions. CUPTI: 22; Runtime: 12040; Driver: 12040
+INFO:2026-01-19 15:16:36 1446889:1447838 FBConfig.cpp:330] Perfetto builder enabled: 1
+INFO:2026-01-19 15:16:36 1446889:1447838 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+[Load] Loading checkpoint seed 42: /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt
+[Load] Loading checkpoint seed 43: /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt
+[Load] Loaded 3 checkpoints
+INFO:2026-01-19 15:16:36 1446889:1447838 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+[Data] Trivial puzzles: 1000
+[Data] Hard puzzles (6-8 empties): 1000
+
+[Batches] B0 trivial: 100 states (hash: 6eb05a7ca77a)
+[Batches] B0 hard: 100 states (hash: 24d74a9bd1b2)
+
+============================================================
+Checkpoint seed 41
+============================================================
+
+[Scale 1.00]
+WARNING:root:===========[FB_TRITON]=========== Triton Version: 3.3.2+fb
+  L_preproj: 1.0448 ± 0.2310
+  Stability (B0 trivial): argmax@8x=0.580, ΔV@8x=0.816
+  Stability (B0 hard): argmax@8x=0.600, ΔV@8x=0.840
+Traceback (most recent call last):
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/__run_lpar_main__.py", line 39, in <module>
+    __invoke_main()
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/__run_lpar_main__.py", line 36, in __invoke_main
+    run_as_main(module, main_function)
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/__par__/meta_only/bootstrap.py", line 111, in run_as_main
+    oss_run_as_main(
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/__par__/bootstrap.py", line 70, in run_as_main
+    runpy._run_module_as_main(main_module, alter_argv=False)
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/scripts/exp5_tradeoff_curve.py", line 978, in <module>
+    main()
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/scripts/exp5_tradeoff_curve.py", line 963, in main
+    summary = run_exp5(
+              ^^^^^^^^^
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/scripts/exp5_tradeoff_curve.py", line 669, in run_exp5
+    success_trivial = compute_success_rate(
+                      ^^^^^^^^^^^^^^^^^^^^^
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/scripts/exp5_tradeoff_curve.py", line 503, in compute_success_rate
+    from rl.sudoku_utils import sudoku_feasibility_checker
+ImportError: cannot import name 'sudoku_feasibility_checker' from 'rl.sudoku_utils' (/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/rl/sudoku_utils.py)

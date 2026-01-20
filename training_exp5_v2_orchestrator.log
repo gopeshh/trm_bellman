@@ -1,0 +1,46 @@
+======================================================================
+Exp5 v2: Retraining nc_rdis with proper dataset paths
+======================================================================
+
+Seeds: [41, 42, 43]
+Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/exp3_projection_ablation/nc_rdis.yaml
+Dataset: /data/repos/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-trivial
+Output: /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval
+
+[GPU 0] Starting nc_rdis seed=41
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/exp3_projection_ablation/nc_rdis.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s41
+  Dataset: /data/repos/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-trivial
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_exp5_v2_nc_rdis_s41.log
+  Command: buck2 run //buiksat_trm:upi_trm_train -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- --config /data/repos/fbsource/fbcode/buiksat_trm/configs/exp3_projection_ablation/nc_rdis.yaml --seed 41 --checkpoint-dir /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s41 --dataset-paths /data/repos/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-trivial --save-interval 1000
+[GPU 1] Starting nc_rdis seed=42
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/exp3_projection_ablation/nc_rdis.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s42
+  Dataset: /data/repos/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-trivial
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_exp5_v2_nc_rdis_s42.log
+  Command: buck2 run //buiksat_trm:upi_trm_train -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- --config /data/repos/fbsource/fbcode/buiksat_trm/configs/exp3_projection_ablation/nc_rdis.yaml --seed 42 --checkpoint-dir /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s42 --dataset-paths /data/repos/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-trivial --save-interval 1000
+[GPU 2] Starting nc_rdis seed=43
+  Config: /data/repos/fbsource/fbcode/buiksat_trm/configs/exp3_projection_ablation/nc_rdis.yaml
+  Checkpoint: /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s43
+  Dataset: /data/repos/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-trivial
+  Log: /data/repos/fbsource/fbcode/buiksat_trm/training_exp5_v2_nc_rdis_s43.log
+  Command: buck2 run //buiksat_trm:upi_trm_train -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- --config /data/repos/fbsource/fbcode/buiksat_trm/configs/exp3_projection_ablation/nc_rdis.yaml --seed 43 --checkpoint-dir /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s43 --dataset-paths /data/repos/fbsource/fbcode/buiksat_trm/data/sudoku-4x4-trivial --save-interval 1000
+
+Started 3 training jobs.
+Waiting for completion...
+  ✓ Seed 41 completed successfully
+  ✓ Seed 42 completed successfully
+  ✓ Seed 43 completed successfully
+
+======================================================================
+Completed: 3/3
+
+Verifying checkpoints...
+  ✓ /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt
+  ✓ /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt
+  ✓ /data/repos/fbsource/fbcode/buiksat_trm/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt
+
+SUCCESS: All checkpoints created.
+
+Next step: Run Exp5 v2 evaluation with:
+  python scripts/exp5_tradeoff_curve_v2.py
