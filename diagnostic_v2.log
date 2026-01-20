@@ -1,0 +1,39 @@
+[2026-01-19T18:09:50.451-08:00] Buck UI: https://www.internalfb.com/buck2/49fc549e-0d77-42fd-a91a-ebcc156aeb72
+[2026-01-19T18:09:50.461-08:00] Network: Up: 0B  Down: 0B
+BUILD FAILED
+Unknown target `diagnose_success_rate_discrepancy` from package `fbcode//buiksat_trm`.
+Did you mean one of the 640 targets in fbcode//buiksat_trm:BUCK?
+Maybe you meant one of these similar targets?
+  fbcode//buiksat_trm:diagnose_success_discrepancy
+
+Available targets (showing 25 of 640):
+  fbcode//buiksat_trm:audit_exp1_paper_ready
+  fbcode//buiksat_trm:audit_exp1_paper_ready-library
+  fbcode//buiksat_trm:audit_exp2_final_paper_ready
+  fbcode//buiksat_trm:audit_exp2_paper_ready
+  fbcode//buiksat_trm:audit_exp2_paper_ready-library
+  fbcode//buiksat_trm:audit_exp4_final_paper_ready
+  fbcode//buiksat_trm:audit_phase4_paper_ready
+  fbcode//buiksat_trm:diagnose_contraction_components
+  fbcode//buiksat_trm:diagnose_contraction_fix
+  fbcode//buiksat_trm:diagnose_contraction_fix-library
+  fbcode//buiksat_trm:diagnose_contraction_lipschitz
+  fbcode//buiksat_trm:diagnose_contraction_lipschitz-library
+  fbcode//buiksat_trm:diagnose_contraction_saturation
+  fbcode//buiksat_trm:diagnose_contraction_saturation-library
+  fbcode//buiksat_trm:diagnose_latent_collapse
+  fbcode//buiksat_trm:diagnose_latent_collapse-library
+  fbcode//buiksat_trm:diagnose_latent_collapse_v2
+  fbcode//buiksat_trm:diagnose_latent_collapse_v2-library
+  fbcode//buiksat_trm:diagnose_success_discrepancy
+  fbcode//buiksat_trm:diagnose_success_discrepancy-library
+  fbcode//buiksat_trm:eval_exp2c_lite-library
+  fbcode//buiksat_trm:inspect_checkpoint-library
+  fbcode//buiksat_trm:sanity_check_feasibility
+  fbcode//buiksat_trm:test_gae-library
+  fbcode//buiksat_trm:test_solved_termination
+
+To see all 640 targets, run:
+  buck2 uquery --reuse-current-config fbcode//buiksat_trm:
+
+
