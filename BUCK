@@ -1106,6 +1106,22 @@ python_binary(
     ],
 )
 
+python_binary(
+    name = "phase5_centering_alpha",
+    srcs = ["scripts/phase5_centering_alpha.py"],
+    base_module = "",
+    main_module = "scripts.phase5_centering_alpha",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)
+
 # ============================================================================
 # Phase 4: 2×2 Norm Ablation (Multi-seed)
 # ============================================================================
