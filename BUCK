@@ -1162,3 +1162,14 @@ python_binary(
         "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
+
+python_binary(
+    name = "plot_table3_baselines",
+    srcs = ["scripts/plot_table3_baselines.py"],
+    base_module = "",
+    main_module = "scripts.plot_table3_baselines",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)

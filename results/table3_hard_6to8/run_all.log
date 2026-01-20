@@ -1,0 +1,10 @@
+=== Running Table 3 experiments on HARDER dataset (6-8 empties) ===
+Training steps: 20000
+Dataset: buiksat_trm/data/sudoku-4x4-easy_6to8empties
+Results: /home/buiksat/trm_bellman/results/table3_hard_6to8
+
+=== Batch 1/5: persistent_nc (3 seeds) + episodic_nc (1 seed) ===
+[GPU 0] Starting persistent_nc seed=42
+[GPU 1] Starting persistent_nc seed=123
+[GPU 2] Starting persistent_nc seed=456
+[GPU 3] Starting episodic_nc seed=42

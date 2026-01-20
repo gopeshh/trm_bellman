@@ -1038,6 +1038,90 @@ Figures and tables exported to:
 
 ---
 
+## Table 3: Baseline Comparison Experiments (2026-01-20)
+
+**Status:** COMPLETE (trivial) / IN PROGRESS (hard)
+
+### Purpose
+
+Verify and update Table 3 in the paper with correct experimental data across 3 seeds for all methods.
+
+### Datasets
+
+| Dataset | Location | Description |
+|---------|----------|-------------|
+| Trivial 4×4 | `data/sudoku-4x4-trivial` | 1-4 empty cells, 5k steps |
+| Hard 4×4 | `data/sudoku-4x4-easy_6to8empties` | 6-8 empty cells, 20k steps |
+
+### Methods Tested
+
+| Method Key | Config Path | Contraction | Projection | vhead |
+|------------|-------------|-------------|------------|-------|
+| persistent_nc | `ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml` | OFF | ON (R=10) | OFF |
+| episodic_nc | `ablations/upi_trm_feasibility_no_contraction.yaml` | OFF | ON (R=10) | OFF |
+| episodic_c_clean | `exp3_projection_ablation/c_rdis.yaml` | ON | OFF (R=0) | OFF |
+| ppo | `baselines/ppo_trm_feasibility.yaml` | N/A | N/A | N/A |
+| a2c | `baselines/a2c_trm_feasibility.yaml` | N/A | N/A | N/A |
+| dqn | `baselines/dqn_trm_feasibility.yaml` | N/A | N/A | N/A |
+
+### Trivial 4×4 Results (COMPLETE ✅)
+
+**Location:** `results/table3_baselines/`
+**Seeds:** 42, 123, 456 (3 seeds per method)
+**Training steps:** 5000
+
+| Method | Seed 42 | Seed 123 | Seed 456 | Mean ± Std |
+|--------|---------|----------|----------|------------|
+| persistent_nc | 96.0% | 92.0% | 92.0% | **93.3% ± 2.3%** |
+| episodic_nc | 92.0% | 96.0% | 92.0% | **93.3% ± 2.3%** |
+| episodic_c_clean | 96.0% | 86.0% | 90.0% | **90.7% ± 5.0%** |
+| PPO | 30.0% | 30.0% | 30.0% | 30.0% ± 0.0% |
+| A2C | 30.0% | 34.0% | 30.0% | 31.3% ± 2.3% |
+| DQN | 24.0% | 30.0% | 30.0% | 28.0% ± 3.5% |
+| Random | - | - | - | 52.0% |
+
+### Hard 4×4 (6-8 empties) Experiments (IN PROGRESS 🔄)
+
+**Location:** `results/table3_hard_6to8/`
+**Script:** `scripts/run_table3_hard.sh`
+**Training steps:** 20000
+**Estimated time:** ~20-25 hours total (5 batches × 4-5 hours)
+
+Status: Running on 4 A100 GPUs as of 2026-01-20.
+
+### ⚠️ Config Asymmetry Note
+
+The no-contraction configs (`persistent_nc`, `episodic_nc`) have **projection ON** (default R=10), while the clean contraction config (`episodic_c_clean`) has **projection OFF** (R=0).
+
+This is intentional for Table 3 (matching historical configs), but creates an asymmetry. For fully controlled comparisons:
+- Use `exp3_projection_ablation/nc_rdis.yaml` for no-contraction with projection OFF
+- Use `exp3_projection_ablation/c_r10.yaml` for contraction with projection ON
+
+### Deliverables
+
+- [x] Trivial 4×4 experiments (18 runs complete)
+- [x] Paper Table 3 updated with correct values
+- [x] Learning curves figure regenerated: `figures/trivial_baselines_vs_no_contraction_success_vs_steps.pdf`
+- [ ] Hard 4×4 experiments (in progress)
+- [ ] Hard 4×4 learning curves figure (pending)
+
+### Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/run_table3_baselines.sh` | Run trivial 4×4 experiments |
+| `scripts/run_table3_hard.sh` | Run hard 4×4 experiments (20k steps) |
+| `scripts/plot_table3_baselines.py` | Generate learning curves figure |
+
+### Buck Target
+
+```bash
+buck2 run //buiksat_trm:plot_table3_baselines \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true
+```
+
+---
+
 ## Exp5: Stability–Expressivity Tradeoff Curve (Submission-Critical)
 
 **Date Added:** 2026-01-18
