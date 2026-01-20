@@ -1076,6 +1076,36 @@ python_binary(
     main_module = "scripts.audit_exp5_tradeoff_curve",
 )
 
+python_binary(
+    name = "diagnose_success_discrepancy",
+    srcs = ["scripts/diagnose_success_discrepancy.py"],
+    base_module = "",
+    main_module = "scripts.diagnose_success_discrepancy",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_binary(
+    name = "diagnose_success_rate_discrepancy",
+    srcs = ["scripts/diagnose_success_rate_discrepancy.py"],
+    base_module = "",
+    main_module = "scripts.diagnose_success_rate_discrepancy",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
 # ============================================================================
 # Phase 4: 2×2 Norm Ablation (Multi-seed)
 # ============================================================================

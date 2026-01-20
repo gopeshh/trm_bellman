@@ -1041,7 +1041,7 @@ Figures and tables exported to:
 ## Exp5: Stability–Expressivity Tradeoff Curve (Submission-Critical)
 
 **Date Added:** 2026-01-18
-**Status:** IN PROGRESS → REQUIRES Exp5 v2 (see below)
+**Status:** COMPLETED (G3 FAIL - no tradeoff observed at matched compute)
 **Context:** Exp4 v2 established a working projection-free dial via inference-time scaling. This experiment produces the submission-critical "stability vs expressivity tradeoff curve" deliverable.
 
 ### ⚠️ CRITICAL BUG FIX: Exp5 v2
@@ -1051,7 +1051,7 @@ Figures and tables exported to:
 
 **Evidence:**
 - Original training logs: `initial=16.00` (puzzles already solved)
-- Correct training logs (Exp2): `initial=13.52` (real unsolved puzzles)
+- Correct training logs (Exp5 v2): `initial=13.52` (real unsolved puzzles)
 
 **Fix Applied:**
 - Created `scripts/train_nc_rdis_v2.py` with explicit `--dataset-paths data/sudoku-4x4-trivial`
@@ -1059,9 +1059,26 @@ Figures and tables exported to:
 - New Exp5 v2 uses these fixed checkpoints
 
 **Result:**
-- Success rates now comparable to baseline (~30-60% expected, not ~5%)
-- Stability metrics unchanged (same architecture, same projection disabled)
-- Paper artifacts moved to `results/paper_ready/exp5_tradeoff_curve_v2/`
+- Training success: 88-98% (at n=4, R=10 - extended compute)
+- Matched-compute success: ~6-7% (at n=2, R=0 - experiment setting)
+- **This is NOT a bug:** See `SUCCESS_PROTOCOL_RECONCILIATION.md`
+- Paper artifacts in `results/paper_ready/exp5_tradeoff_curve_v2/`
+
+### Final Results (2026-01-19)
+
+| Scale | L_preproj | Stability (argmax@8×) | Success (n=2) |
+|-------|-----------|----------------------|---------------|
+| 1.00 | 0.801 | 70.0% | 6.7% |
+| 0.85 | 0.562 | 73.0% | 7.0% |
+| 0.70 | 0.489 | 77.0% | 6.7% |
+| 0.55 | 0.524 | 73.0% | 6.7% |
+
+- **G0:** PASS (projection inactive)
+- **G1:** PASS (no NaN)
+- **G2:** PASS (spread=0.6532)
+- **G3:** FAIL (success range=0.3%, no tradeoff at matched compute)
+
+**Interpretation:** The dial controls L_preproj effectively. Stability shows modest variation (70-77%). Success is flat at matched compute, but same checkpoints achieve 88-98% at extended compute (n=4). The "no tradeoff" result at matched compute is genuine—it means 2 unroll steps is insufficient for this task regardless of contraction setting.
 
 ### Goal
 
