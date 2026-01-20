@@ -1,0 +1,170 @@
+[2026-01-19T16:32:12.093-08:00] Buck UI: https://www.internalfb.com/buck2/2bd2ef63-b16b-4806-ab49-4c637f879bd0
+[2026-01-19T16:32:19.180-08:00] Waiting on buck2 daemon 2bd2ef63-b16b-4806-ab49-4c637f879bd0...
+[2026-01-19T16:32:19.180-08:00] Network: Up:   0B             Down:   0B           
+[2026-01-19T16:32:19.180-08:00] Resource usage: RSS: 29GiB CPU: 1873%
+[2026-01-19T16:32:19.180-08:00] IO: none
+[2026-01-19T16:32:26.280-08:00] Waiting on buck2 daemon 2bd2ef63-b16b-4806-ab49-4c637f879bd0...
+[2026-01-19T16:32:26.280-08:00] Network: Up:   0B             Down:   0B           
+[2026-01-19T16:32:26.280-08:00] Resource usage: RSS: 31GiB CPU: 980%
+[2026-01-19T16:32:26.280-08:00] IO: none
+[2026-01-19T16:32:28.779-08:00] Network: Up: 0B  Down: 0B
+BUILD SUCCEEDED - starting your binary
+======================================================================
+Exp5: Stability–Expressivity Tradeoff Curve
+======================================================================
+
+[Config] Checkpoints: ['/home/buiksat/trm_bellman/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt', '/home/buiksat/trm_bellman/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt', '/home/buiksat/trm_bellman/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt']
+[Config] YAML: /home/buiksat/trm_bellman/configs/exp3_projection_ablation/nc_rdis.yaml
+[Config] Output: /home/buiksat/trm_bellman/results/paper_ready/exp5_tradeoff_curve_v2
+[Config] Device: cuda
+[Config] Dial scales: [1.0, 0.85, 0.7, 0.55]
+
+[Load] Loading checkpoint seed 41: /home/buiksat/trm_bellman/results/exp5_v2_inputs_eval/nc_rdis_s41/model_step_5000.pt
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU0 NVIDIA A100-PG509-200 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU1 NVIDIA A100-PG509-200 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU2 NVIDIA A100-PG509-200 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__exp5_tradeoff_curve__/exp5_tradeoff_curve#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU3 NVIDIA A100-PG509-200 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+INFO:2026-01-19 16:32:36 1902919:1902919 CuptiCallbackApi.cpp:74] Callback: domain = 3, cbid = 1
+INFO:2026-01-19 16:32:36 1902919:1902919 CuptiActivityProfiler.cpp:245] CUDA versions. CUPTI: 22; Runtime: 12040; Driver: 12040
+INFO:2026-01-19 16:32:36 1902919:1906829 FBConfig.cpp:330] Perfetto builder enabled: 1
+INFO:2026-01-19 16:32:36 1902919:1906829 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+[Load] Loading checkpoint seed 42: /home/buiksat/trm_bellman/results/exp5_v2_inputs_eval/nc_rdis_s42/model_step_5000.pt
+[Load] Loading checkpoint seed 43: /home/buiksat/trm_bellman/results/exp5_v2_inputs_eval/nc_rdis_s43/model_step_5000.pt
+[Load] Loaded 3 checkpoints
+INFO:2026-01-19 16:32:36 1902919:1906829 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+[Data] Trivial puzzles: 1000
+[Data] Hard puzzles (6-8 empties): 1000
+
+[Batches] B0 trivial: 100 states (hash: 6eb05a7ca77a)
+[Batches] B0 hard: 100 states (hash: 24d74a9bd1b2)
+
+============================================================
+Checkpoint seed 41
+============================================================
+
+[Scale 1.00]
+WARNING:root:===========[FB_TRITON]=========== Triton Version: 3.3.2+fb
+  L_preproj: 1.0310 ± 0.2064
+  Stability (B0 trivial): argmax@8x=0.580, ΔV@8x=0.816
+  Stability (B0 hard): argmax@8x=0.600, ΔV@8x=0.840
+  Success (trivial): 0.050
+  Success (hard): 0.000
+
+[Scale 0.85]
+  L_preproj: 0.6997 ± 0.1027
+  Stability (B0 trivial): argmax@8x=0.650, ΔV@8x=0.681
+  Stability (B0 hard): argmax@8x=0.640, ΔV@8x=0.504
+  Success (trivial): 0.060
+  Success (hard): 0.000
+
+[Scale 0.70]
+  L_preproj: 0.5692 ± 0.0564
+  Stability (B0 trivial): argmax@8x=0.650, ΔV@8x=0.587
+  Stability (B0 hard): argmax@8x=0.580, ΔV@8x=0.512
+  Success (trivial): 0.050
+  Success (hard): 0.000
+
+[Scale 0.55]
+  L_preproj: 0.5560 ± 0.0251
+  Stability (B0 trivial): argmax@8x=0.610, ΔV@8x=0.604
+  Stability (B0 hard): argmax@8x=0.530, ΔV@8x=0.653
+  Success (trivial): 0.050
+  Success (hard): 0.000
+
+============================================================
+Checkpoint seed 42
+============================================================
+
+[Scale 1.00]
+  L_preproj: 0.8990 ± 0.2178
+  Stability (B0 trivial): argmax@8x=0.760, ΔV@8x=0.605
+  Stability (B0 hard): argmax@8x=0.700, ΔV@8x=0.667
+  Success (trivial): 0.060
+  Success (hard): 0.000
+
+[Scale 0.85]
+  L_preproj: 0.6098 ± 0.1137
+  Stability (B0 trivial): argmax@8x=0.770, ΔV@8x=0.472
+  Stability (B0 hard): argmax@8x=0.790, ΔV@8x=0.392
+  Success (trivial): 0.060
+  Success (hard): 0.000
+
+[Scale 0.70]
+  L_preproj: 0.5048 ± 0.0669
+  Stability (B0 trivial): argmax@8x=0.770, ΔV@8x=0.435
+  Stability (B0 hard): argmax@8x=0.760, ΔV@8x=0.496
+  Success (trivial): 0.060
+  Success (hard): 0.000
+
+[Scale 0.55]
+  L_preproj: 0.5335 ± 0.0337
+  Stability (B0 trivial): argmax@8x=0.710, ΔV@8x=0.819
+  Stability (B0 hard): argmax@8x=0.690, ΔV@8x=0.948
+  Success (trivial): 0.070
+  Success (hard): 0.000
+
+============================================================
+Checkpoint seed 43
+============================================================
+
+[Scale 1.00]
+  L_preproj: 0.4731 ± 0.1611
+  Stability (B0 trivial): argmax@8x=0.760, ΔV@8x=0.164
+  Stability (B0 hard): argmax@8x=0.720, ΔV@8x=0.136
+  Success (trivial): 0.090
+  Success (hard): 0.000
+
+[Scale 0.85]
+  L_preproj: 0.3778 ± 0.0803
+  Stability (B0 trivial): argmax@8x=0.770, ΔV@8x=0.162
+  Stability (B0 hard): argmax@8x=0.750, ΔV@8x=0.194
+  Success (trivial): 0.090
+  Success (hard): 0.000
+
+[Scale 0.70]
+  L_preproj: 0.3919 ± 0.0509
+  Stability (B0 trivial): argmax@8x=0.890, ΔV@8x=0.353
+  Stability (B0 hard): argmax@8x=0.760, ΔV@8x=0.502
+  Success (trivial): 0.090
+  Success (hard): 0.000
+
+[Scale 0.55]
+  L_preproj: 0.4818 ± 0.0434
+  Stability (B0 trivial): argmax@8x=0.870, ΔV@8x=0.616
+  Stability (B0 hard): argmax@8x=0.800, ΔV@8x=0.883
+  Success (trivial): 0.080
+  Success (hard): 0.000
+
+======================================================================
+TRADEOFF SUMMARY
+======================================================================
+Scale 1.00: stability=0.700, success_trivial=0.067, L_preproj=0.801
+Scale 0.85: stability=0.730, success_trivial=0.070, L_preproj=0.562
+Scale 0.70: stability=0.770, success_trivial=0.067, L_preproj=0.489
+Scale 0.55: stability=0.730, success_trivial=0.067, L_preproj=0.524
+
+------------------------------------------------------------
+DECISION GATES
+------------------------------------------------------------
+G0 (Projection inactive): PASS
+G1 (Stability): PASS
+G2 (Dial range, inherited): PASS (spread=0.6532)
+G3 (Tradeoff exists): FAIL (success range=0.0033)
+
+DECISION: POSITIVE: Tradeoff curve generated successfully
+
+Saved: /home/buiksat/trm_bellman/results/paper_ready/exp5_tradeoff_curve_v2/summary.json
+Saved: /home/buiksat/trm_bellman/results/paper_ready/exp5_tradeoff_curve_v2/CLAIMS.md
+Saved: /home/buiksat/trm_bellman/results/paper_ready/exp5_tradeoff_curve_v2/PROVENANCE.md
