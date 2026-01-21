@@ -143,8 +143,8 @@ def compute_mean_std(seed_data: Dict[int, List[Tuple[int, float]]]) -> Tuple[np.
 def main():
     apply_paper_style()
 
-    results_dir = Path("/home/buiksat/trm_bellman/results/table3_baselines")
-    output_dir = Path("/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures")
+    results_dir = Path("/Users/buiksat/trm_bellman/results/table3_baselines")
+    output_dir = Path("/Users/buiksat/UPI_TRM/UPI_TRM_ICML/figures")
 
     # Define methods and their log file patterns
     methods = {
@@ -219,7 +219,7 @@ def main():
 
     ax.set_xlabel("Training Steps")
     ax.set_ylabel("Success Rate")
-    ax.set_title("4×4 Sudoku: Success Rate vs Training Steps\n(Feasibility Checker, trivial dataset)")
+    ax.set_title("4×4 Sudoku: Success Rate vs Training Steps\n(Feasibility Checker, 1–4 empties)")
     ax.set_ylim(0, 1.0)
     ax.set_xlim(0, 5000)
     ax.grid(True, alpha=0.3)
