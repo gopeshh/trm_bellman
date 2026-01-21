@@ -28,3 +28,21 @@ Batch 2 complete
 [GPU 1] Starting ppo seed=42
 [GPU 2] Starting ppo seed=123
 [GPU 3] Starting ppo seed=456
+[GPU 0] Finished episodic_c_clean seed=456 -> success=0.340
+[GPU 3] Finished ppo seed=456 -> success=0.000
+[GPU 1] Finished ppo seed=42 -> success=0.000
+[GPU 2] Finished ppo seed=123 -> success=0.000
+Batch 3 complete
+=== Batch 4/5: a2c (3 seeds) + dqn (1 seed) ===
+[GPU 0] Starting a2c seed=42
+[GPU 1] Starting a2c seed=123
+[GPU 2] Starting a2c seed=456
+[GPU 3] Starting dqn seed=42
+[GPU 2] Finished a2c seed=456 -> success=0.000
+[GPU 3] Finished dqn seed=42 -> success=0.000
+[GPU 0] Finished a2c seed=42 -> success=0.000
+[GPU 1] Finished a2c seed=123 -> success=0.000
+Batch 4 complete
+=== Batch 5/5: dqn (2 seeds) ===
+[GPU 0] Starting dqn seed=123
+[GPU 1] Starting dqn seed=456
