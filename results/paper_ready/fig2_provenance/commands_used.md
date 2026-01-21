@@ -65,21 +65,47 @@ grep -n "93\|90\|31\|28\|30" /home/buiksat/UPI_TRM/UPI_TRM_ICML/main.tex | \
     grep -E "(persistent|episodic|PPO|A2C|DQN|93\.3|90\.7|31\.3|28\.0|30\.0)"
 ```
 
-## 8. Get Git Commit
+## 8. Verify Horizon T
+
+```bash
+# Check configs for max_edits
+grep -E "max_edits" configs/ablations/*.yaml configs/baselines/*.yaml
+# Result: All configs use max_edits: 16
+
+# Check RLConfig default
+grep "max_edits" rl/config.py
+# Result: max_edits: int = 16
+```
+
+## 9. Get Git Commit
 
 ```bash
 cd /home/buiksat/trm_bellman
 git log -1 --format='%H %s'
-# Result: 9569d241b5986d23569b24ccdffc907ed3742404
 ```
 
-## 9. Regenerate Figure (if needed)
+## 10. Regenerate Figure (if needed)
 
 ```bash
 cd ~/fbsource/fbcode
 buck2 run //buiksat_trm:plot_table3_baselines \
     -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true
 ```
+
+## 11. Update main.tex (2026-01-20)
+
+Fixed horizon discrepancy: paper incorrectly stated T=20, actual value is T=16.
+Changed all occurrences in main.tex:
+- Line 151: abstract
+- Line 1540: Setup description
+- Line 1578: Success definition
+- Line 1581: "within 16 attempts" (was 20)
+- Line 1585: Table 3 caption
+- Line 1622: Figure 2 caption
+- Line 2108: Appendix baseline comparison
+- Line 2119: Appendix figure caption
+- Line 2285: Exp5 figure caption
+- Line 2309: 6-8 empties figure caption
 
 ---
 
@@ -88,3 +114,4 @@ buck2 run //buiksat_trm:plot_table3_baselines \
 - `fig2_protocol.md` - Paper-safe protocol description (no run IDs)
 - `fig2_table3_consistency.md` - Verification that Figure 2 and Table 3 match
 - `fig2_inputs.json` - Full provenance with exact paths, settings, and values
+- `commands_used.md` - This file
