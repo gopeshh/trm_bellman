@@ -1040,7 +1040,7 @@ Figures and tables exported to:
 
 ## Table 3: Baseline Comparison Experiments (2026-01-20)
 
-**Status:** COMPLETE (trivial) / IN PROGRESS (hard)
+**Status:** COMPLETE
 
 ### Purpose
 
@@ -1080,14 +1080,26 @@ Verify and update Table 3 in the paper with correct experimental data across 3 s
 | DQN | 24.0% | 30.0% | 30.0% | 28.0% ± 3.5% |
 | Random | - | - | - | 52.0% |
 
-### Hard 4×4 (6-8 empties) Experiments (IN PROGRESS 🔄)
+### Hard 4×4 (6-8 empties) Experiments (COMPLETE ✅)
 
 **Location:** `results/table3_hard_6to8/`
 **Script:** `scripts/run_table3_hard.sh`
 **Training steps:** 20000
-**Estimated time:** ~20-25 hours total (5 batches × 4-5 hours)
+**Completed:** 2026-01-21
 
-Status: Running on 4 A100 GPUs as of 2026-01-20.
+| Method | Seed 42 | Seed 123 | Seed 456 | Mean ± Std |
+|--------|---------|----------|----------|------------|
+| persistent_nc | 60.0% | 52.0% | 58.0% | **56.7% ± 4.2%** |
+| episodic_nc | 42.0% | 54.0% | 48.0% | **48.0% ± 6.0%** |
+| episodic_c_clean | 36.0% | 40.0% | 34.0% | **36.7% ± 3.1%** |
+| PPO | 0.0% | 0.0% | 0.0% | 0.0% ± 0.0% |
+| A2C | 0.0% | 0.0% | 0.0% | 0.0% ± 0.0% |
+| DQN | 0.0% | 0.0% | 0.0% | 0.0% ± 0.0% |
+
+**Key Observations:**
+1. No-contraction variants outperform contraction on harder puzzles (57% vs 37%)
+2. All standard RL baselines fail completely (0% success)
+3. persistent_nc performs best on harder puzzles
 
 ### ⚠️ Config Asymmetry Note
 
@@ -1102,8 +1114,8 @@ This is intentional for Table 3 (matching historical configs), but creates an as
 - [x] Trivial 4×4 experiments (18 runs complete)
 - [x] Paper Table 3 updated with correct values
 - [x] Learning curves figure regenerated: `figures/trivial_baselines_vs_no_contraction_success_vs_steps.pdf`
-- [ ] Hard 4×4 experiments (in progress)
-- [ ] Hard 4×4 learning curves figure (pending)
+- [x] Hard 4×4 experiments (18 runs complete)
+- [x] Hard 4×4 learning curves figure: `figures/hard_4x4_baselines_success_vs_steps.pdf`
 
 ### Scripts
 
@@ -1111,7 +1123,8 @@ This is intentional for Table 3 (matching historical configs), but creates an as
 |--------|---------|
 | `scripts/run_table3_baselines.sh` | Run trivial 4×4 experiments |
 | `scripts/run_table3_hard.sh` | Run hard 4×4 experiments (20k steps) |
-| `scripts/plot_table3_baselines.py` | Generate learning curves figure |
+| `scripts/plot_table3_baselines.py` | Generate trivial learning curves figure |
+| `scripts/plot_table3_hard.py` | Generate hard learning curves figure |
 
 ### Buck Target
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Generate learning curve plots for Table 3 baselines.
+Generate learning curve plots for Table 3 baselines - HARDER 4x4 Sudoku (6-8 empties).
 Matches paper style from plot_feasibility_curves.py and plot_6to8empties_paper_style.py
 
-Creates trivial_baselines_vs_no_contraction_success_vs_steps.pdf
+Creates hard_4x4_baselines_success_vs_steps.pdf
 
 Usage:
-    buck2 run //buiksat_trm:plot_table3_baselines
+    buck2 run //buiksat_trm:plot_table3_hard
 """
 
 import re
@@ -72,8 +72,8 @@ ALGO_CONFIG = {
     },
 }
 
-# Random baseline for trivial dataset (52%)
-RANDOM_BASELINE = 0.52
+# Random baseline for hard dataset 6-8 empties (0% - computed via eval_random_baseline.py)
+RANDOM_BASELINE = 0.0
 
 
 def parse_log_file(log_path: Path) -> List[Tuple[int, float]]:
@@ -143,7 +143,8 @@ def compute_mean_std(seed_data: Dict[int, List[Tuple[int, float]]]) -> Tuple[np.
 def main():
     apply_paper_style()
 
-    results_dir = Path("/home/buiksat/trm_bellman/results/table3_baselines")
+    # Use hard dataset results
+    results_dir = Path("/home/buiksat/trm_bellman/results/table3_hard_6to8")
     output_dir = Path("/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures")
 
     # Define methods and their log file patterns
@@ -203,7 +204,7 @@ def main():
                 linewidth=3.0,
                 marker=config["marker"],
                 markersize=6,
-                markevery=8,
+                markevery=20,  # Fewer markers for longer x-axis
                 label=f"{config['name']} (S={num_seeds})"
             )
 
@@ -219,9 +220,9 @@ def main():
 
     ax.set_xlabel("Training Steps")
     ax.set_ylabel("Success Rate")
-    ax.set_title("4×4 Sudoku (1–4 empties, T=16): Success Rate vs Training Steps\n(Feasibility Checker, 5k steps, 3 seeds)")
+    ax.set_title("4×4 Sudoku (6–8 empties, T=16): Success Rate vs Training Steps\n(Feasibility Checker, 20k steps, 3 seeds)")
     ax.set_ylim(0, 1.0)
-    ax.set_xlim(0, 5000)
+    ax.set_xlim(0, 20000)
     ax.grid(True, alpha=0.3)
 
     # Legend below plot in two columns (matches paper style)
@@ -240,7 +241,7 @@ def main():
 
     # Save figures
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "trivial_baselines_vs_no_contraction_success_vs_steps.pdf"
+    output_path = output_dir / "hard_4x4_baselines_success_vs_steps.pdf"
 
     fig.savefig(output_path, dpi=200, bbox_inches="tight", pad_inches=0.02)
     fig.savefig(str(output_path).replace(".pdf", ".png"), dpi=200, bbox_inches="tight", pad_inches=0.02)

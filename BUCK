@@ -1173,3 +1173,14 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+python_binary(
+    name = "plot_table3_hard",
+    srcs = ["scripts/plot_table3_hard.py"],
+    base_module = "",
+    main_module = "scripts.plot_table3_hard",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)

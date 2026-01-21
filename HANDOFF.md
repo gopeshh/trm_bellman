@@ -1,6 +1,6 @@
 # HANDOFF.md - Session Summary for UPI-TRM Project
 
-**Date:** 2026-01-20
+**Date:** 2026-01-21
 **Branch:** `feature/upi-trm-clean`
 **Latest Commit:** See git log for current state
 
@@ -8,37 +8,40 @@
 
 ## Current Work
 
-### Active Task: Hard 4×4 Sudoku Baseline Experiments
+### Completed Task: Hard 4×4 Sudoku Baseline Experiments
 
-**Status:** IN PROGRESS (Batch 2/5 completing)
+**Status:** ✅ COMPLETE
 **Started:** 2026-01-20 ~08:37
-**Estimated Completion:** ~4-5 more hours for remaining batches
+**Completed:** 2026-01-21 ~14:56
 
-#### What's Running
+#### Final Results (Hard 4×4 Sudoku, 6-8 empties, 20k steps)
 
-18 experiments (6 methods × 3 seeds) on harder 4×4 Sudoku (6-8 empty cells) with 20k training steps. Running on 4 A100 GPUs in 5 sequential batches.
+| Method | Seed 42 | Seed 123 | Seed 456 | Mean ± Std |
+|--------|---------|----------|----------|------------|
+| persistent_nc | 60.0% | 52.0% | 58.0% | **56.7% ± 4.2%** |
+| episodic_nc | 42.0% | 54.0% | 48.0% | **48.0% ± 6.0%** |
+| episodic_c_clean | 36.0% | 40.0% | 34.0% | **36.7% ± 3.1%** |
+| PPO | 0.0% | 0.0% | 0.0% | 0.0% ± 0.0% |
+| A2C | 0.0% | 0.0% | 0.0% | 0.0% ± 0.0% |
+| DQN | 0.0% | 0.0% | 0.0% | 0.0% ± 0.0% |
+
+**Figure generated:** `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/hard_4x4_baselines_success_vs_steps.pdf`
 
 **Script:** `/home/buiksat/trm_bellman/scripts/run_table3_hard.sh`
 **Results:** `/home/buiksat/trm_bellman/results/table3_hard_6to8/`
 
-#### Current Progress (as of last check)
+#### Key Observations
 
-| Method | Seed 42 | Seed 123 | Seed 456 | Status |
-|--------|---------|----------|----------|--------|
-| persistent_nc | 60.0% | 52.0% | 58.0% | ✅ COMPLETE |
-| episodic_nc | 42.0% | 54.0% | 48.0% | ✅ COMPLETE |
-| episodic_c_clean | ~36% | ~38% | pending | 🔄 Batch 2 |
-| ppo | - | - | - | ⏳ Batch 3 |
-| a2c | - | - | - | ⏳ Batch 4 |
-| dqn | - | - | - | ⏳ Batch 4-5 |
+1. **No-contraction variants outperform contraction on harder puzzles:**
+   - `persistent_nc`: 56.7% (best)
+   - `episodic_nc`: 48.0%
+   - `episodic_c_clean`: 36.7%
 
-#### Key Observation
+2. **All standard RL baselines (PPO, A2C, DQN) fail completely** on harder puzzles (0% success).
 
-Contraction variant (`episodic_c_clean`) shows lower success on harder puzzles:
-- **Trivial (1-4 empties):** 90.7% ± 5.0%
-- **Hard (6-8 empties):** ~36-38% (preliminary)
-
-No-contraction variants maintain higher success on hard puzzles (~50-57%).
+3. **Comparison with trivial puzzles:**
+   - Trivial (1-4 empties): All UPI-TRM variants ~90-93%
+   - Hard (6-8 empties): UPI-TRM variants 37-57%, baselines 0%
 
 ### Decisions Made This Session
 
