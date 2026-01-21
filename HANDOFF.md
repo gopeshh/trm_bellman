@@ -6,6 +6,124 @@
 
 ---
 
+## Current Work
+
+### Active Task: Hard 4×4 Sudoku Baseline Experiments
+
+**Status:** IN PROGRESS (Batch 2/5 completing)
+**Started:** 2026-01-20 ~08:37
+**Estimated Completion:** ~4-5 more hours for remaining batches
+
+#### What's Running
+
+18 experiments (6 methods × 3 seeds) on harder 4×4 Sudoku (6-8 empty cells) with 20k training steps. Running on 4 A100 GPUs in 5 sequential batches.
+
+**Script:** `/home/buiksat/trm_bellman/scripts/run_table3_hard.sh`
+**Results:** `/home/buiksat/trm_bellman/results/table3_hard_6to8/`
+
+#### Current Progress (as of last check)
+
+| Method | Seed 42 | Seed 123 | Seed 456 | Status |
+|--------|---------|----------|----------|--------|
+| persistent_nc | 60.0% | 52.0% | 58.0% | ✅ COMPLETE |
+| episodic_nc | 42.0% | 54.0% | 48.0% | ✅ COMPLETE |
+| episodic_c_clean | ~36% | ~38% | pending | 🔄 Batch 2 |
+| ppo | - | - | - | ⏳ Batch 3 |
+| a2c | - | - | - | ⏳ Batch 4 |
+| dqn | - | - | - | ⏳ Batch 4-5 |
+
+#### Key Observation
+
+Contraction variant (`episodic_c_clean`) shows lower success on harder puzzles:
+- **Trivial (1-4 empties):** 90.7% ± 5.0%
+- **Hard (6-8 empties):** ~36-38% (preliminary)
+
+No-contraction variants maintain higher success on hard puzzles (~50-57%).
+
+### Decisions Made This Session
+
+1. **Table 3 Data Verification:** Discovered paper had incorrect baseline numbers. Re-ran all 18 experiments (6 methods × 3 seeds) and updated `main.tex`.
+
+2. **Missing persistent_nc Experiments:** Found that `persistent_nc` logs didn't exist - ran them and confirmed results match `episodic_nc` (93.3% ± 2.3% both).
+
+3. **Config Asymmetry Documented:** Noted that:
+   - No-contraction configs have **projection ON** (R=10, default)
+   - Clean contraction config has **projection OFF** (R=0)
+   - This is intentional for matching historical Table 3 setup
+
+4. **Paper Updates Made:**
+   - Table 3 (lines 1583-1588): Correct experimental values
+   - Abstract (line 151): "90–93%" success range
+   - Key observation (lines 1594-1601): Clean contraction note added
+   - Appendix (line 2094): Baseline comparison updated
+
+5. **Figure Regenerated:** `trivial_baselines_vs_no_contraction_success_vs_steps.pdf` with paper style (legend below, individual seed curves, thick mean lines).
+
+### Relevant Codebase Details
+
+#### Config Locations
+```
+configs/
+├── ablations/
+│   ├── upi_trm_feasibility_no_contraction.yaml        # episodic_nc
+│   └── upi_trm_feasibility_persistent_z_no_contraction.yaml  # persistent_nc
+├── baselines/
+│   ├── ppo_trm_feasibility.yaml
+│   ├── a2c_trm_feasibility.yaml
+│   └── dqn_trm_feasibility.yaml
+└── exp3_projection_ablation/
+    └── c_rdis.yaml                                     # episodic_c_clean (contraction ON, vhead OFF, R=0)
+```
+
+#### Key Config Differences
+
+| Config | `enable_contraction` | `latent_ball_radius` | `disable_value_head_norm` | `episodic_latent` |
+|--------|---------------------|---------------------|--------------------------|-------------------|
+| episodic_nc | false | 10.0 (default) | not set | true |
+| persistent_nc | false | 10.0 (default) | not set | false |
+| episodic_c_clean | true | 0 (disabled) | true | true |
+
+#### Dataset Locations
+```
+data/
+├── sudoku-4x4-trivial           # 1-4 empty cells (Table 3 primary)
+├── sudoku-4x4-easy_6to8empties  # 6-8 empty cells (harder experiments)
+└── sudoku-4x4-ultra-easy        # Mostly easy puzzles
+```
+
+#### Scripts Created This Session
+```
+scripts/
+├── run_table3_baselines.sh      # Trivial 4×4, 5k steps
+├── run_table3_hard.sh           # Hard 4×4, 20k steps (RUNNING)
+├── run_persistent_nc.sh         # Fixed missing persistent_nc runs
+└── plot_table3_baselines.py     # Paper-style learning curves
+```
+
+### Next Steps (When Experiments Complete)
+
+1. **Aggregate hard 4×4 results:** Compute mean±std for all 6 methods
+2. **Generate learning curves figure:** Modify `plot_table3_baselines.py` for hard dataset
+3. **Update paper (optional):** Add hard 4×4 results to appendix if significant
+4. **Consider 9×9 experiments:** Instructions in HANDOFF.md for generating dataset and running
+
+### Monitoring Commands
+
+```bash
+# Overall progress
+tail -20 /home/buiksat/trm_bellman/results/table3_hard_6to8/run_all.log
+
+# Individual experiment status
+for f in /home/buiksat/trm_bellman/results/table3_hard_6to8/*.log; do
+    if [[ "$f" != *"run_all"* ]]; then
+        echo "=== $(basename $f) ===";
+        grep "eval_success" "$f" | tail -1;
+    fi
+done
+```
+
+---
+
 ## Project Overview
 
 **UPI-TRM (Unified Policy Iteration with Thinking Recursive Model)** is a research project exploring contraction-based stability for recursive latent reasoning in neural networks. The work targets ICML submission.

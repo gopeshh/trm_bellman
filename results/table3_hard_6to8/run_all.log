@@ -8,3 +8,23 @@ Results: /home/buiksat/trm_bellman/results/table3_hard_6to8
 [GPU 1] Starting persistent_nc seed=123
 [GPU 2] Starting persistent_nc seed=456
 [GPU 3] Starting episodic_nc seed=42
+[GPU 2] Finished persistent_nc seed=456 -> success=0.580
+[GPU 1] Finished persistent_nc seed=123 -> success=0.520
+[GPU 0] Finished persistent_nc seed=42 -> success=0.600
+[GPU 3] Finished episodic_nc seed=42 -> success=0.420
+Batch 1 complete
+=== Batch 2/5: episodic_nc (2 seeds) + episodic_c_clean (2 seeds) ===
+[GPU 0] Starting episodic_nc seed=123
+[GPU 1] Starting episodic_nc seed=456
+[GPU 2] Starting episodic_c_clean seed=42
+[GPU 3] Starting episodic_c_clean seed=123
+[GPU 1] Finished episodic_nc seed=456 -> success=0.480
+[GPU 0] Finished episodic_nc seed=123 -> success=0.540
+[GPU 2] Finished episodic_c_clean seed=42 -> success=0.360
+[GPU 3] Finished episodic_c_clean seed=123 -> success=0.400
+Batch 2 complete
+=== Batch 3/5: episodic_c_clean (1 seed) + ppo (3 seeds) ===
+[GPU 0] Starting episodic_c_clean seed=456
+[GPU 1] Starting ppo seed=42
+[GPU 2] Starting ppo seed=123
+[GPU 3] Starting ppo seed=456
