@@ -74,9 +74,20 @@ The same log files are used as input for both:
 ## Evaluation Protocol Match
 
 Both Figure 2 and Table 3 use the same evaluation protocol:
-- Unroll depth: n=2 (matches training)
-- Evaluation mode: Greedy (argmax)
-- Success criterion: `sudoku_is_solved(final_plan)`
-- Evaluation frequency: Every 100 steps
-- Evaluation episodes: 50 per checkpoint
-- Projection radius: Varies by method (R=10 for no-contraction, R=0 for contraction/baselines)
+- **Episode horizon:** T=16 (config `max_edits: 16`)
+- **Unroll depth:** n=2 (matches training)
+- **Evaluation mode:** Greedy (argmax)
+- **Success criterion:** `sudoku_is_solved(final_plan)`
+- **Evaluation frequency:** Every 100 steps
+- **Evaluation episodes:** 50 per checkpoint
+- **Projection radius:** Varies by method (R=10 for no-contraction, R=0 for contraction/baselines)
+
+---
+
+## Horizon Correction (2026-01-20)
+
+**Fixed:** Paper previously stated T=20 incorrectly. Actual horizon is T=16 based on:
+- All configs: `max_edits: 16`
+- RLConfig default: `max_edits: int = 16`
+
+Changed 10 occurrences in main.tex (lines 151, 1540, 1578, 1581, 1585, 1622, 2108, 2119, 2285, 2309).

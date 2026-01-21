@@ -9,9 +9,10 @@
 
 - **Task:** 4x4 Sudoku
 - **Difficulty:** Trivial (1-4 empty cells)
-- **Dataset path:** `data/sudoku-4x4-trivial`
+- **Dataset path:** `data/sudoku-4x4-trivial` (relative)
 - **Grid size:** 4x4 (16 cells total)
 - **Action space:** 97 discrete edit actions (16 cells x 6 tokens + 1 STOP, but STOP disabled)
+- **Episode horizon (T):** 16 (config `max_edits: 16`)
 
 ---
 
@@ -23,7 +24,7 @@
 | Batch size | 32 (UPI-TRM) / 256 (baselines) | Per-method config |
 | Discount (gamma) | 0.99 | Config `gamma: 0.99` |
 | K-step horizon | 1 (UPI-TRM) / 5 (PPO) | Config `K` |
-| Episode horizon (max_edits) | 16 | Config `max_edits: 16` |
+| Episode horizon (T) | 16 | Config `max_edits: 16` |
 | Evaluation frequency | Every 100 steps | Config `eval_interval: 100` |
 | Evaluation episodes | 50 per checkpoint | Config `eval_num_episodes: 50` |
 
