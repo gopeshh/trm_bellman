@@ -11,21 +11,21 @@ ls scripts/plot*.py
 ## 2. Verify Figure PDF Location
 
 ```bash
-ls /home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/*trivial*.pdf
+ls ../UPI_TRM_ICML/figures/*trivial*.pdf
 # Result: trivial_baselines_vs_no_contraction_success_vs_steps.pdf
 ```
 
 ## 3. Identify Source Log Files
 
 ```bash
-ls -la /home/buiksat/trm_bellman/results/table3_baselines/*.log
+ls -la results/table3_baselines/*.log
 # Shows 18 log files (6 methods x 3 seeds)
 ```
 
 ## 4. Extract Final Success Rates
 
 ```bash
-cd /home/buiksat/trm_bellman/results/table3_baselines
+cd results/table3_baselines
 for method in persistent_nc episodic_nc episodic_c_clean ppo a2c dqn; do
     echo "=== $method ==="
     for seed in 42 123 456; do
@@ -61,7 +61,7 @@ cat configs/baselines/dqn_trm_feasibility.yaml
 ## 7. Check Table 3 in Paper
 
 ```bash
-grep -n "93\|90\|31\|28\|30" /home/buiksat/UPI_TRM/UPI_TRM_ICML/main.tex | \
+grep -n "93\|90\|31\|28\|30" ../UPI_TRM_ICML/main.tex | \
     grep -E "(persistent|episodic|PPO|A2C|DQN|93\.3|90\.7|31\.3|28\.0|30\.0)"
 ```
 
@@ -80,7 +80,6 @@ grep "max_edits" rl/config.py
 ## 9. Get Git Commit
 
 ```bash
-cd /home/buiksat/trm_bellman
 git log -1 --format='%H %s'
 ```
 
