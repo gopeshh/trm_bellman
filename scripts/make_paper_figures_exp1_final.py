@@ -35,9 +35,10 @@ N_TRAIN = 2
 N2_VALUES = [4, 8, 16]  # Evaluation depths
 RADII = [0.0, 10.0, 100.0]
 
-BASE_DIR = Path("/home/buiksat/trm_bellman/results/validation/exp1_v4")
-TABLES_DIR = Path("/home/buiksat/trm_bellman/results/tables")
-OUT_DIR = Path("/home/buiksat/trm_bellman/results/paper_ready/exp1")
+BASE_DIR = Path("/Users/buiksat/trm_bellman/results/validation/exp1_v4")
+TABLES_DIR = Path("/Users/buiksat/trm_bellman/results/tables")
+OUT_DIR = Path("/Users/buiksat/trm_bellman/results/paper_ready/exp1")  # docs & tables
+FIG_DIR = Path("/Users/buiksat/UPI_TRM/UPI_TRM_ICML/figures")  # figures for paper
 
 LABEL_MAP = {
     "model_a": "No Contraction",
@@ -139,21 +140,26 @@ def load_radius_csv(csv_path: Path) -> Dict[float, Dict[str, Dict[str, Aggregate
 # =============================================================================
 
 def set_paper_style():
+    """ICML-ready styling: larger fonts, bolder lines for two-column print."""
     plt.rcParams.update({
-        'font.size': 10,
+        'font.size': 14,
         'font.family': 'serif',
-        'axes.labelsize': 11,
-        'axes.titlesize': 11,
-        'legend.fontsize': 9,
-        'xtick.labelsize': 9,
-        'ytick.labelsize': 9,
-        'lines.linewidth': 1.5,
-        'lines.markersize': 6,
+        'axes.labelsize': 16,
+        'axes.titlesize': 16,
+        'legend.fontsize': 11,
+        'xtick.labelsize': 12,
+        'ytick.labelsize': 12,
+        'lines.linewidth': 2.5,
+        'lines.markersize': 10,
         'figure.dpi': 150,
         'axes.grid': True,
         'grid.alpha': 0.3,
+        'grid.linewidth': 0.8,
+        'axes.linewidth': 1.5,
         'axes.spines.top': False,
         'axes.spines.right': False,
+        'pdf.fonttype': 42,  # TrueType fonts for better PDF rendering
+        'ps.fonttype': 42,
     })
 
 
@@ -169,7 +175,7 @@ def create_unroll_sensitivity_figure(
     """Create 1×3 unroll sensitivity figure for a single batch."""
     set_paper_style()
 
-    fig, axes = plt.subplots(1, 3, figsize=(10, 3))
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 
     # x-axis: depth multiplier
     n2_values = sorted(set(data["model_a"].keys()) & set(data["model_b"].keys()))
@@ -205,7 +211,8 @@ def create_unroll_sensitivity_figure(
             marker = MARKERS[model]
 
             ax.errorbar(mults, means, yerr=[yerr_lower, yerr_upper],
-                       label=label, marker=marker, color=color, capsize=3)
+                       label=label, marker=marker, color=color, capsize=5,
+                       markeredgewidth=1.5, elinewidth=2.0)
 
         ax.set_xlabel(r"Depth Multiplier ($n_2 / n_\mathrm{train}$)")
         ax.set_ylabel(ylabel)
@@ -218,11 +225,11 @@ def create_unroll_sensitivity_figure(
             ax.set_ylim(0.9, 1.01)
 
         if col == 2:
-            ax.legend(loc='lower left', framealpha=0.9)
+            ax.legend(loc='lower left', framealpha=0.9, fontsize=12)
 
-    fig.suptitle(f"Unroll Sensitivity ({batch_name})", fontsize=12, fontweight='bold', y=1.02)
+    fig.suptitle(f"Unroll Sensitivity ({batch_name})", fontsize=16, fontweight='bold', y=1.02)
     plt.tight_layout()
-    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+    plt.savefig(out_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close()
     print(f"[Figure] {out_path}")
 
@@ -239,7 +246,7 @@ def create_radius_sweep_figure(
     """Create 1×3 radius sweep figure for a single batch."""
     set_paper_style()
 
-    fig, axes = plt.subplots(1, 3, figsize=(10, 3))
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 
     radii = [0.0, 10.0, 100.0]
     x = np.arange(len(radii))
@@ -279,7 +286,8 @@ def create_radius_sweep_figure(
             offset = -width/2 if i == 0 else width/2
 
             ax.bar(x + offset, means, width, yerr=yerr_list, label=label,
-                  color=color, capsize=3, alpha=0.8)
+                  color=color, capsize=5, alpha=0.85, edgecolor='black', linewidth=1.2,
+                  error_kw={'elinewidth': 2.0})
 
         ax.set_xlabel("Projection Radius")
         ax.set_ylabel(ylabel)
@@ -292,11 +300,11 @@ def create_radius_sweep_figure(
             ax.set_ylim(0.5, 1.05)
 
         if col == 2:
-            ax.legend(loc='lower right', framealpha=0.9)
+            ax.legend(loc='lower right', framealpha=0.9, fontsize=12)
 
-    fig.suptitle(f"Projection Radius Sweep ({batch_name})", fontsize=12, fontweight='bold', y=1.02)
+    fig.suptitle(f"Projection Radius Sweep ({batch_name})", fontsize=16, fontweight='bold', y=1.02)
     plt.tight_layout()
-    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+    plt.savefig(out_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close()
     print(f"[Figure] {out_path}")
 
@@ -574,17 +582,21 @@ def write_claims(
 # Validation
 # =============================================================================
 
-def validate_outputs(out_dir: Path):
+def validate_outputs(out_dir: Path, fig_dir: Path):
     """Validate all outputs exist and are correct."""
     print("\n" + "=" * 60)
     print("VALIDATION CHECKS")
     print("=" * 60)
 
-    required_files = [
+    # Figures go to paper repo
+    fig_files = [
         "fig_exp1_unroll_sensitivity_main.pdf",
         "fig_exp1_unroll_sensitivity_appendix.pdf",
         "fig_exp1_radius_sweep_main.pdf",
         "fig_exp1_radius_sweep_appendix.pdf",
+    ]
+    # Docs/tables go to trm_bellman
+    doc_files = [
         "table_exp1_unroll_sensitivity.tex",
         "table_exp1_radius_sweep_main.tex",
         "table_exp1_radius_sweep_appendix.tex",
@@ -593,7 +605,16 @@ def validate_outputs(out_dir: Path):
     ]
 
     all_ok = True
-    for fname in required_files:
+    for fname in fig_files:
+        path = fig_dir / fname
+        if path.exists():
+            size = path.stat().st_size
+            print(f"  ✓ {fname} ({size} bytes)")
+        else:
+            print(f"  ✗ MISSING: {fname}")
+            all_ok = False
+
+    for fname in doc_files:
         path = out_dir / fname
         if path.exists():
             size = path.stat().st_size
@@ -647,6 +668,7 @@ def validate_outputs(out_dir: Path):
 
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
 
     print("=" * 60)
     print("GENERATING PAPER-READY ARTIFACTS")
@@ -660,12 +682,12 @@ def main():
     radius_b1 = load_radius_csv(TABLES_DIR / "radius_sweep_b1_aggregated.csv")
     print("  Loaded 4 aggregated CSVs")
 
-    # Generate figures
+    # Generate figures (to paper repo)
     print("\n=== Generating Figures ===")
-    create_unroll_sensitivity_figure(unroll_b0, OUT_DIR / "fig_exp1_unroll_sensitivity_main.pdf", "B0: Initial States")
-    create_unroll_sensitivity_figure(unroll_b1, OUT_DIR / "fig_exp1_unroll_sensitivity_appendix.pdf", "B1: Successor States")
-    create_radius_sweep_figure(radius_b0, OUT_DIR / "fig_exp1_radius_sweep_main.pdf", "B0: Initial States")
-    create_radius_sweep_figure(radius_b1, OUT_DIR / "fig_exp1_radius_sweep_appendix.pdf", "B1: Successor States")
+    create_unroll_sensitivity_figure(unroll_b0, FIG_DIR / "fig_exp1_unroll_sensitivity_main.pdf", "B0: Initial States")
+    create_unroll_sensitivity_figure(unroll_b1, FIG_DIR / "fig_exp1_unroll_sensitivity_appendix.pdf", "B1: Successor States")
+    create_radius_sweep_figure(radius_b0, FIG_DIR / "fig_exp1_radius_sweep_main.pdf", "B0: Initial States")
+    create_radius_sweep_figure(radius_b1, FIG_DIR / "fig_exp1_radius_sweep_appendix.pdf", "B1: Successor States")
 
     # Generate LaTeX tables
     print("\n=== Generating LaTeX Tables ===")
@@ -679,22 +701,24 @@ def main():
     write_claims(OUT_DIR / "CLAIMS.md", unroll_b0, radius_b0, radius_b1)
 
     # Validate
-    all_ok = validate_outputs(OUT_DIR)
+    all_ok = validate_outputs(OUT_DIR, FIG_DIR)
 
     # Summary
     print("\n" + "=" * 60)
     print("PAPER INTEGRATION NOTE")
     print("=" * 60)
-    print("\nMAIN PAPER:")
+    print("\nFIGURES (in paper repo):")
+    print(f"  {FIG_DIR}/")
     print("  - fig_exp1_unroll_sensitivity_main.pdf  (Section 7.4)")
-    print("  - fig_exp1_radius_sweep_main.pdf        (Section 7.4)")
-    print("  - table_exp1_unroll_sensitivity.tex     (Table 1)")
-    print("  - table_exp1_radius_sweep_main.tex      (Table 2)")
-    print("\nAPPENDIX:")
     print("  - fig_exp1_unroll_sensitivity_appendix.pdf")
+    print("  - fig_exp1_radius_sweep_main.pdf        (Section 7.4)")
     print("  - fig_exp1_radius_sweep_appendix.pdf")
+    print("\nDOCS & TABLES (in trm_bellman):")
+    print(f"  {OUT_DIR}/")
+    print("  - table_exp1_unroll_sensitivity.tex")
+    print("  - table_exp1_radius_sweep_main.tex")
     print("  - table_exp1_radius_sweep_appendix.tex")
-    print("\nAll outputs: results/paper_ready/exp1/")
+    print("  - PROVENANCE.md, CLAIMS.md")
 
     return 0 if all_ok else 1
 

@@ -44,9 +44,27 @@ except ImportError:
 # Configuration
 # =============================================================================
 
-PROJECT_ROOT = Path("/home/buiksat/trm_bellman")
+PROJECT_ROOT = Path("/Users/buiksat/trm_bellman")
 EXP2C_JSON = PROJECT_ROOT / "results/paper_ready/exp2c/DIAGNOSTICS_exp2c_lite.json"
-OUT_DIR = PROJECT_ROOT / "results/paper_ready/exp2_final"
+OUT_DIR = PROJECT_ROOT / "results/paper_ready/exp2_final"  # docs & tables
+FIG_DIR = Path("/Users/buiksat/UPI_TRM/UPI_TRM_ICML/figures")  # figures for paper
+
+# ICML paper styling
+PAPER_STYLE = {
+    'font.size': 14,
+    'axes.labelsize': 16,
+    'axes.titlesize': 16,
+    'legend.fontsize': 11,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'lines.linewidth': 2.5,
+    'lines.markersize': 10,
+    'axes.linewidth': 1.5,
+    'pdf.fonttype': 42,
+    'font.weight': 'medium',
+    'axes.labelweight': 'bold',
+    'axes.titleweight': 'bold',
+}
 
 # Commit references
 COMMITS = {
@@ -169,54 +187,73 @@ def generate_dial_figure(dial_metrics: Dict[str, Any], out_path: Path):
         print(f"[Skip] {out_path.name} (matplotlib not available)")
         return
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    # Apply ICML paper styling
+    plt.rcParams.update(PAPER_STYLE)
+
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
 
     # Get metrics for R=10 and R=disabled
     target_lz = dial_metrics["R10"]["target_lz"]
     x = np.arange(len(target_lz))
 
+    # Colors for ICML visibility
+    color_disabled = '#2166AC'  # Strong blue
+    color_r10 = '#D6604D'       # Strong coral/red
+
     # Panel A: L_preproj at R=disabled
     ax = axes[0]
     r_disabled = dial_metrics["R_disabled"]
-    ax.bar(x, r_disabled["L_preproj_mean"], yerr=r_disabled["L_preproj_std"],
-           capsize=3, color='steelblue', alpha=0.8)
+    bars = ax.bar(x, r_disabled["L_preproj_mean"], yerr=r_disabled["L_preproj_std"],
+           capsize=5, color=color_disabled, alpha=0.85, edgecolor='black', linewidth=1.5,
+           error_kw={'linewidth': 2, 'capthick': 2})
     ax.set_xticks(x)
-    ax.set_xticklabels([f"{t}" for t in target_lz])
-    ax.set_xlabel("Target $L_z$")
-    ax.set_ylabel("$\\hat{L}_{pre-proj}$")
-    ax.set_title(f"(A) Pre-proj Lipschitz (R=disabled)\nSpread: {r_disabled['L_preproj_spread']:.3f}")
-    ax.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5, label='Reference')
+    ax.set_xticklabels([f"{t}" for t in target_lz], fontweight='bold')
+    ax.set_xlabel("Target $L_z$", fontweight='bold')
+    ax.set_ylabel("$\\hat{L}_{\\mathrm{pre}}$", fontweight='bold')
+    ax.set_title(f"(A) Pre-proj Lipschitz (R=∞)\nSpread: {r_disabled['L_preproj_spread']:.3f}", fontweight='bold')
+    ax.axhline(y=0.5, color='#666666', linestyle='--', linewidth=2, alpha=0.7, label='Reference')
     ax.set_ylim(0.3, 0.6)
+    ax.tick_params(width=1.5)
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.5)
 
     # Panel B: L_postproj at R=10
     ax = axes[1]
     r10 = dial_metrics["R10"]
-    ax.bar(x, r10["L_postproj_mean"], yerr=r10["L_postproj_std"],
-           capsize=3, color='coral', alpha=0.8)
+    bars = ax.bar(x, r10["L_postproj_mean"], yerr=r10["L_postproj_std"],
+           capsize=5, color=color_r10, alpha=0.85, edgecolor='black', linewidth=1.5,
+           error_kw={'linewidth': 2, 'capthick': 2})
     ax.set_xticks(x)
-    ax.set_xticklabels([f"{t}" for t in target_lz])
-    ax.set_xlabel("Target $L_z$")
-    ax.set_ylabel("$\\hat{L}_{post-proj}$")
-    ax.set_title(f"(B) Post-proj Lipschitz (R=10)\nSaturates at ~0.23")
+    ax.set_xticklabels([f"{t}" for t in target_lz], fontweight='bold')
+    ax.set_xlabel("Target $L_z$", fontweight='bold')
+    ax.set_ylabel("$\\hat{L}_{\\mathrm{post}}$", fontweight='bold')
+    ax.set_title("(B) Post-proj Lipschitz (R=10)\nSaturates at ~0.23", fontweight='bold')
     ax.set_ylim(0.0, 0.35)
+    ax.tick_params(width=1.5)
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.5)
 
     # Panel C: Projection active rate
     ax = axes[2]
     width = 0.35
     ax.bar(x - width/2, r10["projection_active_rate"], width,
-           label='R=10', color='coral', alpha=0.8)
+           label='R=10', color=color_r10, alpha=0.85, edgecolor='black', linewidth=1.5)
     ax.bar(x + width/2, r_disabled["projection_active_rate"], width,
-           label='R=disabled', color='steelblue', alpha=0.8)
+           label='R=∞', color=color_disabled, alpha=0.85, edgecolor='black', linewidth=1.5)
     ax.set_xticks(x)
-    ax.set_xticklabels([f"{t}" for t in target_lz])
-    ax.set_xlabel("Target $L_z$")
-    ax.set_ylabel("Projection Active Rate")
-    ax.set_title("(C) Projection Dominance")
-    ax.legend()
+    ax.set_xticklabels([f"{t}" for t in target_lz], fontweight='bold')
+    ax.set_xlabel("Target $L_z$", fontweight='bold')
+    ax.set_ylabel("Projection Active Rate", fontweight='bold')
+    ax.set_title("(C) Projection Dominance", fontweight='bold')
+    ax.legend(fontsize=12, framealpha=0.9, edgecolor='black')
     ax.set_ylim(0, 1.1)
+    ax.tick_params(width=1.5)
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.5)
 
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.subplots_adjust(bottom=0.15)
+    plt.savefig(out_path, dpi=300, bbox_inches='tight', pad_inches=0.02)
     plt.close()
     print(f"[Output] Saved: {out_path}")
 
@@ -227,7 +264,10 @@ def generate_stability_figure(stability_comp: Dict[str, Any], by_radius: Dict, o
         print(f"[Skip] {out_path.name} (matplotlib not available)")
         return
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    # Apply ICML paper styling
+    plt.rcParams.update(PAPER_STYLE)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
 
     # Get per-target_lz data
     r10_results = sorted(by_radius.get(10.0, []), key=lambda x: x["target_lz"])
@@ -237,38 +277,53 @@ def generate_stability_figure(stability_comp: Dict[str, Any], by_radius: Dict, o
     x = np.arange(len(target_lz))
     width = 0.35
 
+    # Colors for ICML visibility
+    color_on = '#1B7837'   # Strong green (projection ON)
+    color_off = '#C51B7D'  # Strong magenta/red (projection OFF)
+
     # Panel A: ΔV comparison
     ax = axes[0]
     r10_dv = [r["delta_V_2_16"] for r in r10_results]
     r_disabled_dv = [r["delta_V_2_16"] for r in r_disabled_results]
 
-    ax.bar(x - width/2, r10_dv, width, label='R=10 (proj ON)', color='green', alpha=0.8)
-    ax.bar(x + width/2, r_disabled_dv, width, label='R=disabled (proj OFF)', color='red', alpha=0.8)
+    ax.bar(x - width/2, r10_dv, width, label='R=10 (proj ON)', color=color_on, 
+           alpha=0.85, edgecolor='black', linewidth=1.5)
+    ax.bar(x + width/2, r_disabled_dv, width, label='R=∞ (proj OFF)', color=color_off, 
+           alpha=0.85, edgecolor='black', linewidth=1.5)
     ax.set_xticks(x)
-    ax.set_xticklabels([f"{t}" for t in target_lz])
-    ax.set_xlabel("Target $L_z$")
-    ax.set_ylabel("$\\Delta V$ (n=2 → n=16)")
-    ax.set_title("(A) Value Stability: Projection Reduces $\\Delta V$")
-    ax.legend()
+    ax.set_xticklabels([f"{t}" for t in target_lz], fontweight='bold')
+    ax.set_xlabel("Target $L_z$", fontweight='bold')
+    ax.set_ylabel("$\\Delta V$ (n=2 → n=16)", fontweight='bold')
+    ax.set_title("(A) Projection Reduces $\\Delta V$", fontweight='bold')
+    ax.legend(fontsize=12, framealpha=0.9, edgecolor='black')
     ax.set_yscale('log')
+    ax.tick_params(width=1.5)
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.5)
 
     # Panel B: Argmax agreement comparison
     ax = axes[1]
     r10_agree = [r["argmax_agree_2_16"] * 100 for r in r10_results]
     r_disabled_agree = [r["argmax_agree_2_16"] * 100 for r in r_disabled_results]
 
-    ax.bar(x - width/2, r10_agree, width, label='R=10 (proj ON)', color='green', alpha=0.8)
-    ax.bar(x + width/2, r_disabled_agree, width, label='R=disabled (proj OFF)', color='red', alpha=0.8)
+    ax.bar(x - width/2, r10_agree, width, label='R=10 (proj ON)', color=color_on, 
+           alpha=0.85, edgecolor='black', linewidth=1.5)
+    ax.bar(x + width/2, r_disabled_agree, width, label='R=∞ (proj OFF)', color=color_off, 
+           alpha=0.85, edgecolor='black', linewidth=1.5)
     ax.set_xticks(x)
-    ax.set_xticklabels([f"{t}" for t in target_lz])
-    ax.set_xlabel("Target $L_z$")
-    ax.set_ylabel("Argmax Agreement (%)")
-    ax.set_title("(B) Policy Consistency: Projection Improves Agreement")
-    ax.legend()
+    ax.set_xticklabels([f"{t}" for t in target_lz], fontweight='bold')
+    ax.set_xlabel("Target $L_z$", fontweight='bold')
+    ax.set_ylabel("Argmax Agreement (%)", fontweight='bold')
+    ax.set_title("(B) Projection Improves Agreement", fontweight='bold')
+    ax.legend(fontsize=12, framealpha=0.9, edgecolor='black')
     ax.set_ylim(80, 105)
+    ax.tick_params(width=1.5)
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.5)
 
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.subplots_adjust(bottom=0.15, wspace=0.3)  # Add horizontal space between panels
+    plt.savefig(out_path, dpi=300, bbox_inches='tight', pad_inches=0.02)
     plt.close()
     print(f"[Output] Saved: {out_path}")
 
@@ -599,8 +654,9 @@ def main():
     print("EXP2 FINAL: Paper-Ready Artifact Generation")
     print("=" * 60)
 
-    # Create output directory
+    # Create output directories
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
 
     # Load data
     print("\n[Load] Loading Exp2c data...")
@@ -625,10 +681,10 @@ def main():
     print(f"  Projection active (R=10): {np.mean(dial_metrics['R10']['projection_active_rate'])*100:.0f}%")
     print(f"  Projection active (R=disabled): {np.mean(dial_metrics['R_disabled']['projection_active_rate'])*100:.0f}%")
 
-    # Generate outputs
-    print("\n[Generate] Creating figures...")
-    generate_dial_figure(dial_metrics, OUT_DIR / "fig_exp2_dial_does_not_control_Lz.pdf")
-    generate_stability_figure(stability_comp, by_radius, OUT_DIR / "fig_exp2_projection_is_primary_stabilizer.pdf")
+    # Generate outputs - figures go to paper repo
+    print("\n[Generate] Creating figures (to paper repo)...")
+    generate_dial_figure(dial_metrics, FIG_DIR / "fig_exp2_dial_does_not_control_Lz.pdf")
+    generate_stability_figure(stability_comp, by_radius, FIG_DIR / "fig_exp2_projection_is_primary_stabilizer.pdf")
 
     print("\n[Generate] Creating tables...")
     generate_dial_table(dial_metrics, OUT_DIR / "table_exp2_dial_does_not_control_Lz.tex")
@@ -644,7 +700,11 @@ def main():
     print("\n" + "=" * 60)
     print("EXP2 FINAL: Generation Complete")
     print("=" * 60)
-    print(f"\nOutput directory: {OUT_DIR}")
+    print(f"\nFigures (paper repo): {FIG_DIR}")
+    print(f"  - fig_exp2_dial_does_not_control_Lz.pdf")
+    print(f"  - fig_exp2_projection_is_primary_stabilizer.pdf")
+    print(f"\nDocs & tables (trm_bellman): {OUT_DIR}")
+    print(f"  - table_exp2_*.tex, CLAIMS.md, PROVENANCE.md")
     print("\nNext step: Run audit with")
     print("  buck2 run //buiksat_trm:audit_exp2_final_paper_ready")
 
