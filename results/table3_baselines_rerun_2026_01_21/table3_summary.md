@@ -48,7 +48,7 @@ python scripts/eval_random_policy.py \
     --dataset-path data/sudoku-4x4-trivial \
     --seeds 42 123 456 \
     --num-episodes 50 \
-    --output results/plot_data/random_baseline_trivial.csv
+    --output results/plot_data/random_baseline.csv
 ```
 
 ## Key Observations
@@ -77,5 +77,5 @@ python scripts/eval_random_policy.py \
 - A2C logs: `a2c_s42.log`, `a2c_s123.log`, `a2c_s456.log`
 - DQN logs: `dqn_s42_fixed.log`, `dqn_s123_fixed.log`, `dqn_s456_fixed.log`
 - UPI-TRM logs: `upitrm_s42.log`, `upitrm_s123.log`, `upitrm_s456.log`
-- Random baseline: `../plot_data/random_baseline_trivial.csv`, `../plot_data/random_baseline_trivial.json`
+- Random baseline: `../plot_data/random_baseline.csv`, `../plot_data/random_baseline.json`
 - Figure: `figure2_learning_curves.pdf`

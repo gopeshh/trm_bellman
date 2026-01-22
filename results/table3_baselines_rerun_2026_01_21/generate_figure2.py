@@ -13,7 +13,7 @@ Usage:
 
 To regenerate the random baseline first:
     python scripts/eval_random_policy.py \\
-        --dataset-path data/sudoku-4x4-ultra-easy \\
+        --dataset-path data/sudoku-4x4-trivial \\
         --output results/plot_data/random_baseline.csv
 """
 

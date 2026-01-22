@@ -89,8 +89,8 @@ def main():
     parser.add_argument(
         "--random-baseline-json",
         type=str,
-        default=None,
-        help="Path to random_baseline.json (reads success rate from file instead of hardcoding)",
+        default="/home/buiksat/trm_bellman/results/plot_data/random_baseline.json",
+        help="Path to random_baseline.json (reads success rate from file)",
     )
     args = parser.parse_args()
 
@@ -126,21 +126,21 @@ def main():
     fig, ax = plt.subplots(figsize=(8, 5))
 
     # Plot random policy baseline (horizontal line)
-    # Read from JSON if provided, otherwise default to 52% (trivial dataset)
+    # Read from JSON (required for reproducibility)
     if args.include_random:
-        random_success_rate = 52.0  # Default for trivial dataset
-        random_dataset = "trivial"
+        json_path = Path(args.random_baseline_json)
+        if not json_path.exists():
+            raise FileNotFoundError(
+                f"Random baseline JSON not found: {json_path}\n"
+                f"Run: python scripts/eval_random_policy.py --dataset-path data/sudoku-4x4-trivial "
+                f"--seeds 42 123 456 --num-episodes 50 --output results/plot_data/random_baseline.csv"
+            )
 
-        if args.random_baseline_json:
-            json_path = Path(args.random_baseline_json)
-            if json_path.exists():
-                with open(json_path, "r") as f:
-                    random_data = json.load(f)
-                random_success_rate = random_data["aggregate"]["success_rate_mean"] * 100
-                random_dataset = Path(random_data["config"]["dataset"]).name
-                print(f"Random baseline from {json_path}: {random_success_rate:.1f}% on {random_dataset}")
-            else:
-                print(f"Warning: {json_path} not found, using default 52%")
+        with open(json_path, "r") as f:
+            random_data = json.load(f)
+        random_success_rate = random_data["aggregate"]["success_rate_mean"] * 100
+        random_dataset = Path(random_data["config"]["dataset"]).name
+        print(f"Random baseline from {json_path}: {random_success_rate:.1f}% on {random_dataset}")
 
         ax.axhline(
             y=random_success_rate,
