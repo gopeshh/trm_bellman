@@ -227,7 +227,7 @@ def main():
     # Formatting
     ax.set_xlabel("Training Steps", fontsize=12)
     ax.set_ylabel("Success Rate (%)", fontsize=12)
-    ax.set_title("Learning Curves on TRIVIAL 4×4 Sudoku", fontsize=14)
+    ax.set_title("Learning Curves on 4×4 Sudoku (ULTRA-EASY)", fontsize=14)
     ax.set_xlim(0, 5000)
     ax.set_ylim(0, 105)
     ax.set_yticks([0, 20, 40, 60, 80, 100])
