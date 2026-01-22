@@ -252,14 +252,6 @@ def main():
     plt.savefig(png_path, dpi=150, bbox_inches="tight")
     print(f"Saved: {png_path}")
 
-    # Also copy to paper figures directory if it exists
-    paper_fig_dir = Path("/Users/buiksat/UPI_TRM/UPI_TRM_ICML/figures")
-    if paper_fig_dir.exists():
-        paper_output = paper_fig_dir / "trivial_baselines_vs_no_contraction_success_vs_steps.pdf"
-        import shutil
-        shutil.copy(output_path, paper_output)
-        print(f"Copied to: {paper_output}")
-
 
 if __name__ == "__main__":
     main()

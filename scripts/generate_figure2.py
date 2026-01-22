@@ -11,6 +11,13 @@ matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 import numpy as np
 
+# Repository root (scripts/ is one level down)
+REPO_ROOT = Path(__file__).parent.parent
+
+# Default paths (relative to repo root)
+DEFAULT_LOG_DIR = REPO_ROOT / "results" / "table3_baselines_rerun_2026_01_21"
+DEFAULT_RANDOM_JSON = REPO_ROOT / "results" / "plot_data" / "random_baseline.json"
+
 # Methods and seeds
 METHODS = ["ppo", "a2c", "dqn", "upitrm"]
 SEEDS = [42, 123, 456]
@@ -71,7 +78,7 @@ def main():
     parser.add_argument(
         "--log-dir",
         type=str,
-        default="/home/buiksat/trm_bellman/results/table3_baselines_rerun_2026_01_21",
+        default=str(DEFAULT_LOG_DIR),
         help="Directory containing log files",
     )
     parser.add_argument(
@@ -89,7 +96,7 @@ def main():
     parser.add_argument(
         "--random-baseline-json",
         type=str,
-        default="/home/buiksat/trm_bellman/results/plot_data/random_baseline.json",
+        default=str(DEFAULT_RANDOM_JSON),
         help="Path to random_baseline.json (reads success rate from file)",
     )
     args = parser.parse_args()

@@ -5,6 +5,22 @@
 **Training steps:** 5000
 **Seeds:** 42, 123, 456
 
+## Dataset
+
+The trivial 4×4 Sudoku dataset is **included in the repository** at `data/sudoku-4x4-trivial/` (~108 KB).
+
+- **Puzzles:** 500 total (450 train / 50 test)
+- **Empties:** 1–4 per puzzle (12–15 clues)
+- **Format:** `.npy` files compatible with `PlanEditEnv`
+
+If you need to regenerate it (e.g., different seed or puzzle count):
+```bash
+python dataset/build_4x4_trivial.py \
+    --output-dir data/sudoku-4x4-trivial \
+    --num-puzzles 500 \
+    --seed 42
+```
+
 ## Final Success Rates (Step 5000)
 
 | Method    | Seed 42 | Seed 123 | Seed 456 | Mean ± Std |
