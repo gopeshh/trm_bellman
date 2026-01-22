@@ -6,9 +6,11 @@ Matches paper style from plot_feasibility_curves.py and plot_6to8empties_paper_s
 Creates trivial_baselines_vs_no_contraction_success_vs_steps.pdf
 
 Usage:
-    buck2 run //buiksat_trm:plot_table3_baselines
+    python plot_table3_baselines.py --results-dir results/table3_baselines_rerun_evalfix_2026_01_22 \
+                                     --output-dir figures/
 """
 
+import argparse
 import re
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -141,10 +143,26 @@ def compute_mean_std(seed_data: Dict[int, List[Tuple[int, float]]]) -> Tuple[np.
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Generate Figure 2: Table 3 baselines learning curves")
+    parser.add_argument("--results-dir", type=str, required=True,
+                        help="Directory containing training logs (e.g., results/table3_baselines_rerun_evalfix_2026_01_22)")
+    parser.add_argument("--output-dir", type=str, required=True,
+                        help="Directory to save output figures (e.g., figures/)")
+    parser.add_argument("--output-name", type=str,
+                        default="trivial_baselines_vs_no_contraction_success_vs_steps",
+                        help="Base name for output files (without extension)")
+    parser.add_argument("--max-steps", type=int, default=5000,
+                        help="Maximum x-axis value (default: 5000)")
+    args = parser.parse_args()
+
     apply_paper_style()
 
-    results_dir = Path("/home/buiksat/trm_bellman/results/table3_baselines")
-    output_dir = Path("/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures")
+    results_dir = Path(args.results_dir)
+    output_dir = Path(args.output_dir)
+
+    if not results_dir.exists():
+        print(f"Error: Results directory does not exist: {results_dir}")
+        return
 
     # Define methods and their log file patterns
     methods = {
@@ -221,7 +239,7 @@ def main():
     ax.set_ylabel("Success Rate")
     ax.set_title("4×4 Sudoku (1–4 empties, T=16): Success Rate vs Training Steps\n(Feasibility Checker, 5k steps, 3 seeds)")
     ax.set_ylim(0, 1.0)
-    ax.set_xlim(0, 5000)
+    ax.set_xlim(0, args.max_steps)
     ax.grid(True, alpha=0.3)
 
     # Legend below plot in two columns (matches paper style)
@@ -240,7 +258,7 @@ def main():
 
     # Save figures
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "trivial_baselines_vs_no_contraction_success_vs_steps.pdf"
+    output_path = output_dir / f"{args.output_name}.pdf"
 
     fig.savefig(output_path, dpi=200, bbox_inches="tight", pad_inches=0.02)
     fig.savefig(str(output_path).replace(".pdf", ".png"), dpi=200, bbox_inches="tight", pad_inches=0.02)

@@ -1038,9 +1038,85 @@ Figures and tables exported to:
 
 ---
 
+## Trivial Table 3 + Fig2 RERUN (post-baseline-evaluator-change)
+
+**Date Added:** 2026-01-22
+**Status:** IN PROGRESS
+**Context:** Baseline evaluators were changed. Paper currently shows "DQN: eval unavailable (bug)" in Figure 2. This rerun ensures all methods use the updated evaluator consistently.
+
+### Protocol
+
+| Parameter | Value |
+|-----------|-------|
+| Dataset | `data/sudoku-4x4-trivial` (1-4 empties) |
+| Training steps | 5000 |
+| Horizon | max_edits = 16 (T=16) |
+| Discount | γ = 0.99 |
+| Eval frequency | Every 100 steps |
+| Eval episodes | 50 per checkpoint |
+| Eval policy | Greedy argmax + action masking |
+| Unroll depth | n_eval = 2 |
+| Seeds | 42, 123, 456 |
+
+### Methods
+
+| Method Key | Config Path | Contraction | Projection (R) |
+|------------|-------------|-------------|----------------|
+| persistent_nc | `configs/ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml` | OFF | 10.0 (ON) |
+| episodic_nc | `configs/ablations/upi_trm_feasibility_no_contraction.yaml` | OFF | 10.0 (ON) |
+| episodic_c_clean | `configs/exp3_projection_ablation/c_rdis.yaml` | ON | 0.0 (OFF) |
+| ppo | `configs/baselines/ppo_trm_feasibility.yaml` | OFF | 0.0 (OFF) |
+| a2c | `configs/baselines/a2c_trm_feasibility.yaml` | OFF | 0.0 (OFF) |
+| dqn | `configs/baselines/dqn_trm_feasibility.yaml` | OFF | 0.0 (OFF) |
+
+**Note:** Projection asymmetry is intentional to match historical Table 3 configs. Controlled comparisons exist in "Table 3 Hard Controlled" section.
+
+### Output Locations (repo-relative)
+
+| Artifact | Path |
+|----------|------|
+| Training logs | `results/table3_baselines_rerun_evalfix_2026_01_22/{method}_s{seed}.log` |
+| Table summary | `results/table3_baselines_rerun_evalfix_2026_01_22/table3_summary.md` |
+| Figure 2 PDF | `figures/trivial_baselines_vs_no_contraction_success_vs_steps.pdf` |
+| Provenance bundle | `results/paper_ready/fig2_provenance_rerun_evalfix_2026_01_22/` |
+
+### Sanity Gate (MUST PASS before proceeding)
+
+Before running the full 18-training sweep, verify DQN evaluation works:
+
+1. Run DQN smoke test (seed=42, ~200 steps)
+2. Confirm log contains `eval_success_rate=` entries
+3. If missing or "eval unavailable":
+   - Fix evaluator integration for DQN
+   - Ensure action masking applied consistently
+   - Ensure greedy evaluation uses correct Q-values
+   - Ensure eval metric emission matches plot parser
+
+### Execution
+
+```bash
+# Command template (4 GPUs in parallel)
+CUDA_VISIBLE_DEVICES={gpu} python upi_trm_train.py \
+  --config {config_path} \
+  --seed {seed} \
+  --dataset-paths data/sudoku-4x4-trivial \
+  --no-wandb \
+  > results/table3_baselines_rerun_evalfix_2026_01_22/{method}_s{seed}.log 2>&1
+```
+
+### Deliverables
+
+- [ ] DQN smoke test passes (eval_success_rate present)
+- [ ] 18 training logs complete (6 methods × 3 seeds)
+- [ ] Table 3 summary generated with mean±std
+- [ ] Figure 2 regenerated with DQN included (no "eval unavailable")
+- [ ] Provenance bundle created
+
+---
+
 ## Table 3: Baseline Comparison Experiments (2026-01-20)
 
-**Status:** COMPLETE
+**Status:** COMPLETE (superseded by rerun above for paper)
 
 ### Purpose
 
