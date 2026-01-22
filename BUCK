@@ -1184,3 +1184,14 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+python_binary(
+    name = "plot_table3_hard_controlled",
+    srcs = ["scripts/plot_table3_hard_controlled.py"],
+    base_module = "",
+    main_module = "scripts.plot_table3_hard_controlled",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)

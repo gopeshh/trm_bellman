@@ -1286,4 +1286,101 @@ Audit: [PASSED/FAILED]
 
 ---
 
+## Table 3 Hard Controlled: 2×2 Contraction × Projection Deconfounding
+
+**Date Added:** 2026-01-21
+**Status:** READY TO RUN
+**Context:** Table 3 Hard results are confounded: no-contraction configs use R=10 (projection ON), while contraction configs use R=0 (projection OFF). This makes it impossible to attribute performance differences to contraction vs projection effects.
+
+### Problem Statement
+
+Current Table 3 Hard (6-8 empties) results:
+- `episodic_nc` (no contraction, R=10): 48.0% ± 6.0%
+- `episodic_c_clean` (contraction, R=0): 36.7% ± 3.1%
+
+**Confound:** Is the ~11pp gap due to contraction hurting performance, or projection helping it?
+
+### Solution: Controlled 2×2 Factorial Design
+
+Run all 4 combinations for Episodic-z TRM on hard 4×4 Sudoku:
+
+| Cell | enable_contraction | latent_ball_radius | Description |
+|------|-------------------|-------------------|-------------|
+| NC-R0 | false | 0.0 | No contraction, projection OFF |
+| NC-R10 | false | 10.0 | No contraction, projection ON |
+| C-R0 | true | 0.0 | Contraction, projection OFF |
+| C-R10 | true | 10.0 | Contraction, projection ON |
+
+### Critical Controls (Non-Negotiable)
+
+All 4 cells MUST have:
+- `disable_value_head_norm: true` (avoid known instability confound)
+- `episodic_latent: true` (same TRM variant across all cells)
+- `use_feasibility_checker: true`
+- `num_train_steps: 20000`
+- `max_edits: 16` (T=16 horizon)
+- Dataset: `data/sudoku-4x4-easy_6to8empties`
+
+### Configs
+
+Created in `configs/table3_hard_controlled/`:
+- `episodic_nc_r0_hard.yaml` (NC-R0)
+- `episodic_nc_r10_hard.yaml` (NC-R10)
+- `episodic_c_r0_hard.yaml` (C-R0)
+- `episodic_c_r10_hard.yaml` (C-R10)
+
+### Seeds
+
+3 seeds per cell: 42, 123, 456 (12 runs total)
+
+### Execution
+
+**Script:** `scripts/run_table3_hard_controlled_4gpu.sh`
+**Output:** `results/table3_hard_6to8_controlled/`
+**Plotting:** `scripts/plot_table3_hard_controlled.py`
+
+### Expected Analysis
+
+**Main Effects:**
+1. **Contraction effect** = mean(C cells) - mean(NC cells)
+   - If negative at matched R: "contraction hurts success"
+   - If positive: "contraction helps success"
+
+2. **Projection effect** = mean(R10 cells) - mean(R0 cells)
+   - If positive: "projection helps success"
+   - If negative: "projection hurts success"
+
+**Interaction:**
+- (C-R10 - C-R0) vs (NC-R10 - NC-R0)
+- If different: "contraction and projection interact"
+
+### Decision Rule
+
+**Claim "contraction hurts hard success" ONLY if:**
+- C-R0 < NC-R0 (matched at projection OFF), OR
+- C-R10 < NC-R10 (matched at projection ON)
+
+**Do NOT claim based on the confounded comparison:**
+- ~~episodic_c_clean (R=0) vs episodic_nc (R=10)~~ ← INVALID
+
+### Deliverables
+
+- [ ] 4 YAML configs in `configs/table3_hard_controlled/`
+- [ ] Runner script: `scripts/run_table3_hard_controlled_4gpu.sh`
+- [ ] Plotting script: `scripts/plot_table3_hard_controlled.py`
+- [ ] Results in `results/table3_hard_6to8_controlled/`
+- [ ] 2×2 bar chart: `figures/table3_hard_controlled_2x2_bar.pdf`
+- [ ] Learning curves: `figures/table3_hard_controlled_curves.pdf`
+- [ ] Main effects analysis in summary output
+
+### Audit Checks
+
+1. `disable_value_head_norm: true` in ALL 4 configs
+2. Correct dataset path used (6-8 empties)
+3. `max_edits: 16` (T=16) in all configs
+4. All 12 runs complete (4 configs × 3 seeds)
+5. Claims match 2×2 table values
+
+---
+
 
