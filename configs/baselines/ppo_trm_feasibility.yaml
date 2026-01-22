@@ -13,7 +13,11 @@ algorithm: "ppo"
 # PPO hyperparameters
 ppo_clip_eps: 0.2
 ppo_epochs: 4
-ppo_minibatch_size: 64
+# MINIBATCH CONFIGURATION:
+# Option A: ppo_num_minibatches - number of minibatches per epoch (takes precedence)
+# Option B: ppo_minibatch_size - size in samples => num_minibatches = num_steps // size
+# With ppo_num_steps=64 and ppo_minibatch_size=16 => 4 minibatches of 16 samples each
+ppo_minibatch_size: 16
 vf_coef: 0.5
 ppo_num_steps: 64  # Reduced from 128 for faster updates on short episodes
 normalize_advantages: true

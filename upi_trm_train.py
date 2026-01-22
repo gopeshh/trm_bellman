@@ -41,6 +41,257 @@ from utils.seeding import set_global_seed
 
 
 # =============================================================================
+# Baseline Selection Helper (SINGLE SOURCE OF TRUTH)
+# =============================================================================
+
+class BaselineSelection:
+    """
+    Result of baseline selection from CLI and YAML configs.
+    
+    This is the SINGLE SOURCE OF TRUTH for baseline selection logic.
+    main() and tests both use this to ensure consistency.
+    """
+    def __init__(
+        self,
+        selected_baseline: Optional[str],
+        yaml_algorithm: Optional[str],
+        get_yaml_key: callable,
+    ):
+        self.selected_baseline = selected_baseline  # Effective baseline: CLI > YAML > None
+        self.yaml_algorithm = yaml_algorithm  # Algorithm from YAML (for logging)
+        self.get_yaml_key = get_yaml_key  # Function to retrieve config values
+
+
+def select_baseline_from_configs(
+    cli_baseline: Optional[str],
+    config_paths: Optional[List[str]],
+) -> BaselineSelection:
+    """
+    Determine baseline algorithm from CLI flag and/or YAML configs.
+    
+    This is the SINGLE SOURCE OF TRUTH for baseline selection logic.
+    main() calls this function; tests also call this function.
+    
+    Args:
+        cli_baseline: Value from --baseline CLI arg (None, "ppo", "a2c", "dqn", "ddqn")
+        config_paths: List of YAML config file paths from --config args
+    
+    Returns:
+        BaselineSelection with:
+        - selected_baseline: The effective baseline ("ppo", "a2c", "dqn", "ddqn", or None for UPI-TRM)
+        - yaml_algorithm: The algorithm specified in YAML (for logging, may differ from selected)
+        - get_yaml_key: A function get_yaml_key(key, default) to retrieve baseline-specific config values
+        
+    Override order:
+    - CLI --baseline overrides YAML algorithm
+    - Later --config files override earlier ones (last wins)
+    """
+    import yaml
+    
+    # Extract algorithm from YAML configs (last config wins)
+    # Iterate forward - each iteration overwrites, so last config wins
+    yaml_algorithm = None
+    if config_paths is not None:
+        for config_path in config_paths:
+            with open(config_path, "r") as f:
+                override = yaml.safe_load(f) or {}
+            if "algorithm" in override:
+                yaml_algorithm = override["algorithm"].lower()
+    
+    # CLI overrides YAML
+    selected_baseline = cli_baseline
+    if selected_baseline is None and yaml_algorithm is not None:
+        if yaml_algorithm in ("ppo", "a2c", "dqn", "ddqn"):
+            selected_baseline = yaml_algorithm
+    
+    # Create get_yaml_key helper that searches in reverse order (last config wins)
+    def get_yaml_key(key: str, default):
+        """Get key from YAML configs (last config wins)."""
+        if config_paths is not None:
+            for config_path in reversed(config_paths):
+                with open(config_path, "r") as f:
+                    override = yaml.safe_load(f) or {}
+                if key in override:
+                    return override[key]
+        return default
+    
+    return BaselineSelection(selected_baseline, yaml_algorithm, get_yaml_key)
+
+
+# =============================================================================
+# Trainer Construction Helper (SINGLE SOURCE OF TRUTH for trainer instantiation)
+# =============================================================================
+
+def build_trainer(
+    model: nn.Module,
+    env,  # PlanEditEnv
+    rl_cfg: "RLConfig",
+    device: torch.device,
+    baseline_selection: BaselineSelection,
+    cli_baseline: Optional[str] = None,
+    verbose: bool = True,
+) -> "Union[UPITrmTrainer, PPOTrainer, A2CTrainer, DQNTrainer]":
+    """
+    Construct the appropriate trainer based on baseline selection.
+    
+    This is the SINGLE SOURCE OF TRUTH for trainer instantiation.
+    main() calls this function; tests also call this function directly.
+    
+    Args:
+        model: The neural network model (TRM or NoRecursionEncoder)
+        env: The PlanEditEnv environment
+        rl_cfg: RLConfig with training hyperparameters
+        device: torch device (cpu/cuda)
+        baseline_selection: Result from select_baseline_from_configs()
+        cli_baseline: Original CLI --baseline value (for logging only)
+        verbose: Whether to print trainer selection logs
+    
+    Returns:
+        The constructed trainer (UPITrmTrainer, PPOTrainer, A2CTrainer, or DQNTrainer)
+    """
+    from rl.upi_trm_trainer import UPITrmTrainer
+    from rl.algos.ppo import PPOTrainer, PPOConfig
+    from rl.algos.a2c import A2CTrainer, A2CConfig
+    from rl.algos.dqn import DQNTrainer, DQNConfig
+    
+    selected_baseline = baseline_selection.selected_baseline
+    yaml_algorithm = baseline_selection.yaml_algorithm
+    get_yaml_key = baseline_selection.get_yaml_key
+    
+    if verbose:
+        print("=" * 60)
+        print("TRAINER SELECTION")
+        print("=" * 60)
+    
+    trainer = None
+    
+    if selected_baseline is None:
+        # Default: UPI-TRM (theory-aligned algorithm)
+        trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
+        if verbose:
+            print(f"[TRAINER] UPI-TRM (K={rl_cfg.K}, inner_n={rl_cfg.inner_unroll_n})")
+            print(f"[TRAINER] CLI --baseline: {cli_baseline}, YAML algorithm: {yaml_algorithm}")
+    
+    elif selected_baseline == "ppo":
+        # PPO baseline - wire YAML keys
+        # MINIBATCH MAPPING:
+        # - ppo_num_minibatches: count of minibatches per epoch (takes precedence)
+        # - ppo_minibatch_size: size in samples => num_minibatches = num_steps // size
+        ppo_num_steps = get_yaml_key("ppo_num_steps", 128)
+        ppo_num_minibatches_explicit = get_yaml_key("ppo_num_minibatches", None)
+        ppo_minibatch_size_explicit = get_yaml_key("ppo_minibatch_size", None)
+        
+        if ppo_num_minibatches_explicit is not None:
+            ppo_num_minibatches = ppo_num_minibatches_explicit
+            ppo_minibatch_size = ppo_num_steps // max(1, ppo_num_minibatches)
+        elif ppo_minibatch_size_explicit is not None:
+            if ppo_minibatch_size_explicit > ppo_num_steps:
+                if verbose:
+                    print(f"[WARNING] ppo_minibatch_size={ppo_minibatch_size_explicit} > ppo_num_steps={ppo_num_steps}")
+                    print(f"[WARNING] This is likely wrong. Using num_minibatches=1 (full batch).")
+                ppo_num_minibatches = 1
+                ppo_minibatch_size = ppo_num_steps
+            else:
+                ppo_num_minibatches = max(1, ppo_num_steps // ppo_minibatch_size_explicit)
+                ppo_minibatch_size = ppo_minibatch_size_explicit
+        else:
+            ppo_num_minibatches = 4
+            ppo_minibatch_size = ppo_num_steps // ppo_num_minibatches
+        
+        ppo_cfg = PPOConfig(
+            clip_eps=get_yaml_key("ppo_clip_eps", 0.2),
+            vf_coef=get_yaml_key("vf_coef", 0.5),
+            entropy_coef=rl_cfg.entropy_coef,
+            max_grad_norm=get_yaml_key("max_grad_norm", 0.5),
+            num_steps=ppo_num_steps,
+            num_epochs=get_yaml_key("ppo_epochs", 4),
+            num_minibatches=ppo_num_minibatches,
+            gamma=rl_cfg.gamma,
+            gae_lambda=get_yaml_key("gae_lambda", 0.95),
+            normalize_advantages=get_yaml_key("normalize_advantages", True),
+            clip_vf_loss=get_yaml_key("clip_vf_loss", False),
+            policy_lr=rl_cfg.policy_lr,
+            value_lr=rl_cfg.value_lr,
+            inner_unroll_n=rl_cfg.inner_unroll_n,
+            log_interval=rl_cfg.log_interval,
+            eval_interval=rl_cfg.eval_interval,
+            num_train_steps=rl_cfg.num_train_steps,
+        )
+        trainer = PPOTrainer(model=model, env=env, config=ppo_cfg, device=device)
+        if verbose:
+            print(f"[TRAINER] PPO baseline selected")
+            print(f"[TRAINER] CLI --baseline: {cli_baseline}, YAML algorithm: {yaml_algorithm}")
+            print(f"[TRAINER] PPO config: clip_eps={ppo_cfg.clip_eps}, epochs={ppo_cfg.num_epochs}, "
+                  f"num_steps={ppo_cfg.num_steps}, num_minibatches={ppo_cfg.num_minibatches}, "
+                  f"minibatch_size={ppo_minibatch_size}")
+    
+    elif selected_baseline == "a2c":
+        # A2C baseline - wire YAML keys
+        a2c_cfg = A2CConfig(
+            vf_coef=get_yaml_key("vf_coef", 0.5),
+            entropy_coef=rl_cfg.entropy_coef,
+            max_grad_norm=get_yaml_key("max_grad_norm", 0.5),
+            num_steps=get_yaml_key("a2c_num_steps", 5),
+            gamma=rl_cfg.gamma,
+            use_gae=get_yaml_key("use_gae", True),
+            gae_lambda=get_yaml_key("gae_lambda", 0.95),
+            lr=rl_cfg.policy_lr,
+            inner_unroll_n=rl_cfg.inner_unroll_n,
+            log_interval=rl_cfg.log_interval,
+            eval_interval=rl_cfg.eval_interval,
+            num_train_steps=rl_cfg.num_train_steps,
+        )
+        trainer = A2CTrainer(model=model, env=env, config=a2c_cfg, device=device)
+        if verbose:
+            print(f"[TRAINER] A2C baseline selected")
+            print(f"[TRAINER] CLI --baseline: {cli_baseline}, YAML algorithm: {yaml_algorithm}")
+            print(f"[TRAINER] A2C config: num_steps={a2c_cfg.num_steps}, use_gae={a2c_cfg.use_gae}, "
+                  f"gae_lambda={a2c_cfg.gae_lambda}")
+    
+    elif selected_baseline in ("dqn", "ddqn"):
+        # DQN/Double DQN baseline - wire YAML keys
+        use_double = (selected_baseline == "ddqn") or get_yaml_key("dqn_double_dqn", False)
+        
+        exploration_fraction = get_yaml_key("dqn_exploration_fraction", 0.1)
+        epsilon_decay_steps = int(rl_cfg.num_train_steps * exploration_fraction)
+        
+        dqn_cfg = DQNConfig(
+            double_dqn=use_double,
+            gamma=rl_cfg.gamma,
+            epsilon_start=get_yaml_key("dqn_exploration_initial_eps", 1.0),
+            epsilon_end=get_yaml_key("dqn_exploration_final_eps", 0.01),
+            epsilon_decay_steps=epsilon_decay_steps,
+            buffer_size=get_yaml_key("dqn_buffer_size", 10000),
+            batch_size=get_yaml_key("dqn_batch_size", 64),
+            min_buffer_size=get_yaml_key("dqn_learning_starts", 500),
+            target_update_freq=get_yaml_key("dqn_target_update_interval", 100),
+            learning_rate=rl_cfg.value_lr,
+            max_grad_norm=get_yaml_key("max_grad_norm", 1.0),
+            inner_unroll_n=rl_cfg.inner_unroll_n,
+            train_freq=get_yaml_key("dqn_train_freq", 4),
+            gradient_steps=get_yaml_key("dqn_gradient_steps", 1),
+            num_train_steps=rl_cfg.num_train_steps,
+            log_interval=rl_cfg.log_interval,
+            eval_interval=rl_cfg.eval_interval,
+        )
+        trainer = DQNTrainer(model=model, env=env, config=dqn_cfg, device=device)
+        if verbose:
+            algo_name = "Double DQN" if use_double else "DQN"
+            print(f"[TRAINER] {algo_name} baseline selected")
+            print(f"[TRAINER] CLI --baseline: {cli_baseline}, YAML algorithm: {yaml_algorithm}")
+            print(f"[TRAINER] DQN config: buffer={dqn_cfg.buffer_size}, batch={dqn_cfg.batch_size}, "
+                  f"target_update={dqn_cfg.target_update_freq}, epsilon_decay={epsilon_decay_steps}")
+    
+    else:
+        raise ValueError(f"Unknown baseline algorithm: {selected_baseline}")
+    
+    if verbose:
+        print("=" * 60)
+    
+    return trainer
+
+
+# =============================================================================
 # Checkpoint Loading/Saving (aligned with pretrain.py)
 # =============================================================================
 
@@ -741,6 +992,18 @@ def main():
             **(rl_cfg.model_dump() if hasattr(rl_cfg, "model_dump") else rl_cfg.dict()),
             "max_edits": args.max_edits,
         })
+    
+    # === YAML-based baseline selection (uses helper - SINGLE SOURCE OF TRUTH) ===
+    # This calls select_baseline_from_configs() which is the canonical implementation.
+    # Tests also call this function to ensure consistency with main().
+    baseline_selection = select_baseline_from_configs(args.baseline, args.config)
+    selected_baseline = baseline_selection.selected_baseline
+    yaml_algorithm = baseline_selection.yaml_algorithm
+    get_yaml_key = baseline_selection.get_yaml_key  # Function to retrieve baseline-specific config values
+    
+    if selected_baseline is not None and args.baseline is None:
+        # Baseline was auto-selected from YAML
+        print(f"[INFO] Baseline algorithm '{selected_baseline}' auto-selected from YAML config")
 
     dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
         dataset_paths=args.dataset_paths,
@@ -911,79 +1174,18 @@ def main():
         else:
             print("[INFO] Puzzle embeddings DISABLED (set --puzzle-emb-ndim > 0 to enable)")
 
-    # === Trainer Selection ===
-    # Support for different algorithms: UPI-TRM (default), PPO, A2C, DQN, or Double DQN
-    if args.baseline is None:
-        # Default: UPI-TRM (theory-aligned algorithm)
-        trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
-        print(f"[INFO] Using UPI-TRM algorithm (K={rl_cfg.K}, inner_n={rl_cfg.inner_unroll_n})")
-    elif args.baseline == "ppo":
-        # PPO baseline
-        ppo_cfg = PPOConfig(
-            clip_eps=0.2,
-            vf_coef=0.5,
-            entropy_coef=rl_cfg.entropy_coef,
-            max_grad_norm=0.5,
-            num_steps=128,  # Standard PPO rollout length
-            num_epochs=4,
-            num_minibatches=4,
-            gamma=rl_cfg.gamma,
-            gae_lambda=0.95,
-            normalize_advantages=True,
-            policy_lr=rl_cfg.policy_lr,
-            value_lr=rl_cfg.value_lr,
-            inner_unroll_n=rl_cfg.inner_unroll_n,
-            log_interval=rl_cfg.log_interval,
-            eval_interval=rl_cfg.eval_interval,
-            num_train_steps=rl_cfg.num_train_steps,
-        )
-        trainer = PPOTrainer(model=model, env=env, config=ppo_cfg, device=device)
-        print(f"[INFO] Using PPO baseline (clip_eps={ppo_cfg.clip_eps}, epochs={ppo_cfg.num_epochs})")
-    elif args.baseline == "a2c":
-        # A2C baseline
-        a2c_cfg = A2CConfig(
-            vf_coef=0.5,
-            entropy_coef=rl_cfg.entropy_coef,
-            max_grad_norm=0.5,
-            num_steps=5,  # Standard A2C uses small rollouts
-            gamma=rl_cfg.gamma,
-            use_gae=True,
-            gae_lambda=0.95,
-            lr=rl_cfg.policy_lr,
-            inner_unroll_n=rl_cfg.inner_unroll_n,
-            log_interval=rl_cfg.log_interval,
-            eval_interval=rl_cfg.eval_interval,
-            num_train_steps=rl_cfg.num_train_steps,
-        )
-        trainer = A2CTrainer(model=model, env=env, config=a2c_cfg, device=device)
-        print(f"[INFO] Using A2C baseline (num_steps={a2c_cfg.num_steps})")
-    elif args.baseline in ("dqn", "ddqn"):
-        # DQN/Double DQN baseline
-        use_double = (args.baseline == "ddqn")
-        dqn_cfg = DQNConfig(
-            double_dqn=use_double,
-            gamma=rl_cfg.gamma,
-            epsilon_start=1.0,
-            epsilon_end=0.01,
-            epsilon_decay_steps=2000,  # Faster decay for small action spaces
-            buffer_size=10000,
-            batch_size=64,
-            min_buffer_size=500,
-            target_update_freq=100,
-            learning_rate=rl_cfg.value_lr,
-            max_grad_norm=1.0,
-            inner_unroll_n=rl_cfg.inner_unroll_n,
-            train_freq=4,
-            gradient_steps=1,
-            num_train_steps=rl_cfg.num_train_steps,
-            log_interval=rl_cfg.log_interval,
-            eval_interval=rl_cfg.eval_interval,
-        )
-        trainer = DQNTrainer(model=model, env=env, config=dqn_cfg, device=device)
-        algo_name = "Double DQN" if use_double else "DQN"
-        print(f"[INFO] Using {algo_name} baseline (buffer={dqn_cfg.buffer_size}, target_update={dqn_cfg.target_update_freq})")
-    else:
-        raise ValueError(f"Unknown baseline algorithm: {args.baseline}")
+    # === Trainer Selection (uses build_trainer - SINGLE SOURCE OF TRUTH) ===
+    # This calls build_trainer() which is the canonical implementation.
+    # Tests also call this function to verify trainer instantiation.
+    trainer = build_trainer(
+        model=model,
+        env=env,
+        rl_cfg=rl_cfg,
+        device=device,
+        baseline_selection=baseline_selection,
+        cli_baseline=args.baseline,
+        verbose=True,
+    )
     
     # === Setup puzzle embedding optimizer (separate from main optimizer) ===
     puzzle_emb_optimizer = None
@@ -1022,7 +1224,7 @@ def main():
         trainer.set_checker_fn(checker_fn)
 
     # === Validate theory alignment and show warnings (UPI-TRM only) ===
-    if args.baseline is None:
+    if selected_baseline is None:
         print("\n" + "="*60)
         print("UPI-TRM THEORY ALIGNMENT CHECK")
         print("="*60)
@@ -1056,7 +1258,7 @@ def main():
         print()
     else:
         # Baseline algorithm info
-        print(f"\n[INFO] Using {args.baseline.upper()} baseline algorithm")
+        print(f"\n[INFO] Using {selected_baseline.upper()} baseline algorithm")
         print(f"[INFO] Backbone: {args.backbone}")
         print(f"[INFO] This is a comparison baseline (no theory-exact features)")
         print()
@@ -1064,7 +1266,7 @@ def main():
     # Log additional configuration settings
     stop_mode = getattr(rl_cfg, "stop_action_mode", "noop")
     print(f"[INFO] STOP action mode: {stop_mode}")
-    if args.baseline is None:  # Only show theory-specific info for UPI-TRM
+    if selected_baseline is None:  # Only show theory-specific info for UPI-TRM
         if getattr(rl_cfg, "exact_baseline_summation", False):
             print("[INFO] Using EXACT baseline summation (Theorem 5.9 O(α·ε_A) bound)")
         if getattr(rl_cfg, "latent_ball_radius", 0.0) > 0:
@@ -1187,7 +1389,7 @@ def main():
             loss_policy = metrics.get('loss_policy', 0.0)
 
             # Build message based on algorithm type
-            if args.baseline in ("dqn", "ddqn"):
+            if selected_baseline in ("dqn", "ddqn"):
                 epsilon = metrics.get('epsilon', trainer._get_epsilon() if hasattr(trainer, '_get_epsilon') else 0)
                 mean_q = metrics.get('mean_q', 0.0)
                 msg = (
@@ -1229,7 +1431,7 @@ def main():
                     "train/term_budget": metrics.get("term_budget", 0),
                 }
                 # DQN-specific metrics
-                if args.baseline in ("dqn", "ddqn"):
+                if selected_baseline in ("dqn", "ddqn"):
                     wandb_metrics["train/mean_q"] = metrics.get("mean_q", 0.0)
                     wandb_metrics["train/epsilon"] = metrics.get("epsilon", 0.0)
                     wandb_metrics["train/buffer_size"] = metrics.get("buffer_size", 0)

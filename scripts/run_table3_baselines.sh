@@ -1,6 +1,17 @@
 #!/bin/bash
 # Run all Table 3 baseline experiments
 # Uses 4 GPUs in parallel
+#
+# BASELINE SELECTION:
+# - Baselines (PPO/A2C/DQN) are selected via YAML `algorithm:` key
+# - upi_trm_train.py auto-detects algorithm from YAML config
+# - CLI --baseline flag overrides YAML if needed
+# - Trainer selection is logged at startup: "TRAINER SELECTION" block
+#
+# YAML configs used:
+# - baselines/ppo_trm_feasibility.yaml: algorithm: "ppo"
+# - baselines/a2c_trm_feasibility.yaml: algorithm: "a2c"
+# - baselines/dqn_trm_feasibility.yaml: algorithm: "dqn"
 
 set -e
 
