@@ -43,31 +43,32 @@ def apply_paper_style():
 # Algorithm config with CORRECT naming per user requirements
 # - "UPI-TRM ..." prefix for all UPI-TRM based methods
 # - "Episodic-z" and "Persistent-z" terminology
+# - R=10 indicates projection radius
 ALGO_CONFIG = {
     # UPI-TRM main variants (the 2x2 grid)
     "upi_trm": {
-        "name": "UPI-TRM (Episodic-z, contraction)",
+        "name": "UPI-TRM (Episodic-z, contraction, R=10)",
         "color": "#1f77b4",  # blue
         "marker": "o"
     },
     "ablation_persistent_z": {
-        "name": "UPI-TRM (Persistent-z, contraction)",
+        "name": "UPI-TRM (Persistent-z, contraction, R=10)",
         "color": "#9467bd",  # purple
         "marker": "v"
     },
     "no_contraction": {
-        "name": "UPI-TRM (Episodic-z, no contraction)",
+        "name": "UPI-TRM (Episodic-z, no contraction, R=10)",
         "color": "#8c564b",  # brown
         "marker": "<"
     },
     "persistent_z_no_contraction": {
-        "name": "UPI-TRM (Persistent-z, no contraction)",
+        "name": "UPI-TRM (Persistent-z, no contraction, R=10)",
         "color": "#e377c2",  # pink
         "marker": "P"
     },
     # Other ablations
     "ablation_no_conservative": {
-        "name": "UPI-TRM (no conservative)",
+        "name": "UPI-TRM (no conservative, R=10)",
         "color": "#ff7f0e",  # orange
         "marker": "^"
     },
