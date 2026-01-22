@@ -637,7 +637,12 @@ class DQNTrainer:
                 
                 # Get optimal solution for computing max reward
                 if isinstance(x, dict):
-                    optimal_plan = x.get("solution") or x.get("labels")
+                    # NOTE: Use explicit None check instead of `or` to avoid
+                    # "Boolean value of Tensor with more than one value is ambiguous"
+                    # when solution is a multi-element tensor
+                    optimal_plan = x.get("solution", None)
+                    if optimal_plan is None:
+                        optimal_plan = x.get("labels", None)
                 else:
                     optimal_plan = None
                 
