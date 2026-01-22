@@ -1010,6 +1010,19 @@ def main():
         pool_size=max(rl_cfg.batch_size, 8),
     )
 
+    # === DATASET PROVENANCE LOGGING (for audit/reproducibility) ===
+    # These lines are grep-friendly for verifying which dataset was used
+    dataset_name = "dummy"
+    if args.dataset_paths:
+        dataset_name = os.path.basename(args.dataset_paths[0])
+        print(f"[DATASET] dataset_paths={args.dataset_paths}")
+        print(f"[DATASET] resolved_dataset_name={dataset_name}")
+        print(f"[DATASET] num_samples={len(dataset)}")
+    else:
+        print(f"[DATASET] dataset_paths=None (using dummy dataset)")
+        print(f"[DATASET] resolved_dataset_name=dummy")
+        print(f"[DATASET] num_samples={len(dataset)}")
+
     # Choose checker function based on task and dataset
     # Priority: feasibility_checker > progress_checker > constraint_checker > solution_checker
     # For 4x4 Sudoku (seq_len=16):
@@ -1207,11 +1220,9 @@ def main():
         )
     
     # === Setup checkpoint directory ===
+    # Note: dataset_name is already set in the provenance logging section above
     checkpoint_dir = args.checkpoint_dir
     if checkpoint_dir is None and args.save_interval > 0:
-        dataset_name = "dummy"
-        if args.dataset_paths:
-            dataset_name = os.path.basename(args.dataset_paths[0])
         checkpoint_dir = os.path.join("checkpoints", f"rl_{dataset_name}_seed{args.seed or 0}")
         print(f"[INFO] Checkpoint directory: {checkpoint_dir}")
 
@@ -1282,13 +1293,11 @@ def main():
         # Set offline mode if requested
         if args.wandb_offline:
             os.environ["WANDB_MODE"] = "offline"
-        
+
         # Generate run name if not provided
+        # Note: dataset_name is already set in the provenance logging section
         run_name = args.wandb_run_name
         if run_name is None:
-            dataset_name = "dummy"
-            if args.dataset_paths:
-                dataset_name = os.path.basename(args.dataset_paths[0])
             run_name = f"{dataset_name}-K{rl_cfg.K}-seed{args.seed or 0}"
         
         # Prepare config dict for WandB

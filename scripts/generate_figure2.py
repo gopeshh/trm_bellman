@@ -2,6 +2,7 @@
 """Generate Figure 2: Learning curves for Table 3 baselines."""
 
 import argparse
+import json
 import re
 from pathlib import Path
 
@@ -85,6 +86,12 @@ def main():
         default=True,
         help="Include random policy baseline",
     )
+    parser.add_argument(
+        "--random-baseline-json",
+        type=str,
+        default=None,
+        help="Path to random_baseline.json (reads success rate from file instead of hardcoding)",
+    )
     args = parser.parse_args()
 
     log_dir = Path(args.log_dir)
@@ -118,15 +125,29 @@ def main():
     # Create figure
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    # Plot random policy baseline (horizontal line at 52%)
-    # With action masking on trivial 4x4 Sudoku (1-4 empties), random achieves ~52%
+    # Plot random policy baseline (horizontal line)
+    # Read from JSON if provided, otherwise default to 52% (trivial dataset)
     if args.include_random:
+        random_success_rate = 52.0  # Default for trivial dataset
+        random_dataset = "trivial"
+
+        if args.random_baseline_json:
+            json_path = Path(args.random_baseline_json)
+            if json_path.exists():
+                with open(json_path, "r") as f:
+                    random_data = json.load(f)
+                random_success_rate = random_data["aggregate"]["success_rate_mean"] * 100
+                random_dataset = Path(random_data["config"]["dataset"]).name
+                print(f"Random baseline from {json_path}: {random_success_rate:.1f}% on {random_dataset}")
+            else:
+                print(f"Warning: {json_path} not found, using default 52%")
+
         ax.axhline(
-            y=52,
+            y=random_success_rate,
             color=COLORS["random"],
             linestyle="--",
             linewidth=1.5,
-            label=LABELS["random"],
+            label=f"{LABELS['random']} ({random_success_rate:.0f}%)",
             alpha=0.7,
         )
 
