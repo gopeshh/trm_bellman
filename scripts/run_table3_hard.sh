@@ -2,6 +2,17 @@
 # Run Table 3 experiments on harder 4x4 Sudoku (6-8 empties)
 # Uses 4 GPUs in parallel, 20k training steps
 # Same configs as trivial dataset experiments
+#
+# BASELINE SELECTION:
+# - Baselines (PPO/A2C/DQN) are selected via YAML `algorithm:` key
+# - upi_trm_train.py auto-detects algorithm from YAML config
+# - CLI --baseline flag overrides YAML if needed
+# - Trainer selection is logged at startup: "TRAINER SELECTION" block
+#
+# DQN EVALUATION FIX:
+# - DQN now uses Q-network greedy policy (argmax Q-values) for evaluation
+# - Previously incorrectly used policy_dist() (actor-critic interface)
+# - eval_policy_mode="q_greedy" in logs indicates correct DQN evaluation
 
 set -e
 

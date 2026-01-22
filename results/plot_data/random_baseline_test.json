@@ -1,0 +1,38 @@
+{
+  "per_seed": [
+    {
+      "seed": 42,
+      "success_rate": 0.0,
+      "mean_score": -6.9,
+      "solved_count": 0,
+      "num_episodes": 10,
+      "max_edits": 16,
+      "score_min": -16.0,
+      "score_max": 7.0,
+      "initial_score_mean": 8.8,
+      "final_filled_mean": 15.1,
+      "final_violations_mean": 9.5,
+      "final_zero_cand_mean": 0.6,
+      "dataset": "data/sudoku-4x4-ultra-easy"
+    }
+  ],
+  "aggregate": {
+    "success_rate_mean": 0.0,
+    "success_rate_std": 0.0,
+    "mean_score": -6.9,
+    "total_solved": 0,
+    "total_episodes": 10
+  },
+  "config": {
+    "dataset": "data/sudoku-4x4-ultra-easy",
+    "seeds": [
+      42
+    ],
+    "num_episodes": 10,
+    "max_edits": 16,
+    "gamma": 0.99,
+    "vocab_size": 6,
+    "stop_action_mode": "disabled",
+    "checker": "feasibility (w_v=2.0, w_z=5.0)"
+  }
+}

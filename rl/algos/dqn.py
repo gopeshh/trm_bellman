@@ -11,7 +11,7 @@ References:
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import random
 from collections import deque
 
@@ -586,10 +586,11 @@ class DQNTrainer:
         num_episodes: int = 50,
     ) -> Dict[str, float]:
         """
-        Evaluate the policy using greedy rollouts.
-
-        Uses the shared evaluator to ensure consistent metrics (including
-        filled/violations/zero_cand for PROGRESS logging) across all trainers.
+        Evaluate the DQN policy using epsilon=0 greedy Q-network rollouts.
+        
+        IMPORTANT (Task 3 fix): This method uses the Q-network's argmax(Q-values)
+        for action selection, NOT model.policy_dist(). DQN is a value-based method
+        and must be evaluated using the learned Q-function, not actor-critic interfaces.
 
         Args:
             env_cfg: Environment configuration
@@ -600,23 +601,129 @@ class DQNTrainer:
         Returns:
             Dict with mean_score, success_rate, filled/violations/zero_cand, etc.
         """
-        from rl.evaluator import evaluate_plan_policy_with_scores
-
-        mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
-            model=self.q_network.base_model,
-            dataset=dataset,
-            checker=checker,
-            env_cfg=env_cfg,
-            num_episodes=num_episodes,
-            inner_unroll_n=2,  # DQN default inner unroll
-            episodic_latent=True,  # Baselines use episodic latent
-            greedy=True,  # Always greedy for deterministic evaluation
-        )
-
+        self.q_network.eval()
+        device = self.device
+        
+        # Create evaluation environment
+        eval_env = PlanEditEnv(dataset=dataset, checker=checker, config=env_cfg)
+        if eval_env.stop_action_id is None:
+            eval_env.set_stop_action_id(stop_id=self.num_actions - 1)
+        
+        dataset_size = len(dataset)
+        if dataset_size == 0:
+            return {"mean_score": 0.0, "success_rate": 0.0, "eval_policy_mode": "q_greedy"}
+        
+        num_solved = 0
+        total_score = 0.0
+        episodes_ran = 0
+        all_final_scores: List[float] = []
+        all_initial_scores: List[float] = []
+        max_possible_score: Optional[float] = None
+        
+        # Sudoku-specific tracking
+        all_filled: List[int] = []
+        all_violations: List[int] = []
+        all_zero_cand: List[int] = []
+        is_sudoku_task = False
+        
+        with torch.no_grad():
+            for episode_idx in range(num_episodes):
+                x, y = eval_env.reset(idx=episode_idx % dataset_size)
+                done = False
+                
+                # Track initial score before any edits
+                initial_score = float(checker(x, y))
+                all_initial_scores.append(initial_score)
+                
+                # Get optimal solution for computing max reward
+                if isinstance(x, dict):
+                    # NOTE: Use explicit None check instead of `or` to avoid
+                    # "Boolean value of Tensor with more than one value is ambiguous"
+                    # when solution is a multi-element tensor
+                    optimal_plan = x.get("solution", None)
+                    if optimal_plan is None:
+                        optimal_plan = x.get("labels", None)
+                else:
+                    optimal_plan = None
+                
+                if optimal_plan is not None:
+                    episode_max_reward = float(checker(x, optimal_plan))
+                    if max_possible_score is None:
+                        max_possible_score = episode_max_reward
+                else:
+                    episode_max_reward = None
+                
+                for _ in range(env_cfg.max_edits):
+                    # Prepare inputs for Q-network
+                    batch_x = self._prepare_batch_x(x)
+                    batch_y = self._prepare_plan(y)
+                    
+                    # Get action mask
+                    action_mask = eval_env.get_action_mask()
+                    if action_mask is not None:
+                        action_mask = action_mask.to(device)
+                    
+                    # === KEY FIX: Use Q-network for action selection, NOT policy_dist ===
+                    # DQN selects actions via argmax(Q(s,a)) with epsilon=0 (greedy)
+                    q_values = self.q_network(
+                        batch_x, batch_y,
+                        n=self.config.inner_unroll_n,
+                        action_mask=action_mask,
+                    )
+                    action = q_values.argmax(dim=-1).item()
+                    
+                    (x_next, y_next), _, done, _ = eval_env.step(action)
+                    x, y = x_next, y_next
+                    
+                    if done:
+                        break
+                
+                final_score = float(checker(x, y))
+                total_score += final_score
+                all_final_scores.append(final_score)
+                episodes_ran += 1
+                
+                # Get final plan tensor for Sudoku-specific checks
+                if isinstance(y, torch.Tensor):
+                    final_plan = y
+                elif isinstance(y, dict) and "plan" in y:
+                    final_plan = y["plan"]
+                else:
+                    final_plan = None
+                
+                # Track Sudoku-specific stats and use solution-independent success criterion
+                if final_plan is not None and final_plan.numel() in (16, 81):
+                    is_sudoku_task = True
+                    total_cells, filled, violations, zero_cand = sudoku_get_stats(final_plan)
+                    all_filled.append(filled)
+                    all_violations.append(violations)
+                    all_zero_cand.append(zero_cand)
+                    
+                    # Use sudoku_is_solved for solution-independent success
+                    if sudoku_is_solved(final_plan):
+                        num_solved += 1
+                elif episode_max_reward is not None and abs(final_score - episode_max_reward) < 1e-6:
+                    num_solved += 1
+        
+        mean_score = total_score / float(max(episodes_ran, 1))
+        success_rate = num_solved / float(max(episodes_ran, 1))
+        
         result = {
             "mean_score": mean_score,
             "success_rate": success_rate,
-            "eval_policy_mode": "greedy",
+            "eval_policy_mode": "q_greedy",  # Indicates Q-network greedy, not policy_dist
+            "solved_count": num_solved,
+            "total_episodes": episodes_ran,
+            "score_min": min(all_final_scores) if all_final_scores else 0.0,
+            "score_max": max(all_final_scores) if all_final_scores else 0.0,
+            "max_possible_score": max_possible_score,
+            "initial_score_mean": sum(all_initial_scores) / len(all_initial_scores) if all_initial_scores else 0.0,
         }
-        result.update(detailed_stats)
+        
+        # Add Sudoku-specific stats if applicable
+        if is_sudoku_task and all_filled:
+            result["final_filled_mean"] = sum(all_filled) / len(all_filled)
+            result["final_violations_mean"] = sum(all_violations) / len(all_violations)
+            result["final_zero_cand_mean"] = sum(all_zero_cand) / len(all_zero_cand)
+        
         return result

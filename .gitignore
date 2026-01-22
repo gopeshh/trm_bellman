@@ -35,9 +35,10 @@ temp/
 outputs/
 logs/
 
-# Dataset artifacts
-data/
+# Dataset artifacts (ignore by default, but allow small reproducibility datasets)
 datasets/
+data/*
+!data/sudoku-4x4-trivial/
 *.zip
 artifact/*.zip
 *.tar
