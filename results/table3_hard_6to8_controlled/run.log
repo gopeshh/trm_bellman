@@ -1,0 +1,93 @@
+============================================================
+Table 3 Hard CONTROLLED: 2×2 Contraction × Projection
+============================================================
+Training steps: 20000
+Dataset: buiksat_trm/data/sudoku-4x4-easy_6to8empties
+Results: /home/buiksat/trm_bellman/results/table3_hard_6to8_controlled
+
+Design:
+  NC-R0:  enable_contraction=false, latent_ball_radius=0.0
+  NC-R10: enable_contraction=false, latent_ball_radius=10.0
+  C-R0:   enable_contraction=true,  latent_ball_radius=0.0
+  C-R10:  enable_contraction=true,  latent_ball_radius=10.0
+
+Controls: disable_value_head_norm=true, episodic_latent=true, T=16
+============================================================
+
+=== Batch 1/3: All 4 cells, seed=42 ===
+[GPU 0] Starting nc_r0 seed=42
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_nc_r0_hard.yaml
+[GPU 1] Starting nc_r10 seed=42
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_nc_r10_hard.yaml
+[GPU 2] Starting c_r0 seed=42
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_c_r0_hard.yaml
+[GPU 3] Starting c_r10 seed=42
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_c_r10_hard.yaml
+[GPU 1] Finished nc_r10 seed=42 -> success=0.600
+[GPU 0] Finished nc_r0 seed=42 -> success=0.420
+[GPU 2] Finished c_r0 seed=42 -> success=0.360
+[GPU 3] Finished c_r10 seed=42 -> success=0.360
+Batch 1 complete
+
+=== Batch 2/3: All 4 cells, seed=123 ===
+[GPU 0] Starting nc_r0 seed=123
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_nc_r0_hard.yaml
+[GPU 1] Starting nc_r10 seed=123
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_nc_r10_hard.yaml
+[GPU 2] Starting c_r0 seed=123
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_c_r0_hard.yaml
+[GPU 3] Starting c_r10 seed=123
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_c_r10_hard.yaml
+[GPU 0] Finished nc_r0 seed=123 -> success=0.300
+[GPU 1] Finished nc_r10 seed=123 -> success=0.540
+[GPU 2] Finished c_r0 seed=123 -> success=0.400
+[GPU 3] Finished c_r10 seed=123 -> success=0.480
+Batch 2 complete
+
+=== Batch 3/3: All 4 cells, seed=456 ===
+[GPU 0] Starting nc_r0 seed=456
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_nc_r0_hard.yaml
+[GPU 1] Starting nc_r10 seed=456
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_nc_r10_hard.yaml
+[GPU 2] Starting c_r0 seed=456
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_c_r0_hard.yaml
+[GPU 3] Starting c_r10 seed=456
+  Config: buiksat_trm/configs/table3_hard_controlled/episodic_c_r10_hard.yaml
+[GPU 1] Finished nc_r10 seed=456 -> success=0.580
+[GPU 0] Finished nc_r0 seed=456 -> success=0.260
+[GPU 2] Finished c_r0 seed=456 -> success=0.340
+[GPU 3] Finished c_r10 seed=456 -> success=0.560
+Batch 3 complete
+
+============================================================
+All experiments complete
+Results saved to: /home/buiksat/trm_bellman/results/table3_hard_6to8_controlled
+============================================================
+
+=== 2×2 Results Summary (Final Success Rate) ===
+
+                    R=0 (proj OFF)    R=10 (proj ON)
+---------------------------------------------------
+No Contraction     .326              .573
+Contraction        .366              .466
+---------------------------------------------------
+
+=== Per-Seed Details ===
+nc_r0:
+  seed 42: 0.420
+  seed 123: 0.300
+  seed 456: 0.260
+nc_r10:
+  seed 42: 0.600
+  seed 123: 0.540
+  seed 456: 0.580
+c_r0:
+  seed 42: 0.360
+  seed 123: 0.400
+  seed 456: 0.340
+c_r10:
+  seed 42: 0.360
+  seed 123: 0.480
+  seed 456: 0.560
+
+Logs saved to: /home/buiksat/trm_bellman/results/table3_hard_6to8_controlled/
