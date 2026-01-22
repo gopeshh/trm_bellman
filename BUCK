@@ -1184,3 +1184,14 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+python_binary(
+    name = "generate_figure2",
+    srcs = ["scripts/generate_figure2.py"],
+    base_module = "",
+    main_module = "scripts.generate_figure2",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+    ],
+)
