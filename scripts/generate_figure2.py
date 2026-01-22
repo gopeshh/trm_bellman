@@ -11,20 +11,32 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Methods and seeds
-METHODS = ["ppo", "a2c", "upitrm"]  # DQN excluded due to eval bug
+METHODS = ["ppo", "a2c", "dqn", "upitrm"]
 SEEDS = [42, 123, 456]
 
 # Colors for methods (colorblind-friendly)
 COLORS = {
     "ppo": "#E69F00",    # Orange
     "a2c": "#56B4E9",    # Sky blue
+    "dqn": "#CC79A7",    # Reddish purple
     "upitrm": "#009E73", # Bluish green
+    "random": "#999999", # Gray
 }
 
 LABELS = {
     "ppo": "PPO",
     "a2c": "A2C",
+    "dqn": "DQN",
     "upitrm": "UPI-TRM (Ours)",
+    "random": "Random Policy",
+}
+
+# Log file patterns - DQN uses _fixed suffix for rerun
+LOG_PATTERNS = {
+    "ppo": "ppo_s{seed}.log",
+    "a2c": "a2c_s{seed}.log",
+    "dqn": "dqn_s{seed}_fixed.log",
+    "upitrm": "upitrm_s{seed}.log",
 }
 
 
@@ -62,15 +74,20 @@ def main():
         help="Directory containing log files",
     )
     parser.add_argument(
-        "--output-dir",
+        "--output-path",
         type=str,
         default=None,
-        help="Output directory (defaults to log-dir)",
+        help="Output PDF path (defaults to log-dir/figure2_learning_curves.pdf)",
+    )
+    parser.add_argument(
+        "--include-random",
+        action="store_true",
+        default=True,
+        help="Include random policy baseline",
     )
     args = parser.parse_args()
 
     log_dir = Path(args.log_dir)
-    output_dir = Path(args.output_dir) if args.output_dir else log_dir
 
     # Collect data
     data = {}
@@ -79,7 +96,7 @@ def main():
         data[method] = {"steps": None, "rates": []}
 
         for seed in SEEDS:
-            log_name = f"{method}_s{seed}.log"
+            log_name = LOG_PATTERNS[method].format(seed=seed)
             log_path = log_dir / log_name
 
             if not log_path.exists():
@@ -100,6 +117,18 @@ def main():
 
     # Create figure
     fig, ax = plt.subplots(figsize=(8, 5))
+
+    # Plot random policy baseline (horizontal line at 52%)
+    # With action masking on trivial 4x4 Sudoku (1-4 empties), random achieves ~52%
+    if args.include_random:
+        ax.axhline(
+            y=52,
+            color=COLORS["random"],
+            linestyle="--",
+            linewidth=1.5,
+            label=LABELS["random"],
+            alpha=0.7,
+        )
 
     for method in METHODS:
         if not data[method]["rates"]:
@@ -135,32 +164,26 @@ def main():
     ax.set_ylabel("Success Rate (%)", fontsize=12)
     ax.set_title("Learning Curves on TRIVIAL 4×4 Sudoku", fontsize=14)
     ax.set_xlim(0, 5000)
-    ax.set_ylim(0, 105)
+    ax.set_ylim(-5, 105)
     ax.set_yticks([0, 20, 40, 60, 80, 100])
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="lower right", fontsize=11)
-
-    # Add note about DQN
-    ax.text(
-        0.02,
-        0.98,
-        "DQN: eval unavailable (bug)",
-        transform=ax.transAxes,
-        fontsize=9,
-        verticalalignment="top",
-        style="italic",
-        color="gray",
-    )
+    ax.legend(loc="lower right", fontsize=10)
 
     plt.tight_layout()
 
-    # Save
-    output_path = output_dir / "figure2_learning_curves.pdf"
+    # Determine output path
+    if args.output_path:
+        output_path = Path(args.output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        output_path = log_dir / "figure2_learning_curves.pdf"
+
+    # Save PDF
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"\nSaved: {output_path}")
 
-    # Also save PNG for quick preview
-    png_path = output_dir / "figure2_learning_curves.png"
+    # Also save PNG for quick preview (in same directory as PDF)
+    png_path = output_path.with_suffix(".png")
     plt.savefig(png_path, dpi=150, bbox_inches="tight")
     print(f"Saved: {png_path}")
 
