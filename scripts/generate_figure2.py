@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Generate Figure 2: Learning curves for Table 3 baselines."""
+"""Generate Figure 2: Learning curves for Table 3 baselines.
+
+Paper-style plot matching feasibility_6to8empties_success_vs_steps.pdf style:
+- Legend below plot in two columns
+- Larger fonts, thicker mean curves, faint per-seed lines
+- "(S=N)" for seed count notation
+"""
 
 import argparse
 import json
@@ -35,7 +41,7 @@ LABELS = {
     "ppo": "PPO",
     "a2c": "A2C",
     "dqn": "DQN",
-    "upitrm": "UPI-TRM (Ours)",
+    "upitrm": "UPI-TRM (R=10)",
     "random": "Random Policy",
 }
 
@@ -46,6 +52,25 @@ LOG_PATTERNS = {
     "dqn": "dqn_s{seed}_fixed.log",
     "upitrm": "upitrm_s{seed}.log",
 }
+
+
+def apply_paper_style():
+    """Apply paper-quality styling matching 6to8empties plot."""
+    plt.rcParams.update({
+        'font.size': 14,
+        'axes.labelsize': 16,
+        'axes.titlesize': 18,
+        'xtick.labelsize': 12,
+        'ytick.labelsize': 12,
+        'legend.fontsize': 11,
+        'figure.titlesize': 18,
+        'lines.linewidth': 2.5,
+        'lines.markersize': 6,
+        'axes.linewidth': 1.2,
+        'grid.linewidth': 0.8,
+        'pdf.fonttype': 42,
+        'ps.fonttype': 42,
+    })
 
 
 def parse_log(log_path: Path) -> tuple:
@@ -103,11 +128,11 @@ def main():
 
     log_dir = Path(args.log_dir)
 
-    # Collect data
+    # Collect data: store per-seed curves
     data = {}
 
     for method in METHODS:
-        data[method] = {"steps": None, "rates": []}
+        data[method] = {"steps": None, "rates": [], "per_seed": {}}
 
         for seed in SEEDS:
             log_name = LOG_PATTERNS[method].format(seed=seed)
@@ -128,12 +153,16 @@ def main():
             if data[method]["steps"] is None:
                 data[method]["steps"] = steps
             data[method]["rates"].append(rates)
+            data[method]["per_seed"][seed] = {"steps": steps, "rates": rates}
 
-    # Create figure
-    fig, ax = plt.subplots(figsize=(8, 5))
+    # Apply paper style
+    apply_paper_style()
 
-    # Plot random policy baseline (horizontal line)
-    # Read from JSON (required for reproducibility)
+    # Create figure with increased height for legend below
+    fig, ax = plt.subplots(figsize=(7.2, 6.0))
+
+    # Load random baseline
+    random_success_rate = None
     if args.include_random:
         json_path = Path(args.random_baseline_json)
         if not json_path.exists():
@@ -149,18 +178,22 @@ def main():
         random_dataset = Path(random_data["config"]["dataset"]).name
         print(f"Random baseline from {json_path}: {random_success_rate:.1f}% on {random_dataset}")
 
-        ax.axhline(
-            y=random_success_rate,
-            color=COLORS["random"],
-            linestyle="--",
-            linewidth=1.5,
-            label=f"{LABELS['random']} ({random_success_rate:.0f}%)",
-            alpha=0.7,
-        )
+    # Plot order (best performers first for legend ordering)
+    plot_order = ["upitrm", "dqn", "a2c", "ppo"]
 
-    for method in METHODS:
+    for method in plot_order:
         if not data[method]["rates"]:
             continue
+
+        # Plot individual seed curves (thin, semi-transparent)
+        for seed, seed_data in data[method]["per_seed"].items():
+            ax.plot(
+                seed_data["steps"],
+                seed_data["rates"],
+                color=COLORS[method],
+                alpha=0.18,
+                linewidth=0.9,
+            )
 
         steps = np.array(data[method]["steps"])
         rates = np.array(data[method]["rates"])
@@ -168,15 +201,6 @@ def main():
         # Compute mean and std
         mean_rate = rates.mean(axis=0)
         std_rate = rates.std(axis=0)
-
-        # Plot mean line
-        ax.plot(
-            steps,
-            mean_rate,
-            color=COLORS[method],
-            linewidth=2,
-            label=LABELS[method],
-        )
 
         # Plot shaded std region
         ax.fill_between(
@@ -187,17 +211,51 @@ def main():
             alpha=0.2,
         )
 
+        # Plot mean line (thick, with markers)
+        num_seeds = len(data[method]["per_seed"])
+        ax.plot(
+            steps,
+            mean_rate,
+            color=COLORS[method],
+            linewidth=3.0,
+            marker="o",
+            markersize=5,
+            markevery=5,
+            label=f"{LABELS[method]} (S={num_seeds})",
+        )
+
+    # Add random baseline horizontal line
+    if random_success_rate is not None:
+        ax.axhline(
+            y=random_success_rate,
+            color=COLORS["random"],
+            linestyle="--",
+            linewidth=2.5,
+            alpha=0.7,
+            label=f"{LABELS['random']} ({random_success_rate:.0f}%)",
+        )
+
     # Formatting
-    ax.set_xlabel("Training Steps", fontsize=12)
-    ax.set_ylabel("Success Rate (%)", fontsize=12)
-    ax.set_title("Learning Curves on TRIVIAL 4×4 Sudoku", fontsize=14)
+    ax.set_xlabel("Training Steps")
+    ax.set_ylabel("Success Rate (%)")
+    ax.set_title("Learning Curves on TRIVIAL 4×4 Sudoku")
     ax.set_xlim(0, 5000)
     ax.set_ylim(-5, 105)
     ax.set_yticks([0, 20, 40, 60, 80, 100])
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="lower right", fontsize=10)
 
-    plt.tight_layout()
+    # Legend below plot in two columns (matches paper style)
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.18),
+        ncol=2,
+        frameon=False,
+        handlelength=2.0,
+        columnspacing=1.2,
+    )
+
+    # Leave room for legend under axes
+    fig.subplots_adjust(bottom=0.32)
 
     # Determine output path
     if args.output_path:
@@ -207,12 +265,12 @@ def main():
         output_path = log_dir / "figure2_learning_curves.pdf"
 
     # Save PDF
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.savefig(output_path, dpi=300, bbox_inches="tight", pad_inches=0.02)
     print(f"\nSaved: {output_path}")
 
     # Also save PNG for quick preview (in same directory as PDF)
     png_path = output_path.with_suffix(".png")
-    plt.savefig(png_path, dpi=150, bbox_inches="tight")
+    plt.savefig(png_path, dpi=150, bbox_inches="tight", pad_inches=0.02)
     print(f"Saved: {png_path}")
 
 
