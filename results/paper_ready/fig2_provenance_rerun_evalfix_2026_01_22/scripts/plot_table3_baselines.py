@@ -41,22 +41,19 @@ def apply_paper_style():
 
 
 # Algorithm config with correct naming
-# - "UPI-TRM (...)" prefix for all UPI-TRM variants
-# - "Episodic-z" and "Persistent-z" terminology
-# - R=10 indicates projection radius (latent_ball_radius)
 ALGO_CONFIG = {
     "persistent_nc": {
-        "name": "UPI-TRM (Persistent-z, no contraction, R=10)",
+        "name": "UPI-TRM (Persistent-z, no contraction)",
         "color": "#e377c2",  # pink
         "marker": "P"
     },
     "episodic_nc": {
-        "name": "UPI-TRM (Episodic-z, no contraction, R=10)",
+        "name": "UPI-TRM (Episodic-z, no contraction)",
         "color": "#8c564b",  # brown
         "marker": "<"
     },
     "episodic_c_clean": {
-        "name": "UPI-TRM (Episodic-z, contraction, proj. off)",
+        "name": "UPI-TRM (Episodic-z, contraction)",
         "color": "#1f77b4",  # blue
         "marker": "o"
     },
