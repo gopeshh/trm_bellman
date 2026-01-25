@@ -1,0 +1,61 @@
+# DQN Sweep 4: Stronger reward shaping
+algorithm: "dqn"
+
+# DQN hyperparameters
+dqn_buffer_size: 10000
+dqn_batch_size: 64
+dqn_learning_starts: 200
+dqn_train_freq: 4
+dqn_target_update_interval: 200
+dqn_exploration_fraction: 0.25
+dqn_exploration_final_eps: 0.05
+dqn_double_dqn: true
+
+# Core RL
+gamma: 0.99
+inner_unroll_n: 2
+max_edits: 16
+num_train_steps: 20000
+
+# === FEASIBILITY CHECKER - STRONGER SHAPING ===
+reward_shaping: true
+use_feasibility_checker: true
+feasibility_violation_weight: 5.0  # INCREASED
+feasibility_zerocand_weight: 10.0  # INCREASED
+use_progress_checker: false
+use_constraint_checker: false
+fail_terminal_reward: -32.0  # STRONGER penalty
+solve_terminal_reward: 5.0   # STRONGER reward
+C_max: 32.0
+solved_threshold: null
+
+# Model
+model_type: "trm"
+enable_contraction: false
+target_Lz: 0.9
+target_Lv: 5.0
+latent_ball_radius: 0.0
+
+# Optimization
+value_lr: 5.0e-4
+value_target_clip: 100.0
+
+lr_schedule: "constant"
+
+# Training
+batch_size: 256
+rollout_episodes_per_step: 4
+
+# Latent mode
+episodic_latent: true
+
+# Stop action
+stop_action_mode: "disabled"
+
+# Logging
+log_interval: 50
+eval_interval: 100
+eval_num_episodes: 50
+use_tqdm: true
+
+task_name: "sudoku"
