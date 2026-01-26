@@ -1,0 +1,47 @@
+=== Re-running PPO/A2C/DQN baselines on HARDER dataset (6-8 empties) ===
+Training steps: 20000
+Dataset: buiksat_trm/data/sudoku-4x4-easy_6to8empties
+Results: /home/buiksat/trm_bellman/results/table3_hard_6to8
+
+Backing up old logs...
+=== Batch 1/3: ppo (3 seeds) + a2c seed 42 ===
+[GPU 0] Starting ppo seed=42
+[GPU 1] Starting ppo seed=123
+[GPU 2] Starting ppo seed=456
+[GPU 3] Starting a2c seed=42
+[GPU 3] Finished a2c seed=42 -> success=0.000
+[GPU 1] Finished ppo seed=123 -> success=0.000
+[GPU 0] Finished ppo seed=42 -> success=0.000
+[GPU 2] Finished ppo seed=456 -> success=0.000
+Batch 1 complete
+=== Batch 2/3: a2c (2 seeds) + dqn (2 seeds) ===
+[GPU 0] Starting a2c seed=123
+[GPU 1] Starting a2c seed=456
+[GPU 2] Starting dqn seed=42
+[GPU 3] Starting dqn seed=123
+[GPU 2] Finished dqn seed=42 -> success=0.000
+[GPU 3] Finished dqn seed=123 -> success=0.000
+[GPU 1] Finished a2c seed=456 -> success=0.000
+[GPU 0] Finished a2c seed=123 -> success=0.000
+Batch 2 complete
+=== Batch 3/3: dqn seed 456 ===
+[GPU 0] Starting dqn seed=456
+[GPU 0] Finished dqn seed=456 -> success=0.000
+Batch 3 complete
+
+=== All baseline experiments complete ===
+Results saved to: /home/buiksat/trm_bellman/results/table3_hard_6to8
+
+=== Final Results Summary ===
+ppo:
+  seed 42: 0.000
+  seed 123: 0.000
+  seed 456: 0.000
+a2c:
+  seed 42: 0.000
+  seed 123: 0.000
+  seed 456: 0.000
+dqn:
+  seed 42: 0.000
+  seed 123: 0.000
+  seed 456: 0.000
