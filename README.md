@@ -154,6 +154,62 @@ python upi_trm_train.py \
     --seed 42
 ```
 
+#### 9×9 Sudoku (Full-Scale Experiments)
+
+For full-scale 9×9 Sudoku experiments with train/val/test splits:
+
+```bash
+# 1. Generate the dataset (10k train, 1k val, 1k test)
+python scripts/gen_sudoku9x9.py \
+    --output-dir data/sudoku-9x9 \
+    --num-train 10000 \
+    --num-val 1000 \
+    --num-test 1000 \
+    --seed 42
+
+# 2. Train UPI-TRM on 9×9
+python upi_trm_train.py \
+    --config configs/sudoku9x9/upi_trm_9x9.yaml \
+    --seed 0
+
+# 3. Train baselines
+python upi_trm_train.py --config configs/sudoku9x9/ppo_9x9.yaml --baseline ppo --seed 0
+python upi_trm_train.py --config configs/sudoku9x9/dqn_9x9.yaml --baseline dqn --seed 0
+```
+
+**Multi-GPU Parallel Experiments (4 GPUs, 5 seeds):**
+
+```bash
+# Dry run to see what would be executed
+python scripts/run_experiments_parallel.py \
+    --config-dir configs/sudoku9x9 \
+    --seeds 0,1,2,3,4 \
+    --gpus 0,1,2,3 \
+    --dry-run
+
+# Run all experiments
+python scripts/run_experiments_parallel.py \
+    --config-dir configs/sudoku9x9 \
+    --seeds 0,1,2,3,4 \
+    --gpus 0,1,2,3 \
+    --output-dir results/sudoku9x9
+```
+
+**9×9 Dataset Generation Options:**
+
+```bash
+# With unique solution guarantee (slower but higher quality)
+python scripts/gen_sudoku9x9.py --ensure-unique --num-train 5000
+
+# Custom difficulty distribution
+python scripts/gen_sudoku9x9.py --easy-ratio 0.2 --medium-ratio 0.3 --hard-ratio 0.5
+```
+
+Key differences from 4×4:
+- **Larger action space**: 81 cells × 10 tokens = 810 edit actions
+- **Longer episodes**: Max 81 edits needed
+- **Harder puzzles**: 17-35 clues (vs 4-10 for 4×4)
+
 #### Available `configs/` files (post-prune)
 
 These are the only YAML configs under `configs/` after pruning (all are feasibility-checker configs):
@@ -167,6 +223,9 @@ These are the only YAML configs under `configs/` after pruning (all are feasibil
 - `configs/ablations/upi_trm_feasibility_no_contraction.yaml`
 - `configs/ablations/upi_trm_feasibility_persistent_z.yaml`
 - `configs/ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml`
+- `configs/sudoku9x9/upi_trm_9x9.yaml` (9×9 UPI-TRM)
+- `configs/sudoku9x9/ppo_9x9.yaml` (9×9 PPO baseline)
+- `configs/sudoku9x9/dqn_9x9.yaml` (9×9 DQN baseline)
 
 #### Theory-Exact Features Explained
 

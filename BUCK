@@ -1206,3 +1206,27 @@ python_binary(
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
+
+# ============================================================================
+# 9x9 Sudoku Dataset Generation and Experiments
+# ============================================================================
+
+python_binary(
+    name = "gen_sudoku9x9",
+    srcs = ["scripts/gen_sudoku9x9.py"],
+    base_module = "",
+    main_module = "scripts.gen_sudoku9x9",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_binary(
+    name = "run_experiments_parallel",
+    srcs = ["scripts/run_experiments_parallel.py"],
+    base_module = "",
+    main_module = "scripts.run_experiments_parallel",
+    deps = [
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
