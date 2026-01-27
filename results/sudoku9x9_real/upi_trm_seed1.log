@@ -436,3 +436,175 @@ indices=tensor([714, 469, 445, 724,  94], device='cuda:0'))
 [step 13600] VALUE_DEBUG: target(mean=-48.10 std=2.20 min=-49.88 max=-40.93) V(s)(mean=-48.32 std=2.32) reward(mean=-0.152 std=0.362) clip=100.0
 [step 13700] value_loss=1.372044 policy_loss=0.441721
 [step 13700] VALUE_DEBUG: target(mean=-48.12 std=2.63 min=-52.75 max=-40.02) V(s)(mean=-47.91 std=2.69) reward(mean=-0.469 std=0.907) clip=100.0
+[step 13800] value_loss=15.522795 policy_loss=0.297266
+[step 13800] VALUE_DEBUG: target(mean=-49.17 std=4.52 min=-81.23 max=-42.49) V(s)(mean=-48.88 std=2.07) reward(mean=-1.490 std=10.057) clip=100.0
+[step 13900] value_loss=32.030560 policy_loss=0.104318
+[step 13900] VALUE_DEBUG: target(mean=-49.53 std=6.31 min=-81.21 max=-39.05) V(s)(mean=-48.65 std=2.32) reward(mean=-2.897 std=14.116) clip=100.0
+[step 14000] value_loss=1.803336 policy_loss=0.329560
+[step 14000] VALUE_DEBUG: target(mean=-48.25 std=2.83 min=-57.69 max=-40.93) V(s)(mean=-48.15 std=2.55) reward(mean=-0.459 std=1.259) clip=100.0
+[step 14000] eval_success_rate=0.000 eval_mean_score=27.570 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 14000] PROGRESS: filled=27.65 violations=0.04 zero_cand=0.00
+[step 14000] DEBUG: ep_len=81.0 ep_ret=-108.551 stop_prob=0.000 score_chg=-8.3938
+[Checkpoint] Saved to /home/buiksat/trm_bellman/results/sudoku9x9_real/upi_trm_seed1/rl_checkpoint_step_14000.pt
+[step 14100] value_loss=16.083973 policy_loss=0.102250
+[step 14100] VALUE_DEBUG: target(mean=-48.45 std=4.95 min=-81.12 max=-37.74) V(s)(mean=-47.97 std=2.77) reward(mean=-1.565 std=10.048) clip=100.0
+[step 14200] value_loss=1.186832 policy_loss=0.387186
+[step 14200] VALUE_DEBUG: target(mean=-48.06 std=2.73 min=-55.58 max=-41.27) V(s)(mean=-48.22 std=2.36) reward(mean=-0.370 std=1.070) clip=100.0
+[step 14300] value_loss=1.005264 policy_loss=-0.003260
+[step 14300] VALUE_DEBUG: target(mean=-48.77 std=2.04 min=-54.61 max=-43.66) V(s)(mean=-48.97 std=1.76) reward(mean=-0.285 std=0.911) clip=100.0
+[step 14400] value_loss=0.328710 policy_loss=0.137794
+[step 14400] VALUE_DEBUG: target(mean=-48.12 std=2.91 min=-52.22 max=-37.72) V(s)(mean=-48.33 std=2.89) reward(mean=-0.243 std=0.554) clip=100.0
+[step 14500] value_loss=1.784255 policy_loss=0.283839
+[step 14500] VALUE_DEBUG: target(mean=-48.43 std=2.07 min=-52.34 max=-42.79) V(s)(mean=-48.52 std=2.12) reward(mean=-0.264 std=1.168) clip=100.0
+[step 14500] eval_success_rate=0.000 eval_mean_score=27.590 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 14500] PROGRESS: filled=27.67 violations=0.04 zero_cand=0.00
+[step 14500] DEBUG: ep_len=81.0 ep_ret=-108.686 stop_prob=0.000 score_chg=-8.4205
+[step 14600] value_loss=15.447303 policy_loss=0.155877
+[step 14600] VALUE_DEBUG: target(mean=-48.23 std=5.12 min=-81.13 max=-38.05) V(s)(mean=-48.01 std=2.86) reward(mean=-1.476 std=10.049) clip=100.0
+[step 14700] value_loss=2.048833 policy_loss=0.073590
+[step 14700] VALUE_DEBUG: target(mean=-48.24 std=3.00 min=-54.69 max=-39.47) V(s)(mean=-48.07 std=2.66) reward(mean=-0.533 std=1.309) clip=100.0
+[step 14800] value_loss=16.501898 policy_loss=0.133072
+[step 14800] VALUE_DEBUG: target(mean=-48.57 std=5.19 min=-81.15 max=-38.72) V(s)(mean=-48.10 std=2.80) reward(mean=-1.665 std=10.075) clip=100.0
+[step 14900] value_loss=1.180439 policy_loss=0.082946
+[step 14900] VALUE_DEBUG: target(mean=-48.43 std=2.65 min=-54.63 max=-39.85) V(s)(mean=-48.71 std=2.39) reward(mean=-0.264 std=1.050) clip=100.0
+[step 15000] value_loss=0.890020 policy_loss=0.222450
+[step 15000] VALUE_DEBUG: target(mean=-48.14 std=2.92 min=-54.46 max=-39.42) V(s)(mean=-48.29 std=2.62) reward(mean=-0.344 std=0.920) clip=100.0
+[step 15000] eval_success_rate=0.000 eval_mean_score=27.580 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 15000] PROGRESS: filled=27.66 violations=0.04 zero_cand=0.00
+[step 15000] DEBUG: ep_len=81.0 ep_ret=-108.923 stop_prob=0.000 score_chg=-8.5188
+[Checkpoint] Saved to /home/buiksat/trm_bellman/results/sudoku9x9_real/upi_trm_seed1/rl_checkpoint_step_15000.pt
+[step 15100] value_loss=31.749342 policy_loss=0.055417
+[step 15100] VALUE_DEBUG: target(mean=-49.59 std=6.20 min=-82.21 max=-41.74) V(s)(mean=-48.67 std=2.44) reward(mean=-2.833 std=14.169) clip=100.0
+[step 15200] value_loss=15.758112 policy_loss=-0.121287
+[step 15200] VALUE_DEBUG: target(mean=-48.39 std=5.01 min=-81.13 max=-37.92) V(s)(mean=-48.28 std=2.53) reward(mean=-1.520 std=10.051) clip=100.0
+[step 15300] value_loss=16.292418 policy_loss=0.580423
+[step 15300] VALUE_DEBUG: target(mean=-48.62 std=4.98 min=-81.17 max=-40.92) V(s)(mean=-48.25 std=2.56) reward(mean=-1.589 std=10.081) clip=100.0
+[step 15400] value_loss=1.249546 policy_loss=0.439920
+[step 15400] VALUE_DEBUG: target(mean=-48.23 std=3.00 min=-54.67 max=-39.45) V(s)(mean=-48.18 std=2.70) reward(mean=-0.479 std=1.003) clip=100.0
+[step 15500] value_loss=2.210028 policy_loss=1.039052
+[step 15500] VALUE_DEBUG: target(mean=-48.54 std=2.57 min=-57.62 max=-39.76) V(s)(mean=-48.33 std=2.47) reward(mean=-0.510 std=1.399) clip=100.0
+[step 15500] eval_success_rate=0.000 eval_mean_score=27.570 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 15500] PROGRESS: filled=27.65 violations=0.04 zero_cand=0.00
+[step 15500] DEBUG: ep_len=81.0 ep_ret=-108.633 stop_prob=0.000 score_chg=-8.3688
+[step 15600] value_loss=0.414357 policy_loss=0.001363
+[step 15600] VALUE_DEBUG: target(mean=-48.92 std=2.34 min=-52.65 max=-38.45) V(s)(mean=-49.14 std=2.39) reward(mean=-0.197 std=0.544) clip=100.0
+[step 15700] value_loss=1.714778 policy_loss=0.314676
+[step 15700] VALUE_DEBUG: target(mean=-48.63 std=2.37 min=-54.59 max=-39.46) V(s)(mean=-48.55 std=2.21) reward(mean=-0.472 std=1.174) clip=100.0
+[step 15800] value_loss=1.662728 policy_loss=-0.272687
+[step 15800] VALUE_DEBUG: target(mean=-47.95 std=3.33 min=-54.72 max=-38.61) V(s)(mean=-48.06 std=2.99) reward(mean=-0.359 std=1.244) clip=100.0
+[step 15900] value_loss=0.599487 policy_loss=-0.020059
+[step 15900] VALUE_DEBUG: target(mean=-48.01 std=2.93 min=-53.81 max=-37.72) V(s)(mean=-48.07 std=2.74) reward(mean=-0.322 std=0.800) clip=100.0
+[step 16000] value_loss=0.554159 policy_loss=-0.058843
+[step 16000] VALUE_DEBUG: target(mean=-48.61 std=2.42 min=-53.56 max=-39.01) V(s)(mean=-48.65 std=2.39) reward(mean=-0.334 std=0.617) clip=100.0
+[step 16000] eval_success_rate=0.000 eval_mean_score=27.570 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 16000] PROGRESS: filled=27.65 violations=0.04 zero_cand=0.00
+[step 16000] DEBUG: ep_len=81.0 ep_ret=-108.797 stop_prob=0.000 score_chg=-8.4745
+[Checkpoint] Saved to /home/buiksat/trm_bellman/results/sudoku9x9_real/upi_trm_seed1/rl_checkpoint_step_16000.pt
+[step 16100] value_loss=1.597563 policy_loss=-0.096502
+[step 16100] VALUE_DEBUG: target(mean=-48.65 std=2.68 min=-55.71 max=-41.45) V(s)(mean=-48.38 std=2.43) reward(mean=-0.570 std=1.199) clip=100.0
+[step 16200] value_loss=0.353301 policy_loss=0.477318
+[step 16200] VALUE_DEBUG: target(mean=-48.40 std=2.50 min=-52.74 max=-40.30) V(s)(mean=-48.61 std=2.38) reward(mean=-0.243 std=0.584) clip=100.0
+[step 16300] value_loss=15.958039 policy_loss=0.432318
+[step 16300] VALUE_DEBUG: target(mean=-48.59 std=5.15 min=-81.09 max=-36.04) V(s)(mean=-48.22 std=2.90) reward(mean=-1.612 std=10.056) clip=100.0
+[step 16400] value_loss=1.234825 policy_loss=0.137062
+[step 16400] VALUE_DEBUG: target(mean=-47.76 std=3.03 min=-53.68 max=-37.35) V(s)(mean=-48.11 std=2.76) reward(mean=-0.152 std=1.048) clip=100.0
+[step 16500] value_loss=18.041058 policy_loss=0.573428
+[step 16500] VALUE_DEBUG: target(mean=-48.89 std=5.04 min=-83.07 max=-37.29) V(s)(mean=-48.34 std=2.64) reward(mean=-1.640 std=10.297) clip=100.0
+[step 16500] eval_success_rate=0.000 eval_mean_score=27.580 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 16500] PROGRESS: filled=27.66 violations=0.04 zero_cand=0.00
+[step 16500] DEBUG: ep_len=81.0 ep_ret=-108.590 stop_prob=0.000 score_chg=-8.2895
+[step 16600] value_loss=2.085564 policy_loss=-0.100146
+[step 16600] VALUE_DEBUG: target(mean=-48.95 std=2.35 min=-54.73 max=-42.42) V(s)(mean=-48.82 std=1.83) reward(mean=-0.565 std=1.328) clip=100.0
+[step 16700] value_loss=16.914143 policy_loss=0.032140
+[step 16700] VALUE_DEBUG: target(mean=-49.07 std=4.83 min=-82.10 max=-40.13) V(s)(mean=-48.58 std=2.28) reward(mean=-1.700 std=10.169) clip=100.0
+[step 16800] value_loss=17.564503 policy_loss=-0.663168
+[step 16800] VALUE_DEBUG: target(mean=-48.99 std=5.24 min=-81.07 max=-39.31) V(s)(mean=-48.28 std=2.86) reward(mean=-1.887 std=10.082) clip=100.0
+[step 16900] value_loss=49.785385 policy_loss=0.057064
+[step 16900] VALUE_DEBUG: target(mean=-49.92 std=7.53 min=-81.20 max=-39.38) V(s)(mean=-48.16 std=2.72) reward(mean=-4.389 std=17.075) clip=100.0
+[step 17000] value_loss=16.518698 policy_loss=-0.040215
+[step 17000] VALUE_DEBUG: target(mean=-48.93 std=5.15 min=-81.23 max=-37.05) V(s)(mean=-48.36 std=2.89) reward(mean=-1.707 std=10.082) clip=100.0
+[step 17000] eval_success_rate=0.000 eval_mean_score=27.590 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 17000] PROGRESS: filled=27.67 violations=0.04 zero_cand=0.00
+[step 17000] DEBUG: ep_len=81.0 ep_ret=-108.823 stop_prob=0.000 score_chg=-8.4450
+[Checkpoint] Saved to /home/buiksat/trm_bellman/results/sudoku9x9_real/upi_trm_seed1/rl_checkpoint_step_17000.pt
+[step 17100] value_loss=31.003525 policy_loss=0.211822
+[step 17100] VALUE_DEBUG: target(mean=-49.99 std=5.91 min=-81.20 max=-42.63) V(s)(mean=-49.03 std=1.69) reward(mean=-2.944 std=14.066) clip=100.0
+[step 17200] value_loss=0.872296 policy_loss=0.240576
+[step 17200] VALUE_DEBUG: target(mean=-48.43 std=2.70 min=-53.59 max=-39.54) V(s)(mean=-48.47 std=2.62) reward(mean=-0.388 std=0.811) clip=100.0
+[step 17300] value_loss=15.940227 policy_loss=0.429571
+[step 17300] VALUE_DEBUG: target(mean=-49.18 std=4.60 min=-81.24 max=-40.06) V(s)(mean=-48.95 std=2.03) reward(mean=-1.479 std=10.080) clip=100.0
+[step 17400] value_loss=17.508337 policy_loss=0.110649
+[step 17400] VALUE_DEBUG: target(mean=-49.44 std=4.71 min=-81.17 max=-40.67) V(s)(mean=-48.63 std=2.37) reward(mean=-1.944 std=10.069) clip=100.0
+[step 17500] value_loss=16.936880 policy_loss=0.764753
+[step 17500] VALUE_DEBUG: target(mean=-48.92 std=5.04 min=-81.22 max=-39.31) V(s)(mean=-48.47 std=2.62) reward(mean=-1.695 std=10.065) clip=100.0
+[step 17500] eval_success_rate=0.000 eval_mean_score=27.570 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 17500] PROGRESS: filled=27.65 violations=0.04 zero_cand=0.00
+[step 17500] DEBUG: ep_len=81.0 ep_ret=-108.680 stop_prob=0.000 score_chg=-8.2348
+[step 17600] value_loss=2.699308 policy_loss=0.546206
+[step 17600] VALUE_DEBUG: target(mean=-48.47 std=2.85 min=-58.60 max=-39.82) V(s)(mean=-48.30 std=2.50) reward(mean=-0.632 std=1.534) clip=100.0
+[step 17700] value_loss=31.348969 policy_loss=0.542057
+[step 17700] VALUE_DEBUG: target(mean=-49.05 std=6.49 min=-81.18 max=-36.97) V(s)(mean=-48.17 std=2.98) reward(mean=-2.764 std=14.093) clip=100.0
+[step 17800] value_loss=0.668282 policy_loss=-0.259292
+[step 17800] VALUE_DEBUG: target(mean=-48.05 std=3.12 min=-54.80 max=-37.54) V(s)(mean=-48.16 std=3.03) reward(mean=-0.354 std=0.824) clip=100.0
+[step 17900] value_loss=2.700898 policy_loss=0.405305
+[step 17900] VALUE_DEBUG: target(mean=-48.72 std=3.54 min=-55.70 max=-37.72) V(s)(mean=-48.66 std=2.96) reward(mean=-0.550 std=1.609) clip=100.0
+[step 18000] value_loss=1.614574 policy_loss=0.398160
+[step 18000] VALUE_DEBUG: target(mean=-48.74 std=2.73 min=-54.73 max=-40.74) V(s)(mean=-48.53 std=2.50) reward(mean=-0.589 std=1.179) clip=100.0
+[step 18000] eval_success_rate=0.000 eval_mean_score=27.620 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 18000] PROGRESS: filled=27.70 violations=0.04 zero_cand=0.00
+[step 18000] DEBUG: ep_len=81.0 ep_ret=-108.840 stop_prob=0.000 score_chg=-8.4725
+[Checkpoint] Saved to /home/buiksat/trm_bellman/results/sudoku9x9_real/upi_trm_seed1/rl_checkpoint_step_18000.pt
+[step 18100] value_loss=0.813260 policy_loss=0.007323
+[step 18100] VALUE_DEBUG: target(mean=-48.58 std=2.60 min=-53.70 max=-38.86) V(s)(mean=-48.76 std=2.41) reward(mean=-0.270 std=0.909) clip=100.0
+[step 18200] value_loss=0.350456 policy_loss=0.281977
+[step 18200] VALUE_DEBUG: target(mean=-48.68 std=2.06 min=-52.70 max=-42.22) V(s)(mean=-48.79 std=2.02) reward(mean=-0.263 std=0.634) clip=100.0
+[step 18300] value_loss=35.167709 policy_loss=0.177298
+[step 18300] VALUE_DEBUG: target(mean=-49.28 std=6.70 min=-85.15 max=-39.66) V(s)(mean=-48.35 std=2.80) reward(mean=-2.836 std=14.448) clip=100.0
+[step 18400] value_loss=32.693417 policy_loss=0.782334
+[step 18400] VALUE_DEBUG: target(mean=-50.06 std=6.02 min=-81.23 max=-39.89) V(s)(mean=-48.79 std=2.03) reward(mean=-3.104 std=14.078) clip=100.0
+[step 18500] value_loss=32.012775 policy_loss=0.030506
+[step 18500] VALUE_DEBUG: target(mean=-48.85 std=6.63 min=-81.19 max=-36.79) V(s)(mean=-48.22 std=3.22) reward(mean=-2.512 std=14.175) clip=100.0
+[step 18500] eval_success_rate=0.000 eval_mean_score=27.590 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 18500] PROGRESS: filled=27.67 violations=0.04 zero_cand=0.00
+[step 18500] DEBUG: ep_len=81.0 ep_ret=-108.902 stop_prob=0.000 score_chg=-8.2683
+[step 18600] value_loss=22.299643 policy_loss=-0.030949
+[step 18600] VALUE_DEBUG: target(mean=-48.14 std=6.18 min=-86.13 max=-35.64) V(s)(mean=-47.58 std=3.65) reward(mean=-1.703 std=10.716) clip=100.0
+[step 18700] value_loss=16.132195 policy_loss=0.612087
+[step 18700] VALUE_DEBUG: target(mean=-49.02 std=4.92 min=-81.31 max=-36.43) V(s)(mean=-48.47 std=2.68) reward(mean=-1.641 std=10.071) clip=100.0
+[step 18800] value_loss=0.701333 policy_loss=0.178958
+[step 18800] VALUE_DEBUG: target(mean=-48.15 std=2.97 min=-51.78 max=-36.23) V(s)(mean=-48.33 std=3.05) reward(mean=-0.122 std=0.725) clip=100.0
+[step 18900] value_loss=31.375673 policy_loss=-0.437447
+[step 18900] VALUE_DEBUG: target(mean=-49.39 std=6.41 min=-81.36 max=-35.85) V(s)(mean=-48.47 std=2.84) reward(mean=-2.913 std=14.103) clip=100.0
+[step 19000] value_loss=17.533062 policy_loss=-0.087835
+[step 19000] VALUE_DEBUG: target(mean=-49.19 std=5.32 min=-81.31 max=-35.98) V(s)(mean=-48.44 std=2.95) reward(mean=-1.944 std=10.108) clip=100.0
+[step 19000] eval_success_rate=0.000 eval_mean_score=27.620 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 19000] PROGRESS: filled=27.70 violations=0.04 zero_cand=0.00
+[step 19000] DEBUG: ep_len=81.0 ep_ret=-108.783 stop_prob=0.000 score_chg=-8.3315
+[Checkpoint] Saved to /home/buiksat/trm_bellman/results/sudoku9x9_real/upi_trm_seed1/rl_checkpoint_step_19000.pt
+[step 19100] value_loss=1.325983 policy_loss=0.038886
+[step 19100] VALUE_DEBUG: target(mean=-48.86 std=2.63 min=-55.42 max=-39.02) V(s)(mean=-48.74 std=2.58) reward(mean=-0.469 std=1.052) clip=100.0
+[step 19200] value_loss=0.947886 policy_loss=0.195772
+[step 19200] VALUE_DEBUG: target(mean=-48.61 std=2.51 min=-54.61 max=-41.11) V(s)(mean=-48.55 std=2.40) reward(mean=-0.433 std=0.903) clip=100.0
+[step 19300] value_loss=37.276474 policy_loss=0.142137
+[step 19300] VALUE_DEBUG: target(mean=-49.55 std=6.85 min=-87.23 max=-39.94) V(s)(mean=-48.60 std=2.84) reward(mean=-2.907 std=14.626) clip=100.0
+[step 19400] value_loss=35.147827 policy_loss=0.587031
+[step 19400] VALUE_DEBUG: target(mean=-49.95 std=6.52 min=-84.12 max=-38.06) V(s)(mean=-48.88 std=2.56) reward(mean=-3.009 std=14.359) clip=100.0
+[step 19500] value_loss=0.357071 policy_loss=-0.060310
+[step 19500] VALUE_DEBUG: target(mean=-47.96 std=3.25 min=-52.74 max=-36.88) V(s)(mean=-48.04 std=3.21) reward(mean=-0.297 std=0.597) clip=100.0
+[step 19500] eval_success_rate=0.000 eval_mean_score=27.620 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 19500] PROGRESS: filled=27.70 violations=0.04 zero_cand=0.00
+[step 19500] DEBUG: ep_len=81.0 ep_ret=-108.468 stop_prob=0.000 score_chg=-7.8952
+[step 19600] value_loss=15.941497 policy_loss=-0.339413
+[step 19600] VALUE_DEBUG: target(mean=-49.25 std=4.52 min=-81.15 max=-41.14) V(s)(mean=-48.98 std=1.92) reward(mean=-1.533 std=10.066) clip=100.0
+[step 19700] value_loss=47.752846 policy_loss=0.124119
+[step 19700] VALUE_DEBUG: target(mean=-49.87 std=7.74 min=-81.32 max=-36.02) V(s)(mean=-48.49 std=3.04) reward(mean=-4.173 std=17.149) clip=100.0
+[step 19800] value_loss=19.286852 policy_loss=0.777794
+[step 19800] VALUE_DEBUG: target(mean=-48.90 std=5.42 min=-84.16 max=-38.86) V(s)(mean=-48.37 std=2.85) reward(mean=-1.720 std=10.440) clip=100.0
+[step 19900] value_loss=33.605278 policy_loss=0.496247
+[step 19900] VALUE_DEBUG: target(mean=-49.05 std=6.58 min=-81.21 max=-38.82) V(s)(mean=-48.14 std=2.94) reward(mean=-2.865 std=14.100) clip=100.0
+[step 20000] value_loss=36.203697 policy_loss=0.038042
+[step 20000] VALUE_DEBUG: target(mean=-49.05 std=6.53 min=-81.25 max=-38.29) V(s)(mean=-47.92 std=3.10) reward(mean=-2.862 std=14.092) clip=100.0
+[step 20000] eval_success_rate=0.000 eval_mean_score=27.640 eval_policy_mode=greedy [solved=0/100, score_range=18.00-36.00/81.0, initial=26.64]
+[step 20000] PROGRESS: filled=27.72 violations=0.04 zero_cand=0.00
+[step 20000] DEBUG: ep_len=81.0 ep_ret=-108.876 stop_prob=0.000 score_chg=-8.1865
+[Checkpoint] Saved to /home/buiksat/trm_bellman/results/sudoku9x9_real/upi_trm_seed1/rl_checkpoint_step_20000.pt
