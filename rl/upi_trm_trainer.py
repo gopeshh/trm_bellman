@@ -895,15 +895,29 @@ class UPITrmTrainer:
         transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
         x_batch, y_batch, x_next_batch, y_next_batch, actions, rewards, dones = self._stack_batch(transitions)
 
-        # Reconstruct action mask from batch inputs to prevent policy from training on invalid actions
+        # Reconstruct action mask to prevent policy from training on invalid actions
         action_mask = None
         if self.env.vocab_size is not None and self.env.stop_action_id is not None:
-            action_mask = PlanEditEnv.compute_batch_action_mask(
-                x_batch["inputs"],
-                self.env.vocab_size,
-                self.env.stop_action_id,
-                stop_mode=self.env._stop_mode,
-            )
+            y_inputs = None
+            if isinstance(y_batch, dict):
+                y_inputs = y_batch.get("inputs", y_batch.get("labels"))
+            else:
+                y_inputs = y_batch
+
+            if self.env.task_config is not None:
+                action_mask = self.env.task_config.compute_batch_action_mask(
+                    x_batch["inputs"],
+                    self.env.vocab_size,
+                    self.env.stop_action_id,
+                    current_state=y_inputs,
+                )
+            else:
+                action_mask = PlanEditEnv.compute_batch_action_mask(
+                    x_batch["inputs"],
+                    self.env.vocab_size,
+                    self.env.stop_action_id,
+                    stop_mode=self.env._stop_mode,
+                )
 
         self.model.train()
         self.policy_model_candidate.train()

@@ -1459,4 +1459,149 @@ Created in `configs/table3_hard_controlled/`:
 
 ---
 
+---
+
+## 9×9 Sudoku Scale-Up: Constraint-Aware Action Masking
+
+**Date Added:** 2026-01-28
+**Status:** IN PROGRESS
+**Context:** Scaling experiments from 4×4 to 9×9 Sudoku requires improved action masking due to the exponentially larger action space (729 vs 16 positions × vocab).
+
+### Motivation
+
+Previous 9×9 experiments showed limited learning:
+- UPI-TRM: 27.64 → +1.0 improvement (best)
+- PPO: 26.02 → -0.82 degradation
+- DQN: 25.57 → -1.27 degradation
+
+Initial score ~26.8, max possible 81. Models were struggling to improve.
+
+**Hypothesis:** The 729-action space (81 positions × 9 digits) is too large for effective exploration. Many actions are invalid due to Sudoku constraints.
+
+### Solution: Constraint-Aware Action Masking
+
+Implemented dynamic action masking that enforces Sudoku constraints at the action selection level:
+
+**What gets masked:**
+1. Given cells (original clues) - cannot be edited
+2. PAD (token 0) and empty (token 1) tokens - never useful
+3. **Constraint violations:**
+   - Digits already in same row
+   - Digits already in same column
+   - Digits already in same 3×3 box
+
+**Result:** Action space reduced from 729 → ~250 valid actions (72% reduction)
+
+### Implementation Details
+
+**Files Modified:**
+| File | Change |
+|------|--------|
+| `rl/task_config.py` | Added `SudokuTaskConfig.compute_action_mask()` with row/col/box constraint checking |
+| `rl/envs/plan_edit_env.py` | Pass `current_state` to mask, recompute mask after every step |
+| `configs/sudoku9x9/*.yaml` | Increased training from 25k → 50k steps |
+
+**Key Code (task_config.py):**
+```python
+def compute_action_mask(self, inputs, vocab_size, stop_action_id, current_state=None):
+    # ... existing masking for given cells and PAD/empty tokens ...
+
+    # Constraint-aware masking: mask digits in same row/col/box
+    for pos in range(num_positions):
+        row, col = pos // grid_size, pos % grid_size
+        box_row, box_col = (row // box_size) * box_size, (col // box_size) * box_size
+
+        used_digits = set()
+        # Check row, column, and box for used digits
+        for c in range(grid_size):
+            val = int(state[row * grid_size + c].item())
+            if val > 1: used_digits.add(val)
+        # ... similar for column and box ...
+
+        # Mask actions that place used digits at this position
+        for digit_token in used_digits:
+            mask[pos * vocab_size + digit_token] = False
+```
+
+### Tests
+
+**New test file:** `tests/test_constraint_aware_masking_unittest.py` (14 tests)
+
+Tests verify:
+- Given cells are properly masked
+- PAD and empty tokens are masked for all positions
+- Row constraint masking works
+- Column constraint masking works
+- Box (3×3) constraint masking works
+- `current_state` parameter updates mask correctly
+- Batch masking works with current_state
+- STOP action always valid
+- No NaN in mask
+- Mask is deterministic
+
+**Test Results:** All 14 tests passed (Buck2)
+
+### Current Experiment Status
+
+| Algorithm | GPU | Status | Progress | Latest Score | Notes |
+|-----------|-----|--------|----------|--------------|-------|
+| UPI-TRM | 0 | **STUCK** | - | - | Hangs after first step (100% CPU, 8% GPU) |
+| PPO | 1 | ✅ Running | ~300/50000 | - | Slow (~3.6s/step) |
+| DQN | 2 | ✅ Running | ~4500/50000 (9%) | 25.56 | Good progress (~9 it/s) |
+
+**Constraint masking verified:** Logs show "253 valid actions out of 892 total"
+
+### Known Issues
+
+**UPI-TRM Hang:**
+- Process hangs after first debug output with 100% CPU, 8% GPU
+- Reproducible on restart
+- PPO and DQN work fine with same masking code
+- Likely related to UPI-TRM trainer's batch action mask computation
+- **Status:** Needs investigation
+
+### Monitoring Commands
+
+```bash
+# Check experiment progress
+for algo in ppo dqn; do
+  log="results/sudoku9x9_constraint_aware/${algo}_seed0.log"
+  step=$(grep -oP '\| \K\d+(?=/)' "$log" | tail -1)
+  score=$(grep "eval_mean_score" "$log" | tail -1 | grep -oP 'eval_mean_score=\K[0-9.]+')
+  echo "$algo: step=$step score=$score"
+done
+```
+
+### Expected Impact
+
+With constraint-aware masking:
+- ~72% reduction in valid action space
+- All explorations are constraint-valid (no wasted samples on invalid moves)
+- Expected: faster learning, better final performance
+
+### Next Steps
+
+1. **Monitor PPO and DQN experiments** - Let them complete 50k steps
+2. **Investigate UPI-TRM hang** - Debug batch action mask computation
+3. **Compare results** with previous 9×9 experiments (without constraint masking)
+4. **If successful:** Apply constraint masking to 4×4 experiments for consistency
+
+### Configs
+
+Located in `configs/sudoku9x9/`:
+- `upi_trm_9x9.yaml` - UPI-TRM with TRM backbone
+- `ppo_9x9.yaml` - PPO baseline
+- `dqn_9x9.yaml` - DQN baseline
+
+All use:
+- `num_train_steps: 50000`
+- `use_feasibility_checker: true`
+- `use_action_masking: true`
+
+### Commit
+
+`6c23d19` - Add constraint-aware action masking for 9x9 Sudoku
+
+---
+
 

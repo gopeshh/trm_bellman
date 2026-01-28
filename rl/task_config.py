@@ -79,6 +79,7 @@ class TaskConfig(ABC):
         inputs: torch.Tensor,
         vocab_size: int,
         stop_action_id: int,
+        current_state: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Compute action mask for a single instance.
@@ -89,6 +90,7 @@ class TaskConfig(ABC):
             inputs: [seq_len] input tokens
             vocab_size: Number of tokens per position
             stop_action_id: Index of STOP action
+            current_state: Optional current plan/state (unused by default)
             
         Returns:
             [num_actions] boolean mask (True = valid action)
@@ -121,6 +123,7 @@ class TaskConfig(ABC):
         inputs: torch.Tensor,
         vocab_size: int,
         stop_action_id: int,
+        current_state: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Compute action masks for a batch of instances.
@@ -129,6 +132,7 @@ class TaskConfig(ABC):
             inputs: [B, ...] batch of input tokens
             vocab_size: Number of tokens per position
             stop_action_id: Index of STOP action
+            current_state: Optional current plan/state (unused by default)
             
         Returns:
             [B, num_actions] boolean mask
@@ -233,22 +237,39 @@ class SudokuTaskConfig(TaskConfig):
         inputs: torch.Tensor,
         vocab_size: int,
         stop_action_id: int,
+        current_state: torch.Tensor = None,
     ) -> torch.Tensor:
         """
-        Compute action mask for Sudoku.
-        
+        Compute action mask for Sudoku with constraint-aware masking.
+
         Masks out:
-        1. All tokens for "given" cells (clues)
+        1. All tokens for "given" cells (clues from original inputs)
         2. Token 0 (PAD) and Token 1 (empty) for all positions
-           - These are never valid target values for solving Sudoku
+        3. Digits that violate Sudoku constraints (same digit in row/col/box)
+
+        Args:
+            inputs: Original puzzle state (to identify given cells)
+            vocab_size: Number of tokens (11 for 9x9: 0=PAD, 1=empty, 2-10=digits)
+            stop_action_id: Index of STOP action
+            current_state: Current board state for constraint checking (optional)
         """
         flat_inputs = inputs.reshape(-1)
         num_positions = flat_inputs.numel()
         num_actions = stop_action_id + 1
-        
+
+        # Determine grid size (4x4 or 9x9)
+        grid_size = int(num_positions ** 0.5)
+        box_size = int(grid_size ** 0.5)  # 2 for 4x4, 3 for 9x9
+
+        # Use current state for constraint checking, fall back to inputs
+        if current_state is not None:
+            state = current_state.reshape(-1)
+        else:
+            state = flat_inputs
+
         # Start with all actions valid
         mask = torch.ones(num_actions, dtype=torch.bool, device=inputs.device)
-        
+
         # === 1. Mask out all tokens for "given" positions ===
         for pos in range(num_positions):
             cell_value = int(flat_inputs[pos].item())
@@ -257,21 +278,96 @@ class SudokuTaskConfig(TaskConfig):
                 end_action = start_action + vocab_size
                 if end_action <= num_actions:
                     mask[start_action:end_action] = False
-        
+
         # === 2. Mask out tokens 0 (PAD) and 1 (empty) for ALL positions ===
-        # For Sudoku, only tokens 2+ are valid digits (1-9).
-        # Setting a cell to PAD or empty is never useful for solving.
         for tok in range(min(2, vocab_size)):  # tok=0 (PAD), tok=1 (empty)
             for pos in range(num_positions):
                 action_idx = pos * vocab_size + tok
-                if action_idx < num_actions - 1:  # Don't touch STOP action
+                if action_idx < num_actions - 1:
                     mask[action_idx] = False
-        
+
+        # === 3. Constraint-aware masking: mask digits in same row/col/box ===
+        for pos in range(num_positions):
+            # Skip given cells (already masked above)
+            if self.is_given_cell(int(flat_inputs[pos].item())):
+                continue
+
+            row = pos // grid_size
+            col = pos % grid_size
+            box_row = (row // box_size) * box_size
+            box_col = (col // box_size) * box_size
+
+            # Collect digits already used in this row/col/box
+            used_digits = set()
+
+            # Check row
+            for c in range(grid_size):
+                cell_pos = row * grid_size + c
+                val = int(state[cell_pos].item())
+                if val > 1:  # val > 1 means it's a placed digit (2-10 = digits 1-9)
+                    used_digits.add(val)
+
+            # Check column
+            for r in range(grid_size):
+                cell_pos = r * grid_size + col
+                val = int(state[cell_pos].item())
+                if val > 1:
+                    used_digits.add(val)
+
+            # Check box
+            for br in range(box_size):
+                for bc in range(box_size):
+                    cell_pos = (box_row + br) * grid_size + (box_col + bc)
+                    val = int(state[cell_pos].item())
+                    if val > 1:
+                        used_digits.add(val)
+
+            # Mask out actions that place used digits at this position
+            for digit_token in used_digits:
+                action_idx = pos * vocab_size + digit_token
+                if action_idx < num_actions - 1:
+                    mask[action_idx] = False
+
         # STOP action is always valid
         if stop_action_id < num_actions:
             mask[stop_action_id] = True
-        
+
         return mask
+
+    def compute_batch_action_mask(
+        self,
+        inputs: torch.Tensor,
+        vocab_size: int,
+        stop_action_id: int,
+        current_state: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Compute action masks for a batch, honoring Sudoku constraints.
+
+        Args:
+            inputs: [B, ...] original puzzle tokens
+            vocab_size: Number of tokens per position
+            stop_action_id: Index of STOP action
+            current_state: Optional [B, ...] current board state
+
+        Returns:
+            [B, num_actions] boolean mask
+        """
+        if inputs.dim() == 1:
+            inputs = inputs.unsqueeze(0)
+        batch_size = inputs.shape[0]
+        if current_state is not None and current_state.dim() == 1:
+            current_state = current_state.unsqueeze(0)
+
+        masks = []
+        for b in range(batch_size):
+            state_b = current_state[b] if current_state is not None else None
+            masks.append(
+                self.compute_action_mask(
+                    inputs[b], vocab_size, stop_action_id, current_state=state_b
+                )
+            )
+        return torch.stack(masks, dim=0)
 
 
 @dataclass

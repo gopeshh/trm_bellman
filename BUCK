@@ -1230,3 +1230,17 @@ python_binary(
         "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
+
+python_unittest(
+    name = "test_constraint_aware_masking",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_constraint_aware_masking_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":rl",
+        "//caffe2:torch",
+        "fbsource//third-party/pypi/pytest:pytest",
+    ],
+)

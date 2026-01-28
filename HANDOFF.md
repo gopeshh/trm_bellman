@@ -1,12 +1,74 @@
 # HANDOFF.md - Session Summary for UPI-TRM Project
 
-**Date:** 2026-01-21
+**Date:** 2026-01-28
 **Branch:** `feature/upi-trm-clean`
 **Latest Commit:** See git log for current state
 
 ---
 
-## Current Work
+## Current Work: Constraint-Aware Action Masking (2026-01-28)
+
+### Status: RUNNING
+
+Implemented constraint-aware action masking for 9x9 Sudoku to reduce action space from 729 → ~50-150 valid actions per step.
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `rl/task_config.py` | Added constraint checking in `compute_action_mask()` for row/col/box |
+| `rl/envs/plan_edit_env.py` | Pass current state to mask, recompute mask after every step |
+| `configs/sudoku9x9/*.yaml` | Changed training steps from 25k → 50k |
+| `tests/test_constraint_aware_masking_unittest.py` | 14 tests for constraint masking |
+| `BUCK` | Updated test target for constraint masking |
+
+### Tests Passed
+
+- `test_upi_trm_trainer_smoke`: **2 tests passed**
+- `test_constraint_aware_masking`: **14 tests passed**
+
+### Experiments Running
+
+| Algorithm | GPU | Status | Progress | Latest Score |
+|-----------|-----|--------|----------|--------------|
+| UPI-TRM | 0 | **STUCK** | - | - |
+| PPO | 1 | ✅ Running | Step 287/50000 (0.6%) | - |
+| DQN | 2 | ✅ Running | Step 4340/50000 (8.7%) | 25.56 |
+
+**Constraint-aware masking active:** 253 valid actions out of 892 (72% reduction)
+
+**Issue with UPI-TRM:** Hangs after first debug output. 100% CPU, 8% GPU. May be related to constraint-aware masking interaction with UPI-TRM's batch action mask computation. Needs investigation.
+
+### Monitoring Commands
+
+```bash
+# Check experiment progress
+for algo in upi_trm ppo dqn; do
+  log="results/sudoku9x9_constraint_aware/${algo}_seed0.log"
+  step=$(grep -oP 'step \K\d+' "$log" 2>/dev/null | tail -1)
+  score=$(grep "eval_mean_score" "$log" 2>/dev/null | tail -1 | grep -oP 'eval_mean_score=\K[0-9.]+')
+  echo "$algo: step=$step score=$score"
+done
+```
+
+### Previous Results (Before Constraint Masking)
+
+| Algorithm | Mean Score | Initial | Change |
+|-----------|------------|---------|--------|
+| **UPI-TRM** | 27.64 | 26.64 | **+1.00** |
+| PPO | 26.02 | 26.84 | -0.82 |
+| DQN | 25.57 | 26.84 | -1.27 |
+
+### Expected Impact
+
+With constraint-aware masking:
+- ~80% reduction in valid action space
+- All explorations are constraint-valid
+- Expected: faster learning, better final performance
+
+---
+
+## Previous Session: Hard 4×4 Sudoku (2026-01-21)
 
 ### Completed Task: Hard 4×4 Sudoku Baseline Experiments
 

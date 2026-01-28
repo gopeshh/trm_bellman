@@ -6,6 +6,7 @@ from upi_trm_train import DummyPuzzleDataset, dummy_checker
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from rl.task_config import DummyTaskConfig
 from rl.upi_trm_trainer import UPITrmTrainer
 
 
@@ -71,4 +72,48 @@ def test_upi_trm_trainer_smoke():
         assert "loss_value" in metrics and "loss_policy" in metrics
         assert math.isfinite(metrics["loss_value"])
         assert math.isfinite(metrics["loss_policy"])
+
+
+class TrackingTaskConfig(DummyTaskConfig):
+    def __init__(self):
+        super().__init__()
+        self.batch_called = False
+        self.last_current_state_shape = None
+
+    def compute_batch_action_mask(self, inputs, vocab_size, stop_action_id, current_state=None):
+        if current_state is None:
+            raise AssertionError("current_state should be provided for batch masking")
+        self.batch_called = True
+        if torch.is_tensor(current_state):
+            self.last_current_state_shape = tuple(current_state.shape)
+        return super().compute_batch_action_mask(inputs, vocab_size, stop_action_id, current_state=current_state)
+
+
+def test_policy_update_uses_task_config_batch_mask():
+    dataset = DummyPuzzleDataset(num_instances=6, seq_len=8, vocab_size=12)
+    env_cfg = PlanEditEnvConfig(max_edits=3, gamma=0.99, reward_shaping=True, vocab_size=dataset.vocab_size)
+    task_config = TrackingTaskConfig()
+    env = PlanEditEnv(dataset=dataset, checker=dummy_checker, config=env_cfg, task_config=task_config)
+    env.set_stop_action_id(stop_id=_num_actions(dataset.seq_len, dataset.vocab_size) - 1)
+
+    rl_cfg = RLConfig(
+        batch_size=2,
+        num_train_steps=4,
+        rollout_episodes_per_step=2,
+        max_edits=3,
+    )
+    model_cfg = _tiny_trm_cfg(
+        seq_len=dataset.seq_len,
+        vocab_size=dataset.vocab_size,
+        num_identifiers=dataset.num_identifiers,
+        batch_size=rl_cfg.batch_size,
+    )
+    model = TinyRecursiveReasoningModel_ACTV1(model_cfg)
+
+    trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=torch.device("cpu"))
+    for _ in range(3):
+        trainer.train_step()
+
+    assert task_config.batch_called
+    assert task_config.last_current_state_shape is not None
 

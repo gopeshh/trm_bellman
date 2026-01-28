@@ -240,13 +240,24 @@ class PlanEditEnv:
             
         if not torch.is_tensor(inputs):
             inputs = torch.as_tensor(inputs)
-        
+
         self._original_inputs = inputs.clone()
-        
+
+        # Get current state for constraint-aware masking
+        current_state = None
+        if hasattr(self, 'y') and self.y is not None:
+            if isinstance(self.y, dict):
+                current_state = self.y.get("inputs", self.y.get("labels"))
+            else:
+                current_state = self.y
+            if current_state is not None and not torch.is_tensor(current_state):
+                current_state = torch.as_tensor(current_state)
+
         # Use TaskConfig if available, otherwise fall back to default behavior
         if self.task_config is not None:
             mask = self.task_config.compute_action_mask(
-                inputs, self.vocab_size, self.stop_action_id
+                inputs, self.vocab_size, self.stop_action_id,
+                current_state=current_state
             )
         else:
             # Default Sudoku-style logic
@@ -770,8 +781,8 @@ class PlanEditEnv:
         self.y = y_next
         self.done = done
 
-        # Update action mask after state change (important for UNDO validity)
-        if self._enable_undo and not done:
+        # Update action mask after state change for constraint-aware masking
+        if not done:
             self._compute_action_mask()
 
         return (self.x, self.y), r, done, info

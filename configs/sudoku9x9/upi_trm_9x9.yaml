@@ -18,7 +18,7 @@ inner_unroll_n: 2
 
 max_edits: 81  # 9x9 has 81 cells
 
-num_train_steps: 25000  # Longer training for harder task
+num_train_steps: 50000  # Increased for harder task with constraint masking
 batch_size: 64
 rollout_episodes_per_step: 8
 

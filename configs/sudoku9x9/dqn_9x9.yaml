@@ -22,7 +22,7 @@ dqn_double_dqn: true
 gamma: 0.99
 inner_unroll_n: 2
 max_edits: 81
-num_train_steps: 25000
+num_train_steps: 50000
 
 # === FEASIBILITY CHECKER ===
 reward_shaping: true
