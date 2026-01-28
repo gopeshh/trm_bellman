@@ -12,7 +12,7 @@ This decouples task-specific logic from the core RL infrastructure.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, ClassVar, Dict, Optional
 
 import torch
 
@@ -242,97 +242,116 @@ class SudokuTaskConfig(TaskConfig):
         """
         Compute action mask for Sudoku with constraint-aware masking.
 
+        Delegates to compute_batch_action_mask with batch_size=1 for efficiency.
+        The batch implementation is fully vectorized and GPU-friendly.
+
         Masks out:
         1. All tokens for "given" cells (clues from original inputs)
         2. Token 0 (PAD) and Token 1 (empty) for all positions
         3. Digits that violate Sudoku constraints (same digit in row/col/box)
 
         Args:
-            inputs: Original puzzle state (to identify given cells)
+            inputs: Original puzzle state (to identify given cells) - 1D or 2D
             vocab_size: Number of tokens (11 for 9x9: 0=PAD, 1=empty, 2-10=digits)
             stop_action_id: Index of STOP action
             current_state: Current board state for constraint checking (optional)
         """
-        flat_inputs = inputs.reshape(-1)
-        num_positions = flat_inputs.numel()
-        num_actions = stop_action_id + 1
+        # Handle input dimensionality
+        is_1d = inputs.dim() == 1
+        batch_inputs = inputs.unsqueeze(0) if is_1d else inputs
 
-        # Determine grid size (4x4 or 9x9)
-        grid_size = int(num_positions ** 0.5)
-        box_size = int(grid_size ** 0.5)  # 2 for 4x4, 3 for 9x9
-
-        # Use current state for constraint checking, fall back to inputs
+        # Handle current_state dimensionality
         if current_state is not None:
-            state = current_state.reshape(-1)
+            batch_state = current_state.unsqueeze(0) if current_state.dim() == 1 else current_state
         else:
-            state = flat_inputs
+            batch_state = None
 
-        # Start with all actions valid
-        mask = torch.ones(num_actions, dtype=torch.bool, device=inputs.device)
+        # Delegate to batch implementation
+        batch_mask = self.compute_batch_action_mask(
+            batch_inputs,
+            vocab_size,
+            stop_action_id,
+            batch_state,
+        )
 
-        # === 1. Mask out all tokens for "given" positions ===
+        # Return single-instance mask if input was 1D, otherwise return batch mask
+        if is_1d:
+            return batch_mask.squeeze(0)
+        return batch_mask
+
+    # Class-level cache for constraint indices (shared across instances)
+    _constraint_cache: ClassVar[Dict] = {}
+
+    def _get_constraint_indices(
+        self, grid_size: int, box_size: int, device: torch.device
+    ) -> tuple:
+        """
+        Get or build constraint index tensors (cached per grid size).
+
+        Returns:
+            constraint_tensor: [P, C] - indices of constraint cells for each position
+            constraint_valid: [P, C] - validity mask for constraint indices
+        """
+        cache_key = (grid_size, box_size, str(device))
+        if cache_key in SudokuTaskConfig._constraint_cache:
+            cached = SudokuTaskConfig._constraint_cache[cache_key]
+            # Move to correct device if needed
+            if cached[0].device != device:
+                return cached[0].to(device), cached[1].to(device)
+            return cached
+
+        num_positions = grid_size * grid_size
+
+        # Build constraint indices using vectorized operations where possible
+        # For each position, we need indices of all cells in same row, col, and box
+        positions = torch.arange(num_positions, device=device)
+        rows = positions // grid_size
+        cols = positions % grid_size
+
+        # Row constraints: for position p in row r, all positions r*G + [0..G-1]
+        # Col constraints: for position p in col c, all positions [0..G-1]*G + c
+        # Box constraints: for position p in box (br, bc), positions in that box
+
+        # Pre-allocate constraint tensor
+        # Max constraints per cell: G (row) + G (col) + box_size^2 (box) = 2G + B^2
+        # But there are overlaps, actual unique is about G + G + B^2 - 2 for corner
+        # Use safe upper bound
+        max_constraints = grid_size + grid_size + box_size * box_size
+
+        constraint_tensor = torch.zeros(
+            num_positions, max_constraints, dtype=torch.long, device=device
+        )
+        constraint_valid = torch.zeros(
+            num_positions, max_constraints, dtype=torch.bool, device=device
+        )
+
+        # Build constraints vectorized per constraint type, then combine
+        # This is one-time cost, so acceptable to use some Python for clarity
         for pos in range(num_positions):
-            cell_value = int(flat_inputs[pos].item())
-            if self.is_given_cell(cell_value):
-                start_action = pos * vocab_size
-                end_action = start_action + vocab_size
-                if end_action <= num_actions:
-                    mask[start_action:end_action] = False
+            r, c = pos // grid_size, pos % grid_size
+            br = (r // box_size) * box_size
+            bc = (c // box_size) * box_size
 
-        # === 2. Mask out tokens 0 (PAD) and 1 (empty) for ALL positions ===
-        for tok in range(min(2, vocab_size)):  # tok=0 (PAD), tok=1 (empty)
-            for pos in range(num_positions):
-                action_idx = pos * vocab_size + tok
-                if action_idx < num_actions - 1:
-                    mask[action_idx] = False
+            cells = set()
+            # Row cells
+            for i in range(grid_size):
+                cells.add(r * grid_size + i)
+            # Col cells
+            for i in range(grid_size):
+                cells.add(i * grid_size + c)
+            # Box cells
+            for dr in range(box_size):
+                for dc in range(box_size):
+                    cells.add((br + dr) * grid_size + (bc + dc))
 
-        # === 3. Constraint-aware masking: mask digits in same row/col/box ===
-        for pos in range(num_positions):
-            # Skip given cells (already masked above)
-            if self.is_given_cell(int(flat_inputs[pos].item())):
-                continue
+            cells_list = sorted(cells)
+            constraint_tensor[pos, : len(cells_list)] = torch.tensor(
+                cells_list, dtype=torch.long, device=device
+            )
+            constraint_valid[pos, : len(cells_list)] = True
 
-            row = pos // grid_size
-            col = pos % grid_size
-            box_row = (row // box_size) * box_size
-            box_col = (col // box_size) * box_size
-
-            # Collect digits already used in this row/col/box
-            used_digits = set()
-
-            # Check row
-            for c in range(grid_size):
-                cell_pos = row * grid_size + c
-                val = int(state[cell_pos].item())
-                if val > 1:  # val > 1 means it's a placed digit (2-10 = digits 1-9)
-                    used_digits.add(val)
-
-            # Check column
-            for r in range(grid_size):
-                cell_pos = r * grid_size + col
-                val = int(state[cell_pos].item())
-                if val > 1:
-                    used_digits.add(val)
-
-            # Check box
-            for br in range(box_size):
-                for bc in range(box_size):
-                    cell_pos = (box_row + br) * grid_size + (box_col + bc)
-                    val = int(state[cell_pos].item())
-                    if val > 1:
-                        used_digits.add(val)
-
-            # Mask out actions that place used digits at this position
-            for digit_token in used_digits:
-                action_idx = pos * vocab_size + digit_token
-                if action_idx < num_actions - 1:
-                    mask[action_idx] = False
-
-        # STOP action is always valid
-        if stop_action_id < num_actions:
-            mask[stop_action_id] = True
-
-        return mask
+        SudokuTaskConfig._constraint_cache[cache_key] = (constraint_tensor, constraint_valid)
+        return constraint_tensor, constraint_valid
 
     def compute_batch_action_mask(
         self,
@@ -344,30 +363,107 @@ class SudokuTaskConfig(TaskConfig):
         """
         Compute action masks for a batch, honoring Sudoku constraints.
 
+        Fully vectorized implementation with no Python loops in the hot path.
+        Uses [B, P, V] tensor space and flattens to [B, num_actions] at the end.
+
+        Constraint indices are cached per grid size for efficiency.
+
         Args:
-            inputs: [B, ...] original puzzle tokens
-            vocab_size: Number of tokens per position
+            inputs: [B, ...] original puzzle tokens (identifies given cells)
+            vocab_size: Number of tokens per position (6 for 4x4, 11 for 9x9)
             stop_action_id: Index of STOP action
-            current_state: Optional [B, ...] current board state
+            current_state: Optional [B, ...] current board state for constraint checking
 
         Returns:
-            [B, num_actions] boolean mask
+            [B, num_actions] boolean mask where True = action allowed
         """
+        # Ensure batch dimension
         if inputs.dim() == 1:
             inputs = inputs.unsqueeze(0)
         batch_size = inputs.shape[0]
         if current_state is not None and current_state.dim() == 1:
             current_state = current_state.unsqueeze(0)
 
-        masks = []
-        for b in range(batch_size):
-            state_b = current_state[b] if current_state is not None else None
-            masks.append(
-                self.compute_action_mask(
-                    inputs[b], vocab_size, stop_action_id, current_state=state_b
-                )
-            )
-        return torch.stack(masks, dim=0)
+        flat_inputs = inputs.reshape(batch_size, -1)
+        num_positions = flat_inputs.shape[1]
+        num_actions = stop_action_id + 1
+        device = inputs.device
+
+        # Determine grid size (4 for 4x4, 9 for 9x9)
+        grid_size = int(num_positions ** 0.5)
+        box_size = int(grid_size ** 0.5)
+
+        # Use current state for constraint checking, fall back to inputs
+        state = (
+            current_state.reshape(batch_size, -1)
+            if current_state is not None
+            else flat_inputs
+        )
+
+        # === Build [B, P, V] mask where True = action allowed ===
+        pos_mask = torch.ones(
+            batch_size, num_positions, vocab_size, dtype=torch.bool, device=device
+        )
+
+        # --- 1. Mask PAD (token 0) and empty (token 1) for all positions ---
+        # These tokens should never be placed
+        if vocab_size >= 2:
+            pos_mask[:, :, :2] = False
+
+        # --- 2. Mask constraint violations (digits already in row/col/box) ---
+        # Get cached constraint indices
+        constraint_tensor, constraint_valid = self._get_constraint_indices(
+            grid_size, box_size, device
+        )
+        # constraint_tensor: [P, C], constraint_valid: [P, C]
+
+        # Gather values at constraint positions: [B, P, C]
+        constraint_values = state[:, constraint_tensor]
+
+        # Check which digits (2 to vocab_size-1) appear in constraints
+        # digits: [D] where D = vocab_size - 2
+        num_digits = vocab_size - 2
+        if num_digits > 0:
+            digits = torch.arange(2, vocab_size, device=device)  # [D]
+
+            # Compare constraint values with each digit: [B, P, C, 1] vs [1, 1, 1, D]
+            # Result: [B, P, C, D]
+            digit_match = constraint_values.unsqueeze(3) == digits.view(1, 1, 1, -1)
+
+            # Mask out invalid constraint positions (padding in constraint_tensor)
+            digit_match = digit_match & constraint_valid.view(1, num_positions, -1, 1)
+
+            # digit_present[b, p, d] = True if digit d+2 appears in constraints for position p
+            digit_present = digit_match.any(dim=2)  # [B, P, D]
+
+            # Mask these digits: pos_mask[:, :, 2:] should be False where digit_present is True
+            pos_mask[:, :, 2:vocab_size] = pos_mask[:, :, 2:vocab_size] & ~digit_present
+
+        # --- 3. Mask all tokens for given cells ---
+        # given_mask: [B, P] - True where cell has a given value (> 1)
+        given_mask = flat_inputs > 1  # [B, P]
+
+        # Expand to [B, P, V] and apply: mask all tokens for given positions
+        pos_mask = pos_mask & ~given_mask.unsqueeze(2)
+
+        # === Flatten [B, P, V] to [B, num_actions] ===
+        # Action index = pos * vocab_size + token
+        # Total edit actions = P * V, but we only use first (num_actions - 1)
+        pos_mask_flat = pos_mask.reshape(batch_size, -1)  # [B, P * V]
+
+        # Create output mask with STOP action
+        mask = torch.ones(batch_size, num_actions, dtype=torch.bool, device=device)
+
+        # Copy edit action mask (truncate if P*V > num_actions-1)
+        num_edit_actions = num_positions * vocab_size
+        actual_edit_actions = min(num_edit_actions, num_actions - 1)
+        mask[:, :actual_edit_actions] = pos_mask_flat[:, :actual_edit_actions]
+
+        # STOP action is always valid
+        mask[:, stop_action_id] = True
+
+        return mask
+
 
 
 @dataclass
