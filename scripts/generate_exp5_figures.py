@@ -231,13 +231,22 @@ def generate_L_vs_metrics_plot(summary: Dict[str, Any], out_path: Path) -> None:
     ax2.set_ylim(max(0.0, success_pct.min() - pad), min(100.0, success_pct.max() + pad))
     ax2.yaxis.set_major_locator(mticker.MaxNLocator(4))
 
-    # Add scale annotations (on stability line)
-    for lp, stab, s in zip(L_preproj, stability_pct, scales):
-        ax1.annotate(f's={s}', (lp, stab), textcoords="offset points", xytext=(3, 3), fontsize=6)
+    # Add scale annotations (on stability line) with staggered offsets
+    offsets = [(-14, 10), (0, 6), (6, -8), (-10, -18)]
+    for i, (lp, stab, s) in enumerate(zip(L_preproj, stability_pct, scales)):
+        dx, dy = offsets[i % len(offsets)]
+        ax1.annotate(
+            f's={s}',
+            (lp, stab),
+            textcoords="offset points",
+            xytext=(dx, dy),
+            fontsize=6,
+            fontweight="bold",
+        )
 
     # Compact legend
     ax1.legend([line1, line2], ['Stability', 'Success'],
-               loc='lower right', fontsize=6, frameon=True, borderpad=0.3,
+               loc='upper right', fontsize=6, frameon=True, borderpad=0.3,
                handlelength=1.2, handletextpad=0.4)
 
     ax1.grid(True, alpha=0.3, linewidth=0.6)

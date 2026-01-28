@@ -145,8 +145,9 @@ def main():
     apply_paper_style()
 
     # Use hard dataset results
-    results_dir = Path("/home/buiksat/trm_bellman/results/table3_hard_6to8")
-    output_dir = Path("/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures")
+    repo_root = Path(__file__).parent.parent
+    results_dir = repo_root / "results" / "table3_hard_6to8"
+    output_dir = Path.home() / "UPI_TRM" / "UPI_TRM_ICML" / "figures"
 
     # Define methods and their log file patterns
     methods = {
@@ -221,7 +222,11 @@ def main():
 
     ax.set_xlabel("Training Steps")
     ax.set_ylabel("Success Rate")
-    ax.set_title("4×4 Sudoku (6–8 empties, T=16): Success Rate vs Training Steps\n(Feasibility Checker, 20k steps, 3 seeds)")
+    ax.set_title(
+        "4×4 Sudoku (6–8 empties, T=16)\n"
+        "Success Rate vs Training Steps\n"
+        "(Feasibility Checker, 20k steps, 3 seeds)"
+    )
     ax.set_ylim(0, 1.0)
     ax.set_xlim(0, 20000)
     ax.grid(True, alpha=0.3)
