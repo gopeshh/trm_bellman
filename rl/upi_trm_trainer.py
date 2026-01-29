@@ -77,6 +77,9 @@ class UPITrmTrainer:
         self._debug_episode_returns: List[float] = []
         self._debug_stop_probs: List[float] = []
         self._debug_score_changes: List[float] = []
+
+        # Profiling flag (set True to see per-episode timing breakdown)
+        self._profile_rollout: bool = False
         
         # === NEW: Theory-exact tracking (Sections 4.2, 5.4 of paper) ===
         # Track drift for persistent latents (Lemma 4.4)
@@ -505,29 +508,48 @@ class UPITrmTrainer:
                 print(f"[DEBUG] Action mask: {valid_count} valid actions out of {len(mask)} total")
             print(f"[DEBUG] Latent mode: {'episodic' if episodic_latent else 'persistent'}")
 
+        # Timing instrumentation
+        import time
+        _time_policy = 0.0
+        _time_env_step = 0.0
+        _time_prep = 0.0
+        _time_other = 0.0
+        _profile_enabled = getattr(self, '_profile_rollout', False)
+
         while not done and self.env.step_count < edit_budget:
+            _t0 = time.perf_counter() if _profile_enabled else 0
+
             batched = self._state_is_batched(x)
             batch_x = self._prepare_batch_x(x, batched=batched)
             batch_y = self._prepare_plan(y, batched=batched)
-            
+
             # Get action mask to prevent editing "given" cells
             action_mask = self.env.get_action_mask()
             if action_mask is not None:
                 action_mask = action_mask.to(self.device)
 
+            if _profile_enabled:
+                _t1 = time.perf_counter()
+                _time_prep += _t1 - _t0
+
             dist, z_new = self._mixed_policy_dist(batch_x, batch_y, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask, z=z)
+
+            if _profile_enabled:
+                _t2 = time.perf_counter()
+                _time_policy += _t2 - _t1
+
             # Only update z in persistent mode; in episodic mode z stays None
             # so it's reinitialized from (x, y) at every step
             if not episodic_latent:
                 z = z_new
             action = dist.sample().squeeze()  # Ensure scalar (0-D) tensor for single-state sampling
-            
+
             # Track STOP probability for debugging
             if t == 0 and stop_action_id is not None:
                 probs = dist.probs
                 stop_prob = probs[0, stop_action_id].item() if probs.dim() > 1 else probs[stop_action_id].item()
                 self._debug_stop_probs.append(stop_prob)
-                
+
                 # Debug: on first episode, print full probability info
                 if self._next_episode_id == 0:
                     if probs.dim() > 1:
@@ -536,7 +558,14 @@ class UPITrmTrainer:
                     print(f"[DEBUG] Step 0 probs: STOP={stop_prob:.6f}, edits={edit_probs:.6f}")
                     print(f"[DEBUG] Top 5 action probs: {probs.topk(5)}")
 
+            if _profile_enabled:
+                _t3 = time.perf_counter()
+
             (x_next, y_next), reward, done, info = self.env.step(action.item())
+
+            if _profile_enabled:
+                _t4 = time.perf_counter()
+                _time_env_step += _t4 - _t3
             last_info = info
             
             # Track for debugging
@@ -577,6 +606,15 @@ class UPITrmTrainer:
 
             x, y = x_next, y_next
             t += 1
+
+        # Print profiling summary for first few episodes
+        if _profile_enabled and self._next_episode_id < 3:
+            _total = _time_prep + _time_policy + _time_env_step
+            print(f"[PROFILE] Episode {self._next_episode_id} ({t} steps):")
+            print(f"  prep:      {_time_prep*1000:7.1f}ms ({100*_time_prep/_total:5.1f}%)")
+            print(f"  policy:    {_time_policy*1000:7.1f}ms ({100*_time_policy/_total:5.1f}%)")
+            print(f"  env.step:  {_time_env_step*1000:7.1f}ms ({100*_time_env_step/_total:5.1f}%)")
+            print(f"  total:     {_total*1000:7.1f}ms ({_total/t*1000:.2f}ms/step)")
 
         self._next_episode_id += 1
         

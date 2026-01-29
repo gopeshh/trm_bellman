@@ -12,6 +12,7 @@ from rl.value_targets import (
 from rl.task_config import (
     TaskConfig,
     SudokuTaskConfig,
+    SudokuConstraintTracker,
     DummyTaskConfig,
     ARCTaskConfig,
     get_task_config,
@@ -32,6 +33,7 @@ __all__ = [
     # Task configs
     "TaskConfig",
     "SudokuTaskConfig",
+    "SudokuConstraintTracker",
     "DummyTaskConfig",
     "ARCTaskConfig",
     "get_task_config",

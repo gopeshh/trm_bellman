@@ -12,7 +12,7 @@ This decouples task-specific logic from the core RL infrastructure.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable, ClassVar, Dict, Optional
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 
 import torch
 
@@ -164,8 +164,348 @@ class TaskConfig(ABC):
         # Ensure STOP is always valid
         if stop_action_id < num_actions:
             mask[:, stop_action_id] = True
-        
+
         return mask
+
+
+class SudokuConstraintTracker:
+    """
+    Incremental constraint tracker for Sudoku puzzle environments.
+
+    Maintains per-row/col/box digit COUNTS (not just presence flags) to correctly
+    handle duplicate digits. When a digit count goes from 1->0, that digit becomes
+    available again in that constraint group.
+
+    This enables O(1) mask updates after each edit instead of O(P*V) recomputation.
+
+    Usage:
+        tracker = SudokuConstraintTracker(grid_size=9)
+        tracker.initialize(current_state)
+
+        # After an edit at position p, old_digit -> new_digit:
+        tracker.update(position, old_digit, new_digit)
+
+        # Get valid digits for a position:
+        valid = tracker.get_valid_digits(position)
+
+        # Or patch an existing mask:
+        tracker.patch_mask(mask, affected_positions, vocab_size)
+    """
+
+    def __init__(self, grid_size: int, device: torch.device = None):
+        """
+        Initialize the constraint tracker.
+
+        Args:
+            grid_size: Size of the Sudoku grid (4 for 4x4, 9 for 9x9)
+            device: Torch device for tensor storage
+        """
+        self.grid_size = grid_size
+        self.box_size = int(grid_size ** 0.5)
+        self.num_positions = grid_size * grid_size
+        self.num_digits = grid_size  # Digits 1-4 for 4x4, 1-9 for 9x9
+        self.device = device if device is not None else torch.device('cpu')
+
+        # Digit counts: track how many times each digit appears in each constraint group
+        # Using int16 to save memory while supporting counts > 1
+        self.row_counts = torch.zeros(
+            grid_size, self.num_digits, dtype=torch.int16, device=self.device
+        )
+        self.col_counts = torch.zeros(
+            grid_size, self.num_digits, dtype=torch.int16, device=self.device
+        )
+        self.box_counts = torch.zeros(
+            grid_size, self.num_digits, dtype=torch.int16, device=self.device
+        )
+
+        # Precompute position -> (row, col, box) mapping
+        self._pos_to_row = torch.zeros(self.num_positions, dtype=torch.long, device=self.device)
+        self._pos_to_col = torch.zeros(self.num_positions, dtype=torch.long, device=self.device)
+        self._pos_to_box = torch.zeros(self.num_positions, dtype=torch.long, device=self.device)
+
+        for pos in range(self.num_positions):
+            row = pos // grid_size
+            col = pos % grid_size
+            box_row = row // self.box_size
+            box_col = col // self.box_size
+            box_idx = box_row * self.box_size + box_col
+
+            self._pos_to_row[pos] = row
+            self._pos_to_col[pos] = col
+            self._pos_to_box[pos] = box_idx
+
+        # Precompute which positions share constraints with each position
+        # For patching the mask after an edit
+        self._affected_positions: List[List[int]] = []
+        for pos in range(self.num_positions):
+            row = pos // grid_size
+            col = pos % grid_size
+            box_row = (row // self.box_size) * self.box_size
+            box_col = (col // self.box_size) * self.box_size
+
+            affected = set()
+            # Same row
+            for c in range(grid_size):
+                affected.add(row * grid_size + c)
+            # Same column
+            for r in range(grid_size):
+                affected.add(r * grid_size + col)
+            # Same box
+            for dr in range(self.box_size):
+                for dc in range(self.box_size):
+                    affected.add((box_row + dr) * grid_size + (box_col + dc))
+
+            self._affected_positions.append(sorted(affected))
+
+        # Cache for the full mask (will be set by initialize or compute_full_mask)
+        self._cached_mask: Optional[torch.Tensor] = None
+        self._mask_valid = False
+
+        # Store given cells mask (from original inputs, immutable)
+        self._given_mask: Optional[torch.Tensor] = None
+
+    def initialize(
+        self,
+        current_state: torch.Tensor,
+        given_mask: Optional[torch.Tensor] = None,
+    ) -> None:
+        """
+        Initialize constraint counts from a board state.
+
+        Args:
+            current_state: Flat tensor of board values [num_positions]
+                          Values: 1=empty, 2-10=digits 1-9
+            given_mask: Optional boolean mask [num_positions] where True = given cell
+        """
+        state = current_state.reshape(-1)
+        if state.device != self.device:
+            state = state.to(self.device)
+
+        # Reset counts
+        self.row_counts.zero_()
+        self.col_counts.zero_()
+        self.box_counts.zero_()
+
+        # Count digits in each constraint group
+        for pos in range(self.num_positions):
+            val = state[pos].item()
+            if val >= 2:  # Valid digit (tokens 2-10 = digits 1-9)
+                digit_idx = val - 2  # Convert token to 0-indexed digit
+                if digit_idx < self.num_digits:
+                    row = self._pos_to_row[pos].item()
+                    col = self._pos_to_col[pos].item()
+                    box = self._pos_to_box[pos].item()
+
+                    self.row_counts[row, digit_idx] += 1
+                    self.col_counts[col, digit_idx] += 1
+                    self.box_counts[box, digit_idx] += 1
+
+        # Store given mask
+        if given_mask is not None:
+            self._given_mask = given_mask.to(self.device) if given_mask.device != self.device else given_mask
+        else:
+            self._given_mask = None
+
+        # Invalidate cached mask
+        self._mask_valid = False
+        self._cached_mask = None
+
+    def update(self, position: int, old_digit: int, new_digit: int) -> List[int]:
+        """
+        Update counts after an edit at the given position.
+
+        Args:
+            position: Flat position index (0 to num_positions-1)
+            old_digit: Previous token value at this position (1=empty, 2-10=digits)
+            new_digit: New token value at this position
+
+        Returns:
+            List of positions whose valid digits may have changed
+        """
+        if old_digit == new_digit:
+            return []
+
+        row = self._pos_to_row[position].item()
+        col = self._pos_to_col[position].item()
+        box = self._pos_to_box[position].item()
+
+        # Decrement count for old digit
+        if old_digit >= 2:
+            digit_idx = old_digit - 2
+            if digit_idx < self.num_digits:
+                self.row_counts[row, digit_idx] -= 1
+                self.col_counts[col, digit_idx] -= 1
+                self.box_counts[box, digit_idx] -= 1
+
+        # Increment count for new digit
+        if new_digit >= 2:
+            digit_idx = new_digit - 2
+            if digit_idx < self.num_digits:
+                self.row_counts[row, digit_idx] += 1
+                self.col_counts[col, digit_idx] += 1
+                self.box_counts[box, digit_idx] += 1
+
+        # Invalidate mask and return affected positions
+        self._mask_valid = False
+        return self._affected_positions[position]
+
+    def get_valid_digits(self, position: int) -> torch.Tensor:
+        """
+        Get valid digits for a position based on current constraints.
+
+        Args:
+            position: Flat position index
+
+        Returns:
+            Boolean tensor [num_digits] where True = digit is valid
+        """
+        row = self._pos_to_row[position].item()
+        col = self._pos_to_col[position].item()
+        box = self._pos_to_box[position].item()
+
+        # Digit is valid if count == 0 in row AND col AND box
+        row_available = self.row_counts[row] == 0
+        col_available = self.col_counts[col] == 0
+        box_available = self.box_counts[box] == 0
+
+        return row_available & col_available & box_available
+
+    def compute_full_mask(
+        self,
+        vocab_size: int,
+        stop_action_id: int,
+    ) -> torch.Tensor:
+        """
+        Compute the full action mask from current constraint state.
+
+        This is used when the cached mask is invalid or for initial computation.
+
+        Args:
+            vocab_size: Number of tokens (6 for 4x4, 11 for 9x9)
+            stop_action_id: Index of STOP action
+
+        Returns:
+            Boolean mask [num_actions] where True = valid action
+        """
+        num_actions = stop_action_id + 1
+        mask = torch.ones(num_actions, dtype=torch.bool, device=self.device)
+
+        for pos in range(self.num_positions):
+            start = pos * vocab_size
+            end = start + vocab_size
+
+            if end > num_actions:
+                break
+
+            # Check if this is a given cell
+            if self._given_mask is not None and self._given_mask[pos]:
+                mask[start:end] = False
+                continue
+
+            # Mask PAD (token 0) and empty (token 1)
+            mask[start:start+2] = False
+
+            # Mask invalid digits based on constraints
+            valid_digits = self.get_valid_digits(pos)
+            # valid_digits is [num_digits], maps to tokens [2, 2+num_digits)
+            for d in range(self.num_digits):
+                if d + 2 < vocab_size:
+                    mask[start + d + 2] = valid_digits[d]
+
+        # STOP is always valid
+        mask[stop_action_id] = True
+
+        self._cached_mask = mask
+        self._mask_valid = True
+
+        return mask
+
+    def get_mask(
+        self,
+        vocab_size: int,
+        stop_action_id: int,
+    ) -> torch.Tensor:
+        """
+        Get action mask, using cache if valid.
+
+        Args:
+            vocab_size: Number of tokens
+            stop_action_id: Index of STOP action
+
+        Returns:
+            Boolean mask [num_actions]
+        """
+        if self._mask_valid and self._cached_mask is not None:
+            return self._cached_mask
+
+        return self.compute_full_mask(vocab_size, stop_action_id)
+
+    def patch_mask(
+        self,
+        affected_positions: List[int],
+        vocab_size: int,
+    ) -> None:
+        """
+        Patch the cached mask for affected positions only.
+
+        This is O(affected_positions) instead of O(num_positions).
+        For a single edit, affected_positions is typically ~20 for 9x9.
+
+        Args:
+            affected_positions: List of position indices to update
+            vocab_size: Number of tokens
+        """
+        if self._cached_mask is None:
+            return
+
+        for pos in affected_positions:
+            start = pos * vocab_size
+            end = start + vocab_size
+
+            if end > len(self._cached_mask):
+                continue
+
+            # Check if this is a given cell (skip patching)
+            if self._given_mask is not None and self._given_mask[pos]:
+                # Given cells stay masked - no change needed
+                continue
+
+            # Keep PAD and empty masked
+            self._cached_mask[start:start+2] = False
+
+            # Update digit validity
+            valid_digits = self.get_valid_digits(pos)
+            for d in range(self.num_digits):
+                if d + 2 < vocab_size:
+                    self._cached_mask[start + d + 2] = valid_digits[d]
+
+        self._mask_valid = True
+
+    def update_and_patch(
+        self,
+        position: int,
+        old_digit: int,
+        new_digit: int,
+        vocab_size: int,
+    ) -> torch.Tensor:
+        """
+        Combined update and patch operation for efficiency.
+
+        Args:
+            position: Position of the edit
+            old_digit: Old token value
+            new_digit: New token value
+            vocab_size: Number of tokens
+
+        Returns:
+            The updated cached mask
+        """
+        affected = self.update(position, old_digit, new_digit)
+
+        if self._cached_mask is not None and affected:
+            self.patch_mask(affected, vocab_size)
+
+        return self._cached_mask
 
 
 @dataclass

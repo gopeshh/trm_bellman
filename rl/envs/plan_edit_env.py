@@ -6,7 +6,7 @@ import torch
 from rl.sudoku_utils import sudoku_is_solved
 
 if TYPE_CHECKING:
-    from rl.task_config import TaskConfig
+    from rl.task_config import TaskConfig, SudokuConstraintTracker
 
 
 @dataclass
@@ -143,6 +143,10 @@ class PlanEditEnv:
         self._stop_mode = getattr(config, "stop_action_mode", "noop")
         self._stop_penalty_value = getattr(config, "stop_action_penalty", -0.1)
 
+        # Incremental constraint tracker for Sudoku (initialized at reset)
+        self._constraint_tracker: Optional["SudokuConstraintTracker"] = None
+        self._use_incremental_masking = False  # Will be set at reset if applicable
+
     def set_stop_action_id(self, stop_id: int) -> None:
         """
         Configure which discrete action index corresponds to STOP.
@@ -196,6 +200,12 @@ class PlanEditEnv:
         self.step_count = 0
         self.done = False
 
+        # Cache phi value to avoid redundant checker calls
+        # phi_new at step t becomes phi_old at step t+1
+        self._cached_phi: Optional[float] = None
+        if self.config.reward_shaping:
+            self._cached_phi = float(self.checker(self.x, self.y))
+
         # Initialize edit history for UNDO support
         if self._enable_undo:
             # Store initial plan as first entry (cannot undo past this)
@@ -203,22 +213,86 @@ class PlanEditEnv:
         else:
             self._edit_history = []
 
+        # Initialize incremental constraint tracker for Sudoku
+        self._init_constraint_tracker()
+
         # Compute action mask to protect "given" cells (non-zero in original inputs)
         self._compute_action_mask()
 
         return self.x, self.y
-    
-    def _compute_action_mask(self) -> None:
+
+    def _init_constraint_tracker(self) -> None:
+        """
+        Initialize the incremental constraint tracker for Sudoku puzzles.
+
+        This enables O(1) mask updates per step instead of O(P*V) recomputation.
+        Only activates for Sudoku tasks (4x4 or 9x9 grids).
+        """
+        from rl.task_config import SudokuConstraintTracker, SudokuTaskConfig
+
+        # Only use incremental masking for Sudoku with SudokuTaskConfig
+        is_sudoku = (
+            self.config.task_type == "sudoku"
+            or isinstance(self.task_config, SudokuTaskConfig)
+        )
+
+        if not is_sudoku:
+            self._use_incremental_masking = False
+            self._constraint_tracker = None
+            return
+
+        # Get current plan tensor
+        plan = self.y if torch.is_tensor(self.y) else torch.as_tensor(self.y)
+        num_positions = plan.numel()
+
+        # Verify it's a valid Sudoku grid (4x4=16 or 9x9=81 positions)
+        if num_positions not in (16, 81):
+            self._use_incremental_masking = False
+            self._constraint_tracker = None
+            return
+
+        grid_size = int(num_positions ** 0.5)
+        device = plan.device
+
+        # Create the tracker
+        self._constraint_tracker = SudokuConstraintTracker(grid_size, device)
+
+        # Get the given cells mask from original inputs
+        inputs = None
+        if isinstance(self.x, dict):
+            inputs = self.x.get("inputs")
+        else:
+            inputs = self.x
+
+        given_mask = None
+        if inputs is not None:
+            inputs_flat = inputs.reshape(-1) if torch.is_tensor(inputs) else torch.as_tensor(inputs).reshape(-1)
+            given_mask = inputs_flat > 1  # Given cells have value > 1
+
+        # Initialize from current state
+        self._constraint_tracker.initialize(plan, given_mask)
+
+        self._use_incremental_masking = True
+
+    def _compute_action_mask(self, edit_position: int = -1, old_digit: int = -1, new_digit: int = -1) -> None:
         """
         Compute action mask to prevent editing "given" cells and invalid tokens.
-        
+
+        If incremental masking is enabled (for Sudoku), only updates affected positions
+        after an edit. Otherwise, does full recomputation.
+
+        Args:
+            edit_position: Position of the edit (for incremental update). -1 means full recompute.
+            old_digit: Previous token at edit_position.
+            new_digit: New token at edit_position.
+
         If a TaskConfig is provided, it will be used to determine which cells
         are "given" (non-editable). Otherwise, falls back to Sudoku-style logic
         where cells with value > 1 are considered given.
-        
+
         Additionally, tokens 0 (PAD) and 1 (empty) are always masked out because
         setting a cell to empty is never useful for solving Sudoku.
-        
+
         Action space: [pos * vocab_size + tok for all pos, tok] + [STOP]
         Mask is True for valid actions, False for invalid.
         """
@@ -226,35 +300,74 @@ class PlanEditEnv:
             self._action_mask = None
             self._original_inputs = None
             return
-            
+
+        # Fast path: incremental update when constraint tracker is available
+        if (
+            self._use_incremental_masking
+            and self._constraint_tracker is not None
+            and edit_position >= 0
+            and self._action_mask is not None
+        ):
+            # Bounds check to prevent index out of range
+            num_positions = self._constraint_tracker.num_positions
+            if edit_position < num_positions:
+                # No-op check: if digit didn't change, skip update
+                if old_digit == new_digit:
+                    # No change to state, mask stays the same
+                    return
+                # Given cell check: if this position is given, edit was rejected
+                if (
+                    self._constraint_tracker._given_mask is not None
+                    and self._constraint_tracker._given_mask[edit_position]
+                ):
+                    # Edit was rejected (given cell), mask stays the same
+                    return
+                # Valid incremental update
+                self._constraint_tracker.update_and_patch(
+                    edit_position, old_digit, new_digit, self.vocab_size
+                )
+                # Get the updated mask from tracker
+                self._action_mask = self._constraint_tracker.get_mask(
+                    self.vocab_size, self.stop_action_id
+                )
+                # Handle UNDO mask bit
+                self._update_undo_mask()
+                return
+            # else: edit_position >= num_positions, fall through to full recompute
+
+        # Fall through to full recompute if incremental path didn't return
+
         # Get original inputs
         if isinstance(self.x, dict):
             inputs = self.x.get("inputs")
         else:
             inputs = self.x
-            
+
         if inputs is None:
             self._action_mask = None
             self._original_inputs = None
             return
-            
+
         if not torch.is_tensor(inputs):
             inputs = torch.as_tensor(inputs)
 
         self._original_inputs = inputs.clone()
 
-        # Get current state for constraint-aware masking
-        current_state = None
-        if hasattr(self, 'y') and self.y is not None:
-            if isinstance(self.y, dict):
-                current_state = self.y.get("inputs", self.y.get("labels"))
-            else:
-                current_state = self.y
-            if current_state is not None and not torch.is_tensor(current_state):
-                current_state = torch.as_tensor(current_state)
+        # Fast path: use constraint tracker for initial mask computation
+        if self._use_incremental_masking and self._constraint_tracker is not None:
+            # The tracker was initialized in reset, just get the mask
+            mask = self._constraint_tracker.get_mask(self.vocab_size, self.stop_action_id)
+        elif self.task_config is not None:
+            # Get current state for constraint-aware masking
+            current_state = None
+            if hasattr(self, 'y') and self.y is not None:
+                if isinstance(self.y, dict):
+                    current_state = self.y.get("inputs", self.y.get("labels"))
+                else:
+                    current_state = self.y
+                if current_state is not None and not torch.is_tensor(current_state):
+                    current_state = torch.as_tensor(current_state)
 
-        # Use TaskConfig if available, otherwise fall back to default behavior
-        if self.task_config is not None:
             mask = self.task_config.compute_action_mask(
                 inputs, self.vocab_size, self.stop_action_id,
                 current_state=current_state
@@ -310,7 +423,38 @@ class PlanEditEnv:
             mask[self.undo_action_id] = can_undo
 
         self._action_mask = mask
-    
+
+    def _update_undo_mask(self) -> None:
+        """
+        Update the UNDO action mask bit based on current edit history.
+
+        Called after incremental mask updates to ensure UNDO validity is correct.
+        """
+        if self._action_mask is None:
+            return
+
+        # Handle STOP action based on mode
+        if self._stop_mode == "disabled":
+            self._action_mask[self.stop_action_id] = False
+        else:
+            self._action_mask[self.stop_action_id] = True
+
+        # Handle UNDO action if enabled
+        if self._enable_undo and self.undo_action_id is not None:
+            # Expand mask to include UNDO action if needed
+            if len(self._action_mask) <= self.undo_action_id:
+                new_mask = torch.ones(
+                    self.undo_action_id + 1,
+                    dtype=torch.bool,
+                    device=self._action_mask.device
+                )
+                new_mask[:len(self._action_mask)] = self._action_mask
+                self._action_mask = new_mask
+
+            # UNDO is valid only when there's something to undo (history > 1)
+            can_undo = len(self._edit_history) > 1
+            self._action_mask[self.undo_action_id] = can_undo
+
     def get_action_mask(self) -> Optional[torch.Tensor]:
         """
         Return the current action mask. True = valid action, False = invalid.
@@ -634,6 +778,11 @@ class PlanEditEnv:
         terminated_by_solved = False
         is_undo_action = False
 
+        # Track edit info for incremental mask updates
+        edit_position = -1
+        old_digit = -1
+        new_digit = -1
+
         self.step_count += 1
 
         if action == self.stop_action_id:
@@ -658,9 +807,34 @@ class PlanEditEnv:
             self._stop_penalty = 0.0
             y_next = self.apply_edit(self.y, action, self.x)
             done = False
+            # For UNDO, we need full mask recompute since multiple cells may change
+            # Reinitialize the constraint tracker from the new state
+            edit_position = -1
+            if self._use_incremental_masking and self._constraint_tracker is not None:
+                # Get given mask
+                inputs = self.x.get("inputs") if isinstance(self.x, dict) else self.x
+                given_mask = None
+                if inputs is not None:
+                    inputs_flat = inputs.reshape(-1) if torch.is_tensor(inputs) else torch.as_tensor(inputs).reshape(-1)
+                    given_mask = inputs_flat > 1
+                # Reinitialize from new state
+                self._constraint_tracker.initialize(y_next, given_mask)
         else:
             # Non-stop, non-undo action: apply edit
             self._stop_penalty = 0.0
+
+            # Extract edit info for incremental updates BEFORE applying edit
+            vocab_size = self.vocab_size
+            if vocab_size is not None:
+                edit_position = action // vocab_size
+                new_digit = action % vocab_size
+
+                # Get old digit from current plan
+                if torch.is_tensor(self.y):
+                    y_flat = self.y.reshape(-1)
+                    if edit_position < y_flat.numel():
+                        old_digit = int(y_flat[edit_position].item())
+
             y_next = self.apply_edit(self.y, action, self.x)
             done = False
 
@@ -677,13 +851,20 @@ class PlanEditEnv:
         phi_new: Optional[float] = None
 
         if self.config.reward_shaping:
-            phi_old = float(self.checker(self.x, self.y))
+            # Use cached phi_old if available (avoids redundant checker call)
+            if self._cached_phi is not None:
+                phi_old = self._cached_phi
+            else:
+                phi_old = float(self.checker(self.x, self.y))
 
         needs_phi_new = (
             done or self.config.reward_shaping or self.config.solved_threshold is not None
         )
         if needs_phi_new:
             phi_new = float(self.checker(self.x, y_next))
+            # Cache for next step
+            if self.config.reward_shaping and not done:
+                self._cached_phi = phi_new
 
         solved = (
             self.config.solved_threshold is not None
@@ -754,8 +935,9 @@ class PlanEditEnv:
         self.done = done
 
         # Update action mask after state change for constraint-aware masking
+        # Pass edit info for incremental updates when available
         if not done:
-            self._compute_action_mask()
+            self._compute_action_mask(edit_position, old_digit, new_digit)
 
         return (self.x, self.y), r, done, info
 
