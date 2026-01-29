@@ -218,3 +218,29 @@ indices=tensor([746, 387, 101, 109, 146], device='cuda:0'))
 [DEBUG] train_step 50: episodes collected, starting value_update
 [DEBUG] train_step 50: value_update done, starting policy_update
 [DEBUG] train_step 50: policy_update done
+[step 00100] value_loss=127.202057 policy_loss=5.124197
+[step 00100] VALUE_DEBUG: target(mean=-1.60 std=11.33 min=-80.25 max=14.46) V(s)(mean=-0.72 std=0.38) reward(mean=-1.009 std=11.373) clip=100.0
+[DEBUG] train_step 100: starting episode collection
+[DEBUG] train_step 100: episodes collected, starting value_update
+[DEBUG] train_step 100: value_update done, starting policy_update
+[DEBUG] train_step 100: policy_update done
+[DEBUG] train_step 150: starting episode collection
+[DEBUG] train_step 150: episodes collected, starting value_update
+[DEBUG] train_step 150: value_update done, starting policy_update
+[DEBUG] train_step 150: policy_update done
+[step 00200] value_loss=39.037487 policy_loss=3.007123
+[step 00200] VALUE_DEBUG: target(mean=-2.22 std=6.14 min=-16.78 max=18.36) V(s)(mean=-2.67 std=1.26) reward(mean=-0.667 std=6.144) clip=100.0
+[DEBUG] train_step 200: starting episode collection
+[DEBUG] train_step 200: episodes collected, starting value_update
+[DEBUG] train_step 200: value_update done, starting policy_update
+[DEBUG] train_step 200: policy_update done
+[DEBUG] train_step 250: starting episode collection
+[DEBUG] train_step 250: episodes collected, starting value_update
+[DEBUG] train_step 250: value_update done, starting policy_update
+[DEBUG] train_step 250: policy_update done
+[step 00300] value_loss=114.494728 policy_loss=2.856649
+[step 00300] VALUE_DEBUG: target(mean=-3.05 std=10.74 min=-80.16 max=18.18) V(s)(mean=-3.17 std=1.32) reward(mean=-1.058 std=10.941) clip=100.0
+[DEBUG] train_step 300: starting episode collection
+[DEBUG] train_step 300: episodes collected, starting value_update
+[DEBUG] train_step 300: value_update done, starting policy_update
+[DEBUG] train_step 300: policy_update done
