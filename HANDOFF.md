@@ -2,11 +2,72 @@
 
 **Date:** 2026-01-28
 **Branch:** `feature/upi-trm-clean`
-**Latest Commit:** See git log for current state
+**Latest Commit:** `7891bf8` - Vectorize 9x9 Sudoku checker functions for ~8.5x speedup
 
 ---
 
-## Current Work: Constraint-Aware Action Masking (2026-01-28)
+## Current Work: 9x9 Performance Optimization (2026-01-28)
+
+### Status: COMPLETE ✅
+
+Optimized 9x9 Sudoku training from ~15s/step (hanging) to **1.2s/step** (~12.5x speedup).
+
+### Performance Results
+
+| Stage | Time/Step | Improvement |
+|-------|-----------|-------------|
+| Before optimizations | ~15s (hanging) | - |
+| After phi caching | 10.2s | 1.5x |
+| After vectorized checkers | **1.2s** | **8.5x** |
+
+**Total improvement: ~12.5x faster**
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `rl/task_config.py` | Added `SudokuConstraintTracker` class for incremental constraint tracking |
+| `rl/envs/plan_edit_env.py` | Incremental mask updates, phi caching (phi_new@t = phi_old@t+1) |
+| `rl/sudoku_utils.py` | Vectorized `count_sudoku_violations_9x9` and `sudoku_zero_candidate_cells` |
+| `tests/test_sudoku_checkers.py` | Added 10 new tests for vectorized 9x9 functions |
+
+### Commits (Pushed)
+
+```
+7891bf8 Vectorize 9x9 Sudoku checker functions for ~8.5x speedup
+ad70d88 Optimize 9x9 Sudoku training with incremental masking and phi caching
+1b83f29 Remove temporary test file for vectorized masking
+```
+
+### Tests Passed
+
+- `test_sudoku_checkers`: **33 tests passed** (including 10 new vectorized tests)
+- `test_constraint_aware_masking`: **14 tests passed**
+
+### Key Optimizations
+
+1. **Incremental Constraint Tracking** (`SudokuConstraintTracker`):
+   - Maintains per-row/col/box digit COUNTS (not bitmasks) for O(1) updates
+   - Handles duplicates correctly (count 2→1 keeps digit blocked)
+   - Only recomputes affected positions on each edit
+
+2. **Phi Caching**:
+   - `phi_new` at step t equals `phi_old` at step t+1
+   - Eliminates 50% of checker calls during rollouts
+
+3. **Vectorized Checker Functions**:
+   - `count_sudoku_violations_9x9`: One-hot encoding + tensor sum/clamp (replaces 27 loops)
+   - `sudoku_zero_candidate_cells`: Parallel row/col/box blocked masks (replaces 81 loops)
+
+### Remaining Optimization Opportunities
+
+- Parallelized rollouts (multiple environments)
+- TRM forward pass optimizations
+- GPU-side action masking
+
+---
+
+## Previous Work: Constraint-Aware Action Masking (2026-01-28)
 
 ### Status: RUNNING
 
@@ -472,10 +533,12 @@ done
 
 | Date | Description |
 |------|-------------|
+| 2026-01-28 | 9x9 performance optimization: vectorized checkers, phi caching, incremental masking (1.2s/step) |
+| 2026-01-28 | Constraint-aware action masking for 9x9 Sudoku |
 | 2026-01-20 | Table 3 baseline experiments, paper figure regeneration, hard dataset experiments |
 | 2026-01-19 | Phase 4 2×2 Norm Ablation, Exp5 tradeoff curve |
 | 2026-01-18 | Exp3-4 projection ablation experiments |
 
 ---
 
-*Generated: 2026-01-20*
+*Generated: 2026-01-28*
