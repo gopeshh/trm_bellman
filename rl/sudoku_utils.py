@@ -85,7 +85,7 @@ def count_sudoku_violations_4x4(grid: torch.Tensor) -> int:
 
 def count_sudoku_violations_9x9(grid: torch.Tensor) -> int:
     """
-    Count constraint violations in a 9x9 Sudoku grid.
+    Count constraint violations in a 9x9 Sudoku grid (vectorized).
 
     A 9x9 Sudoku has:
     - 9 rows (each should have unique digits 1-9)
@@ -101,31 +101,33 @@ def count_sudoku_violations_9x9(grid: torch.Tensor) -> int:
         Total number of constraint violations (0 = no violations)
     """
     grid = grid.reshape(9, 9)
-    violations = 0
-
     digits = _grid_to_digits(grid, 9)
 
-    # Check rows
-    for r in range(9):
-        row = digits[r, :]
-        filled = row[row > 0]
-        if len(filled) > 0:
-            violations += len(filled) - len(torch.unique(filled))
+    # Create one-hot encoding for digits 1-9 (ignore 0 = empty)
+    # Shape: [9, 9, 9] where last dim is one-hot for digits 1-9
+    digits_flat = digits.reshape(-1)  # [81]
+    one_hot = torch.zeros(81, 9, dtype=torch.int32, device=digits.device)
+    filled_mask = digits_flat > 0
+    one_hot[filled_mask, digits_flat[filled_mask].long() - 1] = 1
+    one_hot = one_hot.reshape(9, 9, 9)  # [row, col, digit]
 
-    # Check columns
-    for c in range(9):
-        col = digits[:, c]
-        filled = col[col > 0]
-        if len(filled) > 0:
-            violations += len(filled) - len(torch.unique(filled))
+    violations = 0
 
-    # Check 3x3 boxes
-    for box_r in range(3):
-        for box_c in range(3):
-            box = digits[box_r*3:(box_r+1)*3, box_c*3:(box_c+1)*3].reshape(-1)
-            filled = box[box > 0]
-            if len(filled) > 0:
-                violations += len(filled) - len(torch.unique(filled))
+    # Row violations: sum across columns for each row
+    # Shape: [9, 9] -> counts per (row, digit)
+    row_counts = one_hot.sum(dim=1)  # [9, 9]
+    violations += int((row_counts - 1).clamp(min=0).sum().item())
+
+    # Column violations: sum across rows for each column
+    col_counts = one_hot.sum(dim=0)  # [9, 9]
+    violations += int((col_counts - 1).clamp(min=0).sum().item())
+
+    # Box violations: reshape to access 3x3 boxes
+    # Reshape to [3, 3, 3, 3, 9] = [box_row, inner_row, box_col, inner_col, digit]
+    box_view = one_hot.reshape(3, 3, 3, 3, 9)
+    # Sum across inner_row and inner_col (dims 1 and 3)
+    box_counts = box_view.sum(dim=(1, 3))  # [3, 3, 9]
+    violations += int((box_counts - 1).clamp(min=0).sum().item())
 
     return violations
 
@@ -251,18 +253,60 @@ def sudoku_zero_candidate_cells(grid: torch.Tensor, grid_size: int = 4) -> int:
         return zero_cand_count
 
     elif grid_size == 9:
+        # Vectorized implementation for 9x9
         grid = grid.reshape(9, 9)
         digits = _grid_to_digits(grid, 9)
-        zero_cand_count = 0
+        device = digits.device
 
-        for r in range(9):
-            for c in range(9):
-                if digits[r, c] == 0:  # Empty cell
-                    candidates = _get_candidates_9x9(digits, r, c)
-                    if len(candidates) == 0:
-                        zero_cand_count += 1
+        # Build one-hot presence masks for digits 1-9
+        # Shape: [9, 9, 9] where [r, c, d] = 1 if digit d+1 is at (r, c)
+        digits_flat = digits.reshape(-1)  # [81]
+        one_hot = torch.zeros(81, 9, dtype=torch.bool, device=device)
+        filled_mask = digits_flat > 0
+        one_hot[filled_mask, digits_flat[filled_mask].long() - 1] = True
+        one_hot = one_hot.reshape(9, 9, 9)  # [row, col, digit]
 
-        return zero_cand_count
+        # Row blocked: for each row, which digits are present?
+        # Shape: [9, 9] -> [row, digit]
+        row_blocked = one_hot.any(dim=1)  # [9, 9]
+
+        # Column blocked: for each column, which digits are present?
+        # Shape: [9, 9] -> [col, digit]
+        col_blocked = one_hot.any(dim=0)  # [9, 9]
+
+        # Box blocked: for each box, which digits are present?
+        # Reshape to [3, 3, 3, 3, 9] = [box_row, inner_row, box_col, inner_col, digit]
+        box_view = one_hot.reshape(3, 3, 3, 3, 9)
+        # Any across inner dims -> [3, 3, 9] = [box_row, box_col, digit]
+        box_blocked = box_view.any(dim=(1, 3))  # [3, 3, 9]
+
+        # For each cell, compute which digits are blocked (union of row, col, box)
+        # We need to expand these to [9, 9, 9] = [row, col, digit]
+        # row_blocked[r, d] -> expand to [r, :, d]
+        row_expand = row_blocked.unsqueeze(1).expand(9, 9, 9)  # [9, 9, 9]
+        # col_blocked[c, d] -> expand to [:, c, d]
+        col_expand = col_blocked.unsqueeze(0).expand(9, 9, 9)  # [9, 9, 9]
+
+        # box_blocked[br, bc, d] needs to map to cells in that box
+        # Cell (r, c) is in box (r//3, c//3)
+        # Create box index tensors
+        box_row_idx = torch.arange(9, device=device) // 3  # [0,0,0,1,1,1,2,2,2]
+        box_col_idx = torch.arange(9, device=device) // 3
+        # For each cell position, lookup its box's blocked digits
+        # box_expand[r, c, d] = box_blocked[r//3, c//3, d]
+        box_expand = box_blocked[box_row_idx][:, box_col_idx]  # [9, 9, 9]
+
+        # Union of all blocked digits per cell
+        all_blocked = row_expand | col_expand | box_expand  # [9, 9, 9]
+
+        # A cell has zero candidates if:
+        # 1. It's empty (digits[r, c] == 0)
+        # 2. All 9 digits are blocked
+        all_digits_blocked = all_blocked.all(dim=2)  # [9, 9]
+        empty_cells = (digits == 0)  # [9, 9]
+        zero_cand_cells = empty_cells & all_digits_blocked
+
+        return int(zero_cand_cells.sum().item())
 
     else:
         raise ValueError(f"Unsupported grid size: {grid_size}. Use 4 or 9.")

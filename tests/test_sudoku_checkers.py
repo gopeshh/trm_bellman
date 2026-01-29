@@ -347,6 +347,140 @@ class TestFeasibilityChecker(unittest.TestCase):
         self.assertLess(score_after, score_before)
 
 
+class TestVectorized9x9Violations(unittest.TestCase):
+    """Tests for vectorized 9x9 violation counting."""
+
+    def test_empty_grid_no_violations(self):
+        """Empty 9x9 grid should have 0 violations."""
+        y = torch.ones(81, dtype=torch.long)  # All empty tokens
+        violations = count_sudoku_violations_9x9(y)
+        self.assertEqual(violations, 0)
+
+    def test_solved_grid_no_violations(self):
+        """Valid solved 9x9 grid should have 0 violations."""
+        # A valid 9x9 Sudoku solution in token space (token = digit + 1)
+        # Standard Sudoku solution:
+        solution = [
+            5, 3, 4, 6, 7, 8, 9, 1, 2,
+            6, 7, 2, 1, 9, 5, 3, 4, 8,
+            1, 9, 8, 3, 4, 2, 5, 6, 7,
+            8, 5, 9, 7, 6, 1, 4, 2, 3,
+            4, 2, 6, 8, 5, 3, 7, 9, 1,
+            7, 1, 3, 9, 2, 4, 8, 5, 6,
+            9, 6, 1, 5, 3, 7, 2, 8, 4,
+            2, 8, 7, 4, 1, 9, 6, 3, 5,
+            3, 4, 5, 2, 8, 6, 1, 7, 9,
+        ]
+        # Convert to token space: token = digit + 1
+        y = torch.tensor([d + 1 for d in solution], dtype=torch.long)
+        violations = count_sudoku_violations_9x9(y)
+        self.assertEqual(violations, 0)
+
+    def test_row_duplicate_violation(self):
+        """Duplicate in row should be counted."""
+        y = torch.ones(81, dtype=torch.long)
+        # Put two 1s in row 0 (tokens 2, 2)
+        y[0] = 2  # (0,0) = digit 1
+        y[1] = 2  # (0,1) = digit 1 (duplicate)
+        violations = count_sudoku_violations_9x9(y)
+        # Row violation: 1, Box violation: 1 (both in box 0)
+        self.assertEqual(violations, 2)
+
+    def test_column_duplicate_violation(self):
+        """Duplicate in column should be counted."""
+        y = torch.ones(81, dtype=torch.long)
+        # Put two 1s in column 0, different boxes
+        y[0] = 2   # (0,0) = digit 1
+        y[27] = 2  # (3,0) = digit 1 (same column, different box)
+        violations = count_sudoku_violations_9x9(y)
+        # Column violation: 1
+        self.assertEqual(violations, 1)
+
+    def test_box_duplicate_violation(self):
+        """Duplicate in box (not row/col) should be counted."""
+        y = torch.ones(81, dtype=torch.long)
+        # Put two 1s in box 0, different rows and columns
+        y[0] = 2   # (0,0) = digit 1
+        y[10] = 2  # (1,1) = digit 1 (same box, different row/col)
+        violations = count_sudoku_violations_9x9(y)
+        # Box violation only: 1
+        self.assertEqual(violations, 1)
+
+    def test_multiple_duplicates(self):
+        """Multiple duplicates should sum correctly."""
+        y = torch.ones(81, dtype=torch.long)
+        # Three 1s in row 0 (positions 0, 1, 2) - all in box 0 too
+        y[0] = 2
+        y[1] = 2
+        y[2] = 2
+        violations = count_sudoku_violations_9x9(y)
+        # Row 0: 3 cells with digit 1 -> 2 violations
+        # Box 0: 3 cells with digit 1 -> 2 violations
+        # Total: 4 violations
+        self.assertEqual(violations, 4)
+
+
+class TestVectorized9x9ZeroCandidates(unittest.TestCase):
+    """Tests for vectorized 9x9 zero-candidate detection."""
+
+    def test_empty_grid_no_zero_cand(self):
+        """Empty 9x9 grid should have no zero-candidate cells."""
+        y = torch.ones(81, dtype=torch.long)
+        zero_cand = sudoku_zero_candidate_cells(y, grid_size=9)
+        self.assertEqual(zero_cand, 0)
+
+    def test_solved_grid_no_zero_cand(self):
+        """Solved grid has no empty cells, so no zero-candidate cells."""
+        solution = [
+            5, 3, 4, 6, 7, 8, 9, 1, 2,
+            6, 7, 2, 1, 9, 5, 3, 4, 8,
+            1, 9, 8, 3, 4, 2, 5, 6, 7,
+            8, 5, 9, 7, 6, 1, 4, 2, 3,
+            4, 2, 6, 8, 5, 3, 7, 9, 1,
+            7, 1, 3, 9, 2, 4, 8, 5, 6,
+            9, 6, 1, 5, 3, 7, 2, 8, 4,
+            2, 8, 7, 4, 1, 9, 6, 3, 5,
+            3, 4, 5, 2, 8, 6, 1, 7, 9,
+        ]
+        y = torch.tensor([d + 1 for d in solution], dtype=torch.long)
+        zero_cand = sudoku_zero_candidate_cells(y, grid_size=9)
+        self.assertEqual(zero_cand, 0)
+
+    def test_impossible_state_has_zero_cand(self):
+        """An impossible 9x9 state should have zero-candidate cells."""
+        # Create a state where cell (0,8) has all 9 digits blocked
+        # Fill row 0 with digits 1-8 (leaving position 8 empty)
+        # Then put digit 9 somewhere that blocks (0,8)
+        y = torch.ones(81, dtype=torch.long)
+
+        # Row 0, positions 0-7: digits 1-8 (tokens 2-9)
+        for i in range(8):
+            y[i] = i + 2  # digit 1-8
+
+        # Position 8 (0,8) is empty - needs digit 9
+        # But let's put digit 9 in column 8 or box 2 to block it
+        # Box 2 = top-right 3x3 = positions (0,6), (0,7), (0,8), (1,6)...
+        # Column 8 = positions 8, 17, 26, 35, ...
+        y[17] = 10  # (1,8) = digit 9
+
+        # Now cell (0,8) is blocked:
+        # Row 0 has 1-8, column 8 has 9, so all digits 1-9 are blocked
+        zero_cand = sudoku_zero_candidate_cells(y, grid_size=9)
+        self.assertGreater(zero_cand, 0, "Expected at least one zero-candidate cell")
+
+    def test_partial_grid_with_candidates(self):
+        """Partial grid where empty cells still have candidates."""
+        y = torch.ones(81, dtype=torch.long)
+        # Fill first row partially
+        y[0] = 2  # digit 1
+        y[1] = 3  # digit 2
+        y[2] = 4  # digit 3
+
+        # All other empty cells should still have candidates
+        zero_cand = sudoku_zero_candidate_cells(y, grid_size=9)
+        self.assertEqual(zero_cand, 0)
+
+
 if __name__ == '__main__':
     unittest.main()
 
