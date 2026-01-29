@@ -532,7 +532,18 @@ class UPITrmTrainer:
                 _t1 = time.perf_counter()
                 _time_prep += _t1 - _t0
 
-            dist, z_new = self._mixed_policy_dist(batch_x, batch_y, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask, z=z)
+            # Data collection should not build autograd graphs.
+            # This avoids massive graph growth and potential stalls when mixing two policy forwards.
+            if self._next_episode_id < 5 and (t < 5 or t % 20 == 0):
+                print(f"[DEBUG] Episode {self._next_episode_id}, Step {t}: calling _mixed_policy_dist", flush=True)
+            with torch.no_grad():
+                dist, z_new = self._mixed_policy_dist(
+                    batch_x,
+                    batch_y,
+                    n=self.rl_cfg.inner_unroll_n,
+                    action_mask=action_mask,
+                    z=z,
+                )
 
             if _profile_enabled:
                 _t2 = time.perf_counter()
@@ -562,6 +573,10 @@ class UPITrmTrainer:
                 _t3 = time.perf_counter()
 
             (x_next, y_next), reward, done, info = self.env.step(action.item())
+
+            # Debug: track each step for first few episodes
+            if self._next_episode_id < 5 and (t < 5 or t % 20 == 0):
+                print(f"[DEBUG] Episode {self._next_episode_id}, Step {t} complete: action={action.item()}, reward={reward:.4f}, done={done}", flush=True)
 
             if _profile_enabled:
                 _t4 = time.perf_counter()
@@ -606,6 +621,11 @@ class UPITrmTrainer:
 
             x, y = x_next, y_next
             t += 1
+
+        # Debug: confirm episode completion
+        if self._next_episode_id < 5:
+            reason = last_info.get("done_reason", "unknown") if last_info else "unknown"
+            print(f"[DEBUG] Episode {self._next_episode_id} finished: {t} steps, done={done}, reason={reason}", flush=True)
 
         # Print profiling summary for first few episodes
         if _profile_enabled and self._next_episode_id < 3:
@@ -1282,11 +1302,26 @@ class UPITrmTrainer:
         # during _mixed_policy_dist(), which is required for proper CPI mixture semantics.
         self._sync_candidate_backbone_from_model()
 
+        # Debug: track train_step phases periodically
+        _should_log = self._train_step_count < 5 or self._train_step_count % 50 == 0
+        if _should_log:
+            print(f"[DEBUG] train_step {self._train_step_count}: starting episode collection", flush=True)
+
         for _ in range(self.rl_cfg.rollout_episodes_per_step):
             self.collect_episode()
 
+        if _should_log:
+            print(f"[DEBUG] train_step {self._train_step_count}: episodes collected, starting value_update", flush=True)
+
         value_result = self.value_update()
+
+        if _should_log:
+            print(f"[DEBUG] train_step {self._train_step_count}: value_update done, starting policy_update", flush=True)
+
         policy_result = self.policy_update()
+
+        if _should_log:
+            print(f"[DEBUG] train_step {self._train_step_count}: policy_update done", flush=True)
         
         # Extract loss values from dicts
         loss_val = value_result.get("loss_value", 0.0) if isinstance(value_result, dict) else value_result

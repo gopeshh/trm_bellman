@@ -1,0 +1,122 @@
+[2026-01-28T22:07:35.023-08:00] Starting new buck2 daemon...
+[2026-01-28T22:07:35.573-08:00] Connected to new buck2 daemon.
+[2026-01-28T22:07:35.583-08:00] Buck UI: https://www.internalfb.com/buck2/81f74ca6-e32d-4655-8f3b-5411c1e79fd5
+[2026-01-28T22:07:37.279-08:00] File changed: fbcode//buiksat_trm
+[2026-01-28T22:07:37.279-08:00] File changed: fbcode//checkpoints/rl_dummy_seed0/model_step_10.pt
+[2026-01-28T22:07:37.279-08:00] File changed: fbcode//checkpoints/rl_dummy_seed0/model_step_100.pt
+[2026-01-28T22:07:37.279-08:00] 116 additional file change events
+[2026-01-28T22:07:37.279-08:00] File Watcher fresh instance: new mergebase, cleared graph state, cleared dep files
+[2026-01-28T22:07:44.377-08:00] Waiting on fbsource//third-party/pypi/cython/3.0.8:BUCK -- evaluating build file, and 91 other actions
+[2026-01-28T22:07:47.975-08:00] [2m2026-01-29T06:07:47.862277Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-28T22:07:47.975-08:00] [2m2026-01-29T06:07:47.862343Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.25.1' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.25 instead
+[2026-01-28T22:07:47.975-08:00] [2m2026-01-29T06:07:47.862369Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-28T22:07:47.975-08:00] [2m2026-01-29T06:07:47.862380Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-28T22:07:47.975-08:00] [2m2026-01-29T06:07:47.862391Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-28T22:07:54.981-08:00] Waiting on fbsource//third-party/rocm_composable_kernel:BUCK -- evaluating build file, and 192 other actions
+[2026-01-28T22:07:56.375-08:00] [2m2026-01-29T06:07:56.334281Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform platform010-aarch64-compat
+[2026-01-28T22:07:56.375-08:00] [2m2026-01-29T06:07:56.334313Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform platform010-compat
+[2026-01-28T22:07:56.375-08:00] [2m2026-01-29T06:07:56.334318Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform platform010-libcxx
+[2026-01-28T22:07:56.375-08:00] [2m2026-01-29T06:07:56.334322Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform antlir-distro
+[2026-01-28T22:08:03.473-08:00] Waiting on fbcode//configerator/structs/data_access_policies/if:BUCK -- evaluating build file, and 88 other actions
+[2026-01-28T22:08:10.474-08:00] Waiting on fbcode//configerator/structs/data_access_policies/if:BUCK -- evaluating build file, and 4 other actions
+[2026-01-28T22:08:17.574-08:00] Waiting on fbcode//configerator/structs/admarket/common:BUCK -- evaluating build file
+[2026-01-28T22:08:24.674-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- running analysis [evaluate_rule]
+[2026-01-28T22:08:26.240-08:00] RE Session: reSessionID-cca4db13-f2e1-48b8-98cb-246eff0b8a9a
+[2026-01-28T22:08:33.275-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `__link_groups__/libllvm.so`, and 5976 other actions
+[2026-01-28T22:08:40.374-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `__link_groups__/libllvm.so`, and 4788 other actions
+[2026-01-28T22:08:47.381-08:00] Waiting on fbcode//caffe2/torch/lib/libshm:torch_shm_manager (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_executable) [local_execute], and 4061 other actions
+[2026-01-28T22:08:54.477-08:00] Waiting on fbcode//fblearner/flow/quick_flow/internal/if:qf_app-py-deprecated-qf_app.thrift (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `out`, and 229 other actions
+[2026-01-28T22:09:01.573-08:00] Waiting on fbcode//core_infra_security/thrift_security_inspector/if:security_inspector-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/SecurityInspector.cpp (modular) (pic)) [re_upload], and 246 other actions
+[2026-01-28T22:09:08.573-08:00] Waiting on fbcode//core_systems/if/server:net-dvc-st-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/DeviceService.cpp (modular) (pic)) [re_upload], and 242 other actions
+[2026-01-28T22:09:15.575-08:00] Waiting on fbcode//configerator/structs/mobile_identity_services/feo2:feo2_service_config-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/FeO2Service.cpp (modular) (pic)) [re_execute], and 206 other actions
+[2026-01-28T22:09:22.674-08:00] Waiting on fbcode//zippydb/if:zippydb_service-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/RocksService.cpp (modular) (pic)) [re_execute], and 179 other actions
+[2026-01-28T22:09:29.773-08:00] Waiting on fbcode//zippydb/if:zippydb_service-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/RocksService.cpp (modular) (pic)) [re_execute], and 110 other actions
+[2026-01-28T22:09:36.773-08:00] Waiting on fbcode//zippydb/if:zippydb_service-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/RocksService.cpp (modular) (pic)) [re_execute], and 138 other actions
+[2026-01-28T22:09:43.875-08:00] Waiting on fbcode//zippydb/if:zippydb_service-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/RocksService.cpp (modular) (pic)) [re_execute], and 162 other actions
+[2026-01-28T22:09:50.973-08:00] Waiting on fbcode//devservers:service-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/DevserversService.cpp (modular) (pic)) [re_execute], and 812 other actions
+[2026-01-28T22:09:57.974-08:00] Waiting on fbcode//fbpkg/if:frontend_service-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/FrontendService.cpp (modular) (pic)) [re_execute], and 142 other actions
+[2026-01-28T22:10:05.073-08:00] Waiting on fbcode//fbpkg/if:frontend_service-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/FrontendService.cpp (modular) (pic)) [re_execute], and 98 other actions
+[2026-01-28T22:10:12.073-08:00] Waiting on fbcode//manifold/blobstore/if:blobstore-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/BlobStore.cpp (modular) (pic)) [re_execute], and 70 other actions
+[2026-01-28T22:10:19.074-08:00] Waiting on fbcode//manifold/blobstore/if:blobstore-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/BlobStore.cpp (modular) (pic)) [re_execute], and 59 other actions
+[2026-01-28T22:10:26.173-08:00] Waiting on fbcode//dsi/logger/configs/GeneratedDynamoCompileLoggerConfig:py3-logger-api (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (py_compile CHECKED_HASH) [re_queued(over_quota)], and 51 other actions
+[2026-01-28T22:10:33.174-08:00] Waiting on fbcode//stylus/xstream/query/serde:json_to_velox_serde (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile JsonToVeloxSerDe.cpp (modular) (pic)) [re_queued(over_quota)], and 33 other actions
+[2026-01-28T22:10:40.274-08:00] Waiting on fbcode//fbjava/datainfra-metastore/api/if:hive_metastore_internal-cpp2-services (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile gen-cpp2/HiveMetastore2.cpp (modular) (pic)) [re_execute], and 15 other actions
+[2026-01-28T22:10:47.373-08:00] Waiting on fbcode//scribe/api/producer/detail:producer_shared_data (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile ProducerSharedData.cpp (modular) (pic)) [local_execute], and 8 other actions
+[2026-01-28T22:10:54.374-08:00] Waiting on fbcode//scribe/api/producer/detail:producer_shared_data (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile ProducerSharedData.cpp (modular) (pic)) [local_execute], and 1 other actions
+[2026-01-28T22:11:01.473-08:00] Waiting on fbcode//scribe/api/producer/detail:producer_shared_data (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile ProducerSharedData.cpp (modular) (pic)) [local_execute]
+[2026-01-28T22:11:08.474-08:00] Waiting on fbcode//scribe/api/producer/detail:producer_shared_data (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile ProducerSharedData.cpp (modular) (pic)) [local_execute]
+[2026-01-28T22:11:15.574-08:00] Waiting on fbcode//scribe/api/producer/detail:producer_shared_data (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile ProducerSharedData.cpp (modular) (pic)) [local_execute]
+[2026-01-28T22:11:22.673-08:00] Waiting on fbcode//scribe/api/producer/detail:producer_shared_data (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile ProducerSharedData.cpp (modular) (pic)) [local_execute]
+[2026-01-28T22:11:29.774-08:00] Waiting on fbcode//scribe/api/producer/detail:producer_shared_data (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_compile ProducerSharedData.cpp (modular) (pic)) [local_execute]
+[2026-01-28T22:11:36.874-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `upi_trm_train`
+[2026-01-28T22:11:41.422-08:00] Cache hits: 99%
+[2026-01-28T22:11:41.422-08:00] Commands: 181767 (cached: 179778, remote: 1798, local: 191)
+[2026-01-28T22:11:41.422-08:00] Network: Up: 68MiB  Down: 2.7GiB  (reSessionID-cca4db13-f2e1-48b8-98cb-246eff0b8a9a)
+BUILD SUCCEEDED - starting your binary
+[DATASET] dataset_paths=['/home/buiksat/trm_bellman/data/sudoku-9x9']
+[DATASET] resolved_dataset_name=sudoku-9x9
+[DATASET] num_samples=64
+[INFO] Using feasibility-aware Sudoku checker for 9x9
+       score = filled - 2.0*violations - 5.0*zeroCand
+       Max score: 81 (all filled, no violations)
+[INFO] Training for 50000 steps (gamma=0.990, K=1, inner_unroll_n=2)
+[INFO] Terminal rewards: solve=1.000, fail=-81.000
+[INFO] Using TRM backbone (hidden=64, H=2, L=2)
+[DEBUG] Policy head STOP bias: 0.00 (should be 0.0 for uniform init)
+[INFO] Puzzle embeddings DISABLED (set --puzzle-emb-ndim > 0 to enable)
+============================================================
+TRAINER SELECTION
+============================================================
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU0 NVIDIA PG509-210 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+INFO:2026-01-28 22:11:50 3709299:3709299 CuptiCallbackApi.cpp:74] Callback: domain = 3, cbid = 1
+INFO:2026-01-28 22:11:50 3709299:3709299 CuptiActivityProfiler.cpp:245] CUDA versions. CUPTI: 22; Runtime: 12040; Driver: 12040
+INFO:2026-01-28 22:11:50 3709299:3760959 FBConfig.cpp:330] Perfetto builder enabled: 1
+INFO:2026-01-28 22:11:50 3709299:3760959 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+INFO:2026-01-28 22:11:50 3709299:3760959 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+TritonTraceHandler: disabled because /logs does not exist
+===========[FB_TRITON]=========== Triton Version: 3.3.2+fb
+[TRAINER] UPI-TRM (K=1, inner_n=2)
+[TRAINER] CLI --baseline: None, YAML algorithm: upi_trm
+============================================================
+
+============================================================
+UPI-TRM THEORY ALIGNMENT CHECK
+============================================================
+⚠ Configuration has theory gaps:
+  • enable_contraction=False disables spectral normalization (Assumption 4.2). L_z < 1 contraction not enforced.
+  • exact_baseline_summation=False: Using approximate baseline. This gives O(ε_A/(1-γ)) bound instead of O(α·ε_A) from Theorem 5.9. For discrete action spaces (Sudoku), enable for tighter bounds.
+  • theory_exact_mixture=False: Using parameter-space interpolation for CPI, which is NOT equivalent to policy-space mixture. The CPI improvement guarantee does not strictly apply. Set theory_exact_mixture=True for theory-exact behavior (but slower due to evaluating two networks).
+
+Theory status:
+  Forward-invariant projection: ✓
+  Contraction enforced (L_z < 1): ✗
+  Exact baseline (Thm 5.9): ✗
+  Distillation (not in theory): ✓ disabled
+
+Is theory-exact: False
+============================================================
+
+UPI-TRM theoretical dials:
+  L_z target (rl_cfg.target_Lz): 0.9
+  L_V target (rl_cfg.target_Lv): 1.0
+  Inner unroll n (rl_cfg.inner_unroll_n): 2
+  K-step horizon K (rl_cfg.K): 1
+  Mixture alpha (rl_cfg.mixture_alpha): 0.1
+  Latent ball radius (rl_cfg.latent_ball_radius): 10.0
+  Episodic latent: False
+  Exact K-step targets: False
+  Exact baseline summation: False
+
+[INFO] STOP action mode: disabled
+[INFO] Forward-invariant projection enabled (R=10.0)
+[WandB] Disabled by default (enable with: --wandb)
+[DEBUG] Action mask: 253 valid actions out of 892 total
+[DEBUG] Latent mode: persistent
+[DEBUG] Step 0 probs: STOP=0.000000, edits=1.000000
+[DEBUG] Top 5 action probs: torch.return_types.topk(
+values=tensor([0.0065, 0.0062, 0.0060, 0.0060, 0.0059], device='cuda:0',
+       grad_fn=<TopkBackward0>),
+indices=tensor([746, 387, 101, 109, 146], device='cuda:0'))

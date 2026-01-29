@@ -1,0 +1,220 @@
+[2026-01-28T22:48:32.450-08:00] Starting new buck2 daemon...
+[2026-01-28T22:48:32.793-08:00] Connected to new buck2 daemon.
+[2026-01-28T22:48:32.804-08:00] Buck UI: https://www.internalfb.com/buck2/a193e463-d137-464d-8847-436ca3970ad7
+[2026-01-28T22:48:34.393-08:00] File changed: fbcode//buiksat_trm
+[2026-01-28T22:48:34.394-08:00] File changed: fbcode//checkpoints/rl_dummy_seed0/model_step_10.pt
+[2026-01-28T22:48:34.394-08:00] File changed: fbcode//checkpoints/rl_dummy_seed0/model_step_100.pt
+[2026-01-28T22:48:34.394-08:00] 116 additional file change events
+[2026-01-28T22:48:34.394-08:00] File Watcher fresh instance: new mergebase, cleared graph state, cleared dep files
+[2026-01-28T22:48:41.397-08:00] Waiting on fbcode//triton -- loading package file tree, and 17 other actions
+[2026-01-28T22:48:45.395-08:00] [2m2026-01-29T06:48:45.268748Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-28T22:48:45.395-08:00] [2m2026-01-29T06:48:45.268780Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.25.1' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.25 instead
+[2026-01-28T22:48:45.395-08:00] [2m2026-01-29T06:48:45.268795Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-28T22:48:45.395-08:00] [2m2026-01-29T06:48:45.268801Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-28T22:48:45.395-08:00] [2m2026-01-29T06:48:45.268807Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m NCCL version '2.23.4' format is being deprecated for this NCCL version, please use MAJOR:MINOR format: 2.23 instead
+[2026-01-28T22:48:50.998-08:00] [2m2026-01-29T06:48:50.857922Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform platform010-aarch64-compat
+[2026-01-28T22:48:50.998-08:00] [2m2026-01-29T06:48:50.857953Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform platform010-compat
+[2026-01-28T22:48:50.998-08:00] [2m2026-01-29T06:48:50.857958Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform platform010-libcxx
+[2026-01-28T22:48:50.998-08:00] [2m2026-01-29T06:48:50.857963Z[0m [33m WARN[0m [2mbuck2_interpreter_for_build::interpreter::functions::warning[0m[2m:[0m ptxas 12.8 is not available on platform antlir-distro
+[2026-01-28T22:48:58.094-08:00] Waiting on fbsource//third-party/rocm_composable_kernel:BUCK -- evaluating build file, and 130 other actions
+[2026-01-28T22:49:05.195-08:00] Waiting on fbcode//configerator/structs/data_access_policies/if:BUCK -- evaluating build file, and 14 other actions
+[2026-01-28T22:49:12.295-08:00] Waiting on fbcode//configerator/structs/data_access_policies/if:BUCK -- evaluating build file, and 1 other actions
+[2026-01-28T22:49:19.394-08:00] Waiting on fbcode//datainfra/privacy/ppf/purpose_policy/rust:theory (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- running analysis [evaluate_rule]
+[2026-01-28T22:49:22.780-08:00] RE Session: reSessionID-b7a757e7-23d2-4c3d-bae2-56f2380d33fc
+[2026-01-28T22:49:29.812-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `__link_groups__/libllvm.so`, and 5923 other actions
+[2026-01-28T22:49:36.923-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- materializing `__link_groups__/libllvm.so`, and 1815 other actions
+[2026-01-28T22:49:43.963-08:00] Waiting on fbcode//caffe2/torch/lib/libshm:torch_shm_manager (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_executable), and 3364 other actions
+[2026-01-28T22:49:50.995-08:00] Waiting on fbcode//buiksat_trm:upi_trm_train (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#7bc20b5dff24e379) -- action (cxx_link_python_exe)
+[2026-01-28T22:49:58.095-08:00] Waiting on buck2 daemon a193e463-d137-464d-8847-436ca3970ad7...
+[2026-01-28T22:49:58.095-08:00] Network: Up: 6.1MiB           Down: 914MiB  82MiB/s  (reSessionID-b7a757e7-23d2-4c3d-bae2-56f2380d33fc)
+[2026-01-28T22:49:58.095-08:00] Resource usage: RSS: 18GiB CPU: 138%
+[2026-01-28T22:49:58.095-08:00] IO: none
+[2026-01-28T22:49:58.511-08:00] Cache hits: 99%
+[2026-01-28T22:49:58.511-08:00] Commands: 181767 (cached: 181684, remote: 0, local: 83)
+[2026-01-28T22:49:58.511-08:00] Network: Up: 6.1MiB  Down: 914MiB  (reSessionID-b7a757e7-23d2-4c3d-bae2-56f2380d33fc)
+BUILD SUCCEEDED - starting your binary
+[DATASET] dataset_paths=['/home/buiksat/trm_bellman/data/sudoku-9x9']
+[DATASET] resolved_dataset_name=sudoku-9x9
+[DATASET] num_samples=64
+[INFO] Using feasibility-aware Sudoku checker for 9x9
+       score = filled - 2.0*violations - 5.0*zeroCand
+       Max score: 81 (all filled, no violations)
+[INFO] Training for 50000 steps (gamma=0.990, K=1, inner_unroll_n=2)
+[INFO] Terminal rewards: solve=1.000, fail=-81.000
+[INFO] Using TRM backbone (hidden=64, H=2, L=2)
+[DEBUG] Policy head STOP bias: 0.00 (should be 0.0 for uniform init)
+[INFO] Puzzle embeddings DISABLED (set --puzzle-emb-ndim > 0 to enable)
+============================================================
+TRAINER SELECTION
+============================================================
+/data/repos/fbsource/buck-out/v2/gen/fbcode/7bc20b5dff24e379/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/torch/cuda/__init__.py:373: UserWarning: Found GPU0 NVIDIA PG509-210 which is of compute capability (CC) 8.0.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+Please follow the instructions at https://pytorch.org/get-started/locally/ to install a PyTorch release that supports one of these CUDA versions: 12.6, 12.8, 13.0
+  _warn_unsupported_code(d, device_cc, code_ccs)
+INFO:2026-01-28 22:50:06 4078732:4078732 CuptiCallbackApi.cpp:74] Callback: domain = 3, cbid = 1
+INFO:2026-01-28 22:50:06 4078732:4078732 CuptiActivityProfiler.cpp:245] CUDA versions. CUPTI: 22; Runtime: 12040; Driver: 12040
+INFO:2026-01-28 22:50:06 4078732:4095293 FBConfig.cpp:330] Perfetto builder enabled: 1
+INFO:2026-01-28 22:50:06 4078732:4095293 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+INFO:2026-01-28 22:50:06 4078732:4095293 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+TritonTraceHandler: disabled because /logs does not exist
+===========[FB_TRITON]=========== Triton Version: 3.3.2+fb
+[TRAINER] UPI-TRM (K=1, inner_n=2)
+[TRAINER] CLI --baseline: None, YAML algorithm: upi_trm
+============================================================
+
+============================================================
+UPI-TRM THEORY ALIGNMENT CHECK
+============================================================
+⚠ Configuration has theory gaps:
+  • enable_contraction=False disables spectral normalization (Assumption 4.2). L_z < 1 contraction not enforced.
+  • exact_baseline_summation=False: Using approximate baseline. This gives O(ε_A/(1-γ)) bound instead of O(α·ε_A) from Theorem 5.9. For discrete action spaces (Sudoku), enable for tighter bounds.
+  • theory_exact_mixture=False: Using parameter-space interpolation for CPI, which is NOT equivalent to policy-space mixture. The CPI improvement guarantee does not strictly apply. Set theory_exact_mixture=True for theory-exact behavior (but slower due to evaluating two networks).
+
+Theory status:
+  Forward-invariant projection: ✓
+  Contraction enforced (L_z < 1): ✗
+  Exact baseline (Thm 5.9): ✗
+  Distillation (not in theory): ✓ disabled
+
+Is theory-exact: False
+============================================================
+
+UPI-TRM theoretical dials:
+  L_z target (rl_cfg.target_Lz): 0.9
+  L_V target (rl_cfg.target_Lv): 1.0
+  Inner unroll n (rl_cfg.inner_unroll_n): 2
+  K-step horizon K (rl_cfg.K): 1
+  Mixture alpha (rl_cfg.mixture_alpha): 0.1
+  Latent ball radius (rl_cfg.latent_ball_radius): 10.0
+  Episodic latent: False
+  Exact K-step targets: False
+  Exact baseline summation: False
+
+[INFO] STOP action mode: disabled
+[INFO] Forward-invariant projection enabled (R=10.0)
+[WandB] Disabled by default (enable with: --wandb)
+[DEBUG] train_step 0: starting episode collection
+[DEBUG] Action mask: 253 valid actions out of 892 total
+[DEBUG] Latent mode: persistent
+[DEBUG] Episode 0, Step 0: calling _mixed_policy_dist
+[DEBUG] Step 0 probs: STOP=0.000000, edits=1.000000
+[DEBUG] Top 5 action probs: torch.return_types.topk(
+values=tensor([0.0065, 0.0062, 0.0060, 0.0060, 0.0059], device='cuda:0'),
+indices=tensor([746, 387, 101, 109, 146], device='cuda:0'))
+[DEBUG] Episode 0, Step 0 complete: action=146, reward=0.7500, done=False
+[DEBUG] Episode 0, Step 1: calling _mixed_policy_dist
+[DEBUG] Episode 0, Step 1 complete: action=695, reward=0.7400, done=False
+[DEBUG] Episode 0, Step 2: calling _mixed_policy_dist
+[DEBUG] Episode 0, Step 2 complete: action=701, reward=-0.2600, done=False
+[DEBUG] Episode 0, Step 3: calling _mixed_policy_dist
+[DEBUG] Episode 0, Step 3 complete: action=681, reward=0.7300, done=False
+[DEBUG] Episode 0, Step 4: calling _mixed_policy_dist
+[DEBUG] Episode 0, Step 4 complete: action=736, reward=0.7200, done=False
+[DEBUG] Episode 0, Step 20: calling _mixed_policy_dist
+[DEBUG] Episode 0, Step 20 complete: action=600, reward=-0.2800, done=False
+[DEBUG] Episode 0, Step 40: calling _mixed_policy_dist
+[DEBUG] Episode 0, Step 40 complete: action=889, reward=-4.0000, done=False
+[DEBUG] Episode 0, Step 60: calling _mixed_policy_dist
+[DEBUG] Episode 0, Step 60 complete: action=402, reward=-3.9700, done=False
+[DEBUG] Episode 0, Step 80: calling _mixed_policy_dist
+[DEBUG] Episode 0, Step 80 complete: action=765, reward=-80.0700, done=True
+[DEBUG] Episode 0 finished: 81 steps, done=True, reason=budget
+[DEBUG] Episode 1, Step 0: calling _mixed_policy_dist
+[DEBUG] Episode 1, Step 0 complete: action=542, reward=0.6900, done=False
+[DEBUG] Episode 1, Step 1: calling _mixed_policy_dist
+[DEBUG] Episode 1, Step 1 complete: action=260, reward=0.6800, done=False
+[DEBUG] Episode 1, Step 2: calling _mixed_policy_dist
+[DEBUG] Episode 1, Step 2 complete: action=370, reward=0.6700, done=False
+[DEBUG] Episode 1, Step 3: calling _mixed_policy_dist
+[DEBUG] Episode 1, Step 3 complete: action=555, reward=0.6600, done=False
+[DEBUG] Episode 1, Step 4: calling _mixed_policy_dist
+[DEBUG] Episode 1, Step 4 complete: action=790, reward=-4.3000, done=False
+[DEBUG] Episode 1, Step 20: calling _mixed_policy_dist
+[DEBUG] Episode 1, Step 20 complete: action=435, reward=4.5900, done=False
+[DEBUG] Episode 1, Step 40: calling _mixed_policy_dist
+[DEBUG] Episode 1, Step 40 complete: action=152, reward=1.0200, done=False
+[DEBUG] Episode 1, Step 60: calling _mixed_policy_dist
+[DEBUG] Episode 1, Step 60 complete: action=482, reward=0.0400, done=False
+[DEBUG] Episode 1, Step 80: calling _mixed_policy_dist
+[DEBUG] Episode 1, Step 80 complete: action=546, reward=-81.0900, done=True
+[DEBUG] Episode 1 finished: 81 steps, done=True, reason=budget
+[DEBUG] Episode 2, Step 0: calling _mixed_policy_dist
+[DEBUG] Episode 2, Step 0 complete: action=127, reward=0.6800, done=False
+[DEBUG] Episode 2, Step 1: calling _mixed_policy_dist
+[DEBUG] Episode 2, Step 1 complete: action=784, reward=0.6700, done=False
+[DEBUG] Episode 2, Step 2: calling _mixed_policy_dist
+[DEBUG] Episode 2, Step 2 complete: action=780, reward=0.6600, done=False
+[DEBUG] Episode 2, Step 3: calling _mixed_policy_dist
+[DEBUG] Episode 2, Step 3 complete: action=101, reward=-4.3000, done=False
+[DEBUG] Episode 2, Step 4: calling _mixed_policy_dist
+[DEBUG] Episode 2, Step 4 complete: action=267, reward=0.6900, done=False
+[DEBUG] Episode 2, Step 20: calling _mixed_policy_dist
+[DEBUG] Episode 2, Step 20 complete: action=710, reward=-4.1700, done=False
+[DEBUG] Episode 2, Step 40: calling _mixed_policy_dist
+[DEBUG] Episode 2, Step 40 complete: action=656, reward=-8.9600, done=False
+[DEBUG] Episode 2, Step 60: calling _mixed_policy_dist
+[DEBUG] Episode 2, Step 60 complete: action=170, reward=-5.0400, done=False
+[DEBUG] Episode 2, Step 80: calling _mixed_policy_dist
+[DEBUG] Episode 2, Step 80 complete: action=272, reward=-81.1300, done=True
+[DEBUG] Episode 2 finished: 81 steps, done=True, reason=budget
+[DEBUG] Episode 3, Step 0: calling _mixed_policy_dist
+[DEBUG] Episode 3, Step 0 complete: action=460, reward=0.6900, done=False
+[DEBUG] Episode 3, Step 1: calling _mixed_policy_dist
+[DEBUG] Episode 3, Step 1 complete: action=371, reward=0.6800, done=False
+[DEBUG] Episode 3, Step 2: calling _mixed_policy_dist
+[DEBUG] Episode 3, Step 2 complete: action=453, reward=-0.3200, done=False
+[DEBUG] Episode 3, Step 3: calling _mixed_policy_dist
+[DEBUG] Episode 3, Step 3 complete: action=609, reward=0.6700, done=False
+[DEBUG] Episode 3, Step 4: calling _mixed_policy_dist
+[DEBUG] Episode 3, Step 4 complete: action=685, reward=0.6600, done=False
+[DEBUG] Episode 3, Step 20: calling _mixed_policy_dist
+[DEBUG] Episode 3, Step 20 complete: action=6, reward=-4.3400, done=False
+[DEBUG] Episode 3, Step 40: calling _mixed_policy_dist
+[DEBUG] Episode 3, Step 40 complete: action=546, reward=9.7500, done=False
+[DEBUG] Episode 3, Step 60: calling _mixed_policy_dist
+[DEBUG] Episode 3, Step 60 complete: action=724, reward=0.8200, done=False
+[DEBUG] Episode 3, Step 80: calling _mixed_policy_dist
+[DEBUG] Episode 3, Step 80 complete: action=445, reward=-76.3600, done=True
+[DEBUG] Episode 3 finished: 81 steps, done=True, reason=budget
+[DEBUG] Episode 4, Step 0: calling _mixed_policy_dist
+[DEBUG] Episode 4, Step 0 complete: action=834, reward=0.7100, done=False
+[DEBUG] Episode 4, Step 1: calling _mixed_policy_dist
+[DEBUG] Episode 4, Step 1 complete: action=861, reward=0.7000, done=False
+[DEBUG] Episode 4, Step 2: calling _mixed_policy_dist
+[DEBUG] Episode 4, Step 2 complete: action=621, reward=0.6900, done=False
+[DEBUG] Episode 4, Step 3: calling _mixed_policy_dist
+[DEBUG] Episode 4, Step 3 complete: action=60, reward=0.6800, done=False
+[DEBUG] Episode 4, Step 4: calling _mixed_policy_dist
+[DEBUG] Episode 4, Step 4 complete: action=615, reward=0.6700, done=False
+[DEBUG] Episode 4, Step 20: calling _mixed_policy_dist
+[DEBUG] Episode 4, Step 20 complete: action=315, reward=0.6700, done=False
+[DEBUG] Episode 4, Step 40: calling _mixed_policy_dist
+[DEBUG] Episode 4, Step 40 complete: action=194, reward=0.9900, done=False
+[DEBUG] Episode 4, Step 60: calling _mixed_policy_dist
+[DEBUG] Episode 4, Step 60 complete: action=325, reward=-0.1200, done=False
+[DEBUG] Episode 4, Step 80: calling _mixed_policy_dist
+[DEBUG] Episode 4, Step 80 complete: action=47, reward=-81.3200, done=True
+[DEBUG] Episode 4 finished: 81 steps, done=True, reason=budget
+[DEBUG] train_step 0: episodes collected, starting value_update
+[DEBUG] train_step 0: value_update done, starting policy_update
+[DEBUG] train_step 0: policy_update done
+[DEBUG] train_step 1: starting episode collection
+[DEBUG] train_step 1: episodes collected, starting value_update
+[DEBUG] train_step 1: value_update done, starting policy_update
+[DEBUG] train_step 1: policy_update done
+[DEBUG] train_step 2: starting episode collection
+[DEBUG] train_step 2: episodes collected, starting value_update
+[DEBUG] train_step 2: value_update done, starting policy_update
+[DEBUG] train_step 2: policy_update done
+[DEBUG] train_step 3: starting episode collection
+[DEBUG] train_step 3: episodes collected, starting value_update
+[DEBUG] train_step 3: value_update done, starting policy_update
+[DEBUG] train_step 3: policy_update done
+[DEBUG] train_step 4: starting episode collection
+[DEBUG] train_step 4: episodes collected, starting value_update
+[DEBUG] train_step 4: value_update done, starting policy_update
+[DEBUG] train_step 4: policy_update done
+[DEBUG] train_step 50: starting episode collection
+[DEBUG] train_step 50: episodes collected, starting value_update
+[DEBUG] train_step 50: value_update done, starting policy_update
+[DEBUG] train_step 50: policy_update done

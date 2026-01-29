@@ -7,6 +7,14 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
+# Workaround for A100 (CC 8.0) when PyTorch build lacks sm_80 kernels.
+# Disables SDPA backends that may cause hangs due to kernel fallback/JIT.
+if hasattr(torch.backends, 'cuda'):
+    if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
+        torch.backends.cuda.enable_flash_sdp(False)
+    if hasattr(torch.backends.cuda, 'enable_mem_efficient_sdp'):
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+
 try:
     from tqdm import trange
 except ImportError:  # pragma: no cover
