@@ -1541,62 +1541,117 @@ Tests verify:
 
 **Test Results:** All 14 tests passed (Buck2)
 
-### Current Experiment Status
+### Completed Experiment: UPI-TRM 50k (2026-01-30)
 
-| Algorithm | GPU | Status | Progress | Latest Score | Notes |
-|-----------|-----|--------|----------|--------------|-------|
-| UPI-TRM | 0 | **STUCK** | - | - | Hangs after first step (100% CPU, 8% GPU) |
-| PPO | 1 | ✅ Running | ~300/50000 | - | Slow (~3.6s/step) |
-| DQN | 2 | ✅ Running | ~4500/50000 (9%) | 25.56 | Good progress (~9 it/s) |
+**Status:** ✅ COMPLETED
+**Log:** `results/9x9_experiments_seed0/upi_trm_50k_s0.log`
+**Report:** `results/9x9_experiments_seed0/EXPERIMENT_REPORT.md`
+**Plot:** `results/9x9_experiments_seed0/upi_trm_50k_training_progress.png`
 
-**Constraint masking verified:** Logs show "253 valid actions out of 892 total"
+#### Configuration
 
-### Known Issues
+| Parameter | Value |
+|-----------|-------|
+| `algorithm` | `upi_trm` |
+| `num_train_steps` | 50,000 |
+| `episodic_latent` | false (persistent-z) |
+| `enable_contraction` | false |
+| `latent_ball_radius` | 10.0 |
+| `disable_value_head_norm` | true |
+| `use_feasibility_checker` | true |
+| `eval_interval` | 500 steps |
+| `eval_num_episodes` | 50 |
 
-**UPI-TRM Hang:**
-- Process hangs after first debug output with 100% CPU, 8% GPU
-- Reproducible on restart
-- PPO and DQN work fine with same masking code
-- Likely related to UPI-TRM trainer's batch action mask computation
-- **Status:** Needs investigation
+#### Results Summary
 
-### Monitoring Commands
+| Metric | Initial | Final (50k) | Peak | Peak Step |
+|--------|---------|-------------|------|-----------|
+| Success Rate | 0% | 8% | **12%** | 46,000 |
+| Mean Score | 26.84 | 54.08 | **57.02** | 47,500 |
+| Score Improvement | - | +27.24 | +30.18 | - |
+
+#### Key Milestones
+
+| Step | Event |
+|------|-------|
+| 16,500 | First puzzle solved (1/50) |
+| 23,000 | First 6% success rate (3/50) |
+| 46,000 | Peak success rate: 12% (6/50) |
+| 47,500 | Peak mean score: 57.02 |
+
+#### Observations
+
+1. **Learning signal present:** Mean score doubled from 27 → 54
+2. **Solve capability acquired:** 0% → 8-12% success rate
+3. **High variance:** Success rate fluctuates between 0-12% due to small eval sample (50 episodes)
+4. **Slow initial progress:** ~33% of training before first solve (step 16.5k)
+
+---
+
+### Pending Experiments: PPO and DQN Baselines
+
+**Status:** NOT YET STARTED
+**Priority:** HIGH (needed for baseline comparison)
+
+#### Planned Runs
+
+| Algorithm | Config | Seed | GPU | Steps |
+|-----------|--------|------|-----|-------|
+| PPO | `configs/sudoku9x9/ppo_9x9.yaml` | 0 | 0 | 50,000 |
+| DQN | `configs/sudoku9x9/dqn_9x9.yaml` | 0 | 1 | 50,000 |
+
+#### Execution Commands
 
 ```bash
-# Check experiment progress
-for algo in ppo dqn; do
-  log="results/sudoku9x9_constraint_aware/${algo}_seed0.log"
-  step=$(grep -oP '\| \K\d+(?=/)' "$log" | tail -1)
-  score=$(grep "eval_mean_score" "$log" | tail -1 | grep -oP 'eval_mean_score=\K[0-9.]+')
-  echo "$algo: step=$step score=$score"
-done
+# PPO baseline (GPU 0)
+CUDA_VISIBLE_DEVICES=0 buck2 run //buiksat_trm:upi_trm_train \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only \
+  -- --config configs/sudoku9x9/ppo_9x9.yaml --seed 0 \
+  > results/9x9_experiments_seed0/ppo_50k_s0.log 2>&1 &
+
+# DQN baseline (GPU 1)
+CUDA_VISIBLE_DEVICES=1 buck2 run //buiksat_trm:upi_trm_train \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only \
+  -- --config configs/sudoku9x9/dqn_9x9.yaml --seed 0 \
+  > results/9x9_experiments_seed0/dqn_50k_s0.log 2>&1 &
 ```
 
-### Expected Impact
+---
 
-With constraint-aware masking:
-- ~72% reduction in valid action space
-- All explorations are constraint-valid (no wasted samples on invalid moves)
-- Expected: faster learning, better final performance
+### Future Work: Additional Seeds and Ablations
 
-### Next Steps
+**Priority:** MEDIUM (after baselines complete)
 
-1. **Monitor PPO and DQN experiments** - Let them complete 50k steps
-2. **Investigate UPI-TRM hang** - Debug batch action mask computation
-3. **Compare results** with previous 9×9 experiments (without constraint masking)
-4. **If successful:** Apply constraint masking to 4×4 experiments for consistency
+#### Additional Seeds (Statistical Significance)
+
+| Algorithm | Seeds to Run |
+|-----------|--------------|
+| UPI-TRM | 1, 2 |
+| PPO | 1, 2 |
+| DQN | 1, 2 |
+
+#### Ablation Studies
+
+| Ablation | Config Change | Purpose |
+|----------|---------------|---------|
+| Episodic vs Persistent z | `episodic_latent: true` | Compare latent modes |
+| Contraction ON | `enable_contraction: true` | Test stability mechanism |
+| Projection radius sweep | `latent_ball_radius: {10, 30, 100}` | Find optimal radius |
+
+---
 
 ### Configs
 
 Located in `configs/sudoku9x9/`:
-- `upi_trm_9x9.yaml` - UPI-TRM with TRM backbone
+- `upi_trm_9x9.yaml` - UPI-TRM base config
+- `upi_trm_9x9_50k.yaml` - UPI-TRM 50k steps (used for completed experiment)
+- `upi_trm_9x9_fast.yaml` - UPI-TRM fast config (2k steps for debugging)
 - `ppo_9x9.yaml` - PPO baseline
 - `dqn_9x9.yaml` - DQN baseline
 
 All use:
-- `num_train_steps: 50000`
 - `use_feasibility_checker: true`
-- `use_action_masking: true`
+- Action masking enabled
 
 ### Commit
 
