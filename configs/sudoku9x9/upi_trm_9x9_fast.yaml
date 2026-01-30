@@ -1,13 +1,9 @@
-# UPI-TRM Fast-Run Config for 9x9 Sudoku
+# UPI-TRM Fast Config for 9x9 Sudoku (50k steps)
 #
-# Use this for quick debugging and iteration (~10 min runs)
-# For paper results, use upi_trm_9x9.yaml instead
-#
-# Key differences from full config:
-# - num_train_steps: 2000 (vs 50000)
+# Faster per-step than full config due to:
 # - rollout_episodes_per_step: 2 (vs 8) - 4x faster per step
 # - inner_unroll_n: 1 (vs 2) - 2x faster policy forward
-# - More frequent logging/eval for shorter runs
+# - Persistent z (episodic_latent: false)
 
 algorithm: "upi_trm"
 
@@ -17,7 +13,7 @@ inner_unroll_n: 1  # Reduced from 2 for faster forward pass
 
 max_edits: 81  # 9x9 has 81 cells
 
-num_train_steps: 2000  # Quick runs for debugging
+num_train_steps: 50000  # Full 50k run
 batch_size: 64
 rollout_episodes_per_step: 2  # Reduced from 8
 
@@ -41,9 +37,9 @@ value_target_clip: 100.0
 advantage_clip: 20.0
 batch_centered_advantage: true
 
-log_interval: 20  # More frequent for short runs
-eval_interval: 200  # More frequent for short runs
-eval_num_episodes: 20  # Faster eval
+log_interval: 100
+eval_interval: 500
+eval_num_episodes: 50
 
 episodic_latent: false
 
