@@ -1244,3 +1244,14 @@ python_unittest(
         "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
+
+python_binary(
+    name = "plot_9x9_training_progress",
+    srcs = ["scripts/plot_9x9_training_progress.py"],
+    base_module = "",
+    main_module = "scripts.plot_9x9_training_progress",
+    deps = [
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
