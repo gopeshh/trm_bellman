@@ -1588,55 +1588,83 @@ Tests verify:
 
 ---
 
-### Pending Experiments: PPO and DQN Baselines
+### Baseline Experiments: PPO, DQN, A2C (Seed 0)
 
-**Status:** NOT YET STARTED
-**Priority:** HIGH (needed for baseline comparison)
+**Status:** IN PROGRESS (2/3 complete)
+**Started:** 2026-01-30
 
-#### Planned Runs
+| Algorithm | Config | Seed | Steps | Status | Final Result |
+|-----------|--------|------|-------|--------|--------------|
+| DQN | `configs/sudoku9x9/dqn_9x9.yaml` | 0 | 50,000 | ✅ COMPLETED | 0% success, 29.30 mean |
+| A2C | `configs/sudoku9x9/a2c_9x9.yaml` | 0 | 50,000 | ✅ COMPLETED | 0% success, 32.28 mean |
+| PPO | `configs/sudoku9x9/ppo_9x9.yaml` | 0 | 50,000 | 🔄 Running (~50%) | Est. ~27h remaining |
 
-| Algorithm | Config | Seed | GPU | Steps |
-|-----------|--------|------|-----|-------|
-| PPO | `configs/sudoku9x9/ppo_9x9.yaml` | 0 | 0 | 50,000 |
-| DQN | `configs/sudoku9x9/dqn_9x9.yaml` | 0 | 1 | 50,000 |
+#### Baseline Results Summary (vs UPI-TRM)
 
-#### Execution Commands
+| Algorithm | Success Rate | Mean Score | Peak Score | Notes |
+|-----------|--------------|------------|------------|-------|
+| **UPI-TRM** | **8%** (12% peak) | **54.08** | 57.02 | Clear learning signal |
+| DQN | 0% | 29.30 | 40 | No improvement from initial |
+| A2C | 0% | 32.28 | 42 | Slight improvement |
+| PPO | 0% (so far) | ~28 | ~40 | Still running |
 
-```bash
-# PPO baseline (GPU 0)
-CUDA_VISIBLE_DEVICES=0 buck2 run //buiksat_trm:upi_trm_train \
-  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only \
-  -- --config configs/sudoku9x9/ppo_9x9.yaml --seed 0 \
-  > results/9x9_experiments_seed0/ppo_50k_s0.log 2>&1 &
+**Key Finding:** UPI-TRM significantly outperforms all baselines on 9x9 Sudoku.
 
-# DQN baseline (GPU 1)
-CUDA_VISIBLE_DEVICES=1 buck2 run //buiksat_trm:upi_trm_train \
-  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only \
-  -- --config configs/sudoku9x9/dqn_9x9.yaml --seed 0 \
-  > results/9x9_experiments_seed0/dqn_50k_s0.log 2>&1 &
-```
+---
+
+### Multi-Seed Experiments
+
+**Status:** IN PROGRESS
+
+| Algorithm | Seed 0 | Seed 1 | Seed 2 | Notes |
+|-----------|--------|--------|--------|-------|
+| UPI-TRM | ✅ 8% | 🔄 Running | ❌ Not started | Seed 1 started 2026-01-31 |
+| PPO | 🔄 Running | ❌ Not started | ❌ Not started | |
+| DQN | ✅ 0% | ❌ Not started | ❌ Not started | |
+| A2C | ✅ 0% | ❌ Not started | ❌ Not started | |
+
+---
+
+### Log Files Location
+
+All 9x9 experiment logs stored in: `results/9x9_experiments_seed0/`
+
+| File | Algorithm | Seed | Status |
+|------|-----------|------|--------|
+| `upi_trm_50k_s0.log` | UPI-TRM | 0 | ✅ Complete |
+| `upi_trm_50k_s1.log` | UPI-TRM | 1 | 🔄 Running |
+| `ppo_50k_s0.log` | PPO | 0 | 🔄 Running |
+| `dqn_50k_s0.log` | DQN | 0 | ✅ Complete |
+| `a2c_50k_s0.log` | A2C | 0 | ✅ Complete |
+
+**For multi-machine runs, see:** `HANDOFF_9x9_EXPERIMENTS.md`
 
 ---
 
 ### Future Work: Additional Seeds and Ablations
 
-**Priority:** MEDIUM (after baselines complete)
+**Priority:** MEDIUM (after all seed 0 baselines complete)
 
-#### Additional Seeds (Statistical Significance)
+See `HANDOFF_9x9_EXPERIMENTS.md` for detailed instructions on running remaining experiments on other machines.
 
-| Algorithm | Seeds to Run |
-|-----------|--------------|
-| UPI-TRM | 1, 2 |
-| PPO | 1, 2 |
-| DQN | 1, 2 |
+#### Remaining Experiments Matrix
 
-#### Ablation Studies
+| Algorithm | Seed 0 | Seed 1 | Seed 2 | Total Runs |
+|-----------|--------|--------|--------|------------|
+| UPI-TRM | ✅ | 🔄 (Machine 1) | ❌ | 3 |
+| PPO | 🔄 (Machine 1) | ❌ | ❌ | 3 |
+| DQN | ✅ | ❌ | ❌ | 3 |
+| A2C | ✅ | ❌ | ❌ | 3 |
 
-| Ablation | Config Change | Purpose |
-|----------|---------------|---------|
-| Episodic vs Persistent z | `episodic_latent: true` | Compare latent modes |
-| Contraction ON | `enable_contraction: true` | Test stability mechanism |
-| Projection radius sweep | `latent_ball_radius: {10, 30, 100}` | Find optimal radius |
+**Total remaining:** 8 runs needed for full 3-seed coverage (12 total)
+
+#### Ablation Studies (After Multi-Seed Complete)
+
+| Ablation | Config Change | Seeds | Purpose |
+|----------|---------------|-------|---------|
+| Episodic-z | `episodic_latent: true` | 0, 1, 2 | Compare latent modes |
+| Contraction ON | `enable_contraction: true` | 0, 1, 2 | Test stability mechanism |
+| Projection sweep | `latent_ball_radius: {10, 30, 100}` | 0 | Find optimal radius |
 
 ---
 
