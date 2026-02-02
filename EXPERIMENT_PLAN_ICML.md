@@ -1592,12 +1592,13 @@ Tests verify:
 
 **Status:** IN PROGRESS (2/3 complete)
 **Started:** 2026-01-30
+**Last Updated:** 2026-01-31 11:18 AM PST
 
 | Algorithm | Config | Seed | Steps | Status | Final Result |
 |-----------|--------|------|-------|--------|--------------|
 | DQN | `configs/sudoku9x9/dqn_9x9.yaml` | 0 | 50,000 | ✅ COMPLETED | 0% success, 29.30 mean |
 | A2C | `configs/sudoku9x9/a2c_9x9.yaml` | 0 | 50,000 | ✅ COMPLETED | 0% success, 32.28 mean |
-| PPO | `configs/sudoku9x9/ppo_9x9.yaml` | 0 | 50,000 | 🔄 Running (~50%) | Est. ~27h remaining |
+| PPO | `configs/sudoku9x9/ppo_9x9.yaml` | 0 | 50,000 | 🔄 Running (54%) | Est. ~22h remaining |
 
 #### Baseline Results Summary (vs UPI-TRM)
 
@@ -1606,7 +1607,7 @@ Tests verify:
 | **UPI-TRM** | **8%** (12% peak) | **54.08** | 57.02 | Clear learning signal |
 | DQN | 0% | 29.30 | 40 | No improvement from initial |
 | A2C | 0% | 32.28 | 42 | Slight improvement |
-| PPO | 0% (so far) | ~28 | ~40 | Still running |
+| PPO | 0% (54% done) | 28.56 | 39 | Still running |
 
 **Key Finding:** UPI-TRM significantly outperforms all baselines on 9x9 Sudoku.
 
@@ -1615,13 +1616,16 @@ Tests verify:
 ### Multi-Seed Experiments
 
 **Status:** IN PROGRESS
+**Last Updated:** 2026-01-31 11:18 AM PST
 
 | Algorithm | Seed 0 | Seed 1 | Seed 2 | Notes |
 |-----------|--------|--------|--------|-------|
-| UPI-TRM | ✅ 8% | 🔄 Running | ❌ Not started | Seed 1 started 2026-01-31 |
-| PPO | 🔄 Running | ❌ Not started | ❌ Not started | |
+| UPI-TRM | ✅ 8% | 🔄 Running (restarted) | ❌ Not started | Seed 1 restarted with correct dataset |
+| PPO | 🔄 54% | ❌ Not started | ❌ Not started | |
 | DQN | ✅ 0% | ❌ Not started | ❌ Not started | |
 | A2C | ✅ 0% | ❌ Not started | ❌ Not started | |
+
+**Note:** UPI-TRM seed 1 was restarted on 2026-01-31 after discovering it was using wrong dataset (dummy 4x4 instead of 9x9). Now correctly using `--dataset-paths /home/buiksat/trm_bellman/data/sudoku-9x9`.
 
 ---
 
@@ -1632,8 +1636,8 @@ All 9x9 experiment logs stored in: `results/9x9_experiments_seed0/`
 | File | Algorithm | Seed | Status |
 |------|-----------|------|--------|
 | `upi_trm_50k_s0.log` | UPI-TRM | 0 | ✅ Complete |
-| `upi_trm_50k_s1.log` | UPI-TRM | 1 | 🔄 Running |
-| `ppo_50k_s0.log` | PPO | 0 | 🔄 Running |
+| `upi_trm_50k_s1.log` | UPI-TRM | 1 | 🔄 Running (restarted) |
+| `ppo_50k_s0.log` | PPO | 0 | 🔄 Running (54%) |
 | `dqn_50k_s0.log` | DQN | 0 | ✅ Complete |
 | `a2c_50k_s0.log` | A2C | 0 | ✅ Complete |
 

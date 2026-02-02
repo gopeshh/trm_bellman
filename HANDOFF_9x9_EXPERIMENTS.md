@@ -1,11 +1,26 @@
 # Handoff: 9x9 Sudoku Experiments for Multi-Machine Execution
 
 **Date:** 2026-01-31
+**Last Updated:** 2026-01-31 11:18 AM PST
 **Purpose:** Instructions for running remaining 9x9 Sudoku experiments on additional machines and merging results for analysis.
 
 ---
 
+## CRITICAL: Dataset Path Required
+
+**Always include `--dataset-paths` flag when running experiments!**
+
+Without this flag, the training will use a dummy 4x4 dataset instead of the actual 9x9 Sudoku puzzles.
+
+```bash
+--dataset-paths /path/to/trm_bellman/data/sudoku-9x9
+```
+
+---
+
 ## Current Status (Machine 1)
+
+**Updated:** 2026-01-31 11:18 AM PST
 
 ### Completed Experiments
 
@@ -19,8 +34,10 @@
 
 | Algorithm | Seed | Progress | Est. Completion | Log File |
 |-----------|------|----------|-----------------|----------|
-| PPO | 0 | ~50% | ~27h remaining | `ppo_50k_s0.log` |
-| UPI-TRM | 1 | ~5% | ~48h remaining | `upi_trm_50k_s1.log` |
+| PPO | 0 | 54% | ~22h remaining | `ppo_50k_s0.log` |
+| UPI-TRM | 1 | ~0% (restarted) | ~50h remaining | `upi_trm_50k_s1.log` |
+
+**Note:** UPI-TRM seed 1 was restarted on 2026-01-31 after discovering it was using wrong dataset.
 
 ---
 
@@ -56,6 +73,7 @@ CUDA_VISIBLE_DEVICES=0 nohup buck2 run //buiksat_trm:upi_trm_train \
   -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only \
   -- --config /path/to/trm_bellman/configs/sudoku9x9/upi_trm_9x9_50k.yaml \
   --seed 2 \
+  --dataset-paths /path/to/trm_bellman/data/sudoku-9x9 \
   --checkpoint-dir /path/to/trm_bellman/checkpoints/rl_sudoku-9x9_seed2 \
   > /path/to/trm_bellman/results/9x9_experiments_machine2/upi_trm_50k_s2.log 2>&1 &
 
@@ -64,6 +82,7 @@ CUDA_VISIBLE_DEVICES=1 nohup buck2 run //buiksat_trm:upi_trm_train \
   -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only \
   -- --config /path/to/trm_bellman/configs/sudoku9x9/ppo_9x9.yaml \
   --seed 1 \
+  --dataset-paths /path/to/trm_bellman/data/sudoku-9x9 \
   --checkpoint-dir /path/to/trm_bellman/checkpoints/rl_ppo-9x9_seed1 \
   > /path/to/trm_bellman/results/9x9_experiments_machine2/ppo_50k_s1.log 2>&1 &
 ```
@@ -77,6 +96,7 @@ cd /path/to/trm_bellman
 CUDA_VISIBLE_DEVICES=0 nohup python upi_trm_train.py \
   --config configs/sudoku9x9/upi_trm_9x9_50k.yaml \
   --seed 2 \
+  --dataset-paths data/sudoku-9x9 \
   --checkpoint-dir checkpoints/rl_sudoku-9x9_seed2 \
   > results/9x9_experiments_machine2/upi_trm_50k_s2.log 2>&1 &
 ```
