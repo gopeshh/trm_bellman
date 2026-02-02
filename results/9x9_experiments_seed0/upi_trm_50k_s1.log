@@ -284,3 +284,5 @@ indices=tensor([  4, 272, 409, 579, 413], device='cuda:0'))
 [DEBUG] train_step 950: episodes collected, starting value_update
 [DEBUG] train_step 950: value_update done, starting policy_update
 [DEBUG] train_step 950: policy_update done
+[step 01000] value_loss=102.183014 policy_loss=0.165874
+[step 01000] VALUE_DEBUG: target(mean=-11.23 std=11.12 min=-75.98 max=20.17) V(s)(mean=-10.76 std=3.94) reward(mean=-1.591 std=11.434) clip=100.0
