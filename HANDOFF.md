@@ -1,544 +1,126 @@
-# HANDOFF.md - Session Summary for UPI-TRM Project
+# HANDOFF.md - UPI-TRM Project
 
-**Date:** 2026-01-28
+**Date:** 2026-02-03
 **Branch:** `feature/upi-trm-clean`
-**Latest Commit:** `7891bf8` - Vectorize 9x9 Sudoku checker functions for ~8.5x speedup
+**Status:** 9x9 experiments 10/12 complete
 
 ---
 
-## Current Work: 9x9 Performance Optimization (2026-01-28)
+## Executive Summary
 
-### Status: COMPLETE ✅
+**UPI-TRM achieves 4% success rate on 9x9 Sudoku while all baselines (DQN, A2C, PPO) achieve 0%.**
 
-Optimized 9x9 Sudoku training from ~15s/step (hanging) to **1.2s/step** (~12.5x speedup).
-
-### Performance Results
-
-| Stage | Time/Step | Improvement |
-|-------|-----------|-------------|
-| Before optimizations | ~15s (hanging) | - |
-| After phi caching | 10.2s | 1.5x |
-| After vectorized checkers | **1.2s** | **8.5x** |
-
-**Total improvement: ~12.5x faster**
-
-### Changes Made
-
-| File | Change |
-|------|--------|
-| `rl/task_config.py` | Added `SudokuConstraintTracker` class for incremental constraint tracking |
-| `rl/envs/plan_edit_env.py` | Incremental mask updates, phi caching (phi_new@t = phi_old@t+1) |
-| `rl/sudoku_utils.py` | Vectorized `count_sudoku_violations_9x9` and `sudoku_zero_candidate_cells` |
-| `tests/test_sudoku_checkers.py` | Added 10 new tests for vectorized 9x9 functions |
-
-### Commits (Pushed)
-
-```
-7891bf8 Vectorize 9x9 Sudoku checker functions for ~8.5x speedup
-ad70d88 Optimize 9x9 Sudoku training with incremental masking and phi caching
-1b83f29 Remove temporary test file for vectorized masking
-```
-
-### Tests Passed
-
-- `test_sudoku_checkers`: **33 tests passed** (including 10 new vectorized tests)
-- `test_constraint_aware_masking`: **14 tests passed**
-
-### Key Optimizations
-
-1. **Incremental Constraint Tracking** (`SudokuConstraintTracker`):
-   - Maintains per-row/col/box digit COUNTS (not bitmasks) for O(1) updates
-   - Handles duplicates correctly (count 2→1 keeps digit blocked)
-   - Only recomputes affected positions on each edit
-
-2. **Phi Caching**:
-   - `phi_new` at step t equals `phi_old` at step t+1
-   - Eliminates 50% of checker calls during rollouts
-
-3. **Vectorized Checker Functions**:
-   - `count_sudoku_violations_9x9`: One-hot encoding + tensor sum/clamp (replaces 27 loops)
-   - `sudoku_zero_candidate_cells`: Parallel row/col/box blocked masks (replaces 81 loops)
-
-### Remaining Optimization Opportunities
-
-- Parallelized rollouts (multiple environments)
-- TRM forward pass optimizations
-- GPU-side action masking
+| Algorithm | Seed 0 | Seed 1 | Seed 2 | Avg Success | Avg Score |
+|-----------|--------|--------|--------|-------------|-----------|
+| **UPI-TRM** | **8%** | 0% | **4%** | **4.0%** | **53.3** |
+| DQN | 0% | 0% | 0% | 0% | 29.5 |
+| A2C | 0% | 0% | 0% | 0% | 31.9 |
+| PPO | running | 0% | running | 0% | 29.7 |
 
 ---
 
-## Previous Work: Constraint-Aware Action Masking (2026-01-28)
+## Current Status
 
-### Status: RUNNING
+### 9x9 Experiments (10/12 complete)
 
-Implemented constraint-aware action masking for 9x9 Sudoku to reduce action space from 729 → ~50-150 valid actions per step.
+| Algorithm | Seed | Success | Score | Status |
+|-----------|------|---------|-------|--------|
+| UPI-TRM | 0 | **8%** | 54.08 | ✅ Done |
+| UPI-TRM | 1 | 0% | 51.94 | ✅ Done |
+| UPI-TRM | 2 | **4%** | 53.76 | ✅ Done |
+| DQN | 0 | 0% | 29.30 | ✅ Done |
+| DQN | 1 | 0% | 29.90 | ✅ Done |
+| DQN | 2 | 0% | 29.28 | ✅ Done |
+| A2C | 0 | 0% | 32.28 | ✅ Done |
+| A2C | 1 | 0% | 31.98 | ✅ Done |
+| A2C | 2 | 0% | 31.58 | ✅ Done |
+| PPO | 0 | - | - | 🔄 Running |
+| PPO | 1 | 0% | 29.72 | ✅ Done |
+| PPO | 2 | - | - | 🔄 Running |
 
-### Changes Made
+**Logs:** `results/9x9_experiments_seed0/`
+**Report:** `results/9x9_experiments_seed0/EXPERIMENT_REPORT.md`
 
-| File | Change |
-|------|--------|
-| `rl/task_config.py` | Added constraint checking in `compute_action_mask()` for row/col/box |
-| `rl/envs/plan_edit_env.py` | Pass current state to mask, recompute mask after every step |
-| `configs/sudoku9x9/*.yaml` | Changed training steps from 25k → 50k |
-| `tests/test_constraint_aware_masking_unittest.py` | 14 tests for constraint masking |
-| `BUCK` | Updated test target for constraint masking |
+---
 
-### Tests Passed
+## Quick Commands
 
-- `test_upi_trm_trainer_smoke`: **2 tests passed**
-- `test_constraint_aware_masking`: **14 tests passed**
-
-### Experiments Running
-
-| Algorithm | GPU | Status | Progress | Latest Score |
-|-----------|-----|--------|----------|--------------|
-| UPI-TRM | 0 | **STUCK** | - | - |
-| PPO | 1 | ✅ Running | Step 287/50000 (0.6%) | - |
-| DQN | 2 | ✅ Running | Step 4340/50000 (8.7%) | 25.56 |
-
-**Constraint-aware masking active:** 253 valid actions out of 892 (72% reduction)
-
-**Issue with UPI-TRM:** Hangs after first debug output. 100% CPU, 8% GPU. May be related to constraint-aware masking interaction with UPI-TRM's batch action mask computation. Needs investigation.
-
-### Monitoring Commands
+### Check Experiment Progress
 
 ```bash
-# Check experiment progress
-for algo in upi_trm ppo dqn; do
-  log="results/sudoku9x9_constraint_aware/${algo}_seed0.log"
-  step=$(grep -oP 'step \K\d+' "$log" 2>/dev/null | tail -1)
-  score=$(grep "eval_mean_score" "$log" 2>/dev/null | tail -1 | grep -oP 'eval_mean_score=\K[0-9.]+')
-  echo "$algo: step=$step score=$score"
+# GPU status
+nvidia-smi --query-gpu=index,utilization.gpu,memory.used --format=csv
+
+# All 9x9 experiments
+for f in ~/trm_bellman/results/9x9_experiments_seed0/*50k*.log; do
+  name=$(basename "$f" .log)
+  last_eval=$(grep "eval_success" "$f" | tail -1)
+  step=$(echo "$last_eval" | grep -oP '\[step \K\d+')
+  success=$(echo "$last_eval" | grep -oP 'eval_success_rate=\K[0-9.]+')
+  printf "%-18s step %5s  success=%s\n" "$name" "$step" "$success"
 done
 ```
 
-### Previous Results (Before Constraint Masking)
-
-| Algorithm | Mean Score | Initial | Change |
-|-----------|------------|---------|--------|
-| **UPI-TRM** | 27.64 | 26.64 | **+1.00** |
-| PPO | 26.02 | 26.84 | -0.82 |
-| DQN | 25.57 | 26.84 | -1.27 |
-
-### Expected Impact
-
-With constraint-aware masking:
-- ~80% reduction in valid action space
-- All explorations are constraint-valid
-- Expected: faster learning, better final performance
-
----
-
-## Previous Session: Hard 4×4 Sudoku (2026-01-21)
-
-### Completed Task: Hard 4×4 Sudoku Baseline Experiments
-
-**Status:** ✅ COMPLETE
-**Started:** 2026-01-20 ~08:37
-**Completed:** 2026-01-21 ~14:56
-
-#### Final Results (Hard 4×4 Sudoku, 6-8 empties, 20k steps)
-
-| Method | Seed 42 | Seed 123 | Seed 456 | Mean ± Std |
-|--------|---------|----------|----------|------------|
-| persistent_nc | 60.0% | 52.0% | 58.0% | **56.7% ± 4.2%** |
-| episodic_nc | 42.0% | 54.0% | 48.0% | **48.0% ± 6.0%** |
-| episodic_c_clean | 36.0% | 40.0% | 34.0% | **36.7% ± 3.1%** |
-| PPO | 0.0% | 0.0% | 0.0% | 0.0% ± 0.0% |
-| A2C | 0.0% | 0.0% | 0.0% | 0.0% ± 0.0% |
-| DQN | 0.0% | 0.0% | 0.0% | 0.0% ± 0.0% |
-
-**Figure generated:** `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/hard_4x4_baselines_success_vs_steps.pdf`
-
-**Script:** `/home/buiksat/trm_bellman/scripts/run_table3_hard.sh`
-**Results:** `/home/buiksat/trm_bellman/results/table3_hard_6to8/`
-
-#### Key Observations
-
-1. **No-contraction variants outperform contraction on harder puzzles:**
-   - `persistent_nc`: 56.7% (best)
-   - `episodic_nc`: 48.0%
-   - `episodic_c_clean`: 36.7%
-
-2. **All standard RL baselines (PPO, A2C, DQN) fail completely** on harder puzzles (0% success).
-
-3. **Comparison with trivial puzzles:**
-   - Trivial (1-4 empties): All UPI-TRM variants ~90-93%
-   - Hard (6-8 empties): UPI-TRM variants 37-57%, baselines 0%
-
-### Decisions Made This Session
-
-1. **Table 3 Data Verification:** Discovered paper had incorrect baseline numbers. Re-ran all 18 experiments (6 methods × 3 seeds) and updated `main.tex`.
-
-2. **Missing persistent_nc Experiments:** Found that `persistent_nc` logs didn't exist - ran them and confirmed results match `episodic_nc` (93.3% ± 2.3% both).
-
-3. **Config Asymmetry Documented:** Noted that:
-   - No-contraction configs have **projection ON** (R=10, default)
-   - Clean contraction config has **projection OFF** (R=0)
-   - This is intentional for matching historical Table 3 setup
-
-4. **Paper Updates Made:**
-   - Table 3 (lines 1583-1588): Correct experimental values
-   - Abstract (line 151): "90–93%" success range
-   - Key observation (lines 1594-1601): Clean contraction note added
-   - Appendix (line 2094): Baseline comparison updated
-
-5. **Figure Regenerated:** `trivial_baselines_vs_no_contraction_success_vs_steps.pdf` with paper style (legend below, individual seed curves, thick mean lines).
-
-### Relevant Codebase Details
-
-#### Config Locations
-```
-configs/
-├── ablations/
-│   ├── upi_trm_feasibility_no_contraction.yaml        # episodic_nc
-│   └── upi_trm_feasibility_persistent_z_no_contraction.yaml  # persistent_nc
-├── baselines/
-│   ├── ppo_trm_feasibility.yaml
-│   ├── a2c_trm_feasibility.yaml
-│   └── dqn_trm_feasibility.yaml
-└── exp3_projection_ablation/
-    └── c_rdis.yaml                                     # episodic_c_clean (contraction ON, vhead OFF, R=0)
-```
-
-#### Key Config Differences
-
-| Config | `enable_contraction` | `latent_ball_radius` | `disable_value_head_norm` | `episodic_latent` |
-|--------|---------------------|---------------------|--------------------------|-------------------|
-| episodic_nc | false | 10.0 (default) | not set | true |
-| persistent_nc | false | 10.0 (default) | not set | false |
-| episodic_c_clean | true | 0 (disabled) | true | true |
-
-#### Dataset Locations
-```
-data/
-├── sudoku-4x4-trivial           # 1-4 empty cells (Table 3 primary)
-├── sudoku-4x4-easy_6to8empties  # 6-8 empty cells (harder experiments)
-└── sudoku-4x4-ultra-easy        # Mostly easy puzzles
-```
-
-#### Scripts Created This Session
-```
-scripts/
-├── run_table3_baselines.sh      # Trivial 4×4, 5k steps
-├── run_table3_hard.sh           # Hard 4×4, 20k steps (RUNNING)
-├── run_persistent_nc.sh         # Fixed missing persistent_nc runs
-└── plot_table3_baselines.py     # Paper-style learning curves
-```
-
-### Next Steps (When Experiments Complete)
-
-1. **Aggregate hard 4×4 results:** Compute mean±std for all 6 methods
-2. **Generate learning curves figure:** Modify `plot_table3_baselines.py` for hard dataset
-3. **Update paper (optional):** Add hard 4×4 results to appendix if significant
-4. **Consider 9×9 experiments:** Instructions in HANDOFF.md for generating dataset and running
-
-### Monitoring Commands
+### Run New Experiment
 
 ```bash
-# Overall progress
-tail -20 /home/buiksat/trm_bellman/results/table3_hard_6to8/run_all.log
-
-# Individual experiment status
-for f in /home/buiksat/trm_bellman/results/table3_hard_6to8/*.log; do
-    if [[ "$f" != *"run_all"* ]]; then
-        echo "=== $(basename $f) ===";
-        grep "eval_success" "$f" | tail -1;
-    fi
-done
-```
-
----
-
-## Project Overview
-
-**UPI-TRM (Unified Policy Iteration with Thinking Recursive Model)** is a research project exploring contraction-based stability for recursive latent reasoning in neural networks. The work targets ICML submission.
-
-### Key Hypothesis
-Spectral-norm contraction on the z→z update map should provide stable value function learning with bounded error propagation.
-
----
-
-## Current State: Table 3 Experiments (2026-01-20)
-
-### Active Experiments
-
-**Harder 4×4 Sudoku (6-8 empties, 20k steps):**
-- **Status:** RUNNING on 4 A100 GPUs
-- **Location:** `results/table3_hard_6to8/`
-- **Script:** `scripts/run_table3_hard.sh`
-- **Design:** 6 methods × 3 seeds = 18 experiments in 5 batches
-
-**Methods being tested:**
-| Method | Config | Key Settings |
-|--------|--------|--------------|
-| persistent_nc | `ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml` | contraction OFF, projection ON (R=10) |
-| episodic_nc | `ablations/upi_trm_feasibility_no_contraction.yaml` | contraction OFF, projection ON (R=10) |
-| episodic_c_clean | `exp3_projection_ablation/c_rdis.yaml` | contraction ON, vhead OFF, projection OFF |
-| ppo | `baselines/ppo_trm_feasibility.yaml` | Standard PPO |
-| a2c | `baselines/a2c_trm_feasibility.yaml` | Standard A2C |
-| dqn | `baselines/dqn_trm_feasibility.yaml` | Standard DQN |
-
-### Completed Table 3 Experiments (Trivial 4×4 Sudoku, 5k steps)
-
-**Results saved to:** `results/table3_baselines/`
-
-| Method | Seed 42 | Seed 123 | Seed 456 | Mean ± Std |
-|--------|---------|----------|----------|------------|
-| persistent_nc | 96.0% | 92.0% | 92.0% | **93.3% ± 2.3%** |
-| episodic_nc | 92.0% | 96.0% | 92.0% | **93.3% ± 2.3%** |
-| episodic_c_clean | 96.0% | 86.0% | 90.0% | **90.7% ± 5.0%** |
-| PPO | 30.0% | 30.0% | 30.0% | 30.0% ± 0.0% |
-| A2C | 30.0% | 34.0% | 30.0% | 31.3% ± 2.3% |
-| DQN | 24.0% | 30.0% | 30.0% | 28.0% ± 3.5% |
-| Random baseline | - | - | - | 52.0% |
-
-### ⚠️ Important Config Notes
-
-**Projection status in no-contraction configs:**
-- `episodic_nc` and `persistent_nc` have **projection ON** (default `latent_ball_radius: 10.0`)
-- `episodic_c_clean` has **projection OFF** (`latent_ball_radius: 0`)
-
-This is an intentional asymmetry in Table 3. If you need consistent projection settings:
-- Use `exp3_projection_ablation/nc_rdis.yaml` for no-contraction with projection OFF
-- Use `exp3_projection_ablation/c_r10.yaml` for contraction with projection ON
-
----
-
-## Paper Assets Updated (2026-01-20)
-
-**Table 3 in paper (`main.tex`):**
-- Lines 1583-1588: Updated with correct experimental values
-- Abstract (line 151): "90–93%" success range
-- Key observation (lines 1594-1601): Updated with clean contraction note
-- Appendix (line 2094): Updated baseline comparison
-
-**Figure regenerated:**
-- `figures/trivial_baselines_vs_no_contraction_success_vs_steps.pdf` - Learning curves with paper style
-
----
-
-## Running Experiments on 9×9 Sudoku
-
-### Step 1: Generate 9×9 Dataset
-
-```bash
-cd ~/fbsource/fbcode/buiksat_trm
-
-# Generate 9×9 Sudoku dataset (easy - fewer empty cells)
-python dataset/build_sudoku_dataset.py \
-    --output-dir data/sudoku-9x9-easy \
-    --subsample-size 1000 \
-    --num-aug 100 \
-    --min-empty 10 \
-    --max-empty 30
-
-# For harder 9×9 (more empty cells):
-python dataset/build_sudoku_dataset.py \
-    --output-dir data/sudoku-9x9-medium \
-    --subsample-size 1000 \
-    --num-aug 100 \
-    --min-empty 30 \
-    --max-empty 50
-```
-
-**Note:** 9×9 Sudoku is significantly harder. Expect:
-- Much longer training (50k-100k+ steps)
-- Lower success rates initially
-- Potentially need architecture changes (more unroll steps, larger latent dim)
-
-### Step 2: Create Experiment Script
-
-Adapt `scripts/run_table3_hard.sh` for 9×9:
-
-```bash
-#!/bin/bash
 cd ~/fbsource/fbcode
 
-DATA_PATH="buiksat_trm/data/sudoku-9x9-easy"
-RESULTS_DIR="/home/buiksat/trm_bellman/results/table3_9x9_easy"
-TRAIN_STEPS=50000  # 9x9 needs more training
-
-mkdir -p "$RESULTS_DIR"
-
-# Configs remain the same - they work for any Sudoku size
-declare -A CONFIGS
-CONFIGS["persistent_nc"]="buiksat_trm/configs/ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml"
-CONFIGS["episodic_nc"]="buiksat_trm/configs/ablations/upi_trm_feasibility_no_contraction.yaml"
-CONFIGS["episodic_c_clean"]="buiksat_trm/configs/exp3_projection_ablation/c_rdis.yaml"
-CONFIGS["ppo"]="buiksat_trm/configs/baselines/ppo_trm_feasibility.yaml"
-CONFIGS["a2c"]="buiksat_trm/configs/baselines/a2c_trm_feasibility.yaml"
-CONFIGS["dqn"]="buiksat_trm/configs/baselines/dqn_trm_feasibility.yaml"
-
-SEEDS=(42 123 456)
-
-run_experiment() {
-    local gpu=$1
-    local method=$2
-    local seed=$3
-    local config="${CONFIGS[$method]}"
-    local logfile="$RESULTS_DIR/${method}_s${seed}.log"
-
-    echo "[GPU $gpu] Starting $method seed=$seed"
-    CUDA_VISIBLE_DEVICES=$gpu buck2 run //buiksat_trm:upi_trm_train \
-        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true \
-        -- --config "$config" \
-        --seed "$seed" \
-        --dataset-paths "$DATA_PATH" \
-        --train-steps "$TRAIN_STEPS" \
-        --no-wandb \
-        > "$logfile" 2>&1
-}
-
-# Run experiments in batches of 4
-# ... (same batch structure as run_table3_hard.sh)
+CUDA_VISIBLE_DEVICES=<GPU> nohup buck2 run //buiksat_trm:upi_trm_train \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+  --config buiksat_trm/configs/sudoku9x9/<CONFIG>.yaml \
+  --dataset-paths buiksat_trm/data/sudoku-9x9 --seed <SEED> --no-wandb \
+  > ~/trm_bellman/results/9x9_experiments_seed0/<ALGO>_50k_s<SEED>.log 2>&1 &
 ```
 
-### Step 3: Run and Monitor
-
-```bash
-chmod +x scripts/run_table3_9x9.sh
-nohup ./scripts/run_table3_9x9.sh > results/table3_9x9_easy/run_all.log 2>&1 &
-
-# Monitor progress:
-tail -f results/table3_9x9_easy/run_all.log
-```
-
-### Step 4: Generate Figure
-
-After experiments complete, update `scripts/plot_table3_baselines.py`:
-- Change `results_dir` to `Path("/home/buiksat/trm_bellman/results/table3_9x9_easy")`
-- Change output filename to include "9x9"
-- Adjust x-axis limit to match training steps
-
-```bash
-buck2 run //buiksat_trm:plot_table3_baselines
-```
+**Available configs:**
+- `upi_trm_9x9_50k.yaml` - UPI-TRM
+- `dqn_9x9.yaml` - DQN baseline
+- `a2c_9x9.yaml` - A2C baseline
+- `ppo_9x9.yaml` - PPO baseline
 
 ---
 
-## Monitoring Current Hard 4×4 Experiments
+## Key Files
 
-```bash
-# Check overall progress:
-tail -20 /home/buiksat/trm_bellman/results/table3_hard_6to8/run_all.log
-
-# Check specific experiment progress:
-for f in /home/buiksat/trm_bellman/results/table3_hard_6to8/*.log; do
-    if [[ "$f" != *"run_all"* ]]; then
-        echo "=== $(basename $f) ===";
-        grep "eval_success" "$f" | tail -1;
-    fi
-done
-
-# Estimated completion: ~4-5 hours per batch, 5 batches total (~20-25 hours)
-```
+| Description | Path |
+|-------------|------|
+| Experiment logs | `results/9x9_experiments_seed0/*.log` |
+| Detailed report | `results/9x9_experiments_seed0/EXPERIMENT_REPORT.md` |
+| Configs | `~/fbsource/fbcode/buiksat_trm/configs/sudoku9x9/` |
+| Dataset | `~/fbsource/fbcode/buiksat_trm/data/sudoku-9x9/` |
+| Project guidelines | `CLAUDE.md` |
 
 ---
 
-## Previous Experiment Status (All Complete)
+## Critical Notes
 
-### Phase 4: 2×2 Norm Ablation (COMPLETE ✅)
-- **Location:** `results/paper_ready/phase4_2x2_norm_ablation/`
-- **Finding:** z→z contraction is the primary stabilizer (~97% vs ~78% argmax agreement)
-
-### Exp1-5: Contraction & Stability Experiments (COMPLETE ✅)
-- See `EXPERIMENT_PLAN_ICML.md` for full details
-- All audits passed
+1. **Always use `--dataset-paths buiksat_trm/data/sudoku-9x9`** - Otherwise defaults to 4x4
+2. **Use Buck2 for training** - Direct Python lacks dependencies
+3. **Config guidelines from CLAUDE.md:**
+   - `use_feasibility_checker: true` (required)
+   - `disable_value_head_norm: true` (for stability)
 
 ---
 
-## Key Technical Findings
+## Previous Experiments (Completed)
 
-### 1. Table 3 Results Match Paper
-All baseline comparisons now have verified experimental data across 3 seeds.
+### 4x4 Hard Sudoku (Table 3)
+- Location: `results/table3_hard_controlled/`
+- Result: UPI-TRM 57% vs baselines 0%
 
-### 2. Config Asymmetry (Document This)
-- No-contraction configs use **projection ON** (R=10, default)
-- Clean contraction config uses **projection OFF** (R=0)
-- This is intentional for Table 3 but worth noting
-
-### 3. Random Baseline Differences by Dataset
-- Trivial 4×4 (1-4 empties): 52% random success
-- Hard 4×4 (6-8 empties): ~0% random success
-- 9×9: Near 0% random success
+### 4x4 Trivial Sudoku
+- Location: `results/table3_baselines/`
+- Result: UPI-TRM 90-93% vs baselines 28-31%
 
 ---
 
-## Important Configuration Rules
+## TODO
 
-### From CLAUDE.md (Must Follow)
-1. **Checker:** Use `use_feasibility_checker: true` only
-2. **Value-head normalization:** `disable_value_head_norm: true` for stability experiments
-3. **One variable at a time:** Don't mix episodic_latent with contraction changes
-
-### Config Template for Stability Experiments
-```yaml
-use_feasibility_checker: true
-enable_contraction: true
-target_Lz: 0.9
-disable_value_head_norm: true   # CRITICAL
-episodic_latent: true
-latent_ball_radius: 10.0        # or 0 for projection-free
-```
+- [ ] Wait for PPO s0, s2 to complete (~35h remaining)
+- [ ] Update report with final PPO results
+- [ ] Generate summary figures for paper
 
 ---
 
-## Commands Reference
-
-### Run Table 3 Baselines (Trivial)
-```bash
-cd ~/fbsource/fbcode
-nohup /home/buiksat/trm_bellman/scripts/run_table3_baselines.sh &
-```
-
-### Run Table 3 Hard (6-8 empties)
-```bash
-cd ~/fbsource/fbcode
-nohup /home/buiksat/trm_bellman/scripts/run_table3_hard.sh &
-```
-
-### Generate Learning Curves Figure
-```bash
-buck2 run //buiksat_trm:plot_table3_baselines \
-  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true
-```
-
-### Aggregate Results
-```bash
-for method in persistent_nc episodic_nc episodic_c_clean ppo a2c dqn; do
-    echo "$method:"
-    for seed in 42 123 456; do
-        logfile="results/table3_baselines/${method}_s${seed}.log"
-        if [ -f "$logfile" ]; then
-            final_success=$(grep "eval_success_rate" "$logfile" | tail -1 | grep -oP "eval_success_rate=\K[0-9.]+")
-            echo "  seed $seed: $final_success"
-        fi
-    done
-done
-```
-
----
-
-## Files to Read First
-
-1. `CLAUDE.md` - Operational guidance, non-negotiables
-2. `EXPERIMENT_PLAN_ICML.md` - Full experiment plan with status
-3. `results/table3_baselines/` - Latest baseline experiment logs
-4. `scripts/run_table3_hard.sh` - Currently running experiment
-
----
-
-## Session Log
-
-| Date | Description |
-|------|-------------|
-| 2026-01-28 | 9x9 performance optimization: vectorized checkers, phi caching, incremental masking (1.2s/step) |
-| 2026-01-28 | Constraint-aware action masking for 9x9 Sudoku |
-| 2026-01-20 | Table 3 baseline experiments, paper figure regeneration, hard dataset experiments |
-| 2026-01-19 | Phase 4 2×2 Norm Ablation, Exp5 tradeoff curve |
-| 2026-01-18 | Exp3-4 projection ablation experiments |
-
----
-
-*Generated: 2026-01-28*
+*Last updated: 2026-02-03*
