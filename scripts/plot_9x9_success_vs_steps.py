@@ -150,6 +150,9 @@ def main():
     # Create figure - match paper style size
     fig, ax = plt.subplots(figsize=(7.2, 6.0))
 
+    # Collect all plotted success rates for auto-scaling Y-axis
+    all_rates = []
+
     for algo_key in algo_order:
         log_files = methods.get(algo_key, [])
         if not log_files:
@@ -170,6 +173,7 @@ def main():
         for seed_idx, data in seed_data.items():
             steps = [d[0] for d in data]
             rates = [d[1] for d in data]
+            all_rates.extend(rates)  # Collect for Y-axis scaling
             ax.plot(steps, rates, color=config["color"], alpha=0.18, linewidth=0.9)
 
         # Compute and plot mean curve (thick)
@@ -194,7 +198,26 @@ def main():
         "9×9 Sudoku (50k steps)\n"
         "Success Rate vs Training Steps"
     )
-    ax.set_ylim(0, 1.0)
+
+    # Auto-scale Y-axis based on plotted data with padding
+    if all_rates:
+        min_rate = min(all_rates)
+        max_rate = max(all_rates)
+
+        # Add padding
+        ymin = max(0.0, min_rate - 0.01)
+        ymax = min(1.0, max_rate + 0.02)
+
+        # Enforce minimum range if data is too narrow
+        if ymax - ymin < 0.05:
+            mean_rate = (min_rate + max_rate) / 2
+            ymin = max(0.0, mean_rate - 0.03)
+            ymax = min(1.0, mean_rate + 0.03)
+
+        ax.set_ylim(ymin, ymax)
+    else:
+        ax.set_ylim(0, 1.0)
+
     ax.set_xlim(0, 50000)
     ax.grid(True, alpha=0.3)
 
