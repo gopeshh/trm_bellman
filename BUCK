@@ -1255,3 +1255,14 @@ python_binary(
         "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
+
+python_binary(
+    name = "plot_9x9_success_vs_steps",
+    srcs = ["scripts/plot_9x9_success_vs_steps.py"],
+    base_module = "",
+    main_module = "scripts.plot_9x9_success_vs_steps",
+    deps = [
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
