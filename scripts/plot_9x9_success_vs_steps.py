@@ -84,9 +84,13 @@ def parse_log_file(log_path: Path) -> List[Tuple[int, float]]:
     return data
 
 
-def aggregate_seeds(log_files: List[Path]) -> Dict[int, List[Tuple[int, float]]]:
+def aggregate_seeds(log_files: List[Path], min_steps: int = 40000) -> Dict[int, List[Tuple[int, float]]]:
     """
-    Load data for each seed separately.
+    Load data for each seed separately, filtering out incomplete runs.
+
+    Args:
+        log_files: List of log file paths
+        min_steps: Minimum steps required to consider a run complete (default 40k for 50k runs)
 
     Returns:
         Dict mapping seed_idx -> list of (step, success_rate) tuples
@@ -95,7 +99,11 @@ def aggregate_seeds(log_files: List[Path]) -> Dict[int, List[Tuple[int, float]]]
     for i, log_file in enumerate(log_files):
         data = parse_log_file(log_file)
         if data:
-            all_data[i] = data
+            max_step = max(d[0] for d in data)
+            if max_step >= min_steps:
+                all_data[i] = data
+            else:
+                print(f"  Skipping {log_file.name}: incomplete (max step {max_step} < {min_steps})")
     return all_data
 
 
