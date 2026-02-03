@@ -1,0 +1,624 @@
+[2026-02-03T13:08:38.893-08:00] Buck UI: https://www.internalfb.com/buck2/5ae2d1da-5f44-46c7-8060-955d46039a09
+[2026-02-03T13:08:46.136-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:08:46.136-08:00] Network: Up:   0B             Down:   0B           
+[2026-02-03T13:08:46.136-08:00] Resource usage: RSS: 6.4GiB CPU: 7558%
+[2026-02-03T13:08:46.136-08:00] IO: ReadDir: 12
+[2026-02-03T13:08:53.140-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:08:53.140-08:00] Network: Up:   0B             Down:   0B           
+[2026-02-03T13:08:53.140-08:00] Resource usage: RSS: 7.2GiB CPU: 8172%
+[2026-02-03T13:08:53.140-08:00] IO: Read: 1
+[2026-02-03T13:09:00.235-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:09:00.235-08:00] Network: Up:   0B             Down:   0B           
+[2026-02-03T13:09:00.235-08:00] Resource usage: RSS: 6.6GiB CPU: 597%
+[2026-02-03T13:09:00.235-08:00] IO: none
+[2026-02-03T13:09:07.236-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:09:07.236-08:00] Network: Up:   0B             Down:   0B           
+[2026-02-03T13:09:07.236-08:00] Resource usage: RSS: 6.3GiB CPU: 104%
+[2026-02-03T13:09:07.236-08:00] IO: none
+[2026-02-03T13:09:14.236-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:09:14.236-08:00] Network: Up:   0B             Down:   0B           
+[2026-02-03T13:09:14.236-08:00] Resource usage: RSS: 10GiB CPU: 147%
+[2026-02-03T13:09:14.236-08:00] IO: none
+[2026-02-03T13:09:15.987-08:00] RE Session: reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb
+[2026-02-03T13:09:23.036-08:00] Waiting on fbsource//third-party/pypi/numpy/2.2.x:numpy/_core/_umath_tests__shared (cfg:opt-linux-x86_64-fbcode-platform010-clang19-no-san-opt-by-default#1b65d69490b158a9) -- action (c_compile numpy/_core/src/common/npy_cpu_features.c (pic)) [re_action_cache], and 3 other actions
+[2026-02-03T13:09:30.135-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:09:30.135-08:00] Network: Up: 3.9KiB           Down:  17MiB 623KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:09:30.135-08:00] Resource usage: RSS: 20GiB CPU: 6405%
+[2026-02-03T13:09:30.135-08:00] IO: MkDir: 1 Stat: 5
+[2026-02-03T13:09:37.136-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:09:37.136-08:00] Network: Up: 3.9KiB           Down:  25MiB 3.0MiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:09:37.136-08:00] Resource usage: RSS: 21GiB CPU: 3810%
+[2026-02-03T13:09:37.136-08:00] IO: Stat: 4
+[2026-02-03T13:09:44.236-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:09:44.236-08:00] Network: Up: 3.9KiB           Down: 158MiB 744KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:09:44.236-08:00] Resource usage: RSS: 19GiB CPU: 285%
+[2026-02-03T13:09:44.236-08:00] IO: Symlink: 4
+[2026-02-03T13:09:51.236-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:09:51.236-08:00] Network: Up: 3.9KiB           Down: 283MiB 6.0KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:09:51.236-08:00] Resource usage: RSS: 19GiB CPU: 102%
+[2026-02-03T13:09:51.236-08:00] IO: Copy: 26
+[2026-02-03T13:09:58.335-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:09:58.335-08:00] Network: Up: 3.9KiB           Down: 284MiB 877KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:09:58.335-08:00] Resource usage: RSS: 18GiB CPU: 253%
+[2026-02-03T13:09:58.335-08:00] IO: RmDirAll: 3 Remove: 1
+[2026-02-03T13:10:05.338-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:10:05.338-08:00] Network: Up: 3.9KiB           Down: 774MiB  51MiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:10:05.338-08:00] Resource usage: RSS: 18GiB CPU: 607%
+[2026-02-03T13:10:05.338-08:00] IO: MkDir: 3 Read: 1
+[2026-02-03T13:10:12.435-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:10:12.435-08:00] Network: Up: 3.9KiB           Down: 784MiB 162KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:10:12.435-08:00] Resource usage: RSS: 18GiB CPU: 805%
+[2026-02-03T13:10:12.435-08:00] IO: Copy: 4 MkDir: 3 Stat: 2
+[2026-02-03T13:10:19.439-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:10:19.439-08:00] Network: Up: 3.9KiB           Down: 785MiB 158KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:10:19.439-08:00] Resource usage: RSS: 18GiB CPU: 1106%
+[2026-02-03T13:10:19.439-08:00] IO: Copy: 12 MkDir: 4
+[2026-02-03T13:10:26.535-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:10:26.535-08:00] Network: Up: 3.9KiB           Down: 786MiB  65KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:10:26.535-08:00] Resource usage: RSS: 18GiB CPU: 911%
+[2026-02-03T13:10:26.535-08:00] IO: Copy: 20 MkDir: 3 Stat: 1 Write: 1
+[2026-02-03T13:10:33.535-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:10:33.535-08:00] Network: Up: 3.9KiB           Down: 869MiB  24MiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:10:33.535-08:00] Resource usage: RSS: 18GiB CPU: 681%
+[2026-02-03T13:10:33.535-08:00] IO: Read: 1
+[2026-02-03T13:10:40.545-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:10:40.545-08:00] Network: Up: 3.9KiB           Down: 878MiB 9.3KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:10:40.545-08:00] Resource usage: RSS: 19GiB CPU: 121%
+[2026-02-03T13:10:40.545-08:00] IO: Copy: 1
+[2026-02-03T13:10:47.545-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:10:47.545-08:00] Network: Up: 3.9KiB           Down: 879MiB 441KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:10:47.545-08:00] Resource usage: RSS: 18GiB CPU: 365%
+[2026-02-03T13:10:47.545-08:00] IO: Copy: 7 Symlink: 1 MkDir: 4
+[2026-02-03T13:10:54.637-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:10:54.637-08:00] Network: Up:  31KiB           Down: 879MiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:10:54.637-08:00] Resource usage: RSS: 18GiB CPU: 45%
+[2026-02-03T13:10:54.637-08:00] IO: Copy: 1 MkDir: 1
+[2026-02-03T13:11:01.638-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:11:01.638-08:00] Network: Up:  84KiB  27KiB/s  Down: 930MiB  25MiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:11:01.638-08:00] Resource usage: RSS: 18GiB CPU: 302%
+[2026-02-03T13:11:01.638-08:00] IO: Read: 1
+[2026-02-03T13:11:08.737-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:11:08.737-08:00] Network: Up:  84KiB           Down: 971MiB 2.7MiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:11:08.737-08:00] Resource usage: RSS: 18GiB CPU: 110%
+[2026-02-03T13:11:08.737-08:00] IO: none
+[2026-02-03T13:11:15.836-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:11:15.836-08:00] Network: Up:  84KiB           Down: 972MiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:11:15.836-08:00] Resource usage: RSS: 18GiB CPU: 23%
+[2026-02-03T13:11:15.836-08:00] IO: none
+[2026-02-03T13:11:22.935-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:11:22.935-08:00] Network: Up:  84KiB           Down: 976MiB 3.6MiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:11:22.935-08:00] Resource usage: RSS: 18GiB CPU: 119%
+[2026-02-03T13:11:22.935-08:00] IO: Copy: 3 MkDir: 5
+[2026-02-03T13:11:29.937-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:11:29.937-08:00] Network: Up:  84KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:11:29.937-08:00] Resource usage: RSS: 18GiB CPU: 16%
+[2026-02-03T13:11:29.937-08:00] IO: none
+[2026-02-03T13:11:37.038-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:11:37.038-08:00] Network: Up:  84KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:11:37.038-08:00] Resource usage: RSS: 18GiB CPU: 18%
+[2026-02-03T13:11:37.038-08:00] IO: none
+[2026-02-03T13:11:44.041-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:11:44.041-08:00] Network: Up: 111KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:11:44.041-08:00] Resource usage: RSS: 18GiB CPU: 67%
+[2026-02-03T13:11:44.041-08:00] IO: Copy: 4 Symlink: 1 MkDir: 4 Write: 1
+[2026-02-03T13:11:51.138-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:11:51.138-08:00] Network: Up: 111KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:11:51.138-08:00] Resource usage: RSS: 18GiB CPU: 70%
+[2026-02-03T13:11:51.138-08:00] IO: Copy: 2
+[2026-02-03T13:11:58.235-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:11:58.235-08:00] Network: Up: 111KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:11:58.235-08:00] Resource usage: RSS: 18GiB CPU: 30%
+[2026-02-03T13:11:58.235-08:00] IO: MkDir: 1
+[2026-02-03T13:12:05.237-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:12:05.237-08:00] Network: Up: 111KiB           Down: 1.1GiB 8.1KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:12:05.237-08:00] Resource usage: RSS: 18GiB CPU: 56%
+[2026-02-03T13:12:05.237-08:00] IO: none
+[2026-02-03T13:12:12.344-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:12:12.344-08:00] Network: Up: 111KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:12:12.344-08:00] Resource usage: RSS: 18GiB CPU: 25%
+[2026-02-03T13:12:12.344-08:00] IO: none
+[2026-02-03T13:12:19.435-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:12:19.435-08:00] Network: Up: 111KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:12:19.435-08:00] Resource usage: RSS: 18GiB CPU: 33%
+[2026-02-03T13:12:19.435-08:00] IO: Copy: 1
+[2026-02-03T13:12:26.440-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:12:26.440-08:00] Network: Up: 111KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:12:26.440-08:00] Resource usage: RSS: 18GiB CPU: 52%
+[2026-02-03T13:12:26.440-08:00] IO: Copy: 3 MkDir: 2
+[2026-02-03T13:12:33.537-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:12:33.537-08:00] Network: Up: 111KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:12:33.537-08:00] Resource usage: RSS: 18GiB CPU: 23%
+[2026-02-03T13:12:33.537-08:00] IO: none
+[2026-02-03T13:12:40.539-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:12:40.539-08:00] Network: Up: 111KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:12:40.539-08:00] Resource usage: RSS: 18GiB CPU: 38%
+[2026-02-03T13:12:40.539-08:00] IO: MkDir: 1
+[2026-02-03T13:12:47.637-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:12:47.637-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:12:47.637-08:00] Resource usage: RSS: 18GiB CPU: 69%
+[2026-02-03T13:12:47.637-08:00] IO: none
+[2026-02-03T13:12:54.737-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:12:54.737-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:12:54.737-08:00] Resource usage: RSS: 18GiB CPU: 39%
+[2026-02-03T13:12:54.737-08:00] IO: none
+[2026-02-03T13:13:01.837-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:13:01.837-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:13:01.837-08:00] Resource usage: RSS: 18GiB CPU: 29%
+[2026-02-03T13:13:01.837-08:00] IO: none
+[2026-02-03T13:13:08.843-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:13:08.843-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:13:08.843-08:00] Resource usage: RSS: 18GiB CPU: 70%
+[2026-02-03T13:13:08.843-08:00] IO: none
+[2026-02-03T13:13:15.937-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:13:15.937-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:13:15.937-08:00] Resource usage: RSS: 18GiB CPU: 48%
+[2026-02-03T13:13:15.937-08:00] IO: none
+[2026-02-03T13:13:23.046-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:13:23.046-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:13:23.046-08:00] Resource usage: RSS: 18GiB CPU: 42%
+[2026-02-03T13:13:23.046-08:00] IO: none
+[2026-02-03T13:13:30.136-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:13:30.136-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:13:30.136-08:00] Resource usage: RSS: 18GiB CPU: 22%
+[2026-02-03T13:13:30.136-08:00] IO: none
+[2026-02-03T13:13:37.137-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:13:37.137-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:13:37.137-08:00] Resource usage: RSS: 18GiB CPU: 34%
+[2026-02-03T13:13:37.137-08:00] IO: none
+[2026-02-03T13:13:44.138-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:13:44.138-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:13:44.138-08:00] Resource usage: RSS: 18GiB CPU: 43%
+[2026-02-03T13:13:44.138-08:00] IO: Copy: 1 Symlink: 2 MkDir: 2
+[2026-02-03T13:13:51.141-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:13:51.141-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:13:51.141-08:00] Resource usage: RSS: 18GiB CPU: 22%
+[2026-02-03T13:13:51.141-08:00] IO: Copy: 4 MkDir: 1
+[2026-02-03T13:13:58.238-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:13:58.238-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:13:58.238-08:00] Resource usage: RSS: 18GiB CPU: 48%
+[2026-02-03T13:13:58.238-08:00] IO: none
+[2026-02-03T13:14:05.337-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:14:05.337-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:14:05.337-08:00] Resource usage: RSS: 18GiB CPU: 59%
+[2026-02-03T13:14:05.337-08:00] IO: Read: 1
+[2026-02-03T13:14:12.438-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:14:12.438-08:00] Network: Up: 140KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:14:12.438-08:00] Resource usage: RSS: 18GiB CPU: 26%
+[2026-02-03T13:14:12.438-08:00] IO: none
+[2026-02-03T13:14:19.440-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:14:19.440-08:00] Network: Up: 140KiB           Down: 1.1GiB 170KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:14:19.440-08:00] Resource usage: RSS: 18GiB CPU: 33%
+[2026-02-03T13:14:19.440-08:00] IO: none
+[2026-02-03T13:14:26.537-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:14:26.537-08:00] Network: Up: 311KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:14:26.537-08:00] Resource usage: RSS: 18GiB CPU: 56%
+[2026-02-03T13:14:26.537-08:00] IO: none
+[2026-02-03T13:14:33.547-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:14:33.547-08:00] Network: Up: 311KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:14:33.547-08:00] Resource usage: RSS: 18GiB CPU: 37%
+[2026-02-03T13:14:33.547-08:00] IO: none
+[2026-02-03T13:14:40.637-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:14:40.637-08:00] Network: Up: 311KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:14:40.637-08:00] Resource usage: RSS: 18GiB CPU: 31%
+[2026-02-03T13:14:40.637-08:00] IO: none
+[2026-02-03T13:14:47.737-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:14:47.737-08:00] Network: Up: 311KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:14:47.737-08:00] Resource usage: RSS: 18GiB CPU: 32%
+[2026-02-03T13:14:47.737-08:00] IO: Copy: 2 MkDir: 3
+[2026-02-03T13:14:54.842-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:14:54.842-08:00] Network: Up: 311KiB           Down: 1.1GiB 5.8KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:14:54.842-08:00] Resource usage: RSS: 18GiB CPU: 51%
+[2026-02-03T13:14:54.842-08:00] IO: none
+[2026-02-03T13:15:01.937-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:15:01.937-08:00] Network: Up: 311KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:15:01.937-08:00] Resource usage: RSS: 18GiB CPU: 46%
+[2026-02-03T13:15:01.937-08:00] IO: Copy: 3
+[2026-02-03T13:15:08.942-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:15:08.942-08:00] Network: Up: 311KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:15:08.942-08:00] Resource usage: RSS: 18GiB CPU: 52%
+[2026-02-03T13:15:08.942-08:00] IO: none
+[2026-02-03T13:15:16.042-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:15:16.042-08:00] Network: Up: 311KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:15:16.042-08:00] Resource usage: RSS: 18GiB CPU: 41%
+[2026-02-03T13:15:16.042-08:00] IO: none
+[2026-02-03T13:15:23.137-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:15:23.137-08:00] Network: Up: 311KiB           Down: 1.1GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:15:23.137-08:00] Resource usage: RSS: 18GiB CPU: 45%
+[2026-02-03T13:15:23.137-08:00] IO: none
+[2026-02-03T13:15:30.147-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:15:30.147-08:00] Network: Up: 311KiB           Down: 1.1GiB 371KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:15:30.147-08:00] Resource usage: RSS: 18GiB CPU: 192%
+[2026-02-03T13:15:30.147-08:00] IO: none
+[2026-02-03T13:15:37.237-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:15:37.237-08:00] Network: Up: 311KiB           Down: 1.2GiB 5.0MiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:15:37.237-08:00] Resource usage: RSS: 18GiB CPU: 50%
+[2026-02-03T13:15:37.237-08:00] IO: none
+[2026-02-03T13:15:44.336-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:15:44.336-08:00] Network: Up: 311KiB           Down: 1.2GiB 325KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:15:44.336-08:00] Resource usage: RSS: 18GiB CPU: 290%
+[2026-02-03T13:15:44.336-08:00] IO: MkDir: 7 Remove: 1 Write: 1
+[2026-02-03T13:15:51.343-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:15:51.343-08:00] Network: Up: 311KiB           Down: 1.2GiB 8.1KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:15:51.343-08:00] Resource usage: RSS: 18GiB CPU: 107%
+[2026-02-03T13:15:51.343-08:00] IO: none
+[2026-02-03T13:15:58.437-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:15:58.437-08:00] Network: Up: 311KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:15:58.437-08:00] Resource usage: RSS: 18GiB CPU: 43%
+[2026-02-03T13:15:58.437-08:00] IO: none
+[2026-02-03T13:16:05.538-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:16:05.538-08:00] Network: Up: 311KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:16:05.538-08:00] Resource usage: RSS: 18GiB CPU: 90%
+[2026-02-03T13:16:05.538-08:00] IO: none
+[2026-02-03T13:16:12.637-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:16:12.637-08:00] Network: Up: 311KiB           Down: 1.2GiB 853B/s    (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:16:12.637-08:00] Resource usage: RSS: 18GiB CPU: 56%
+[2026-02-03T13:16:12.637-08:00] IO: Copy: 4
+[2026-02-03T13:16:19.737-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:16:19.737-08:00] Network: Up: 311KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:16:19.737-08:00] Resource usage: RSS: 18GiB CPU: 41%
+[2026-02-03T13:16:19.737-08:00] IO: none
+[2026-02-03T13:16:26.837-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:16:26.837-08:00] Network: Up: 311KiB           Down: 1.2GiB 832B/s    (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:16:26.837-08:00] Resource usage: RSS: 18GiB CPU: 52%
+[2026-02-03T13:16:26.837-08:00] IO: none
+[2026-02-03T13:16:33.939-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:16:33.939-08:00] Network: Up: 311KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:16:33.939-08:00] Resource usage: RSS: 18GiB CPU: 122%
+[2026-02-03T13:16:33.939-08:00] IO: none
+[2026-02-03T13:16:40.945-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:16:40.945-08:00] Network: Up: 311KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:16:40.945-08:00] Resource usage: RSS: 18GiB CPU: 112%
+[2026-02-03T13:16:40.945-08:00] IO: none
+[2026-02-03T13:16:48.037-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:16:48.037-08:00] Network: Up: 311KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:16:48.037-08:00] Resource usage: RSS: 18GiB CPU: 72%
+[2026-02-03T13:16:48.037-08:00] IO: none
+[2026-02-03T13:16:55.042-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:16:55.042-08:00] Network: Up: 311KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:16:55.042-08:00] Resource usage: RSS: 18GiB CPU: 36%
+[2026-02-03T13:16:55.042-08:00] IO: none
+[2026-02-03T13:17:02.136-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:17:02.136-08:00] Network: Up: 311KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:17:02.136-08:00] Resource usage: RSS: 18GiB CPU: 77%
+[2026-02-03T13:17:02.136-08:00] IO: none
+[2026-02-03T13:17:09.235-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:17:09.235-08:00] Network: Up: 311KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:17:09.235-08:00] Resource usage: RSS: 18GiB CPU: 71%
+[2026-02-03T13:17:09.235-08:00] IO: none
+[2026-02-03T13:17:16.240-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:17:16.240-08:00] Network: Up: 311KiB           Down: 1.2GiB  87KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:17:16.240-08:00] Resource usage: RSS: 18GiB CPU: 68%
+[2026-02-03T13:17:16.240-08:00] IO: none
+[2026-02-03T13:17:23.244-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:17:23.244-08:00] Network: Up: 311KiB           Down: 1.2GiB 186KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:17:23.244-08:00] Resource usage: RSS: 18GiB CPU: 4408%
+[2026-02-03T13:17:23.244-08:00] IO: Copy: 7 MkDir: 7 ReadDir: 2 Write: 2
+[2026-02-03T13:17:30.335-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:17:30.335-08:00] Network: Up: 604KiB           Down: 1.2GiB 385KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:17:30.335-08:00] Resource usage: RSS: 19GiB CPU: 5314%
+[2026-02-03T13:17:30.335-08:00] IO: Stat: 1
+[2026-02-03T13:17:37.344-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:17:37.344-08:00] Network: Up: 604KiB           Down: 1.2GiB  36KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:17:37.344-08:00] Resource usage: RSS: 19GiB CPU: 280%
+[2026-02-03T13:17:37.344-08:00] IO: Symlink: 3 MkDir: 1
+[2026-02-03T13:17:44.437-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:17:44.437-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:17:44.437-08:00] Resource usage: RSS: 19GiB CPU: 1242%
+[2026-02-03T13:17:44.437-08:00] IO: none
+[2026-02-03T13:17:51.537-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:17:51.537-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:17:51.537-08:00] Resource usage: RSS: 19GiB CPU: 841%
+[2026-02-03T13:17:51.537-08:00] IO: none
+[2026-02-03T13:17:58.635-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:17:58.635-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:17:58.635-08:00] Resource usage: RSS: 19GiB CPU: 673%
+[2026-02-03T13:17:58.635-08:00] IO: none
+[2026-02-03T13:18:05.638-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:18:05.638-08:00] Network: Up: 604KiB           Down: 1.2GiB 327B/s    (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:18:05.638-08:00] Resource usage: RSS: 19GiB CPU: 707%
+[2026-02-03T13:18:05.638-08:00] IO: none
+[2026-02-03T13:18:12.736-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:18:12.736-08:00] Network: Up: 604KiB           Down: 1.2GiB 409KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:18:12.736-08:00] Resource usage: RSS: 19GiB CPU: 780%
+[2026-02-03T13:18:12.736-08:00] IO: none
+[2026-02-03T13:18:19.741-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:18:19.741-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:18:19.741-08:00] Resource usage: RSS: 19GiB CPU: 1113%
+[2026-02-03T13:18:19.741-08:00] IO: none
+[2026-02-03T13:18:26.836-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:18:26.836-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:18:26.836-08:00] Resource usage: RSS: 19GiB CPU: 873%
+[2026-02-03T13:18:26.836-08:00] IO: none
+[2026-02-03T13:18:33.837-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:18:33.837-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:18:33.837-08:00] Resource usage: RSS: 19GiB CPU: 1007%
+[2026-02-03T13:18:33.837-08:00] IO: none
+[2026-02-03T13:18:40.937-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:18:40.937-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:18:40.937-08:00] Resource usage: RSS: 19GiB CPU: 1578%
+[2026-02-03T13:18:40.937-08:00] IO: none
+[2026-02-03T13:18:47.939-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:18:47.939-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:18:47.939-08:00] Resource usage: RSS: 19GiB CPU: 909%
+[2026-02-03T13:18:47.939-08:00] IO: none
+[2026-02-03T13:18:55.035-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:18:55.035-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:18:55.035-08:00] Resource usage: RSS: 19GiB CPU: 1103%
+[2026-02-03T13:18:55.035-08:00] IO: none
+[2026-02-03T13:19:02.038-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:19:02.038-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:19:02.038-08:00] Resource usage: RSS: 19GiB CPU: 1038%
+[2026-02-03T13:19:02.038-08:00] IO: none
+[2026-02-03T13:19:09.045-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:19:09.045-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:19:09.045-08:00] Resource usage: RSS: 19GiB CPU: 1133%
+[2026-02-03T13:19:09.045-08:00] IO: none
+[2026-02-03T13:19:16.136-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:19:16.136-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:19:16.136-08:00] Resource usage: RSS: 19GiB CPU: 707%
+[2026-02-03T13:19:16.136-08:00] IO: none
+[2026-02-03T13:19:23.138-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:19:23.138-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:19:23.138-08:00] Resource usage: RSS: 19GiB CPU: 982%
+[2026-02-03T13:19:23.138-08:00] IO: none
+[2026-02-03T13:19:30.241-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:19:30.241-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:19:30.241-08:00] Resource usage: RSS: 19GiB CPU: 814%
+[2026-02-03T13:19:30.241-08:00] IO: none
+[2026-02-03T13:19:37.337-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:19:37.337-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:19:37.337-08:00] Resource usage: RSS: 19GiB CPU: 1205%
+[2026-02-03T13:19:37.337-08:00] IO: none
+[2026-02-03T13:19:44.340-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:19:44.340-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:19:44.340-08:00] Resource usage: RSS: 19GiB CPU: 1372%
+[2026-02-03T13:19:44.340-08:00] IO: Read: 1
+[2026-02-03T13:19:51.435-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:19:51.435-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:19:51.435-08:00] Resource usage: RSS: 19GiB CPU: 1289%
+[2026-02-03T13:19:51.435-08:00] IO: none
+[2026-02-03T13:19:58.440-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:19:58.440-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:19:58.440-08:00] Resource usage: RSS: 19GiB CPU: 894%
+[2026-02-03T13:19:58.440-08:00] IO: none
+[2026-02-03T13:20:05.543-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:20:05.543-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:20:05.543-08:00] Resource usage: RSS: 19GiB CPU: 1271%
+[2026-02-03T13:20:05.543-08:00] IO: none
+[2026-02-03T13:20:12.638-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:20:12.638-08:00] Network: Up: 604KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:20:12.638-08:00] Resource usage: RSS: 19GiB CPU: 1186%
+[2026-02-03T13:20:12.638-08:00] IO: none
+[2026-02-03T13:20:19.736-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:20:19.736-08:00] Network: Up: 683KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:20:19.736-08:00] Resource usage: RSS: 19GiB CPU: 1287%
+[2026-02-03T13:20:19.736-08:00] IO: none
+[2026-02-03T13:20:26.738-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:20:26.738-08:00] Network: Up: 777KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:20:26.738-08:00] Resource usage: RSS: 19GiB CPU: 873%
+[2026-02-03T13:20:26.738-08:00] IO: none
+[2026-02-03T13:20:33.746-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:20:33.746-08:00] Network: Up: 881KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:20:33.746-08:00] Resource usage: RSS: 19GiB CPU: 992%
+[2026-02-03T13:20:33.746-08:00] IO: none
+[2026-02-03T13:20:40.838-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:20:40.838-08:00] Network: Up: 881KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:20:40.838-08:00] Resource usage: RSS: 19GiB CPU: 1090%
+[2026-02-03T13:20:40.838-08:00] IO: none
+[2026-02-03T13:20:47.936-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:20:47.936-08:00] Network: Up: 902KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:20:47.936-08:00] Resource usage: RSS: 19GiB CPU: 1324%
+[2026-02-03T13:20:47.936-08:00] IO: none
+[2026-02-03T13:20:54.936-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:20:54.937-08:00] Network: Up: 902KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:20:54.937-08:00] Resource usage: RSS: 19GiB CPU: 946%
+[2026-02-03T13:20:54.937-08:00] IO: none
+[2026-02-03T13:21:01.942-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:21:01.942-08:00] Network: Up: 902KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:21:01.942-08:00] Resource usage: RSS: 19GiB CPU: 902%
+[2026-02-03T13:21:01.942-08:00] IO: none
+[2026-02-03T13:21:09.037-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:21:09.037-08:00] Network: Up: 902KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:21:09.037-08:00] Resource usage: RSS: 19GiB CPU: 860%
+[2026-02-03T13:21:09.037-08:00] IO: none
+[2026-02-03T13:21:16.038-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:21:16.038-08:00] Network: Up: 902KiB           Down: 1.2GiB 1.6KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:21:16.038-08:00] Resource usage: RSS: 19GiB CPU: 2679%
+[2026-02-03T13:21:16.038-08:00] IO: none
+[2026-02-03T13:21:23.051-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:21:23.051-08:00] Network: Up: 974KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:21:23.051-08:00] Resource usage: RSS: 19GiB CPU: 831%
+[2026-02-03T13:21:23.051-08:00] IO: Copy: 3
+[2026-02-03T13:21:30.136-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:21:30.136-08:00] Network: Up: 974KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:21:30.136-08:00] Resource usage: RSS: 19GiB CPU: 610%
+[2026-02-03T13:21:30.136-08:00] IO: none
+[2026-02-03T13:21:37.138-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:21:37.138-08:00] Network: Up: 974KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:21:37.138-08:00] Resource usage: RSS: 19GiB CPU: 1656%
+[2026-02-03T13:21:37.138-08:00] IO: none
+[2026-02-03T13:21:44.236-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:21:44.236-08:00] Network: Up: 974KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:21:44.236-08:00] Resource usage: RSS: 19GiB CPU: 891%
+[2026-02-03T13:21:44.236-08:00] IO: none
+[2026-02-03T13:21:51.242-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:21:51.242-08:00] Network: Up: 974KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:21:51.242-08:00] Resource usage: RSS: 19GiB CPU: 770%
+[2026-02-03T13:21:51.242-08:00] IO: none
+[2026-02-03T13:21:58.338-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:21:58.338-08:00] Network: Up: 974KiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:21:58.338-08:00] Resource usage: RSS: 19GiB CPU: 898%
+[2026-02-03T13:21:58.338-08:00] IO: Symlink: 1 MkDir: 2 RmDirAll: 1 Remove: 1
+[2026-02-03T13:22:05.442-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:22:05.442-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:22:05.442-08:00] Resource usage: RSS: 19GiB CPU: 1060%
+[2026-02-03T13:22:05.442-08:00] IO: RmDirAll: 1
+[2026-02-03T13:22:12.545-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:22:12.545-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:22:12.545-08:00] Resource usage: RSS: 19GiB CPU: 633%
+[2026-02-03T13:22:12.545-08:00] IO: none
+[2026-02-03T13:22:19.636-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:22:19.636-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:22:19.636-08:00] Resource usage: RSS: 19GiB CPU: 1621%
+[2026-02-03T13:22:19.636-08:00] IO: none
+[2026-02-03T13:22:26.744-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:22:26.744-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:22:26.744-08:00] Resource usage: RSS: 19GiB CPU: 1035%
+[2026-02-03T13:22:26.744-08:00] IO: none
+[2026-02-03T13:22:33.842-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:22:33.842-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:22:33.842-08:00] Resource usage: RSS: 19GiB CPU: 745%
+[2026-02-03T13:22:33.842-08:00] IO: none
+[2026-02-03T13:22:40.935-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:22:40.936-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:22:40.936-08:00] Resource usage: RSS: 19GiB CPU: 1189%
+[2026-02-03T13:22:40.936-08:00] IO: none
+[2026-02-03T13:22:47.939-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:22:47.939-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:22:47.939-08:00] Resource usage: RSS: 19GiB CPU: 1288%
+[2026-02-03T13:22:47.939-08:00] IO: none
+[2026-02-03T13:22:55.039-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:22:55.039-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:22:55.039-08:00] Resource usage: RSS: 19GiB CPU: 1193%
+[2026-02-03T13:22:55.039-08:00] IO: none
+[2026-02-03T13:23:02.135-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:23:02.136-08:00] Network: Up: 1.0MiB           Down: 1.2GiB  50KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:23:02.136-08:00] Resource usage: RSS: 19GiB CPU: 1070%
+[2026-02-03T13:23:02.136-08:00] IO: none
+[2026-02-03T13:23:09.235-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:23:09.235-08:00] Network: Up: 1.0MiB           Down: 1.2GiB 781B/s    (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:23:09.235-08:00] Resource usage: RSS: 19GiB CPU: 578%
+[2026-02-03T13:23:09.235-08:00] IO: none
+[2026-02-03T13:23:16.236-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:23:16.236-08:00] Network: Up: 1.0MiB           Down: 1.2GiB  41KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:23:16.236-08:00] Resource usage: RSS: 19GiB CPU: 838%
+[2026-02-03T13:23:16.236-08:00] IO: MkDir: 2 Stat: 1
+[2026-02-03T13:23:23.239-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:23:23.239-08:00] Network: Up: 1.0MiB           Down: 1.2GiB 1.4MiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:23:23.239-08:00] Resource usage: RSS: 19GiB CPU: 338%
+[2026-02-03T13:23:23.239-08:00] IO: none
+[2026-02-03T13:23:30.240-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:23:30.240-08:00] Network: Up: 1.0MiB           Down: 1.2GiB 2.6MiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:23:30.240-08:00] Resource usage: RSS: 18GiB CPU: 207%
+[2026-02-03T13:23:30.240-08:00] IO: Copy: 3 MkDir: 1 RmDirAll: 1 Stat: 1
+[2026-02-03T13:23:37.335-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:23:37.335-08:00] Network: Up: 1.0MiB           Down: 1.2GiB 4.1KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:23:37.335-08:00] Resource usage: RSS: 18GiB CPU: 386%
+[2026-02-03T13:23:37.335-08:00] IO: none
+[2026-02-03T13:23:44.435-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:23:44.435-08:00] Network: Up: 1.0MiB           Down: 1.2GiB 391KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:23:44.435-08:00] Resource usage: RSS: 18GiB CPU: 311%
+[2026-02-03T13:23:44.435-08:00] IO: none
+[2026-02-03T13:23:51.536-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:23:51.536-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:23:51.536-08:00] Resource usage: RSS: 18GiB CPU: 68%
+[2026-02-03T13:23:51.536-08:00] IO: none
+[2026-02-03T13:23:58.635-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:23:58.635-08:00] Network: Up: 1.0MiB           Down: 1.2GiB 1.4MiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:23:58.635-08:00] Resource usage: RSS: 18GiB CPU: 148%
+[2026-02-03T13:23:58.635-08:00] IO: none
+[2026-02-03T13:24:05.736-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:24:05.736-08:00] Network: Up: 1.0MiB           Down: 1.2GiB  14KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:24:05.737-08:00] Resource usage: RSS: 18GiB CPU: 93%
+[2026-02-03T13:24:05.737-08:00] IO: Copy: 1 MkDir: 3 Stat: 1 Write: 2
+[2026-02-03T13:24:12.835-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:24:12.835-08:00] Network: Up: 1.0MiB           Down: 1.2GiB 4.2KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:24:12.835-08:00] Resource usage: RSS: 18GiB CPU: 215%
+[2026-02-03T13:24:12.835-08:00] IO: Copy: 2 Symlink: 1 MkDir: 4 ReadDir: 5 ReadLink: 5 Write: 1
+[2026-02-03T13:24:19.935-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:24:19.935-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:24:19.935-08:00] Resource usage: RSS: 18GiB CPU: 45%
+[2026-02-03T13:24:19.935-08:00] IO: none
+[2026-02-03T13:24:27.035-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:24:27.035-08:00] Network: Up: 1.0MiB           Down: 1.2GiB 348KiB/s  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:24:27.035-08:00] Resource usage: RSS: 18GiB CPU: 34%
+[2026-02-03T13:24:27.035-08:00] IO: none
+[2026-02-03T13:24:34.135-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:24:34.135-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:24:34.135-08:00] Resource usage: RSS: 18GiB CPU: 31%
+[2026-02-03T13:24:34.135-08:00] IO: none
+[2026-02-03T13:24:41.235-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:24:41.235-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:24:41.235-08:00] Resource usage: RSS: 18GiB CPU: 28%
+[2026-02-03T13:24:41.235-08:00] IO: none
+[2026-02-03T13:24:48.236-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:24:48.236-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:24:48.236-08:00] Resource usage: RSS: 18GiB CPU: 14%
+[2026-02-03T13:24:48.236-08:00] IO: none
+[2026-02-03T13:24:55.335-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:24:55.335-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:24:55.335-08:00] Resource usage: RSS: 18GiB CPU: 12%
+[2026-02-03T13:24:55.335-08:00] IO: none
+[2026-02-03T13:25:02.435-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:25:02.435-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:25:02.435-08:00] Resource usage: RSS: 18GiB CPU: 6%
+[2026-02-03T13:25:02.435-08:00] IO: none
+[2026-02-03T13:25:09.435-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:25:09.435-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:25:09.435-08:00] Resource usage: RSS: 18GiB CPU: 12%
+[2026-02-03T13:25:09.435-08:00] IO: none
+[2026-02-03T13:25:16.535-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:25:16.535-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:25:16.535-08:00] Resource usage: RSS: 18GiB CPU: 6%
+[2026-02-03T13:25:16.535-08:00] IO: none
+[2026-02-03T13:25:23.635-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:25:23.635-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:25:23.635-08:00] Resource usage: RSS: 18GiB CPU: 13%
+[2026-02-03T13:25:23.635-08:00] IO: none
+[2026-02-03T13:25:30.636-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:25:30.636-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:25:30.636-08:00] Resource usage: RSS: 18GiB CPU: 6%
+[2026-02-03T13:25:30.636-08:00] IO: none
+[2026-02-03T13:25:37.735-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:25:37.735-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:25:37.735-08:00] Resource usage: RSS: 18GiB CPU: 45%
+[2026-02-03T13:25:37.735-08:00] IO: none
+[2026-02-03T13:25:44.836-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:25:44.836-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:25:44.836-08:00] Resource usage: RSS: 18GiB CPU: 136%
+[2026-02-03T13:25:44.836-08:00] IO: none
+[2026-02-03T13:25:51.836-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:25:51.836-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:25:51.836-08:00] Resource usage: RSS: 18GiB CPU: 6%
+[2026-02-03T13:25:51.836-08:00] IO: none
+[2026-02-03T13:25:58.935-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:25:58.935-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:25:58.935-08:00] Resource usage: RSS: 18GiB CPU: 6%
+[2026-02-03T13:25:58.935-08:00] IO: none
+[2026-02-03T13:26:05.936-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:26:05.936-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:26:05.936-08:00] Resource usage: RSS: 18GiB CPU: 6%
+[2026-02-03T13:26:05.936-08:00] IO: none
+[2026-02-03T13:26:13.036-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:26:13.036-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:26:13.036-08:00] Resource usage: RSS: 18GiB CPU: 5%
+[2026-02-03T13:26:13.036-08:00] IO: none
+[2026-02-03T13:26:20.135-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:26:20.135-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:26:20.135-08:00] Resource usage: RSS: 18GiB CPU: 5%
+[2026-02-03T13:26:20.135-08:00] IO: none
+[2026-02-03T13:26:25.555-08:00] Cache hits: 73%
+[2026-02-03T13:26:25.555-08:00] Commands: 22 (cached: 16, remote: 0, local: 6)
+[2026-02-03T13:26:25.555-08:00] Network: Up: 1.0MiB  Down: 1.2GiB  (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:26:27.136-08:00] Waiting on buck2 daemon 5ae2d1da-5f44-46c7-8060-955d46039a09...
+[2026-02-03T13:26:27.136-08:00] Network: Up: 1.0MiB           Down: 1.2GiB           (reSessionID-1b535933-c3f3-4169-93fa-cedb7e2fd0cb)
+[2026-02-03T13:26:27.136-08:00] Resource usage: RSS: 18GiB CPU: 110%
+[2026-02-03T13:26:27.136-08:00] IO: none
+BUILD SUCCEEDED - starting your binary
+Traceback (most recent call last):
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/1b65d69490b158a9/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/__run_lpar_main__.py", line 39, in <module>
+    __invoke_main()
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/1b65d69490b158a9/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/__run_lpar_main__.py", line 36, in __invoke_main
+    run_as_main(module, main_function)
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/1b65d69490b158a9/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/__par__/meta_only/bootstrap.py", line 111, in run_as_main
+    oss_run_as_main(
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/1b65d69490b158a9/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/__par__/bootstrap.py", line 70, in run_as_main
+    runpy._run_module_as_main(main_module, alter_argv=False)
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/1b65d69490b158a9/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/upi_trm_train.py", line 1604, in <module>
+    main()
+  File "/data/repos/fbsource/buck-out/v2/gen/fbcode/1b65d69490b158a9/buiksat_trm/__upi_trm_train__/upi_trm_train#link-tree/upi_trm_train.py", line 981, in main
+    with open(config_path, "r") as f:
+         ^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'configs/sudoku9x9/ppo_9x9.yaml'
