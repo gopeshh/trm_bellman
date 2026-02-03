@@ -1588,81 +1588,65 @@ Tests verify:
 
 ---
 
-### Baseline Experiments: PPO, DQN, A2C (Seed 0)
+### 9×9 Multi-Seed Results (COMPLETE)
 
-**Status:** IN PROGRESS (2/3 complete)
-**Started:** 2026-01-30
-**Last Updated:** 2026-01-31 11:18 AM PST
+**Status:** ✅ 10/12 COMPLETE (PPO s0, s2 running)
+**Last Updated:** 2026-02-03
 
-| Algorithm | Config | Seed | Steps | Status | Final Result |
-|-----------|--------|------|-------|--------|--------------|
-| DQN | `configs/sudoku9x9/dqn_9x9.yaml` | 0 | 50,000 | ✅ COMPLETED | 0% success, 29.30 mean |
-| A2C | `configs/sudoku9x9/a2c_9x9.yaml` | 0 | 50,000 | ✅ COMPLETED | 0% success, 32.28 mean |
-| PPO | `configs/sudoku9x9/ppo_9x9.yaml` | 0 | 50,000 | 🔄 Running (54%) | Est. ~22h remaining |
+#### Final Results Summary
 
-#### Baseline Results Summary (vs UPI-TRM)
+| Algorithm | Seed 0 | Seed 1 | Seed 2 | Avg Success | Avg Score |
+|-----------|--------|--------|--------|-------------|-----------|
+| **UPI-TRM** | **8%** | 0% | **4%** | **4.0%** | **53.3** |
+| DQN | 0% | 0% | 0% | 0% | 29.5 |
+| A2C | 0% | 0% | 0% | 0% | 31.9 |
+| PPO | 🔄 | 0% | 🔄 | 0% | 29.7 |
 
-| Algorithm | Success Rate | Mean Score | Peak Score | Notes |
-|-----------|--------------|------------|------------|-------|
-| **UPI-TRM** | **8%** (12% peak) | **54.08** | 57.02 | Clear learning signal |
-| DQN | 0% | 29.30 | 40 | No improvement from initial |
-| A2C | 0% | 32.28 | 42 | Slight improvement |
-| PPO | 0% (54% done) | 28.56 | 39 | Still running |
+**Key Finding:** UPI-TRM is the only method that solves 9×9 Sudoku puzzles (4% avg success rate vs 0% for all baselines).
 
-**Key Finding:** UPI-TRM significantly outperforms all baselines on 9x9 Sudoku.
+#### Detailed Results
 
----
-
-### Multi-Seed Experiments
-
-**Status:** IN PROGRESS
-**Last Updated:** 2026-01-31 11:18 AM PST
-
-| Algorithm | Seed 0 | Seed 1 | Seed 2 | Notes |
-|-----------|--------|--------|--------|-------|
-| UPI-TRM | ✅ 8% | 🔄 Running (restarted) | ❌ Not started | Seed 1 restarted with correct dataset |
-| PPO | 🔄 54% | ❌ Not started | ❌ Not started | |
-| DQN | ✅ 0% | ❌ Not started | ❌ Not started | |
-| A2C | ✅ 0% | ❌ Not started | ❌ Not started | |
-
-**Note:** UPI-TRM seed 1 was restarted on 2026-01-31 after discovering it was using wrong dataset (dummy 4x4 instead of 9x9). Now correctly using `--dataset-paths /home/buiksat/trm_bellman/data/sudoku-9x9`.
+| Algorithm | Seed | Success Rate | Mean Score | Status |
+|-----------|------|--------------|------------|--------|
+| UPI-TRM | 0 | **8%** | 54.08 | ✅ Complete |
+| UPI-TRM | 1 | 0% | 51.94 | ✅ Complete |
+| UPI-TRM | 2 | **4%** | 53.76 | ✅ Complete |
+| DQN | 0 | 0% | 29.30 | ✅ Complete |
+| DQN | 1 | 0% | 29.90 | ✅ Complete |
+| DQN | 2 | 0% | 29.28 | ✅ Complete |
+| A2C | 0 | 0% | 32.28 | ✅ Complete |
+| A2C | 1 | 0% | 31.98 | ✅ Complete |
+| A2C | 2 | 0% | 31.58 | ✅ Complete |
+| PPO | 0 | - | - | 🔄 Running |
+| PPO | 1 | 0% | 29.72 | ✅ Complete |
+| PPO | 2 | - | - | 🔄 Running |
 
 ---
 
 ### Log Files Location
 
-All 9x9 experiment logs stored in: `results/9x9_experiments_seed0/`
+All 9×9 experiment logs stored in: `results/9x9_experiments_seed0/`
 
 | File | Algorithm | Seed | Status |
 |------|-----------|------|--------|
 | `upi_trm_50k_s0.log` | UPI-TRM | 0 | ✅ Complete |
-| `upi_trm_50k_s1.log` | UPI-TRM | 1 | 🔄 Running (restarted) |
-| `ppo_50k_s0.log` | PPO | 0 | 🔄 Running (54%) |
+| `upi_trm_50k_s1.log` | UPI-TRM | 1 | ✅ Complete |
+| `upi_trm_50k_s2.log` | UPI-TRM | 2 | ✅ Complete |
 | `dqn_50k_s0.log` | DQN | 0 | ✅ Complete |
+| `dqn_50k_s1.log` | DQN | 1 | ✅ Complete |
+| `dqn_50k_s2.log` | DQN | 2 | ✅ Complete |
 | `a2c_50k_s0.log` | A2C | 0 | ✅ Complete |
+| `a2c_50k_s1.log` | A2C | 1 | ✅ Complete |
+| `a2c_50k_s2.log` | A2C | 2 | ✅ Complete |
+| `ppo_50k_s0.log` | PPO | 0 | 🔄 Running |
+| `ppo_50k_s1.log` | PPO | 1 | ✅ Complete |
+| `ppo_50k_s2.log` | PPO | 2 | 🔄 Running |
 
-**For multi-machine runs, see:** `HANDOFF_9x9_EXPERIMENTS.md`
+**Detailed Report:** `results/9x9_experiments_seed0/EXPERIMENT_REPORT.md`
 
 ---
 
-### Future Work: Additional Seeds and Ablations
-
-**Priority:** MEDIUM (after all seed 0 baselines complete)
-
-See `HANDOFF_9x9_EXPERIMENTS.md` for detailed instructions on running remaining experiments on other machines.
-
-#### Remaining Experiments Matrix
-
-| Algorithm | Seed 0 | Seed 1 | Seed 2 | Total Runs |
-|-----------|--------|--------|--------|------------|
-| UPI-TRM | ✅ | 🔄 (Machine 1) | ❌ | 3 |
-| PPO | 🔄 (Machine 1) | ❌ | ❌ | 3 |
-| DQN | ✅ | ❌ | ❌ | 3 |
-| A2C | ✅ | ❌ | ❌ | 3 |
-
-**Total remaining:** 8 runs needed for full 3-seed coverage (12 total)
-
-#### Ablation Studies (After Multi-Seed Complete)
+### Future Work: Ablation Studies
 
 | Ablation | Config Change | Seeds | Purpose |
 |----------|---------------|-------|---------|
