@@ -1,0 +1,33 @@
+=== Mon Feb  2 11:36:51 AM PST 2026 ===
+a2c_50k_s0         50000/50k (100%)  success=0.000  score=32.280
+a2c_50k_s1         50000/50k (100%)  success=0.000  score=31.980
+a2c_50k_s2         04500/50k (  4%)  success=0.000  score=30.720
+dqn_50k_s0         50000/50k (100%)  success=0.000  score=29.300
+dqn_50k_s1         50000/50k (100%)  success=0.000  score=29.900
+dqn_50k_s2         50000/50k (100%)  success=0.000  score=29.280
+ppo_50k_s1         50000/50k (100%)  success=0.000  score=29.720
+upi_trm_50k_s0     50000/50k (100%)  success=0.080  score=54.080
+upi_trm_50k_s1     03500/50k (  3%)  success=0.000  score=35.780
+upi_trm_50k_s2     50000/50k (100%)  success=0.040  score=53.760
+
+=== Mon Feb  2 12:36:51 PM PST 2026 ===
+a2c_50k_s0         50000/50k (100%)  success=0.000  score=32.280
+a2c_50k_s1         50000/50k (100%)  success=0.000  score=31.980
+a2c_50k_s2         07500/50k (  7%)  success=0.000  score=30.700
+dqn_50k_s0         50000/50k (100%)  success=0.000  score=29.300
+dqn_50k_s1         50000/50k (100%)  success=0.000  score=29.900
+dqn_50k_s2         50000/50k (100%)  success=0.000  score=29.280
+ppo_50k_s1         50000/50k (100%)  success=0.000  score=29.720
+upi_trm_50k_s0     50000/50k (100%)  success=0.080  score=54.080
+upi_trm_50k_s1     06000/50k (  6%)  success=0.000  score=30.840
+upi_trm_50k_s2     50000/50k (100%)  success=0.040  score=53.760
+
+=== Mon Feb  2 01:36:51 PM PST 2026 ===
+a2c_50k_s0         50000/50k (100%)  success=0.000  score=32.280
+a2c_50k_s1         50000/50k (100%)  success=0.000  score=31.980
+a2c_50k_s2         10500/50k ( 21%)  success=0.000  score=30.220
+dqn_50k_s0         50000/50k (100%)  success=0.000  score=29.300
+dqn_50k_s1         50000/50k (100%)  success=0.000  score=29.900
+dqn_50k_s2         50000/50k (100%)  success=0.000  score=29.280
+ppo_50k_s1         50000/50k (100%)  success=0.000  score=29.720
+upi_trm_50k_s0     50000/50k (100%)  success=0.080  score=54.080
