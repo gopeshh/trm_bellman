@@ -84,7 +84,7 @@ def parse_log_file(log_path: Path) -> List[Tuple[int, float]]:
     return data
 
 
-def aggregate_seeds(log_files: List[Path], min_steps: int = 40000) -> Dict[int, List[Tuple[int, float]]]:
+def aggregate_seeds(log_files: List[Path], min_steps: int = 20000) -> Dict[int, List[Tuple[int, float]]]:
     """
     Load data for each seed separately, filtering out incomplete runs.
 
@@ -145,9 +145,11 @@ def main():
     output_dir = Path.home() / "UPI_TRM" / "UPI_TRM_ICML" / "figures"
 
     # Define methods and their log file patterns
+    # Include both 50k and 25k logs for PPO (will use common steps)
+    ppo_logs = list(results_dir.glob("ppo_50k_s*.log")) + list(results_dir.glob("ppo_25k_s*.log"))
     methods = {
         "upi_trm": list(results_dir.glob("upi_trm_50k_s*.log")),
-        "ppo": list(results_dir.glob("ppo_50k_s*.log")),
+        "ppo": ppo_logs,
         "a2c": list(results_dir.glob("a2c_50k_s*.log")),
         "dqn": list(results_dir.glob("dqn_50k_s*.log")),
     }
