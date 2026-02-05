@@ -145,13 +145,16 @@ def main():
     output_dir = Path.home() / "UPI_TRM" / "UPI_TRM_ICML" / "figures"
 
     # Define methods and their log file patterns
-    # Include both 50k and 25k logs for PPO (will use common steps)
-    ppo_logs = list(results_dir.glob("ppo_50k_s*.log")) + list(results_dir.glob("ppo_25k_s*.log"))
+    # Use specific patterns to avoid matching intermediate/restart logs
+    ppo_logs = (
+        list(results_dir.glob("ppo_50k_s[0-9].log")) +
+        list(results_dir.glob("ppo_25k_s[0-9].log"))
+    )
     methods = {
-        "upi_trm": list(results_dir.glob("upi_trm_50k_s*.log")),
+        "upi_trm": list(results_dir.glob("upi_trm_50k_s[0-9].log")),
         "ppo": ppo_logs,
-        "a2c": list(results_dir.glob("a2c_50k_s*.log")),
-        "dqn": list(results_dir.glob("dqn_50k_s*.log")),
+        "a2c": list(results_dir.glob("a2c_50k_s[0-9].log")),
+        "dqn": list(results_dir.glob("dqn_50k_s[0-9].log")),
     }
 
     # Plotting order (UPI-TRM first, then baselines)
