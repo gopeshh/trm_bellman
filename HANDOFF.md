@@ -1,8 +1,8 @@
 # HANDOFF.md - UPI-TRM Project
 
-**Date:** 2026-02-03
+**Date:** 2026-02-05
 **Branch:** `feature/upi-trm-clean`
-**Status:** 9x9 experiments 10/12 complete
+**Status:** 9x9 experiments complete (PPO needs 50k extension)
 
 ---
 
@@ -15,69 +15,85 @@
 | **UPI-TRM** | **8%** | 0% | **4%** | **4.0%** | **53.3** |
 | DQN | 0% | 0% | 0% | 0% | 29.5 |
 | A2C | 0% | 0% | 0% | 0% | 31.9 |
-| PPO | running | 0% | running | 0% | 29.7 |
+| PPO | 0% | 0% | 0% | 0% | 28.2 |
 
 ---
 
-## Current Status
+## Next Session: Continue PPO Seeds 0, 2 to 50k
 
-### 9x9 Experiments (10/12 complete)
+### Current State
 
-| Algorithm | Seed | Success | Score | Status |
-|-----------|------|---------|-------|--------|
-| UPI-TRM | 0 | **8%** | 54.08 | ✅ Done |
-| UPI-TRM | 1 | 0% | 51.94 | ✅ Done |
-| UPI-TRM | 2 | **4%** | 53.76 | ✅ Done |
-| DQN | 0 | 0% | 29.30 | ✅ Done |
-| DQN | 1 | 0% | 29.90 | ✅ Done |
-| DQN | 2 | 0% | 29.28 | ✅ Done |
-| A2C | 0 | 0% | 32.28 | ✅ Done |
-| A2C | 1 | 0% | 31.98 | ✅ Done |
-| A2C | 2 | 0% | 31.58 | ✅ Done |
-| PPO | 0 | - | - | 🔄 Running |
-| PPO | 1 | 0% | 29.72 | ✅ Done |
-| PPO | 2 | - | - | 🔄 Running |
+PPO seeds 0 and 2 completed **25k steps** (not full 50k). Seed 1 has full 50k.
 
-**Logs:** `results/9x9_experiments_seed0/`
-**Report:** `results/9x9_experiments_seed0/EXPERIMENT_REPORT.md`
+| Seed | Current Steps | Target | Status |
+|------|---------------|--------|--------|
+| PPO s0 | 25,000 | 50,000 | ⚠️ Need 25k more |
+| PPO s1 | 50,000 | 50,000 | ✅ Complete |
+| PPO s2 | 25,000 | 50,000 | ⚠️ Need 25k more |
 
----
+**Log files:**
+- `results/9x9_experiments_seed0/ppo_25k_s0.log` (25k complete)
+- `results/9x9_experiments_seed0/ppo_50k_s1.log` (50k complete)
+- `results/9x9_experiments_seed0/ppo_25k_s2.log` (25k complete)
 
-## Quick Commands
-
-### Check Experiment Progress
-
-```bash
-# GPU status
-nvidia-smi --query-gpu=index,utilization.gpu,memory.used --format=csv
-
-# All 9x9 experiments
-for f in ~/trm_bellman/results/9x9_experiments_seed0/*50k*.log; do
-  name=$(basename "$f" .log)
-  last_eval=$(grep "eval_success" "$f" | tail -1)
-  step=$(echo "$last_eval" | grep -oP '\[step \K\d+')
-  success=$(echo "$last_eval" | grep -oP 'eval_success_rate=\K[0-9.]+')
-  printf "%-18s step %5s  success=%s\n" "$name" "$step" "$success"
-done
-```
-
-### Run New Experiment
+### Commands to Continue PPO to 50k
 
 ```bash
 cd ~/fbsource/fbcode
 
-CUDA_VISIBLE_DEVICES=<GPU> nohup buck2 run //buiksat_trm:upi_trm_train \
+# PPO seed 0 - continue from 25k to 50k (use GPU 0)
+CUDA_VISIBLE_DEVICES=0 nohup buck2 run //buiksat_trm:upi_trm_train \
   -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
-  --config buiksat_trm/configs/sudoku9x9/<CONFIG>.yaml \
-  --dataset-paths buiksat_trm/data/sudoku-9x9 --seed <SEED> --no-wandb \
-  > ~/trm_bellman/results/9x9_experiments_seed0/<ALGO>_50k_s<SEED>.log 2>&1 &
+  --config /home/buiksat/trm_bellman/configs/sudoku9x9/ppo_9x9.yaml \
+  --dataset-paths /home/buiksat/trm_bellman/data/sudoku-9x9 \
+  --seed 0 --no-wandb \
+  --resume-checkpoint /home/buiksat/trm_bellman/checkpoints/rl_sudoku-9x9_seed0_ppo25k/rl_checkpoint_step_25000.pt \
+  > /home/buiksat/trm_bellman/results/9x9_experiments_seed0/ppo_50k_s0_continued.log 2>&1 &
+
+# PPO seed 2 - continue from 25k to 50k (use GPU 1)
+CUDA_VISIBLE_DEVICES=1 nohup buck2 run //buiksat_trm:upi_trm_train \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+  --config /home/buiksat/trm_bellman/configs/sudoku9x9/ppo_9x9.yaml \
+  --dataset-paths /home/buiksat/trm_bellman/data/sudoku-9x9 \
+  --seed 2 --no-wandb \
+  --resume-checkpoint /home/buiksat/trm_bellman/checkpoints/rl_sudoku-9x9_seed2_ppo25k/rl_checkpoint_step_25000.pt \
+  > /home/buiksat/trm_bellman/results/9x9_experiments_seed0/ppo_50k_s2_continued.log 2>&1 &
 ```
 
-**Available configs:**
-- `upi_trm_9x9_50k.yaml` - UPI-TRM
-- `dqn_9x9.yaml` - DQN baseline
-- `a2c_9x9.yaml` - A2C baseline
-- `ppo_9x9.yaml` - PPO baseline
+**Note:** Check if checkpoint paths exist. If not, you may need to re-run from scratch with the full 50k config:
+
+```bash
+# Alternative: Run full 50k from scratch
+CUDA_VISIBLE_DEVICES=0 nohup buck2 run //buiksat_trm:upi_trm_train \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
+  --config /home/buiksat/trm_bellman/configs/sudoku9x9/ppo_9x9.yaml \
+  --dataset-paths /home/buiksat/trm_bellman/data/sudoku-9x9 \
+  --seed 0 --no-wandb \
+  > /home/buiksat/trm_bellman/results/9x9_experiments_seed0/ppo_50k_s0_full.log 2>&1 &
+```
+
+### After PPO Completes
+
+1. **Regenerate plots:**
+```bash
+cd ~/fbsource/fbcode
+buck2 run //buiksat_trm:plot_9x9_success_vs_steps
+buck2 run //buiksat_trm:plot_9x9_mean_score_vs_steps
+```
+
+2. **Update plotting scripts** to include the new 50k logs (modify glob patterns in `scripts/plot_9x9_*.py`)
+
+3. **Update EXPERIMENT_REPORT.md** with final results
+
+---
+
+## Current Plotting Behavior
+
+The plotting scripts now handle mixed-length data:
+- **Solid line:** Mean across all seeds (common steps only, 0-25k for PPO)
+- **Dashed line:** Individual seed lines for extended range (25k-50k for PPO s1)
+
+This will automatically show full 50k data once all PPO seeds complete.
 
 ---
 
@@ -87,40 +103,40 @@ CUDA_VISIBLE_DEVICES=<GPU> nohup buck2 run //buiksat_trm:upi_trm_train \
 |-------------|------|
 | Experiment logs | `results/9x9_experiments_seed0/*.log` |
 | Detailed report | `results/9x9_experiments_seed0/EXPERIMENT_REPORT.md` |
-| Configs | `~/fbsource/fbcode/buiksat_trm/configs/sudoku9x9/` |
-| Dataset | `~/fbsource/fbcode/buiksat_trm/data/sudoku-9x9/` |
+| Plotting scripts | `scripts/plot_9x9_*.py` |
+| Configs | `configs/sudoku9x9/` |
+| Dataset | `data/sudoku-9x9/` |
 | Project guidelines | `CLAUDE.md` |
+
+---
+
+## Figures Location
+
+Generated figures are saved to:
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_9x9_success_vs_steps.pdf`
+- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_9x9_mean_score_vs_steps.pdf`
 
 ---
 
 ## Critical Notes
 
-1. **Always use `--dataset-paths buiksat_trm/data/sudoku-9x9`** - Otherwise defaults to 4x4
-2. **Use Buck2 for training** - Direct Python lacks dependencies
+1. **Always use absolute paths** for configs and data (buck2 sandbox issues)
+2. **Use CUDA_VISIBLE_DEVICES** to assign GPUs (0-3 available)
 3. **Config guidelines from CLAUDE.md:**
    - `use_feasibility_checker: true` (required)
    - `disable_value_head_norm: true` (for stability)
 
 ---
 
-## Previous Experiments (Completed)
-
-### 4x4 Hard Sudoku (Table 3)
-- Location: `results/table3_hard_controlled/`
-- Result: UPI-TRM 57% vs baselines 0%
-
-### 4x4 Trivial Sudoku
-- Location: `results/table3_baselines/`
-- Result: UPI-TRM 90-93% vs baselines 28-31%
-
----
-
 ## TODO
 
-- [ ] Wait for PPO s0, s2 to complete (~35h remaining)
-- [ ] Update report with final PPO results
-- [ ] Generate summary figures for paper
+- [ ] Run PPO s0 to 50k steps
+- [ ] Run PPO s2 to 50k steps
+- [ ] Update plotting scripts to include new 50k logs
+- [ ] Regenerate figures with all 50k data
+- [ ] Update EXPERIMENT_REPORT.md with final results
+- [ ] Commit and push changes
 
 ---
 
-*Last updated: 2026-02-03*
+*Last updated: 2026-02-05*

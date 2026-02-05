@@ -182,16 +182,40 @@ def main():
             print(f"  No data found")
             continue
 
-        # Plot individual seed curves (thin, semi-transparent)
-        for seed_idx, data in seed_data.items():
-            steps = [d[0] for d in data]
-            scores = [d[1] for d in data]
-            all_scores.extend(scores)  # Collect for Y-axis scaling
-            ax.plot(steps, scores, color=config["color"], alpha=0.18, linewidth=0.9)
-
-        # Compute and plot mean curve (thick)
+        # Compute mean curve for common steps
         steps, mean, std = compute_mean_std(seed_data)
+        max_common_step = max(steps) if len(steps) > 0 else 0
 
+        # Plot individual seed curves (thin, semi-transparent) for common range
+        # and more visible lines for extended range beyond common steps
+        for seed_idx, data in seed_data.items():
+            seed_steps = [d[0] for d in data]
+            seed_scores = [d[1] for d in data]
+            all_scores.extend(seed_scores)  # Collect for Y-axis scaling
+
+            # Split into common and extended ranges
+            common_steps = [s for s, v in zip(seed_steps, seed_scores) if s <= max_common_step]
+            common_scores = [v for s, v in zip(seed_steps, seed_scores) if s <= max_common_step]
+            extended_steps = [s for s, v in zip(seed_steps, seed_scores) if s > max_common_step]
+            extended_scores = [v for s, v in zip(seed_steps, seed_scores) if s > max_common_step]
+
+            # Plot common range (faint - mean line will overlay)
+            if common_steps:
+                ax.plot(common_steps, common_scores, color=config["color"], alpha=0.18, linewidth=0.9)
+
+            # Plot extended range more visibly (no mean line here)
+            if extended_steps:
+                # Connect from last common point to first extended point
+                if common_steps:
+                    connect_steps = [common_steps[-1]] + extended_steps
+                    connect_scores = [common_scores[-1]] + extended_scores
+                else:
+                    connect_steps = extended_steps
+                    connect_scores = extended_scores
+                ax.plot(connect_steps, connect_scores, color=config["color"], alpha=0.6, linewidth=1.5,
+                        linestyle='--')
+
+        # Plot mean curve (thick) for common steps
         if len(steps) > 0:
             num_seeds = len(seed_data)
             ax.plot(
