@@ -146,13 +146,9 @@ def main():
 
     # Define methods and their log file patterns
     # Use specific patterns to avoid matching intermediate/restart logs
-    ppo_logs = (
-        list(results_dir.glob("ppo_50k_s[0-9].log")) +
-        list(results_dir.glob("ppo_25k_s[0-9].log"))
-    )
     methods = {
         "upi_trm": list(results_dir.glob("upi_trm_50k_s[0-9].log")),
-        "ppo": ppo_logs,
+        "ppo": list(results_dir.glob("ppo_50k_s[0-9].log")),
         "a2c": list(results_dir.glob("a2c_50k_s[0-9].log")),
         "dqn": list(results_dir.glob("dqn_50k_s[0-9].log")),
     }

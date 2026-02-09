@@ -1,8 +1,8 @@
 # HANDOFF.md - UPI-TRM Project
 
-**Date:** 2026-02-05
+**Date:** 2026-02-08
 **Branch:** `feature/upi-trm-clean`
-**Status:** 9x9 experiments complete (PPO needs 50k extension)
+**Status:** 9x9 experiments complete (all seeds at 50k steps)
 
 ---
 
@@ -15,7 +15,7 @@
 | **UPI-TRM** | **8%** | 0% | **4%** | **4.0%** | **53.3** |
 | DQN | 0% | 0% | 0% | 0% | 29.5 |
 | A2C | 0% | 0% | 0% | 0% | 31.9 |
-| PPO | 0% | 0% | 0% | 0% | 28.2 |
+| PPO | 0% | 0% | 0% | 0% | 29.5 |
 
 ---
 
@@ -130,13 +130,13 @@ Generated figures are saved to:
 
 ## TODO
 
-- [ ] Run PPO s0 to 50k steps
-- [ ] Run PPO s2 to 50k steps
-- [ ] Update plotting scripts to include new 50k logs
-- [ ] Regenerate figures with all 50k data
-- [ ] Update EXPERIMENT_REPORT.md with final results
+- [x] Run PPO s0 to 50k steps
+- [x] Run PPO s2 to 50k steps
+- [x] Update plotting scripts to include new 50k logs
+- [x] Regenerate figures with all 50k data
+- [x] Update EXPERIMENT_REPORT.md with final results
 - [ ] Commit and push changes
 
 ---
 
-*Last updated: 2026-02-05*
+*Last updated: 2026-02-08*

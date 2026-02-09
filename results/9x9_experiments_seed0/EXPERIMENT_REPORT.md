@@ -19,7 +19,7 @@ This experiment evaluates UPI-TRM against standard RL baselines (PPO, A2C, DQN) 
 | **UPI-TRM** | **4.0% ± 4.0%** | **53.3 ± 1.1** | **+26.5** |
 | A2C | 0.0% ± 0.0% | 31.9 ± 0.4 | +5.1 |
 | DQN | 0.0% ± 0.0% | 29.5 ± 0.3 | +2.7 |
-| PPO | 0.0% ± 0.0% | 28.2 ± 1.5 | +2.2 |
+| PPO | 0.0% ± 0.0% | 29.5 ± 0.6 | +3.5 |
 
 *Initial puzzle score: ~26.8 (given clues only). Maximum score: 81 (fully solved).*
 
@@ -85,15 +85,13 @@ Success = (filled_cells == 81) AND (violations == 0)
 
 | Parameter | UPI-TRM | PPO | A2C | DQN |
 |-----------|---------|-----|-----|-----|
-| **Training steps** | 50,000 | 25,000* | 50,000 | 50,000 |
+| **Training steps** | 50,000 | 50,000 | 50,000 | 50,000 |
 | **Batch size** | 64 | 256 | 256 | 128 |
 | **Discount (γ)** | 0.99 | 0.99 | 0.99 | 0.99 |
 | **Max edits (T)** | 81 | 81 | 81 | 81 |
 | **Eval interval** | 500 | 500 | 500 | 500 |
-| **Eval episodes** | 50 | 50-100 | 100 | 100 |
+| **Eval episodes** | 50 | 50 | 100 | 100 |
 | **Seeds** | 0, 1, 2 | 0, 1, 2 | 0, 1, 2 | 0, 1, 2 |
-
-*PPO seeds 0 and 2 run for 25k steps due to compute constraints; seed 1 ran for 50k.
 
 ---
 
@@ -236,15 +234,15 @@ Success = (filled_cells == 81) AND (violations == 0)
 
 | Seed | Success Rate | Mean Score | Solved/Total | Peak Score | Initial | Steps |
 |------|--------------|------------|--------------|------------|---------|-------|
-| 0 | 0.0% | 26.82 | 0/50 | 38 | 26.00 | 25k |
+| 0 | 0.0% | 28.78 | 0/50 | 37 | 26.00 | 50k |
 | 1 | 0.0% | 29.72 | 0/50 | 46 | 26.00 | 50k |
-| 2 | 0.0% | 28.08 | 0/50 | 43 | 26.00 | 25k |
-| **Mean** | **0.0%** | **28.21** | 0/150 | 46 | 26.00 | - |
-| **Std** | 0.0% | 1.46 | - | - | - | - |
+| 2 | 0.0% | 29.86 | 0/50 | 40 | 26.00 | 50k |
+| **Mean** | **0.0%** | **29.45** | 0/150 | 46 | 26.00 | - |
+| **Std** | 0.0% | 0.58 | - | - | - | - |
 
 **Key observations:**
-- Never solves any puzzle
-- Similar to DQN performance (+2.2 from initial)
+- Never solves any puzzle across all 3 seeds at full 50k steps
+- Mean score improvement: +3.5 from initial
 - No improvement trend observed across training
 
 ---
@@ -257,7 +255,7 @@ Success = (filled_cells == 81) AND (violations == 0)
 |-----------|---------|-------|-------------|---------------|
 | **UPI-TRM** | 26.6 | 53.3 | **+26.7** | ~27 correct |
 | A2C | 26.6 | 31.9 | +5.3 | ~5 correct |
-| PPO | 26.0 | 28.2 | +2.2 | ~2 correct |
+| PPO | 26.0 | 29.5 | +3.5 | ~4 correct |
 | DQN | 26.3 | 29.5 | +3.2 | ~3 correct |
 
 *Approximate cells filled correctly (assuming no violations).
@@ -370,7 +368,7 @@ buck2 run //buiksat_trm:upi_trm_train -- --config configs/sudoku9x9/ppo_9x9.yaml
 | UPI-TRM | `results/9x9_experiments_seed0/upi_trm_50k_s{0,1,2}.log` |
 | DQN | `results/9x9_experiments_seed0/dqn_50k_s{0,1,2}.log` |
 | A2C | `results/9x9_experiments_seed0/a2c_50k_s{0,1,2}.log` |
-| PPO | `results/9x9_experiments_seed0/ppo_{25k,50k}_s{0,1,2}.log` |
+| PPO | `results/9x9_experiments_seed0/ppo_50k_s{0,1,2}.log` |
 
 ### 8.3 Plotting
 
@@ -479,4 +477,4 @@ gae_lambda: 0.95
 ---
 
 *Report generated: 2026-02-04*
-*Last updated: 2026-02-05 (All experiments complete)*
+*Last updated: 2026-02-08 (All PPO seeds extended to 50k steps)*
