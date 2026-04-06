@@ -2,10 +2,7 @@
 
 This repository extends the Tiny Recursive Model (TRM) codebase with a plan-space reinforcement learning framework we call **UPI–TRM**. It adds latent value estimation (`U_n(s)`), a configurable K-step value operator, and conservative policy improvement (CPI) mixture updates so that TRMs can be trained and evaluated with lightweight RL loops.
 
-## Latest experiment results (canonical)
-
-For the up-to-date 4×4 Sudoku feasibility-checker results (trivial 1–4 empties and harder 6–8 empties), random baselines, and artifact pointers, see:
-- `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
+## Canonical paper materials
 
 LaTeX paper repository:
 - `/home/buiksat/UPI_TRM/UPI_TRM_NIPS`
@@ -17,7 +14,7 @@ For the current NeurIPS 2026 resubmission plan, see:
 - `configs/` – experiment configs grouped by purpose: `ablations/`, `baselines/`, `pilots/`, `sudoku9x9/`, and paper-specific sweeps. Pretrain Hydra configs now live under `configs/pretrain/` (the repo-root `config` symlink remains for compatibility).
 - `entrypoints/` – canonical Python entrypoints for imitation and simple RL training. The legacy top-level scripts remain thin wrappers.
 - `models/recursive_reasoning/trm.py` – `TinyRecursiveReasoningModel_ACTV1` with RL-specific value/policy heads.
-- `models/value_head.py` – latent value head \(V_\psi\). Spectral normalization is optional and controlled by `disable_value_head_norm` (must be `true` for stability experiments; see `CLAUDE.md`).
+- `models/value_head.py` – latent value head \(V_\psi\). Spectral normalization is optional and controlled by `disable_value_head_norm`.
 - `rl/config.py` – `RLConfig` for hyperparameters, logging cadence, CPI knobs, evaluation intervals, and theory-metric toggles.
 - `rl/training_setup.py` – dataset bootstrap helpers (`DummyPuzzleDataset`, supervised bootstrap fallback) and checker resolution shared by the RL entrypoint and tests.
 - `rl/envs/plan_edit_env.py` – plan-space meta-MDP describing edit actions over latent plans.
@@ -226,7 +223,7 @@ Key differences from 4×4:
 
 #### Config Selection Notes
 
-- For stability experiments, follow `CLAUDE.md` and `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`: keep `use_feasibility_checker: true`, set `disable_value_head_norm: true`, and change one variable at a time.
+- For stability experiments, follow `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`: keep `use_feasibility_checker: true`, set `disable_value_head_norm: true`, and change one variable at a time.
 - The 4×4 pilot configs are the fastest way to validate code changes locally.
 - The 9×9 configs and paper-specific sweep directories are intended for longer-running experiments and artifact generation.
 
