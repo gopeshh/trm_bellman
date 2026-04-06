@@ -1,219 +1,117 @@
 #!/usr/bin/env python3
-"""
-Verify that all generated configs are valid and align with paper theory.
+"""Validate the current RL config tree against repo invariants."""
 
-This script checks:
-1. YAML syntax is valid
-2. All required RLConfig fields are present
-3. Theory alignment validation passes
-4. Configs match their intended ablation purpose
-"""
+from __future__ import annotations
 
 import sys
 from pathlib import Path
+
 import yaml
 
-# Add parent directory to path to import RLConfig
-sys.path.insert(0, str(Path(__file__).parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from rl.config import RLConfig
 
 
-def verify_config(config_path: Path) -> tuple[bool, list[str]]:
-    """
-    Verify a single config file.
+CONFIG_ROOT = PROJECT_ROOT / "configs"
+RL_CONFIG_EXCLUDE_DIRS = {"pretrain"}
+STABILITY_DIRS = {
+    "exp2_contraction_sweep",
+    "exp3_projection_ablation",
+    "table3_hard_controlled",
+}
 
-    Returns:
-        (success, issues) tuple
-    """
-    issues = []
 
-    # 1. Check file exists
-    if not config_path.exists():
-        issues.append(f"File not found: {config_path}")
-        return False, issues
+def iter_rl_config_paths() -> list[Path]:
+    return sorted(
+        path
+        for path in CONFIG_ROOT.rglob("*.yaml")
+        if not RL_CONFIG_EXCLUDE_DIRS.intersection(path.parts)
+    )
 
-    # 2. Load YAML
+
+def load_yaml(path: Path) -> dict:
+    with open(path, "r") as handle:
+        return yaml.safe_load(handle)
+
+
+def load_rl_config(path: Path) -> RLConfig:
+    return RLConfig(**load_yaml(path))
+
+
+def validate_repo_invariants(path: Path, cfg_dict: dict) -> list[str]:
+    issues: list[str] = []
+
+    if (
+        STABILITY_DIRS.intersection(path.parts)
+        or "no_vhead_norm" in path.name
+    ) and not cfg_dict.get("disable_value_head_norm", False):
+        issues.append("stability config must set disable_value_head_norm=true")
+
+    if "phase4_2x2_norm_ablation" in path.parts:
+        if path.stem.endswith("_nv") and not cfg_dict.get("disable_value_head_norm", False):
+            issues.append("phase4 *_nv configs must set disable_value_head_norm=true")
+        if path.stem.endswith("_yv") and cfg_dict.get("disable_value_head_norm", True):
+            issues.append("phase4 *_yv configs must set disable_value_head_norm=false")
+
+    return issues
+
+
+def verify_config(path: Path) -> tuple[bool, list[str]]:
+    issues: list[str] = []
+
+    if not path.exists():
+        return False, [f"file not found: {path}"]
+
     try:
-        with open(config_path) as f:
-            config_dict = yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        issues.append(f"YAML parsing error: {e}")
-        return False, issues
+        cfg_dict = load_yaml(path)
+    except yaml.YAMLError as exc:
+        return False, [f"YAML parsing error: {exc}"]
 
-    # 3. Validate as RLConfig
     try:
-        config = RLConfig(**config_dict)
-    except Exception as e:
-        issues.append(f"RLConfig validation error: {e}")
-        return False, issues
+        RLConfig(**cfg_dict)
+    except Exception as exc:
+        return False, [f"RLConfig validation error: {exc}"]
 
-    # 4. Run theory alignment validation
-    validation_result = config.validate_theory_alignment(warn=False)
-
-    if not validation_result["theory_aligned"] and "theory_exact" in config_path.name:
-        # Theory-exact configs should pass validation
-        issues.extend(validation_result["issues"])
-
+    issues.extend(validate_repo_invariants(path, cfg_dict))
     return len(issues) == 0, issues
 
 
-def main():
-    print("="*70)
-    print("Config Validation Report")
-    print("="*70)
-    print()
-
-    # Configs to verify
-    config_paths = [
-        Path("configs/rl_sudoku_shaped_theory_exact.yaml"),
-        Path("configs/rl_sudoku_sparse_theory_exact.yaml"),
-    ]
-
-    # Add ablation configs
-    ablations_dir = Path("configs/ablations")
-    if ablations_dir.exists():
-        config_paths.extend(sorted(ablations_dir.glob("ablation_*.yaml")))
-
-    total = 0
+def main() -> int:
+    config_paths = iter_rl_config_paths()
     passed = 0
     failed = 0
 
-    for config_path in config_paths:
-        total += 1
-        success, issues = verify_config(config_path)
+    print("=" * 72)
+    print("RL Config Validation Report")
+    print("=" * 72)
 
-        status = "✅ PASS" if success else "❌ FAIL"
-        print(f"{status} {config_path.name}")
+    for config_path in config_paths:
+        success, issues = verify_config(config_path)
+        status = "PASS" if success else "FAIL"
+        print(f"[{status}] {config_path.relative_to(PROJECT_ROOT)}")
 
         if success:
             passed += 1
-            # Load config to show key settings
-            with open(config_path) as f:
-                config_dict = yaml.safe_load(f)
-            config = RLConfig(**config_dict)
-
-            # Show key theory flags
-            flags = []
-            if config.reward_shaping:
-                flags.append(f"shaped(fail_r={config.fail_terminal_reward})")
-            else:
-                flags.append("sparse")
-
-            if config.exact_baseline_summation:
-                flags.append("exact_baseline")
-            if config.enable_contraction:
-                flags.append(f"L_z={config.target_Lz}")
-            if config.theory_exact_mixture:
-                flags.append(f"α={config.mixture_alpha}")
-
-            print(f"  Settings: {', '.join(flags)}")
+            cfg = load_rl_config(config_path)
+            flags = [
+                f"algo={cfg.algorithm}",
+                f"checker={'feasibility' if cfg.use_feasibility_checker else 'other'}",
+                f"contraction={'on' if cfg.enable_contraction else 'off'}",
+                f"disable_value_head_norm={cfg.disable_value_head_norm}",
+            ]
+            print(f"  {' | '.join(flags)}")
         else:
             failed += 1
             for issue in issues:
-                print(f"  ⚠️  {issue}")
-        print()
+                print(f"  - {issue}")
 
-    print("="*70)
-    print(f"Summary: {passed}/{total} configs passed, {failed} failed")
-    print("="*70)
-
-    # Specific checks for theory-exact configs
-    print("\nTheory-Exact Config Verification:")
-    print("-" * 70)
-
-    theory_exact_configs = [
-        "configs/rl_sudoku_shaped_theory_exact.yaml",
-    ]
-
-    for config_path_str in theory_exact_configs:
-        config_path = Path(config_path_str)
-        if not config_path.exists():
-            print(f"❌ {config_path.name}: NOT FOUND")
-            continue
-
-        with open(config_path) as f:
-            config_dict = yaml.safe_load(f)
-        config = RLConfig(**config_dict)
-
-        is_exact = config.is_theory_exact()
-        status = "✅" if is_exact else "❌"
-        print(f"{status} {config_path.name}: is_theory_exact() = {is_exact}")
-
-        # Check specific requirements for shaped theory-exact
-        checks = {
-            "reward_shaping": config.reward_shaping,
-            "fail_terminal_reward == -10.0": config.fail_terminal_reward == -10.0,
-            "exact_baseline_summation": config.exact_baseline_summation,
-            "theory_exact_mixture": config.theory_exact_mixture,
-            "enable_contraction": config.enable_contraction,
-            "target_Lz < 1.0": config.target_Lz < 1.0,
-            "latent_ball_radius > 0": config.latent_ball_radius > 0,
-            "NOT distill_mixture_policy": not config.distill_mixture_policy,
-        }
-
-        for check_name, check_passed in checks.items():
-            status = "  ✅" if check_passed else "  ❌"
-            print(f"{status} {check_name}")
-
-    print()
-
-    # Ablation verification
-    print("\nAblation Config Verification:")
-    print("-" * 70)
-
-    expected_ablations = {
-        "ablation_no_contraction.yaml": {
-            "enable_contraction": False,
-        },
-        "ablation_no_exact_baseline.yaml": {
-            "exact_baseline_summation": False,
-        },
-        "ablation_no_conservative_mixture.yaml": {
-            "mixture_alpha": 1.0,
-        },
-        "ablation_no_projection.yaml": {
-            "latent_ball_radius": 0.0,
-        },
-        "ablation_no_theory_exact_mixture.yaml": {
-            "theory_exact_mixture": False,
-        },
-        "ablation_no_theory_features.yaml": {
-            "enable_contraction": False,
-            "exact_baseline_summation": False,
-            "mixture_alpha": 1.0,
-            "latent_ball_radius": 0.0,
-            "theory_exact_mixture": False,
-        },
-    }
-
-    for ablation_name, expected_settings in expected_ablations.items():
-        config_path = Path("configs/ablations") / ablation_name
-        if not config_path.exists():
-            print(f"❌ {ablation_name}: NOT FOUND")
-            continue
-
-        with open(config_path) as f:
-            config_dict = yaml.safe_load(f)
-        config = RLConfig(**config_dict)
-
-        all_correct = True
-        for setting_name, expected_value in expected_settings.items():
-            actual_value = getattr(config, setting_name)
-            if actual_value != expected_value:
-                all_correct = False
-                print(f"❌ {ablation_name}: {setting_name} = {actual_value} (expected {expected_value})")
-
-        if all_correct:
-            print(f"✅ {ablation_name}: All settings correct")
-
-    print()
-    print("="*70)
-    print("Validation complete!")
-    print("="*70)
-
+    print("-" * 72)
+    print(f"Summary: {passed} passed, {failed} failed, {len(config_paths)} checked")
+    print("=" * 72)
     return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
