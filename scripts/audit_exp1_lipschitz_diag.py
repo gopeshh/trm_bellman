@@ -20,7 +20,7 @@ from typing import List, Tuple
 # Configuration
 # =============================================================================
 
-PROJECT_ROOT = Path("/home/buiksat/trm_bellman")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DIAG_DIR = PROJECT_ROOT / "results/paper_ready/exp1_lipschitz_diag"
 
 REQUIRED_FILES = [

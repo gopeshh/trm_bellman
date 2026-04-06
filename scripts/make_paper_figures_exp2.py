@@ -24,8 +24,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-# Add project root - use absolute path for Buck2 compatibility
-PROJECT_ROOT = Path("/home/buiksat/trm_bellman")
+# Add project root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # =============================================================================
@@ -40,9 +40,9 @@ SWEEP_CONFIG = {
     0.90: ("configs/exp2_contraction_sweep/target_lz_090.yaml", [41, 42, 43]),
 }
 
-CHECKPOINT_BASE = Path("/home/buiksat/trm_bellman/checkpoints/exp2_contraction_sweep")
-OUT_DIR = Path("/home/buiksat/trm_bellman/results/paper_ready/exp2")
-BATCH_DIR = Path("/home/buiksat/trm_bellman/artifacts/eval_batches")
+CHECKPOINT_BASE = PROJECT_ROOT / "checkpoints/exp2_contraction_sweep"
+OUT_DIR = PROJECT_ROOT / "results/paper_ready/exp2"
+BATCH_DIR = PROJECT_ROOT / "artifacts/eval_batches"
 
 N_TRAIN = 2
 N_EVAL = 16  # 8× training depth

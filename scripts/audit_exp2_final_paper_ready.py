@@ -27,7 +27,7 @@ from typing import List, Tuple
 # Configuration
 # =============================================================================
 
-PROJECT_ROOT = Path("/home/buiksat/trm_bellman")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXP2_FINAL_DIR = PROJECT_ROOT / "results/paper_ready/exp2_final"
 
 REQUIRED_FILES = [

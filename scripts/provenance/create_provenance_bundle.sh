@@ -1,12 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Create provenance bundle for Figure 2 and Table 3 rerun
 # Contains all artifacts needed to reproduce paper results
 
-set -e
+set -euo pipefail
 
-DATE=$(date +%Y_%m_%d)
-RESULTS_DIR="/home/buiksat/trm_bellman/results/table3_baselines_rerun_evalfix_2026_01_22"
-PROVENANCE_DIR="/home/buiksat/trm_bellman/results/paper_ready/fig2_provenance_rerun_evalfix_${DATE}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+DATE="$(date +%Y_%m_%d)"
+GENERATED_AT="$(date -Is)"
+RESULTS_DIR="${RESULTS_DIR:-${REPO_ROOT}/results/table3_baselines_rerun_evalfix_2026_01_22}"
+PROVENANCE_DIR="${PROVENANCE_DIR:-${REPO_ROOT}/results/paper_ready/fig2_provenance_rerun_evalfix_${DATE}}"
+CONFIG_ROOT="${CONFIG_ROOT:-${REPO_ROOT}/configs}"
+FIGURE_ROOT="${FIGURE_ROOT:-${REPO_ROOT}/figures}"
+SCRIPT_ROOT="${SCRIPT_ROOT:-${REPO_ROOT}/scripts}"
 
 echo "============================================================"
 echo "Creating Provenance Bundle for Figure 2 + Table 3 Rerun"
@@ -18,6 +24,26 @@ echo ""
 # Create directory structure
 mkdir -p "$PROVENANCE_DIR"/{logs,configs,figures,scripts}
 
+config_files=(
+  "ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml"
+  "ablations/upi_trm_feasibility_no_contraction.yaml"
+  "exp3_projection_ablation/c_rdis.yaml"
+  "baselines/ppo_trm_feasibility.yaml"
+  "baselines/a2c_trm_feasibility.yaml"
+  "baselines/dqn_trm_feasibility.yaml"
+)
+
+figure_files=(
+  "trivial_baselines_vs_no_contraction_success_vs_steps.pdf"
+  "trivial_baselines_vs_no_contraction_success_vs_steps.png"
+)
+
+script_files=(
+  "run_table3_fig2_rerun.sh"
+  "plot_table3_baselines.py"
+  "generate_table3_summary.py"
+)
+
 # 1. Copy training logs
 echo "=== Copying training logs ==="
 cp "$RESULTS_DIR"/*.log "$PROVENANCE_DIR/logs/" 2>/dev/null || echo "  No logs found"
@@ -26,27 +52,25 @@ echo "  Copied $(ls "$PROVENANCE_DIR/logs/"*.log 2>/dev/null | wc -l) log files"
 # 2. Copy configs used
 echo ""
 echo "=== Copying configs ==="
-cp /home/buiksat/fbsource/fbcode/buiksat_trm/configs/ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml "$PROVENANCE_DIR/configs/" 2>/dev/null || true
-cp /home/buiksat/fbsource/fbcode/buiksat_trm/configs/ablations/upi_trm_feasibility_no_contraction.yaml "$PROVENANCE_DIR/configs/" 2>/dev/null || true
-cp /home/buiksat/fbsource/fbcode/buiksat_trm/configs/exp3_projection_ablation/c_rdis.yaml "$PROVENANCE_DIR/configs/" 2>/dev/null || true
-cp /home/buiksat/fbsource/fbcode/buiksat_trm/configs/baselines/ppo_trm_feasibility.yaml "$PROVENANCE_DIR/configs/" 2>/dev/null || true
-cp /home/buiksat/fbsource/fbcode/buiksat_trm/configs/baselines/a2c_trm_feasibility.yaml "$PROVENANCE_DIR/configs/" 2>/dev/null || true
-cp /home/buiksat/fbsource/fbcode/buiksat_trm/configs/baselines/dqn_trm_feasibility.yaml "$PROVENANCE_DIR/configs/" 2>/dev/null || true
+for relative_path in "${config_files[@]}"; do
+  cp "${CONFIG_ROOT}/${relative_path}" "$PROVENANCE_DIR/configs/" 2>/dev/null || true
+done
 echo "  Copied $(ls "$PROVENANCE_DIR/configs/"*.yaml 2>/dev/null | wc -l) config files"
 
 # 3. Copy figures
 echo ""
 echo "=== Copying figures ==="
-cp /home/buiksat/trm_bellman/figures/trivial_baselines_vs_no_contraction_success_vs_steps.pdf "$PROVENANCE_DIR/figures/" 2>/dev/null || echo "  PDF not found"
-cp /home/buiksat/trm_bellman/figures/trivial_baselines_vs_no_contraction_success_vs_steps.png "$PROVENANCE_DIR/figures/" 2>/dev/null || echo "  PNG not found"
+for filename in "${figure_files[@]}"; do
+  cp "${FIGURE_ROOT}/${filename}" "$PROVENANCE_DIR/figures/" 2>/dev/null || echo "  Missing ${filename}"
+done
 echo "  Copied $(ls "$PROVENANCE_DIR/figures/"* 2>/dev/null | wc -l) figure files"
 
 # 4. Copy scripts
 echo ""
 echo "=== Copying scripts ==="
-cp /home/buiksat/trm_bellman/scripts/run_table3_fig2_rerun.sh "$PROVENANCE_DIR/scripts/"
-cp /home/buiksat/trm_bellman/scripts/plot_table3_baselines.py "$PROVENANCE_DIR/scripts/"
-cp /home/buiksat/trm_bellman/scripts/generate_table3_summary.py "$PROVENANCE_DIR/scripts/"
+for filename in "${script_files[@]}"; do
+  cp "${SCRIPT_ROOT}/${filename}" "$PROVENANCE_DIR/scripts/"
+done
 echo "  Copied $(ls "$PROVENANCE_DIR/scripts/"* 2>/dev/null | wc -l) script files"
 
 # 5. Copy table summary
@@ -57,10 +81,10 @@ cp "$RESULTS_DIR/table3_summary.md" "$PROVENANCE_DIR/" 2>/dev/null || echo "  Ta
 # 6. Create README
 echo ""
 echo "=== Creating README ==="
-cat > "$PROVENANCE_DIR/README.md" << 'EOFREADME'
+cat > "$PROVENANCE_DIR/README.md" <<EOFREADME
 # Figure 2 + Table 3 Provenance Bundle (Post-Evaluator-Fix Rerun)
 
-**Generated:** $(date)
+**Generated:** ${GENERATED_AT}
 **Purpose:** Reproducibility artifacts for ICML submission
 
 ## Contents

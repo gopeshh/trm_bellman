@@ -22,6 +22,7 @@ Outputs to results/paper_ready/exp2_final/:
 """
 
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -44,10 +45,10 @@ except ImportError:
 # Configuration
 # =============================================================================
 
-PROJECT_ROOT = Path("/Users/buiksat/trm_bellman")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 EXP2C_JSON = PROJECT_ROOT / "results/paper_ready/exp2c/DIAGNOSTICS_exp2c_lite.json"
 OUT_DIR = PROJECT_ROOT / "results/paper_ready/exp2_final"  # docs & tables
-FIG_DIR = Path("/Users/buiksat/UPI_TRM/UPI_TRM_ICML/figures")  # figures for paper
+FIG_DIR = Path(os.environ.get("UPI_TRM_FIG_DIR", str(PROJECT_ROOT / "figures")))
 
 # ICML paper styling
 PAPER_STYLE = {

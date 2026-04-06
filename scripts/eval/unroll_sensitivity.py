@@ -14,7 +14,7 @@ Subcommands:
 Usage:
     python scripts/eval_unroll_sensitivity.py build-batches \
         --checkpoint_a path/to/model_a.pt \
-        --checkpoint_b path/to/model_b.pt \  # optional
+        --checkpoint_b path/to/model_b.pt \
         --out_dir artifacts/eval_batches/ \
         --seed 42
 
@@ -46,8 +46,8 @@ import torch
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent
+# Add project root to path.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import numpy as np

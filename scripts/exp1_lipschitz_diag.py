@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 # Add project root
-PROJECT_ROOT = Path("/home/buiksat/trm_bellman")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import torch
