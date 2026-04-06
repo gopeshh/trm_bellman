@@ -160,10 +160,18 @@ Use the (harder) 6–8 empties suite with a feasibility-enabled config:
 
 ```bash
 python upi_trm_train.py \
-    --dataset-paths data/sudoku-4x4-ultra-easy \
+    --dataset-paths data/sudoku-4x4-easy_6to8empties \
     --config configs/rl_sudoku_4x4_feasibility.yaml \
     --seed 42
 ```
+
+If the canonical 4×4 splits are missing in a fresh checkout, rebuild them with the Buck-backed helper:
+
+```bash
+bash scripts/restore_4x4_datasets.sh
+```
+
+That restores `data/sudoku-4x4-trivial`, `data/sudoku-4x4-ultra-easy`, and `data/sudoku-4x4-easy_6to8empties`, then validates their empties ranges with `//buiksat_trm:inspect_4x4_dataset`.
 
 #### 9×9 Sudoku (Full-Scale Experiments)
 
@@ -425,10 +433,31 @@ python -m dataset.build_arc_dataset \
 # Sudoku-Extreme (9x9)
 python dataset/build_sudoku_dataset.py --output-dir data/sudoku-extreme-1k-aug-1000  --subsample-size 1000 --num-aug 1000  # 1000 examples, 1000 augments
 
-# Sudoku 4x4 (for curriculum learning / debugging)
-python dataset/build_4x4_sudoku.py --output-dir data/sudoku-4x4 --num-puzzles 1000
-# For ultra-easy (mostly easy puzzles with 8-10 clues):
-python dataset/build_4x4_sudoku.py --output-dir data/sudoku-4x4-ultra-easy --num-easy 500 --num-medium 0 --num-hard 0
+# Sudoku 4x4 (mixed curriculum)
+buck2 run //buiksat_trm:build_4x4_sudoku -- \
+  --output-dir buiksat_trm/data/sudoku-4x4 \
+  --num-puzzles 1000
+
+# True ultra-easy 4x4 (1-4 empties, 500 puzzles)
+buck2 run //buiksat_trm:build_4x4_trivial -- \
+  --output-dir buiksat_trm/data/sudoku-4x4-trivial \
+  --num-puzzles 500 \
+  --seed 42
+
+# Hard 4x4 paper split (6-8 empties, 1000 puzzles)
+buck2 run //buiksat_trm:build_4x4_sudoku -- \
+  --output-dir buiksat_trm/data/sudoku-4x4-easy_6to8empties \
+  --num-easy 1000 --num-medium 0 --num-hard 0 \
+  --seed 42
+
+# Legacy compatibility path used by older scripts / eval metadata
+buck2 run //buiksat_trm:build_4x4_sudoku -- \
+  --output-dir buiksat_trm/data/sudoku-4x4-ultra-easy \
+  --num-easy 500 --num-medium 0 --num-hard 0 \
+  --seed 42
+
+# Validate all 4x4 splits
+buck2 run //buiksat_trm:inspect_4x4_dataset
 
 # Maze-Hard
 python dataset/build_maze_dataset.py # 1000 examples, 8 augments
@@ -550,7 +579,7 @@ For a working 4x4 Sudoku solver, use imitation learning from oracle:
 
 ```bash
 # Train and demo (100% solve rate)
-python imitation_train.py --dataset-paths data/sudoku-4x4-ultra-easy --num-epochs 100
+python imitation_train.py --dataset-paths data/sudoku-4x4-trivial --num-epochs 100
 
 # Output: 50/50 puzzles solved, step-by-step solving demos
 ```
