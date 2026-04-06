@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-05
 **Branch:** `feature/upi-trm-clean`
-**Primary sources of truth:** `CLAUDE.md`, `EXPERIMENT_PLAN_ICML.md`, `README.md`
+**Primary sources of truth:** `CLAUDE.md`, `README.md`, `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`
 
 ---
 
@@ -10,9 +10,10 @@
 
 This branch focuses on repository cleanup and behavior-preserving refactors around the UPI-TRM training stack. Historical experiment outputs remain under `results/` and the various `*_export/` directories, but the current operational guidance is:
 
-- Follow `EXPERIMENT_PLAN_ICML.md` for paper-facing experiment sequencing.
+- Follow `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md` for paper-facing experiment sequencing.
 - Treat `CLAUDE.md` as the guardrail document for stability experiments.
 - Treat `README.md` as the current repo layout and entrypoint guide.
+- The LaTeX paper repo is `/home/buiksat/UPI_TRM/UPI_TRM_NIPS`.
 
 ## Refactor Notes
 

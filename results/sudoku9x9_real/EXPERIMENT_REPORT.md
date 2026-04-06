@@ -472,7 +472,7 @@ This is a large effect size given:
 2. **Analyze final results** with complete 25k steps
 3. **Plot learning curves** across training for all methods
 
-**Follow-up experiments (per EXPERIMENT_PLAN_ICML.md):**
+**Follow-up experiments (see `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`):**
 1. **Contraction ablation:** Compare `enable_contraction: true/false`
 2. **Projection radius sweep:** Try R ∈ {10, 30, 100, 0}
 3. **Latent mode comparison:** Episodic vs persistent z head-to-head

@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-Operational guidance for Claude Code. **Single source of truth for experiments:** `EXPERIMENT_PLAN_ICML.md`
+Operational guidance for Claude Code.
+Main experiment plan for the NeurIPS 2026 resubmission:
+`/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`
 
 ---
 
@@ -39,28 +41,25 @@ Enable `track_theory_metrics: true`. Logged in `rl/upi_trm_trainer.py:_compute_t
 |--------|--------|----------|
 | `hat_Lz` | ✅ Implemented | `utils/lipschitz.py:estimate_local_Lz()` |
 | `hat_Cz`, `hat_Lv`, `unrolling_term` | ✅ Implemented | `rl/upi_trm_trainer.py` |
-| `Δ_V`, `Δ_π`, `Δ_z` (unroll sensitivity) | ❌ TODO | See `EXPERIMENT_PLAN_ICML.md` Phase 0 |
-| Saturation rate | ❌ TODO | See `EXPERIMENT_PLAN_ICML.md` Phase 0 |
+| `Δ_V`, `Δ_π`, `Δ_z` (unroll sensitivity) | ❌ TODO | See `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md` |
+| Saturation rate | ❌ TODO | See `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md` |
 
 ---
 
 ## Eval batch requirements
 
-**Do not evaluate only initial states.** Per `EXPERIMENT_PLAN_ICML.md`:
+**Do not evaluate only initial states.** Per `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`:
 - **B0:** Fixed initial puzzles (trivial + hard mix)
 - **B1:** One-step successor closure from B0
 
-Both batches TODO; see Phase 1 spec.
+Both batches TODO; see the external NIPS plan.
 
 ---
 
-## Experiment sequence
+## Experiment Sequence
 
-**Follow `EXPERIMENT_PLAN_ICML.md`.** Summary:
-1. Phase 0: Instrumentation (implement TODO metrics above)
-2. Phase 1: Unroll sensitivity (no-contraction vs contraction, value-head norm OFF)
-3. Phase 2: Projection radius sweep (`latent_ball_radius ∈ {10, 30, 100, 0}`)
-4. Phase 3: Contraction sweep (`target_Lz ∈ {0.999, 0.99, 0.95, 0.90}`)
+Follow `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md` for the current multi-month experiment sequence.
+Do not maintain a duplicate phase plan in this repo.
 
 ---
 
@@ -117,7 +116,7 @@ pytest tests/ -v --tb=short
 
 ## Change-management rules
 
-1. **No silent behavior changes.** Update YAMLs + `EXPERIMENT_PLAN_ICML.md` if defaults change.
+1. **No silent behavior changes.** Update YAMLs and the external NIPS plan if defaults change in a way that affects planned experiments.
 2. **Test new metrics.** At least one unit test (no NaNs, deterministic).
 3. **Reproducible outputs.** Scripts must accept seed + explicit paths.
 4. **Baselines are contingency.** Don't fix until Phases 1–3 done.

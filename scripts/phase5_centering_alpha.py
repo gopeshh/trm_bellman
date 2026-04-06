@@ -2,7 +2,8 @@
 """
 Phase 5: Centering + Alpha Sensitivity Diagnostic (Theorem Alignment).
 
-This script implements the Phase 5 experiment from EXPERIMENT_PLAN_ICML.md:
+This script implements the current Phase 5 experiment tracked in
+/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md:
 
 1. Compute advantage baseline two ways:
    - Exact baseline (sum over all ~97 actions) → E_{a~π}[Q̂(s,a)]

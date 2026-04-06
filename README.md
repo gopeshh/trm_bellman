@@ -7,8 +7,8 @@ This repository extends the Tiny Recursive Model (TRM) codebase with a plan-spac
 For the up-to-date 4×4 Sudoku feasibility-checker results (trivial 1–4 empties and harder 6–8 empties), random baselines, and artifact pointers, see:
 - `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
 
-For the forward-looking ICML execution plan (stability dial), see:
-- `EXPERIMENT_PLAN_ICML.md`
+For the current NeurIPS 2026 resubmission plan, see:
+- `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`
 
 ## Repository Structure
 - `configs/` – experiment configs grouped by purpose: `ablations/`, `baselines/`, `pilots/`, `sudoku9x9/`, and paper-specific sweeps. Pretrain Hydra configs now live under `configs/pretrain/` (the repo-root `config` symlink remains for compatibility).
@@ -223,7 +223,7 @@ Key differences from 4×4:
 
 #### Config Selection Notes
 
-- For stability experiments, follow `CLAUDE.md` and `EXPERIMENT_PLAN_ICML.md`: keep `use_feasibility_checker: true`, set `disable_value_head_norm: true`, and change one variable at a time.
+- For stability experiments, follow `CLAUDE.md` and `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`: keep `use_feasibility_checker: true`, set `disable_value_head_norm: true`, and change one variable at a time.
 - The 4×4 pilot configs are the fastest way to validate code changes locally.
 - The 9×9 configs and paper-specific sweep directories are intended for longer-running experiments and artifact generation.
 
@@ -308,7 +308,7 @@ Set `track_theory_metrics: true` in the YAML you are running to log:
 - `bellman_residual_*`: Empirical Bellman residual statistics
 
 ## Ablation Experiments
-Use the directories under `configs/` as the source of truth for available experiment families. `EXPERIMENT_PLAN_ICML.md` defines the intended phase order for paper-facing stability runs.
+Use the directories under `configs/` as the source of truth for available experiment families. The current paper plan lives in `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`.
 
 ## Evaluating a Trained Policy (Optional)
 To run policy-only evaluation outside the training loop, load the model checkpoint and call `evaluate_plan_policy` (strict success) or `evaluate_plan_policy_with_scores` (mean score + success):
