@@ -113,6 +113,4 @@ def make_sudoku_feasibility_checker(w_v: float = 2.0, w_z: float = 5.0) -> Calla
     checker.__name__ = "sudoku_feasibility_checker"
     return checker
 
-
 sudoku_checker = sudoku_solution_checker
-
