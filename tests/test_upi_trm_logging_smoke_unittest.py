@@ -4,9 +4,10 @@ Converts pytest-style tests to unittest.TestCase for Buck2 compatibility.
 """
 
 import unittest
+from unittest.mock import patch
 import torch
 
-from upi_trm_train import DummyPuzzleDataset, dummy_checker
+from upi_trm_train import DummyPuzzleDataset, build_dataset_from_paths, dummy_checker
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
@@ -87,6 +88,18 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         self.assertIsInstance(success_rate, float)
         self.assertGreaterEqual(success_rate, 0.0)
         self.assertLessEqual(success_rate, 1.0)
+
+    def test_dataset_bootstrap_fallback_is_explicit(self):
+        with patch("upi_trm_train.PuzzleDataset", side_effect=RuntimeError("boom")):
+            with patch("builtins.print") as mock_print:
+                dataset, *_ = build_dataset_from_paths(["missing-dataset"], pool_size=4)
+
+        self.assertIsInstance(dataset, DummyPuzzleDataset)
+        emitted = "\n".join(
+            " ".join(str(arg) for arg in call.args)
+            for call in mock_print.call_args_list
+        )
+        self.assertIn("Falling back to dummy dataset", emitted)
 
 
 if __name__ == "__main__":

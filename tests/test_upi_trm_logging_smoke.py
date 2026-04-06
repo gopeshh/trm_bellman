@@ -1,6 +1,7 @@
 import torch
+from unittest.mock import patch
 
-from upi_trm_train import DummyPuzzleDataset, dummy_checker
+from upi_trm_train import DummyPuzzleDataset, build_dataset_from_paths, dummy_checker
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
@@ -76,3 +77,15 @@ def test_logging_and_eval_hooks_run():
     assert isinstance(success_rate, float)
     assert 0.0 <= success_rate <= 1.0
 
+
+def test_dataset_bootstrap_fallback_is_explicit():
+    with patch("upi_trm_train.PuzzleDataset", side_effect=RuntimeError("boom")):
+        with patch("builtins.print") as mock_print:
+            dataset, *_ = build_dataset_from_paths(["missing-dataset"], pool_size=4)
+
+    assert isinstance(dataset, DummyPuzzleDataset)
+    emitted = "\n".join(
+        " ".join(str(arg) for arg in call.args)
+        for call in mock_print.call_args_list
+    )
+    assert "Falling back to dummy dataset" in emitted
