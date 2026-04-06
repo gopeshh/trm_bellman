@@ -1,142 +1,75 @@
 # HANDOFF.md - UPI-TRM Project
 
-**Date:** 2026-02-08
+**Date:** 2026-04-05
 **Branch:** `feature/upi-trm-clean`
-**Status:** 9x9 experiments complete (all seeds at 50k steps)
+**Primary sources of truth:** `CLAUDE.md`, `EXPERIMENT_PLAN_ICML.md`, `README.md`
 
 ---
 
-## Executive Summary
+## Current State
 
-**UPI-TRM achieves 4% success rate on 9x9 Sudoku while all baselines (DQN, A2C, PPO) achieve 0%.**
+This branch focuses on repository cleanup and behavior-preserving refactors around the UPI-TRM training stack. Historical experiment outputs remain under `results/` and the various `*_export/` directories, but the current operational guidance is:
 
-| Algorithm | Seed 0 | Seed 1 | Seed 2 | Avg Success | Avg Score |
-|-----------|--------|--------|--------|-------------|-----------|
-| **UPI-TRM** | **8%** | 0% | **4%** | **4.0%** | **53.3** |
-| DQN | 0% | 0% | 0% | 0% | 29.5 |
-| A2C | 0% | 0% | 0% | 0% | 31.9 |
-| PPO | 0% | 0% | 0% | 0% | 29.5 |
+- Follow `EXPERIMENT_PLAN_ICML.md` for paper-facing experiment sequencing.
+- Treat `CLAUDE.md` as the guardrail document for stability experiments.
+- Treat `README.md` as the current repo layout and entrypoint guide.
 
----
+## Refactor Notes
 
-## Next Session: Continue PPO Seeds 0, 2 to 50k
+- Pretrain Hydra configs live under `configs/pretrain/`.
+- The repo-root `config` symlink remains for compatibility with older pretrain workflows.
+- Canonical script locations are now:
+  - `scripts/eval/unroll_sensitivity.py`
+  - `scripts/provenance/create_provenance_bundle.sh`
+- Legacy paths remain as thin wrappers:
+  - `scripts/eval_unroll_sensitivity.py`
+  - `scripts/create_provenance_bundle.sh`
+- `rl/training_setup.py` now owns dummy/supervised dataset bootstrap and checker resolution for `upi_trm_train.py`.
 
-### Current State
+## Experiment Guardrails
 
-PPO seeds 0 and 2 completed **25k steps** (not full 50k). Seed 1 has full 50k.
+- Use `use_feasibility_checker: true` for paper results.
+- Use `disable_value_head_norm: true` for contraction and stability experiments.
+- Keep `track_theory_metrics: true` enabled when evaluating theory-facing claims.
+- Change one variable at a time across ablations; do not mix episodic-latent changes with contraction sweeps.
+- Measure projection saturation (`||z||` pre/post projection) so stability claims do not collapse into clipping artifacts.
 
-| Seed | Current Steps | Target | Status |
-|------|---------------|--------|--------|
-| PPO s0 | 25,000 | 50,000 | ⚠️ Need 25k more |
-| PPO s1 | 50,000 | 50,000 | ✅ Complete |
-| PPO s2 | 25,000 | 50,000 | ⚠️ Need 25k more |
-
-**Log files:**
-- `results/9x9_experiments_seed0/ppo_25k_s0.log` (25k complete)
-- `results/9x9_experiments_seed0/ppo_50k_s1.log` (50k complete)
-- `results/9x9_experiments_seed0/ppo_25k_s2.log` (25k complete)
-
-### Commands to Continue PPO to 50k
+## Common Commands
 
 ```bash
+# Local smoke checks
+python upi_trm_train.py --train-steps 100 --batch-size 16 --seed 0
+pytest tests/ -v --tb=short
+
+# Config integrity
+python scripts/verify_configs.py
+
+# Buck2 (Meta devservers)
 cd ~/fbsource/fbcode
+buck2 test //buiksat_trm:test_... \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only
 
-# PPO seed 0 - continue from 25k to 50k (use GPU 0)
-CUDA_VISIBLE_DEVICES=0 nohup buck2 run //buiksat_trm:upi_trm_train \
-  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
-  --config /home/buiksat/trm_bellman/configs/sudoku9x9/ppo_9x9.yaml \
-  --dataset-paths /home/buiksat/trm_bellman/data/sudoku-9x9 \
-  --seed 0 --no-wandb \
-  --resume-checkpoint /home/buiksat/trm_bellman/checkpoints/rl_sudoku-9x9_seed0_ppo25k/rl_checkpoint_step_25000.pt \
-  > /home/buiksat/trm_bellman/results/9x9_experiments_seed0/ppo_50k_s0_continued.log 2>&1 &
-
-# PPO seed 2 - continue from 25k to 50k (use GPU 1)
-CUDA_VISIBLE_DEVICES=1 nohup buck2 run //buiksat_trm:upi_trm_train \
-  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
-  --config /home/buiksat/trm_bellman/configs/sudoku9x9/ppo_9x9.yaml \
-  --dataset-paths /home/buiksat/trm_bellman/data/sudoku-9x9 \
-  --seed 2 --no-wandb \
-  --resume-checkpoint /home/buiksat/trm_bellman/checkpoints/rl_sudoku-9x9_seed2_ppo25k/rl_checkpoint_step_25000.pt \
-  > /home/buiksat/trm_bellman/results/9x9_experiments_seed0/ppo_50k_s2_continued.log 2>&1 &
+buck2 run //buiksat_trm:upi_trm_train \
+  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true \
+  -- --config configs/ablations/upi_trm_feasibility_no_contraction.yaml --seed 42
 ```
 
-**Note:** Check if checkpoint paths exist. If not, you may need to re-run from scratch with the full 50k config:
+## Directories to Know
 
-```bash
-# Alternative: Run full 50k from scratch
-CUDA_VISIBLE_DEVICES=0 nohup buck2 run //buiksat_trm:upi_trm_train \
-  -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only -- \
-  --config /home/buiksat/trm_bellman/configs/sudoku9x9/ppo_9x9.yaml \
-  --dataset-paths /home/buiksat/trm_bellman/data/sudoku-9x9 \
-  --seed 0 --no-wandb \
-  > /home/buiksat/trm_bellman/results/9x9_experiments_seed0/ppo_50k_s0_full.log 2>&1 &
-```
+- `configs/` – experiment YAMLs grouped by workflow.
+- `entrypoints/` – canonical Python entrypoints for moved training scripts.
+- `rl/` – training logic, environment, checkers, and bootstrap helpers.
+- `scripts/` – evaluation, plotting, provenance, and audit tooling.
+- `results/` – historical experiment outputs and plot data.
+- `artifacts/` – evaluation batches and generated auxiliary artifacts.
 
-### After PPO Completes
+## Audit Expectations
 
-1. **Regenerate plots:**
-```bash
-cd ~/fbsource/fbcode
-buck2 run //buiksat_trm:plot_9x9_success_vs_steps
-buck2 run //buiksat_trm:plot_9x9_mean_score_vs_steps
-```
+When changing code that affects experiments:
 
-2. **Update plotting scripts** to include the new 50k logs (modify glob patterns in `scripts/plot_9x9_*.py`)
+- Run `python3 -m py_compile` on touched Python modules.
+- Run `bash -n` on touched shell scripts.
+- Run `python scripts/verify_configs.py` after config/layout changes.
+- Run pytest or Buck2 tests when the environment has the required Python dependencies available.
 
-3. **Update EXPERIMENT_REPORT.md** with final results
-
----
-
-## Current Plotting Behavior
-
-The plotting scripts now handle mixed-length data:
-- **Solid line:** Mean across all seeds (common steps only, 0-25k for PPO)
-- **Dashed line:** Individual seed lines for extended range (25k-50k for PPO s1)
-
-This will automatically show full 50k data once all PPO seeds complete.
-
----
-
-## Key Files
-
-| Description | Path |
-|-------------|------|
-| Experiment logs | `results/9x9_experiments_seed0/*.log` |
-| Detailed report | `results/9x9_experiments_seed0/EXPERIMENT_REPORT.md` |
-| Plotting scripts | `scripts/plot_9x9_*.py` |
-| Configs | `configs/sudoku9x9/` |
-| Dataset | `data/sudoku-9x9/` |
-| Project guidelines | `CLAUDE.md` |
-
----
-
-## Figures Location
-
-Generated figures are saved to:
-- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_9x9_success_vs_steps.pdf`
-- `/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures/fig_9x9_mean_score_vs_steps.pdf`
-
----
-
-## Critical Notes
-
-1. **Always use absolute paths** for configs and data (buck2 sandbox issues)
-2. **Use CUDA_VISIBLE_DEVICES** to assign GPUs (0-3 available)
-3. **Config guidelines from CLAUDE.md:**
-   - `use_feasibility_checker: true` (required)
-   - `disable_value_head_norm: true` (for stability)
-
----
-
-## TODO
-
-- [x] Run PPO s0 to 50k steps
-- [x] Run PPO s2 to 50k steps
-- [x] Update plotting scripts to include new 50k logs
-- [x] Regenerate figures with all 50k data
-- [x] Update EXPERIMENT_REPORT.md with final results
-- [ ] Commit and push changes
-
----
-
-*Last updated: 2026-02-08*
+If local test dependencies are missing, record that explicitly in the handoff or review summary.

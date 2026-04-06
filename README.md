@@ -11,16 +11,19 @@ For the forward-looking ICML execution plan (stability dial), see:
 - `EXPERIMENT_PLAN_ICML.md`
 
 ## Repository Structure
+- `configs/` – experiment configs grouped by purpose: `ablations/`, `baselines/`, `pilots/`, `sudoku9x9/`, and paper-specific sweeps. Pretrain Hydra configs now live under `configs/pretrain/` (the repo-root `config` symlink remains for compatibility).
+- `entrypoints/` – canonical Python entrypoints for imitation and simple RL training. The legacy top-level scripts remain thin wrappers.
 - `models/recursive_reasoning/trm.py` – `TinyRecursiveReasoningModel_ACTV1` with RL-specific value/policy heads.
-- `models/value_head.py` – latent value head \(V_\psi\). Spectral normalization is optional and controlled by `disable_value_head_norm` (must be `true` for stability experiments—see `CLAUDE.md`).
-- `models/edit_policy.py` – autoregressive edit policy head that proposes plan-space actions.
-- `rl/config.py` – `RLConfig` for hyperparameters, logging cadence, CPI knobs, and evaluation intervals.
+- `models/value_head.py` – latent value head \(V_\psi\). Spectral normalization is optional and controlled by `disable_value_head_norm` (must be `true` for stability experiments; see `CLAUDE.md`).
+- `rl/config.py` – `RLConfig` for hyperparameters, logging cadence, CPI knobs, evaluation intervals, and theory-metric toggles.
+- `rl/training_setup.py` – dataset bootstrap helpers (`DummyPuzzleDataset`, supervised bootstrap fallback) and checker resolution shared by the RL entrypoint and tests.
 - `rl/envs/plan_edit_env.py` – plan-space meta-MDP describing edit actions over latent plans.
 - `rl/upi_trm_trainer.py` – trainer implementing 1-step + K-step TD, CPI mixtures, and evaluation hooks.
-- `upi_trm_train.py` – main entry point that wires the TRM, env, dummy dataset, and trainer together.
-- `evaluators/rl_plan_evaluator.py` – helpers to measure strict success rate and mean checker score for a trained plan policy.
-- `tests/` – smoke tests and unit tests for heads, TD targets, CPI mixture, logging, and evaluator glue.
-- `scripts/` – ready-to-run helpers: `run_rl_dummy.sh`, `run_tests.sh`, `run_k_step_experiment.sh`, `run_sudoku_rl_full.sh`.
+- `upi_trm_train.py` – main RL training CLI that wires configs, datasets, the environment, and trainer selection together.
+- `evaluators/rl_plan_evaluator.py` and `rl/evaluator.py` – evaluation helpers for strict success rate and checker-score metrics.
+- `scripts/eval/unroll_sensitivity.py` – canonical unroll-sensitivity evaluator (the legacy `scripts/eval_unroll_sensitivity.py` path remains as a wrapper).
+- `scripts/provenance/create_provenance_bundle.sh` – canonical provenance-bundle script (the legacy `scripts/create_provenance_bundle.sh` path remains as a wrapper).
+- `tests/` – smoke tests and unit tests for heads, TD targets, CPI mixture, logging, evaluator glue, and config integrity.
 
 ## Installation
 
@@ -124,7 +127,15 @@ This uses the in-memory `DummyPuzzleDataset`, collects short plan-edit episodes,
 
 ### Sudoku UPI-TRM Training
 
-This repo previously carried many YAML configs for many experimental branches. **Those configs have been intentionally pruned**: under `configs/`, we now keep only configs that enable the **feasibility checker** (`use_feasibility_checker:`).
+Experiment configs are now grouped by workflow instead of living at the repo root. The most important directories are:
+- `configs/pilots/` – quick 4×4 development runs.
+- `configs/ablations/` – core UPI-TRM ablations.
+- `configs/baselines/` – PPO/A2C/DQN baselines.
+- `configs/sudoku9x9/` – 9×9 training runs and longer baselines.
+- `configs/exp2_contraction_sweep/`, `configs/exp3_projection_ablation/`, `configs/phase4_2x2_norm_ablation/`, `configs/table3_hard_controlled/` – paper-specific experiment sweeps.
+- `configs/pretrain/` – Hydra configs for supervised pretraining.
+
+After changing YAMLs, run `python scripts/verify_configs.py` to catch drift in the tracked config invariants.
 
 #### 4×4 Sudoku (Recommended Starting Point)
 
@@ -210,22 +221,11 @@ Key differences from 4×4:
 - **Longer episodes**: Max 81 edits needed
 - **Harder puzzles**: 17-35 clues (vs 4-10 for 4×4)
 
-#### Available `configs/` files (post-prune)
+#### Config Selection Notes
 
-These are the only YAML configs under `configs/` after pruning (all are feasibility-checker configs):
-- `configs/pilots/feasibility_trivial.yaml`
-- `configs/pilots/feasibility_low_penalty.yaml`
-- `configs/rl_sudoku_4x4_feasibility.yaml`
-- `configs/baselines/a2c_trm_feasibility.yaml`
-- `configs/baselines/dqn_trm_feasibility.yaml`
-- `configs/baselines/ppo_trm_feasibility.yaml`
-- `configs/ablations/upi_trm_feasibility_no_conservative.yaml`
-- `configs/ablations/upi_trm_feasibility_no_contraction.yaml`
-- `configs/ablations/upi_trm_feasibility_persistent_z.yaml`
-- `configs/ablations/upi_trm_feasibility_persistent_z_no_contraction.yaml`
-- `configs/sudoku9x9/upi_trm_9x9.yaml` (9×9 UPI-TRM)
-- `configs/sudoku9x9/ppo_9x9.yaml` (9×9 PPO baseline)
-- `configs/sudoku9x9/dqn_9x9.yaml` (9×9 DQN baseline)
+- For stability experiments, follow `CLAUDE.md` and `EXPERIMENT_PLAN_ICML.md`: keep `use_feasibility_checker: true`, set `disable_value_head_norm: true`, and change one variable at a time.
+- The 4×4 pilot configs are the fastest way to validate code changes locally.
+- The 9×9 configs and paper-specific sweep directories are intended for longer-running experiments and artifact generation.
 
 #### Theory-Exact Features Explained
 
@@ -300,7 +300,7 @@ python upi_trm_train.py \
     --seed 42
 ```
 
-The `upi_trm_full_theory.yaml` config sets `track_theory_metrics: true`, which logs:
+Set `track_theory_metrics: true` in the YAML you are running to log:
 - `hat_Cz`: Estimated ||z^(1) - z^(0)|| bound
 - `hat_Lz`: Local Lipschitz estimate of inner map
 - `hat_Lv`: Lipschitz estimate of value head w.r.t. z
@@ -308,7 +308,7 @@ The `upi_trm_full_theory.yaml` config sets `track_theory_metrics: true`, which l
 - `bellman_residual_*`: Empirical Bellman residual statistics
 
 ## Ablation Experiments
-The legacy ablation YAMLs have been removed as part of config pruning. Use the feasibility-checker configs above as starting points, and override additional knobs via CLI flags.
+Use the directories under `configs/` as the source of truth for available experiment families. `EXPERIMENT_PLAN_ICML.md` defines the intended phase order for paper-facing stability runs.
 
 ## Evaluating a Trained Policy (Optional)
 To run policy-only evaluation outside the training loop, load the model checkpoint and call `evaluate_plan_policy` (strict success) or `evaluate_plan_policy_with_scores` (mean score + success):
