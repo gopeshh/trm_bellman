@@ -208,25 +208,6 @@ class PPOTrainer:
             self._current_x, self._current_y = self.env.reset()
             self._episode_rewards = []
 
-        # #region agent log
-        if num_steps > 0:
-            try:
-                import json
-                import time
-                with open('.cursor/debug.log', 'a') as f:
-                    log_entry = {
-                        "location": "rl/algos/ppo.py:collect_rollouts",
-                        "message": "Starting rollout collection",
-                        "data": { "num_steps": num_steps },
-                        "timestamp": int(time.time() * 1000),
-                        "sessionId": "debug-session",
-                        "runId": "run1",
-                        "hypothesisId": "ppo-debug"
-                    }
-                    f.write(json.dumps(log_entry) + "\n")
-            except Exception: pass
-        # #endregion
-
         for step_idx in range(num_steps):
             x = self._current_x
             y = self._current_y
@@ -255,40 +236,6 @@ class PPOTrainer:
                 # Sample action
                 action = dist.sample().squeeze()
                 log_prob = dist.log_prob(action)
-
-                # #region agent log
-                if step_idx < 5:  # Log first few steps only
-                    try:
-                        import json
-                        valid_actions = action_mask.sum().item() if action_mask is not None else -1
-                        sampled_action = action.item()
-                        is_valid = True
-                        if action_mask is not None and not action_mask[sampled_action]:
-                            is_valid = False
-                        
-                        # Use a simpler logging approach for Python (append to file)
-                        # The JS fetch template provided in instructions is for JS/TS files.
-                        # For Python, instructions say "prefer writing logs directly by appending NDJSON lines"
-                        with open('.cursor/debug.log', 'a') as f:
-                            log_entry = {
-                                "location": "rl/algos/ppo.py:collect_rollouts:step",
-                                "message": "PPO Action Sample",
-                                "data": {
-                                    "step": step_idx,
-                                    "action": sampled_action,
-                                    "valid_actions_count": valid_actions,
-                                    "is_valid_action": is_valid,
-                                    "value_est": value.item()
-                                },
-                                "timestamp": 0, # Placeholder
-                                "sessionId": "debug-session",
-                                "runId": "run1",
-                                "hypothesisId": "A"
-                            }
-                            f.write(json.dumps(log_entry) + "\n")
-                    except Exception as e:
-                        pass
-                # #endregion
 
             # Step environment
             (x_next, y_next), reward, done, info = self.env.step(action.item())
@@ -469,30 +416,6 @@ class PPOTrainer:
                 total_value_loss += value_loss.item()
                 total_entropy += entropy.item()
                 num_updates += 1
-
-                # #region agent log
-                if num_updates % 10 == 0:
-                    try:
-                        import json
-                        with open('.cursor/debug.log', 'a') as f:
-                            log_entry = {
-                                "location": "rl/algos/ppo.py:update",
-                                "message": "PPO Update Stats",
-                                "data": {
-                                    "policy_loss": policy_loss.item(),
-                                    "value_loss": value_loss.item(),
-                                    "entropy": entropy.item(),
-                                    "adv_mean": mb_advantages.mean().item(),
-                                    "adv_std": mb_advantages.std().item()
-                                },
-                                "timestamp": 0,
-                                "sessionId": "debug-session",
-                                "runId": "run1",
-                                "hypothesisId": "B"
-                            }
-                            f.write(json.dumps(log_entry) + "\n")
-                    except Exception as e: pass
-                # #endregion
 
         self._train_step_count += 1
 

@@ -16,6 +16,8 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 
 import torch
 
+from rl.sudoku_checkers import dummy_checker, sudoku_solution_checker
+
 
 class TaskConfig(ABC):
     """
@@ -542,26 +544,11 @@ class SudokuTaskConfig(TaskConfig):
         Score based on fraction of cells matching the solution.
         Returns score in [0, scale_factor] range.
         """
-        solution = x.get("solution")
-        if solution is None:
-            # Fallback: use negative L1 distance from inputs
-            return self._fallback_checker(x, y)
-        
-        plan = self._to_tensor(y).to(torch.long)
-        solution_tensor = self._to_tensor(solution).to(torch.long)
-        
-        if plan.shape != solution_tensor.shape:
-            solution_tensor = solution_tensor.view_as(plan)
-        
-        matches = (plan == solution_tensor).to(torch.float32)
-        return float(matches.mean().item() * self.scale_factor)
+        return sudoku_solution_checker(x, y, scale_factor=self.scale_factor)
     
     def _fallback_checker(self, x: Dict[str, Any], y: Any) -> float:
         """Fallback checker when no solution is available."""
-        target = x["inputs"]
-        plan = self._to_tensor(y).to(torch.float32)
-        target = target.to(torch.float32)
-        return float(-(target - plan).abs().mean().item())
+        return dummy_checker(x, y)
     
     def _to_tensor(self, value: Any) -> torch.Tensor:
         if torch.is_tensor(value):
@@ -826,14 +813,7 @@ class DummyTaskConfig(TaskConfig):
         """
         Score based on negative L1 distance between plan and inputs.
         """
-        target = x["inputs"]
-        if torch.is_tensor(y):
-            plan = y
-        else:
-            plan = torch.as_tensor(y)
-        target = target.to(torch.float32)
-        plan = plan.to(torch.float32)
-        return float(-(target - plan).abs().mean().item())
+        return dummy_checker(x, y)
     
     def is_solved(self, score: float) -> bool:
         """Dummy task is "solved" when plan exactly matches inputs (score = 0)."""
@@ -919,4 +899,3 @@ def get_task_config(task_name: str, **kwargs) -> TaskConfig:
         return DummyTaskConfig(**kwargs)
     else:
         raise ValueError(f"Unknown task: {task_name}. Supported: sudoku, arc, dummy")
-

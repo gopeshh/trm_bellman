@@ -628,14 +628,14 @@ def launch(hydra_config: DictConfig):
     train_loader, train_metadata = create_dataloader(config, "train", test_set_mode=False, epochs_per_iter=train_epochs_per_iter, global_batch_size=config.global_batch_size, rank=RANK, world_size=WORLD_SIZE)
     try:
         eval_loader,  eval_metadata  = create_dataloader(config, "test", test_set_mode=True, epochs_per_iter=1, global_batch_size=config.global_batch_size, rank=RANK, world_size=WORLD_SIZE)
-    except:
-        print("NO EVAL DATA FOUND")
+    except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
+        print(f"NO EVAL DATA FOUND ({type(exc).__name__}: {exc})")
         eval_loader = eval_metadata = None
 
     try:
         evaluators = create_evaluators(config, eval_metadata)
-    except:
-        print("No evaluator found")
+    except (AttributeError, ImportError, RuntimeError, ValueError) as exc:
+        print(f"No evaluator found ({type(exc).__name__}: {exc})")
         evaluators = []
 
     # Train state

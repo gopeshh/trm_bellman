@@ -2,6 +2,7 @@
 import argparse
 import logging
 import os
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -37,14 +38,15 @@ from rl.upi_trm_trainer import UPITrmTrainer
 from rl.algos.ppo import PPOTrainer, PPOConfig
 from rl.algos.a2c import A2CTrainer, A2CConfig
 from rl.algos.dqn import DQNTrainer, DQNConfig
-from rl.sudoku_utils import (
-    count_sudoku_violations_4x4,
-    count_sudoku_violations_9x9,
-    sudoku_filled_cells,
-    sudoku_zero_candidate_cells,
-    sudoku_is_solved,
-    sudoku_get_stats,
+from rl.sudoku_checkers import (
+    dummy_checker,
+    make_sudoku_feasibility_checker,
+    sudoku_checker,
+    sudoku_constraint_checker,
+    sudoku_feasibility_checker,
+    sudoku_progress_checker,
 )
+from rl.sudoku_utils import sudoku_is_solved, sudoku_get_stats
 from utils.seeding import set_global_seed
 
 
@@ -483,207 +485,6 @@ def resume_from_checkpoint(
     return start_step
 
 
-def _to_plan_tensor(value):
-    if torch.is_tensor(value):
-        return value
-    return torch.as_tensor(value)
-
-
-def dummy_checker(x, y) -> float:
-    """
-    Placeholder checker: reward is negative L1 distance between plan and inputs.
-    """
-    target = x["inputs"]
-    plan = _to_plan_tensor(y)
-    target = target.to(torch.float32)
-    plan = plan.to(torch.float32)
-    return float(-(target - plan).abs().mean().item())
-
-
-# Note: count_sudoku_violations_4x4 and count_sudoku_violations_9x9 are now
-# imported from rl.sudoku_utils to avoid duplication
-
-
-def sudoku_constraint_checker(x, y, max_violations_4x4: int = 24, max_violations_9x9: int = 162) -> float:
-    """
-    Constraint-based Sudoku checker that provides dense intermediate signals.
-
-    Returns score based on constraint satisfaction (row/column/box violations),
-    NOT just matching the solution. This provides:
-    - Positive reward for moves that reduce violations
-    - Negative reward for moves that increase violations
-
-    **LIMITATION**: Empty grids and solved grids BOTH score 10.0 because empty
-    cells don't count as violations. Cannot distinguish partial from solved.
-    Use sudoku_feasibility_checker() for a more informative signal.
-
-    Score = 10.0 * (1 - violations / max_violations)
-
-    For 4x4 Sudoku, max possible violations is ~24 (worst case: all duplicates).
-    For 9x9 Sudoku, max possible violations is ~162 (worst case: all duplicates).
-
-    Args:
-        x: Instance dict with "inputs"
-        y: Candidate plan tensor
-        max_violations_4x4: Maximum possible violations for 4x4 (for normalization)
-        max_violations_9x9: Maximum possible violations for 9x9 (for normalization)
-
-    Returns:
-        Score in [0, 10] range where 10 = no violations (solved)
-    """
-    plan = _to_plan_tensor(y).to(torch.long)
-
-    # Detect grid size
-    total_cells = plan.numel()
-    if total_cells == 16:
-        violations = count_sudoku_violations_4x4(plan)
-        max_violations = max_violations_4x4
-    elif total_cells == 81:
-        violations = count_sudoku_violations_9x9(plan)
-        max_violations = max_violations_9x9
-    else:
-        # Fall back to solution matching for other sizes
-        return sudoku_checker(x, y)
-
-    # Normalize to [0, 10] range
-    # 0 violations = score 10 (solved)
-    # max_violations = score 0 (worst)
-    score = 10.0 * (1.0 - min(violations, max_violations) / max_violations)
-    return float(score)
-
-
-def sudoku_progress_checker(x, y, violation_penalty: float = 2.0) -> float:
-    """
-    Progress-based Sudoku checker that tracks filled cells AND constraint violations.
-
-    This checker is more informative than sudoku_constraint_checker because:
-    - Initial score = number of clue cells (e.g., 12 for a puzzle with 12 clues)
-    - Solved score = total cells (16 for 4x4, 81 for 9x9)
-    - Clearly distinguishes between "partially filled" and "fully solved"
-
-    Score formula:
-        If violations == 0:
-            score = filled_cells (range: clues to grid_size)
-        Else:
-            score = filled_cells - violations * violation_penalty
-
-    Args:
-        x: Instance dict with "inputs"
-        y: Candidate plan tensor
-        violation_penalty: Penalty per constraint violation (default: 2.0)
-
-    Returns:
-        Score where:
-        - Initial (e.g., 12 clues): 12
-        - Correctly filled all cells: 16 (for 4x4), 81 (for 9x9)
-        - Filled with violations: filled_cells - penalty
-    """
-    plan = _to_plan_tensor(y).to(torch.long)
-
-    # Detect grid size
-    total_cells = plan.numel()
-
-    if total_cells == 16:
-        # 4x4 Sudoku: token 1 = empty, tokens 2-5 = digits 1-4
-        filled_cells = (plan != 1).sum().item()
-        violations = count_sudoku_violations_4x4(plan)
-    elif total_cells == 81:
-        # 9x9 Sudoku: token 1 = empty, tokens 2-10 = digits 1-9
-        filled_cells = (plan != 1).sum().item()
-        violations = count_sudoku_violations_9x9(plan)
-    else:
-        # Unknown grid size - fall back to solution matching
-        return sudoku_checker(x, y)
-
-    if violations == 0:
-        score = float(filled_cells)
-    else:
-        score = float(filled_cells - violations * violation_penalty)
-
-    return score
-
-
-def sudoku_feasibility_checker(x, y, w_v: float = 2.0, w_z: float = 5.0) -> float:
-    """
-    Feasibility-aware Sudoku checker that provides the most informative learning signal.
-
-    This checker combines three components:
-    1. **Filled cells**: Rewards progress in filling the grid
-    2. **Violations**: Penalizes constraint violations (duplicates in row/col/box)
-    3. **Zero-candidate cells**: Strongly penalizes dead-end states where empty cells
-       have no legal candidates left (impossible to complete)
-
-    Score formula:
-        score = filled - w_v * violations - w_z * zeroCand
-
-    Where:
-    - filled: Number of filled (non-empty) cells
-    - violations: Count of constraint violations
-    - zeroCand: Count of empty cells with 0 legal candidates
-    - w_v: Violation penalty weight (default: 2.0)
-    - w_z: Zero-candidate penalty weight (default: 5.0, strong to discourage dead-ends)
-
-    Advantages over other checkers:
-    - Unlike constraint_checker: Distinguishes empty vs solved (both have 0 violations)
-    - Unlike progress_checker: Penalizes dead-end states that cannot be completed
-    - Solution-independent: Doesn't require ground truth
-
-    Args:
-        x: Instance dict with "inputs"
-        y: Candidate plan tensor
-        w_v: Weight for violation penalty (default: 2.0)
-        w_z: Weight for zero-candidate penalty (default: 5.0)
-
-    Returns:
-        Score where:
-        - Maximum (solved): total_cells (16 for 4x4, 81 for 9x9)
-        - Initial: filled_cells (clue count, e.g., 12)
-        - Violations: filled - w_v * violations
-        - Dead-end: heavily penalized by -w_z * zeroCand
-    """
-    plan = _to_plan_tensor(y).to(torch.long)
-    total_cells = plan.numel()
-
-    if total_cells == 16:
-        grid_size = 4
-        filled = sudoku_filled_cells(plan, empty_token=1)
-        violations = count_sudoku_violations_4x4(plan)
-        zero_cand = sudoku_zero_candidate_cells(plan, grid_size=4)
-    elif total_cells == 81:
-        grid_size = 9
-        filled = sudoku_filled_cells(plan, empty_token=1)
-        violations = count_sudoku_violations_9x9(plan)
-        zero_cand = sudoku_zero_candidate_cells(plan, grid_size=9)
-    else:
-        # Unknown grid size - fall back to solution matching
-        return sudoku_checker(x, y)
-
-    score = float(filled - w_v * violations - w_z * zero_cand)
-    return score
-
-
-def sudoku_checker(x, y) -> float:
-    """
-    Returns a scaled score for how many cells match the Sudoku solution.
-    Scaled to [0, 10] range to provide meaningful reward signal while keeping values bounded.
-    Falls back to dummy_checker if no solution is attached to the sample.
-
-    NOTE: This checker only rewards matching the known solution, NOT constraint satisfaction.
-    For constraint-based rewards, use sudoku_constraint_checker() instead.
-    """
-
-    solution = x.get("solution")
-    if solution is None:
-        return dummy_checker(x, y)
-
-    plan = _to_plan_tensor(y).to(torch.long)
-    solution_tensor = _to_plan_tensor(solution).to(torch.long)
-    if plan.shape != solution_tensor.shape:
-        solution_tensor = solution_tensor.view_as(plan)
-    matches = (plan == solution_tensor).to(torch.float32)
-    return float(matches.mean().item() * 10.0)  # Returns 0-10 range for meaningful rewards
-
-
 class DummyPuzzleDataset:
     """
     DummyPuzzleDataset is only used when no real Sudoku dataset is found.
@@ -786,8 +587,13 @@ def build_dataset_from_paths(
                     num_identifiers=max(num_identifiers, iterable.metadata.num_puzzle_identifiers),
                 )
                 return dataset, dataset.seq_len, dataset.vocab_size, dataset.num_identifiers
-        except Exception as exc:  # pragma: no cover - best-effort bootstrap
-            print(f"[upi_trm_train] Falling back to dummy dataset (reason: {exc})")
+        except Exception as exc:  # pragma: no cover - bootstrap stays permissive by design
+            message = (
+                "[upi_trm_train] Falling back to dummy dataset after supervised bootstrap "
+                f"failed ({type(exc).__name__}: {exc})"
+            )
+            warnings.warn(message, RuntimeWarning)
+            print(message)
 
     dummy = DummyPuzzleDataset()
     return dummy, dummy.seq_len, dummy.vocab_size, dummy.num_identifiers
@@ -1047,34 +853,33 @@ def main():
     w_z = getattr(rl_cfg, "feasibility_zerocand_weight", 5.0)
 
     checker_fn = sudoku_checker
+    checker_kind = "solution"
     if len(dataset) == 0:
         checker_fn = dummy_checker
+        checker_kind = "dummy"
     else:
         sample = dataset[0]
         if not (isinstance(sample, dict) and "solution" in sample):
             checker_fn = dummy_checker
+            checker_kind = "dummy"
         elif use_feasibility_checker and seq_len in (16, 81):
-            # Feasibility checker: most informative, penalizes dead-ends
-            # Score = filled - w_v*violations - w_z*zeroCand
-            def feasibility_checker_with_weights(x, y):
-                return sudoku_feasibility_checker(x, y, w_v=w_v, w_z=w_z)
-            checker_fn = feasibility_checker_with_weights
+            checker_fn = make_sudoku_feasibility_checker(w_v=w_v, w_z=w_z)
+            checker_kind = "feasibility"
             grid_size = "4x4" if seq_len == 16 else "9x9"
             print(f"[INFO] Using feasibility-aware Sudoku checker for {grid_size}")
             print(f"       score = filled - {w_v}*violations - {w_z}*zeroCand")
             print(f"       Max score: {seq_len} (all filled, no violations)")
         elif use_progress_checker and seq_len in (16, 81):
-            # For 4x4/9x9 Sudoku, progress-based checker is most informative
-            # Score = filled_cells (range: clues to grid_size), distinguishes partial from solved
             checker_fn = sudoku_progress_checker
+            checker_kind = "progress"
             grid_size = "4x4" if seq_len == 16 else "9x9"
             print(f"[INFO] Using progress-based Sudoku checker for {grid_size} (score = filled_cells, range 0-{seq_len})")
         elif use_constraint_checker and seq_len in (16, 81):
-            # For 4x4/9x9 Sudoku, constraint-based checker provides better intermediate signals
             checker_fn = sudoku_constraint_checker
+            checker_kind = "constraint"
             grid_size = "4x4" if seq_len == 16 else "9x9"
             print(f"[INFO] Using constraint-based Sudoku checker for {grid_size} for dense intermediate rewards")
-    is_sudoku_checker = checker_fn in (sudoku_checker, sudoku_constraint_checker, sudoku_progress_checker) or use_feasibility_checker
+    is_sudoku_checker = checker_kind in {"solution", "constraint", "progress", "feasibility"}
 
     env_cfg = PlanEditEnvConfig(
         max_edits=rl_cfg.max_edits,
@@ -1098,7 +903,7 @@ def main():
         task_name = getattr(rl_cfg, "task_name", "sudoku")
         if is_sudoku_checker:
             task_config = get_task_config("sudoku")
-        elif checker_fn is dummy_checker:
+        elif checker_kind == "dummy":
             task_config = get_task_config("dummy")
     except ImportError:
         pass  # task_config module not available
@@ -1602,4 +1407,3 @@ if __name__ == "__main__":
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(message)s")
     main()
-
