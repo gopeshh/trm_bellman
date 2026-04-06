@@ -9,8 +9,10 @@ as the original monolithic implementation.
 """
 
 import pytest
+import numpy as np
 import torch
 
+from puzzle_dataset import _sample_batch
 from rl.replay import ReplayBuffer, Transition
 from rl.value_targets import (
     compute_k_step_bootstrapped_target,
@@ -113,6 +115,39 @@ class TestReplayBuffer:
         
         with pytest.raises(AssertionError):
             buffer.sample_batch(10)
+
+
+class TestPuzzleDatasetSampling:
+    """Tests for deterministic sampling in puzzle_dataset helpers."""
+
+    def test_sample_batch_uses_passed_rng(self):
+        group_order = np.array([0, 1, 2], dtype=np.int64)
+        puzzle_indices = np.array([0, 3, 7, 10], dtype=np.int64)
+        group_indices = np.array([0, 1, 2, 3], dtype=np.int64)
+
+        rng_a = np.random.Generator(np.random.Philox(seed=123))
+        rng_b = np.random.Generator(np.random.Philox(seed=123))
+
+        out_a = _sample_batch(
+            rng=rng_a,
+            group_order=group_order,
+            puzzle_indices=puzzle_indices,
+            group_indices=group_indices,
+            start_index=0,
+            global_batch_size=5,
+        )
+        out_b = _sample_batch(
+            rng=rng_b,
+            group_order=group_order,
+            puzzle_indices=puzzle_indices,
+            group_indices=group_indices,
+            start_index=0,
+            global_batch_size=5,
+        )
+
+        assert out_a[0] == out_b[0]
+        assert np.array_equal(out_a[1], out_b[1])
+        assert np.array_equal(out_a[2], out_b[2])
     
     def test_is_ready(self):
         """Test is_ready method."""
@@ -438,4 +473,3 @@ class TestRLConfigNewOptions:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-
