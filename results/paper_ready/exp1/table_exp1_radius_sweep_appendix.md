@@ -6,11 +6,13 @@
 
 **Configuration**: Both models use value-head spectral norm OFF.
 
+**Delta definition**: fixed mismatch Δ(n_train=2, n₂=8) (4× depth), pooled across all states and seeds.
+
 | Radius | Condition | Δ_V (mean±std) | Δ_z (mean±std) | Argmax [95% CI] | Sat. |
 |--------|-----------|----------------|----------------|-----------------|------|
-| disabled | No Contraction | 1.133±1.689 | 30.92±9.04 | 0.640 [0.629, 0.651] | N/A |
-|  | Contraction | 1.650±4.548 | 16.62±5.28 | 0.905 [0.898, 0.912] | N/A |
-| R=10 | No Contraction | 0.147±0.215 | 3.86±1.89 | 0.955 [0.950, 0.960] | 100% |
-|  | Contraction | 0.113±0.295 | 1.36±0.36 | 0.990 [0.988, 0.992] | 100% |
-| R=100 | No Contraction | 1.133±1.689 | 30.92±9.04 | 0.640 [0.629, 0.651] | 0% |
-|  | Contraction | 1.650±4.548 | 16.62±5.28 | 0.905 [0.898, 0.912] | 0% |
+| disabled | No Contraction | 1.169±1.756 | 32.89±8.63 | 0.618 [0.598, 0.637] | N/A |
+|  | Contraction | 1.848±4.987 | 18.22±4.85 | 0.896 [0.883, 0.908] | N/A |
+| R=10 | No Contraction | 0.152±0.226 | 4.02±1.95 | 0.951 [0.942, 0.959] | 100% |
+|  | Contraction | 0.120±0.312 | 1.41±0.38 | 0.990 [0.985, 0.993] | 100% |
+| R=100 | No Contraction | 1.169±1.756 | 32.89±8.63 | 0.618 [0.598, 0.637] | 0% |
+|  | Contraction | 1.848±4.987 | 18.22±4.85 | 0.896 [0.883, 0.908] | 0% |

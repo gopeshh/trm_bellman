@@ -4,23 +4,25 @@
 
 **Configuration**: Both models use value-head spectral norm OFF.
 
+**Delta definition**: fixed mismatch Δ(n_train=2, n₂=8) (4× depth), pooled across all states and seeds.
+
 | Batch | Radius | Condition | Δ_V (mean±std) | Argmax Agree [95% CI] | Saturation |
 |-------|--------|-----------|----------------|----------------------|------------|
-| B0 | disabled | No Contraction | 1.084±1.683 | 0.668 [0.636, 0.698] | N/A |
-|  |  | Contraction | 0.225±0.197 | 0.943 [0.926, 0.957] | N/A |
-|  | R=10 | No Contraction | 0.150±0.207 | 0.960 [0.945, 0.971] | 1.00 (n=900) |
-|  |  | Contraction | 0.036±0.050 | 0.990 [0.981, 0.995] | 1.00 (n=900) |
-|  | R=100 | No Contraction | 1.084±1.683 | 0.668 [0.636, 0.698] | 0.00 (n=900) |
-|  |  | Contraction | 0.225±0.197 | 0.943 [0.926, 0.957] | 0.00 (n=900) |
-| B1 | disabled | No Contraction | 1.133±1.689 | 0.640 [0.629, 0.651] | N/A |
-|  |  | Contraction | 1.650±4.548 | 0.905 [0.898, 0.912] | N/A |
-|  | R=10 | No Contraction | 0.147±0.215 | 0.955 [0.950, 0.960] | 1.00 (n=7245) |
-|  |  | Contraction | 0.113±0.295 | 0.990 [0.988, 0.992] | 1.00 (n=7245) |
-|  | R=100 | No Contraction | 1.133±1.689 | 0.640 [0.629, 0.651] | 0.00 (n=7245) |
-|  |  | Contraction | 1.650±4.548 | 0.905 [0.898, 0.912] | 0.00 (n=7245) |
+| B0 | disabled | No Contraction | 1.078±1.772 | 0.653 [0.598, 0.705] | N/A |
+|  |  | Contraction | 0.240±0.199 | 0.933 [0.899, 0.956] | N/A |
+|  | R=10 | No Contraction | 0.152±0.205 | 0.957 [0.927, 0.975] | 1.00 (n=300) |
+|  |  | Contraction | 0.038±0.054 | 0.990 [0.971, 0.997] | 1.00 (n=300) |
+|  | R=100 | No Contraction | 1.078±1.772 | 0.653 [0.598, 0.705] | 0.00 (n=300) |
+|  |  | Contraction | 0.240±0.199 | 0.933 [0.899, 0.956] | 0.00 (n=300) |
+| B1 | disabled | No Contraction | 1.169±1.756 | 0.618 [0.598, 0.637] | N/A |
+|  |  | Contraction | 1.848±4.987 | 0.896 [0.883, 0.908] | N/A |
+|  | R=10 | No Contraction | 0.152±0.226 | 0.951 [0.942, 0.959] | 1.00 (n=2415) |
+|  |  | Contraction | 0.120±0.312 | 0.990 [0.985, 0.993] | 1.00 (n=2415) |
+|  | R=100 | No Contraction | 1.169±1.756 | 0.618 [0.598, 0.637] | 0.00 (n=2415) |
+|  |  | Contraction | 1.848±4.987 | 0.896 [0.883, 0.908] | 0.00 (n=2415) |
 
 ## Key Finding
 
-- **R=0 (projection disabled)**: Contraction still provides 4.8× improvement
-  - Δ_V: No Contraction = 1.084, Contraction = 0.225
+- **R=0 (projection disabled, fixed n=2→8)**: Contraction still provides 4.5× improvement
+  - Δ_V: No Contraction = 1.078, Contraction = 0.240
   - This proves stability comes from contraction enforcement, not projection clipping.

@@ -34,6 +34,7 @@ from typing import Dict, List, Optional, Tuple
 BASE_DIR = Path("/home/buiksat/trm_bellman")
 OUT_DIR = BASE_DIR / "results/paper_ready/exp1"
 TABLES_DIR = BASE_DIR / "results/tables"
+PAPER_TABLE_DIR = Path("/home/buiksat/UPI_TRM/UPI_TRM_NIPS/tables")
 
 TOLERANCE = 0.01  # Tolerance for numeric comparison
 
@@ -163,7 +164,11 @@ def parse_claims(path: Path) -> Dict:
         result["c_delta_z"] = float(match.group(2))
 
     # R=0 claim - spans multiple lines, so use re.DOTALL
-    match = re.search(r'R=0.*?Δ_V\s+([\d.]+)\s*→\s*([\d.]+)', content, re.DOTALL)
+    match = re.search(
+        r'R=0.*?Δ_V(?:\s*\([^)]+\))?\s+([\d.]+)\s*→\s*([\d.]+)',
+        content,
+        re.DOTALL,
+    )
     if match:
         result["r0_nc_delta_V"] = float(match.group(1))
         result["r0_c_delta_V"] = float(match.group(2))
@@ -311,6 +316,47 @@ def audit_labels():
 
     add_result(
         "Label Correctness",
+        all_passed,
+        "\n".join(checks)
+    )
+
+
+def audit_paper_repo_table_sync():
+    """Check that canonical TeX tables are mirrored into the paper repo."""
+    print("\n=== Auditing Paper Repo Table Sync ===")
+
+    checks = []
+    all_passed = True
+
+    tex_files = [
+        "table_exp1_unroll_sensitivity.tex",
+        "table_exp1_radius_sweep_main.tex",
+        "table_exp1_radius_sweep_appendix.tex",
+    ]
+
+    for name in tex_files:
+        canonical = OUT_DIR / name
+        mirrored = PAPER_TABLE_DIR / name
+
+        if not canonical.exists():
+            all_passed = False
+            checks.append(f"FAIL: missing canonical table {name}")
+            continue
+
+        if not mirrored.exists():
+            all_passed = False
+            checks.append(f"FAIL: missing paper repo table {name}")
+            continue
+
+        if canonical.read_text() != mirrored.read_text():
+            all_passed = False
+            checks.append(f"FAIL: paper repo table out of sync for {name}")
+            continue
+
+        checks.append(f"OK: paper repo table matches for {name}")
+
+    add_result(
+        "Paper Repo Table Sync",
         all_passed,
         "\n".join(checks)
     )
@@ -503,7 +549,8 @@ All artifacts were validated for:
 1. Numeric consistency between CLAIMS.md and LaTeX tables
 2. Saturation metric sanity (R=0→N/A, R=10→100%, R=100→0%)
 3. Correct labeling ("No Contraction" / "Contraction")
-4. B0 scoping for R=0 claims with B1 warning
+4. Canonical LaTeX tables mirrored into the paper repo
+5. B0 scoping for R=0 claims with B1 warning
 
 ## Files in Bundle
 
@@ -550,6 +597,7 @@ def main():
     audit_claims_vs_tables()
     audit_saturation_sanity()
     audit_labels()
+    audit_paper_repo_table_sync()
     audit_b0_scoping()
 
     # Update provenance

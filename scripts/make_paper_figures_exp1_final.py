@@ -16,6 +16,7 @@ Usage:
 
 import csv
 import math
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -32,13 +33,15 @@ import numpy as np
 
 SEEDS = [41, 42, 43]
 N_TRAIN = 2
+RADIUS_SWEEP_N2 = 8  # Paper-facing radius sweep uses the fixed 2→8 comparison.
 N2_VALUES = [4, 8, 16]  # Evaluation depths
 RADII = [0.0, 10.0, 100.0]
 
-BASE_DIR = Path("/Users/buiksat/trm_bellman/results/validation/exp1_v4")
-TABLES_DIR = Path("/Users/buiksat/trm_bellman/results/tables")
-OUT_DIR = Path("/Users/buiksat/trm_bellman/results/paper_ready/exp1")  # docs & tables
-FIG_DIR = Path("/Users/buiksat/UPI_TRM/UPI_TRM_ICML/figures")  # figures for paper
+BASE_DIR = Path("/home/buiksat/trm_bellman/results/validation/exp1_v4")
+TABLES_DIR = Path("/home/buiksat/trm_bellman/results/tables")
+OUT_DIR = Path("/home/buiksat/trm_bellman/results/paper_ready/exp1")  # docs & tables
+FIG_DIR = Path("/home/buiksat/UPI_TRM/UPI_TRM_NIPS/figures")  # figures for paper
+PAPER_TABLE_DIR = Path("/home/buiksat/UPI_TRM/UPI_TRM_NIPS/tables")  # mirrored TeX tables for paper
 
 LABEL_MAP = {
     "model_a": "No Contraction",
@@ -368,6 +371,13 @@ def write_radius_sweep_tex(
     is_main: bool,
 ):
     """Write LaTeX table for radius sweep."""
+    r0_improvement = 0.0
+    if 0.0 in data:
+        dV_a_r0 = data[0.0]["model_a"].get("delta_V", AggregatedStats(0, 0, 0))
+        dV_b_r0 = data[0.0]["model_b"].get("delta_V", AggregatedStats(0, 0, 0))
+        if dV_b_r0.mean > 0:
+            r0_improvement = dV_a_r0.mean / dV_b_r0.mean
+
     with open(out_path, "w") as f:
         loc = "Main Paper" if is_main else "Appendix"
         f.write(f"% Radius Sweep Table ({batch_name} - {loc})\n")
@@ -377,8 +387,9 @@ def write_radius_sweep_tex(
         f.write("\\small\n")
 
         if is_main:
-            f.write("\\caption{Projection radius sweep on B0 (initial states). ")
-            f.write("R=0 disables projection; contraction still provides $4.8\\times$ improvement.}\n")
+            f.write("\\caption{Projection radius sweep on B0 (initial states), using the fixed ")
+            f.write(f"$n={N_TRAIN}\\rightarrow{RADIUS_SWEEP_N2}$ mismatch. ")
+            f.write(f"R=0 disables projection; contraction still provides ${r0_improvement:.1f}\\times$ improvement.}}\n")
             f.write("\\label{tab:radius_sweep}\n")
         else:
             f.write("\\caption{Radius sweep on B1 (successor states). ")
@@ -420,6 +431,21 @@ def write_radius_sweep_tex(
         f.write("\\end{table}\n")
 
     print(f"[LaTeX] {out_path}")
+
+
+def mirror_tex_outputs(out_dir: Path, paper_table_dir: Path):
+    """Mirror canonical TeX tables into the paper repo."""
+    tex_files = [
+        "table_exp1_unroll_sensitivity.tex",
+        "table_exp1_radius_sweep_main.tex",
+        "table_exp1_radius_sweep_appendix.tex",
+    ]
+
+    for name in tex_files:
+        src = out_dir / name
+        dst = paper_table_dir / name
+        shutil.copy2(src, dst)
+        print(f"[Paper TeX] {dst}")
 
 
 # =============================================================================
@@ -551,9 +577,15 @@ def write_claims(
             dV_b_r0 = radius_b0[0.0]["model_b"].get("delta_V", AggregatedStats(0, 0, 0))
             r0_improvement = dV_a_r0.mean / dV_b_r0.mean if dV_b_r0.mean > 0 else 0
 
-            f.write(f"5. **Claim**: On B0 (initial states), with R=0 (projection disabled), ")
-            f.write(f"contraction provides {r0_improvement:.1f}× value stability improvement.\n")
-            f.write(f"   **Evidence**: Δ_V {dV_a_r0.mean:.3f} → {dV_b_r0.mean:.3f}\n")
+            f.write(
+                f"5. **Claim**: On B0 (initial states), with R=0 (projection disabled), at fixed "
+                f"{RADIUS_SWEEP_N2 // N_TRAIN}× mismatch (n={N_TRAIN}→{RADIUS_SWEEP_N2}), "
+                f"contraction provides {r0_improvement:.1f}× value stability improvement.\n"
+            )
+            f.write(
+                f"   **Evidence**: Δ_V (pooled over all states and seeds) "
+                f"{dV_a_r0.mean:.3f} → {dV_b_r0.mean:.3f}\n"
+            )
             f.write("   **Interpretation**: Stability comes from contraction, not projection clipping.\n\n")
 
         # B1 warning
@@ -571,7 +603,10 @@ def write_claims(
         # Summary
         f.write("## One-Sentence Summary\n\n")
         f.write("On initial states (B0), contraction enforcement provides value stability guarantees ")
-        f.write(f"independent of projection radius ({r0_improvement:.1f}× improvement even at R=0); ")
+        f.write(
+            f"independent of projection radius ({r0_improvement:.1f}× improvement at fixed "
+            f"n={N_TRAIN}→{RADIUS_SWEEP_N2} even at R=0); "
+        )
         f.write("on successor states (B1), contraction improves latent and action stability, ")
         f.write("but value estimates require projection to avoid increased variance.\n")
 
@@ -582,7 +617,7 @@ def write_claims(
 # Validation
 # =============================================================================
 
-def validate_outputs(out_dir: Path, fig_dir: Path):
+def validate_outputs(out_dir: Path, fig_dir: Path, paper_table_dir: Path):
     """Validate all outputs exist and are correct."""
     print("\n" + "=" * 60)
     print("VALIDATION CHECKS")
@@ -603,6 +638,11 @@ def validate_outputs(out_dir: Path, fig_dir: Path):
         "PROVENANCE.md",
         "CLAIMS.md",
     ]
+    paper_table_files = [
+        "table_exp1_unroll_sensitivity.tex",
+        "table_exp1_radius_sweep_main.tex",
+        "table_exp1_radius_sweep_appendix.tex",
+    ]
 
     all_ok = True
     for fname in fig_files:
@@ -621,6 +661,15 @@ def validate_outputs(out_dir: Path, fig_dir: Path):
             print(f"  ✓ {fname} ({size} bytes)")
         else:
             print(f"  ✗ MISSING: {fname}")
+            all_ok = False
+
+    for fname in paper_table_files:
+        path = paper_table_dir / fname
+        if path.exists():
+            size = path.stat().st_size
+            print(f"  ✓ mirrored {fname} ({size} bytes)")
+        else:
+            print(f"  ✗ MISSING mirrored paper table: {fname}")
             all_ok = False
 
     # Check labels in a tex file
@@ -669,6 +718,7 @@ def validate_outputs(out_dir: Path, fig_dir: Path):
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     FIG_DIR.mkdir(parents=True, exist_ok=True)
+    PAPER_TABLE_DIR.mkdir(parents=True, exist_ok=True)
 
     print("=" * 60)
     print("GENERATING PAPER-READY ARTIFACTS")
@@ -694,6 +744,7 @@ def main():
     write_unroll_sensitivity_tex(unroll_b0, OUT_DIR / "table_exp1_unroll_sensitivity.tex")
     write_radius_sweep_tex(radius_b0, OUT_DIR / "table_exp1_radius_sweep_main.tex", "B0", is_main=True)
     write_radius_sweep_tex(radius_b1, OUT_DIR / "table_exp1_radius_sweep_appendix.tex", "B1", is_main=False)
+    mirror_tex_outputs(OUT_DIR, PAPER_TABLE_DIR)
 
     # Generate documentation
     print("\n=== Generating Documentation ===")
@@ -701,19 +752,24 @@ def main():
     write_claims(OUT_DIR / "CLAIMS.md", unroll_b0, radius_b0, radius_b1)
 
     # Validate
-    all_ok = validate_outputs(OUT_DIR, FIG_DIR)
+    all_ok = validate_outputs(OUT_DIR, FIG_DIR, PAPER_TABLE_DIR)
 
     # Summary
     print("\n" + "=" * 60)
     print("PAPER INTEGRATION NOTE")
     print("=" * 60)
-    print("\nFIGURES (in paper repo):")
+    print("\nPAPER REPO FIGURES:")
     print(f"  {FIG_DIR}/")
     print("  - fig_exp1_unroll_sensitivity_main.pdf  (Section 7.4)")
     print("  - fig_exp1_unroll_sensitivity_appendix.pdf")
     print("  - fig_exp1_radius_sweep_main.pdf        (Section 7.4)")
     print("  - fig_exp1_radius_sweep_appendix.pdf")
-    print("\nDOCS & TABLES (in trm_bellman):")
+    print("\nPAPER REPO TABLES:")
+    print(f"  {PAPER_TABLE_DIR}/")
+    print("  - table_exp1_unroll_sensitivity.tex")
+    print("  - table_exp1_radius_sweep_main.tex")
+    print("  - table_exp1_radius_sweep_appendix.tex")
+    print("\nCANONICAL DOCS & TABLES (in trm_bellman):")
     print(f"  {OUT_DIR}/")
     print("  - table_exp1_unroll_sensitivity.tex")
     print("  - table_exp1_radius_sweep_main.tex")

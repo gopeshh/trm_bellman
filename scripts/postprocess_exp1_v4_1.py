@@ -548,11 +548,18 @@ def write_radius_sweep_markdown(
     out_path: Path,
     seeds: List[int],
     batch: str,
+    n_train: int,
+    radius_n2: int,
 ):
     """Write radius sweep markdown with fixed saturation."""
     with open(out_path, "w") as f:
         f.write(f"# Radius Sweep Summary ({batch.upper()})\n\n")
         f.write(f"**Seeds**: {seeds}\n\n")
+        depth_mult = radius_n2 // n_train if radius_n2 % n_train == 0 else radius_n2 / n_train
+        f.write(
+            f"**Delta definition**: fixed mismatch Δ(n_train={n_train}, n₂={radius_n2}) "
+            f"({depth_mult}× depth), pooled across all per-state rows.\n\n"
+        )
 
         radii = sorted(data.keys())
 
@@ -706,11 +713,13 @@ def process_radius_sweep(
     seeds: List[int],
     radii: List[float],
     n_train: int,
+    radius_n2: int,
     out_dir: Path,
     batch: str,
 ):
     """Process radius sweep data for a batch."""
     print(f"\n=== Processing Radius Sweep ({batch.upper()}) ===")
+    print(f"[Process] Using fixed mismatch Δ(n_train={n_train}, n₂={radius_n2})")
 
     # Collect data per radius
     all_data = {}
@@ -740,16 +749,28 @@ def process_radius_sweep(
         mismatch_a = filter_mismatch_drift(data["model_a"], n_train)
         mismatch_b = filter_mismatch_drift(data["model_b"], n_train)
 
-        # Aggregate - flatten across all n2 values
-        flat_a = {}
-        flat_b = {}
-        for metric in ["delta_V", "delta_pi", "delta_z", "argmax_agree", "saturated", "z_pre_norm", "z_post_norm"]:
-            flat_a[metric] = []
-            flat_b[metric] = []
-            for (n1, n2), metrics in mismatch_a.items():
-                flat_a[metric].extend(metrics.get(metric, []))
-            for (n1, n2), metrics in mismatch_b.items():
-                flat_b[metric].extend(metrics.get(metric, []))
+        # Radius sweep is reported for one fixed mismatch: Δ(n_train, radius_n2).
+        target_key = (n_train, radius_n2)
+        metrics_list = [
+            "delta_V",
+            "delta_pi",
+            "delta_z",
+            "argmax_agree",
+            "saturated",
+            "z_pre_norm",
+            "z_post_norm",
+        ]
+        if target_key not in mismatch_a or target_key not in mismatch_b:
+            print(f"[WARN] Missing target key {target_key} at R={R}")
+
+        flat_a = {
+            metric: list(mismatch_a.get(target_key, {}).get(metric, []))
+            for metric in metrics_list
+        }
+        flat_b = {
+            metric: list(mismatch_b.get(target_key, {}).get(metric, []))
+            for metric in metrics_list
+        }
 
         all_data[R] = {
             "model_a": {m: compute_stats(v, m == "argmax_agree") for m, v in flat_a.items()},
@@ -758,7 +779,7 @@ def process_radius_sweep(
 
     # Write outputs
     write_radius_sweep_markdown(all_data, out_dir / f"radius_sweep_{batch}_summary.md",
-                                seeds, batch)
+                                seeds, batch, n_train, radius_n2)
 
     # Write CSV
     csv_path = out_dir / f"radius_sweep_{batch}_aggregated.csv"
@@ -796,6 +817,8 @@ def main():
                         help="Comma-separated list of radii")
     parser.add_argument("--n_train", type=int, default=2,
                         help="Training depth")
+    parser.add_argument("--radius_n2", type=int, default=8,
+                        help="Fixed evaluation depth n2 for paper-facing radius sweep aggregation")
 
     args = parser.parse_args()
 
@@ -820,7 +843,15 @@ def main():
 
     # Process both B0 and B1 for radius sweep
     for batch in ["b0", "b1"]:
-        ok = process_radius_sweep(base_dir, seeds, radii, args.n_train, out_dir, batch)
+        ok = process_radius_sweep(
+            base_dir,
+            seeds,
+            radii,
+            args.n_train,
+            args.radius_n2,
+            out_dir,
+            batch,
+        )
         success = success and ok
 
     # Print summary

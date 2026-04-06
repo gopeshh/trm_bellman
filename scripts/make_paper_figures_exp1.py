@@ -39,6 +39,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 SEEDS = [41, 42, 43]
 N_TRAIN = 2
+RADIUS_SWEEP_N2 = 8  # Paper-facing radius sweep uses the fixed 2→8 comparison.
 RADII = [0.0, 10.0, 100.0]  # Order for display
 
 # Label mapping: internal -> paper
@@ -180,7 +181,7 @@ def aggregate_radius_sweep(
     Aggregate radius sweep data from per-state CSVs.
 
     Returns: radius -> model -> metric -> AggregatedStats
-    Uses only MISMATCH pairs (n1 = n_train).
+    Uses the fixed MISMATCH pair (n1 = n_train, n2 = RADIUS_SWEEP_N2).
     """
     result = {}
 
@@ -203,8 +204,8 @@ def aggregate_radius_sweep(
                 rows = load_per_state_csv(csv_path)
                 for row in rows:
                     n1 = int(row.get("n1", 0))
-                    # Only MISMATCH
-                    if n1 != n_train:
+                    n2 = int(row.get("n2", 0))
+                    if n1 != n_train or n2 != RADIUS_SWEEP_N2:
                         continue
 
                     for metric in raw:
@@ -310,6 +311,10 @@ def write_radius_sweep_table(
         f.write("# Experiment 1: Projection Radius Sweep\n\n")
         f.write("**Purpose**: Demonstrate that stability comes from contraction, not projection clipping.\n\n")
         f.write("**Configuration**: Both models use value-head spectral norm OFF.\n\n")
+        f.write(
+            f"**Delta definition**: fixed mismatch Δ(n_train={N_TRAIN}, n₂={RADIUS_SWEEP_N2}) "
+            f"({RADIUS_SWEEP_N2 // N_TRAIN}× depth), pooled across all states and seeds.\n\n"
+        )
 
         # Main table
         f.write("| Batch | Radius | Condition | Δ_V (mean±std) | Argmax Agree [95% CI] | Saturation |\n")
@@ -353,7 +358,10 @@ def write_radius_sweep_table(
             dV_b_r0 = data_b0[0.0]["model_b"].get("delta_V", AggregatedStats(0, 0, 0))
             if dV_b_r0.mean > 0:
                 improvement = dV_a_r0.mean / dV_b_r0.mean
-                f.write(f"- **R=0 (projection disabled)**: Contraction still provides {improvement:.1f}× improvement\n")
+                f.write(
+                    f"- **R=0 (projection disabled, fixed n={N_TRAIN}→{RADIUS_SWEEP_N2})**: "
+                    f"Contraction still provides {improvement:.1f}× improvement\n"
+                )
                 f.write(f"  - Δ_V: No Contraction = {dV_a_r0.mean:.3f}, Contraction = {dV_b_r0.mean:.3f}\n")
                 f.write("  - This proves stability comes from contraction enforcement, not projection clipping.\n")
 
@@ -639,8 +647,14 @@ def write_claims(
             dV_b_r0 = data_radius_b0[0.0]["model_b"].get("delta_V", AggregatedStats(0, 0, 0))
             if dV_b_r0.mean > 0:
                 r0_improvement = dV_a_r0.mean / dV_b_r0.mean
-                f.write(f"4. **Claim**: With projection disabled (R=0), contraction still provides {r0_improvement:.1f}× stability improvement.\n")
-                f.write(f"   **Evidence**: Table 2, Fig 2. R=0 Δ_V: {dV_a_r0.mean:.3f} → {dV_b_r0.mean:.3f}.\n")
+                f.write(
+                    f"4. **Claim**: With projection disabled (R=0), at fixed {RADIUS_SWEEP_N2 // n_train}× mismatch "
+                    f"(n={n_train}→{RADIUS_SWEEP_N2}), contraction still provides {r0_improvement:.1f}× stability improvement.\n"
+                )
+                f.write(
+                    f"   **Evidence**: Table 2, Fig 2. R=0 Δ_V (pooled over all states and seeds): "
+                    f"{dV_a_r0.mean:.3f} → {dV_b_r0.mean:.3f}.\n"
+                )
                 f.write("   This proves stability comes from contraction enforcement, not projection clipping.\n\n")
 
         # Claim 5: Saturation behavior
@@ -666,9 +680,11 @@ def write_claims(
 
         # Summary
         f.write("## One-Sentence Summary\n\n")
-        f.write("Contraction enforcement provides mathematical stability guarantees that are ")
-        f.write("independent of projection radius, as demonstrated by consistent improvement ")
-        f.write("even when projection is completely disabled (R=0).\n")
+        f.write(
+            f"Contraction enforcement provides mathematical stability guarantees that are independent "
+            f"of projection radius, as demonstrated at fixed {RADIUS_SWEEP_N2 // n_train}× mismatch "
+            f"(n={n_train}→{RADIUS_SWEEP_N2}) even when projection is completely disabled (R=0).\n"
+        )
 
     print(f"[Claims] {out_path}")
 

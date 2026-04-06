@@ -17,17 +17,17 @@ All claims are precisely scoped to B0 or B1.
 
 ## Radius Sweep (B0 - Isolation Result)
 
-5. **Claim**: On B0 (initial states), with R=0 (projection disabled), contraction provides 4.8× value stability improvement.
-   **Evidence**: Δ_V 1.084 → 0.225
+5. **Claim**: On B0 (initial states), with R=0 (projection disabled), at fixed 4× mismatch (n=2→8), contraction provides 4.5× value stability improvement.
+   **Evidence**: Δ_V (pooled over all states and seeds) 1.078 → 0.240
    **Interpretation**: Stability comes from contraction, not projection clipping.
 
 ## B1 Observation (NOT a main claim)
 
 ⚠️ **Warning**: On B1 (successor states) with R=0, Δ_V does NOT improve with contraction.
-   B1 R=0 Δ_V: 1.133 → 1.650 (increased)
+   B1 R=0 Δ_V: 1.169 → 1.848 (increased)
    Latent drift and action agreement still improve on B1.
    The main R=0 claim is scoped to B0 initial states only.
 
 ## One-Sentence Summary
 
-On initial states (B0), contraction enforcement provides value stability guarantees independent of projection radius (4.8× improvement even at R=0); on successor states (B1), contraction improves latent and action stability, but value estimates require projection to avoid increased variance.
+On initial states (B0), contraction enforcement provides value stability guarantees independent of projection radius (4.5× improvement at fixed n=2→8 even at R=0); on successor states (B1), contraction improves latent and action stability, but value estimates require projection to avoid increased variance.

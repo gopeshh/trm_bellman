@@ -31,6 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 SEEDS = [41, 42, 43]
 N_TRAIN = 2
+RADIUS_SWEEP_N2 = 8  # Paper-facing radius sweep uses the fixed 2→8 comparison.
 RADII = [0.0, 10.0, 100.0]
 
 LABEL_MAP = {
@@ -113,7 +114,8 @@ def aggregate_radius_sweep(
                 rows = load_per_state_csv(csv_path)
                 for row in rows:
                     n1 = int(row.get("n1", 0))
-                    if n1 != n_train:
+                    n2 = int(row.get("n2", 0))
+                    if n1 != n_train or n2 != RADIUS_SWEEP_N2:
                         continue
 
                     for metric in raw:
@@ -168,6 +170,10 @@ def write_radius_sweep_table_single_batch(
             f.write("can exhibit increased instability even under contraction.\n\n")
 
         f.write("**Configuration**: Both models use value-head spectral norm OFF.\n\n")
+        f.write(
+            f"**Delta definition**: fixed mismatch Δ(n_train={N_TRAIN}, n₂={RADIUS_SWEEP_N2}) "
+            f"({RADIUS_SWEEP_N2 // N_TRAIN}× depth), pooled across all states and seeds.\n\n"
+        )
 
         f.write("| Radius | Condition | Δ_V (mean±std) | Δ_z (mean±std) | Argmax [95% CI] | Sat. |\n")
         f.write("|--------|-----------|----------------|----------------|-----------------|------|\n")
@@ -210,7 +216,10 @@ def write_radius_sweep_table_single_batch(
                 dV_b_r0 = data[0.0]["model_b"].get("delta_V", AggregatedStats(0, 0, 0))
                 if dV_b_r0.mean > 0:
                     improvement = dV_a_r0.mean / dV_b_r0.mean
-                    f.write(f"With projection disabled (R=0), contraction provides **{improvement:.1f}× improvement** in Δ_V.\n")
+                    f.write(
+                        f"With projection disabled (R=0), at fixed n={N_TRAIN}→{RADIUS_SWEEP_N2}, "
+                        f"contraction provides **{improvement:.1f}× improvement** in Δ_V.\n"
+                    )
                     f.write(f"This proves stability comes from contraction enforcement, not projection clipping.\n")
 
     print(f"[Table] {out_path}")
@@ -322,6 +331,7 @@ def write_fixed_claims(
 ):
     """Write corrected CLAIMS.md with properly scoped R=0 statements."""
     with open(out_path, "w") as f:
+        r0_improvement = 0.0
         f.write("# Experiment 1: Paper Claims\n\n")
         f.write("Copy-paste ready for paper text. All claims are precisely scoped.\n\n")
 
@@ -350,10 +360,18 @@ def write_fixed_claims(
             dz_b = data_b0[0.0]["model_b"].get("delta_z", AggregatedStats(0, 0, 0))
 
             improvement = dV_a.mean / dV_b.mean if dV_b.mean > 0 else 0
+            r0_improvement = improvement
             z_improvement = dz_a.mean / dz_b.mean if dz_b.mean > 0 else 0
 
-            f.write(f"5. **Claim**: On initial states (B0), with projection disabled (R=0), contraction provides {improvement:.1f}× value stability improvement.\n")
-            f.write(f"   **Evidence**: Table 2 (main). R=0 B0 Δ_V: No Contraction = {dV_a.mean:.3f}±{dV_a.std:.3f}, Contraction = {dV_b.mean:.3f}±{dV_b.std:.3f}.\n")
+            f.write(
+                f"5. **Claim**: On initial states (B0), with projection disabled (R=0), at fixed "
+                f"{RADIUS_SWEEP_N2 // N_TRAIN}× mismatch (n={N_TRAIN}→{RADIUS_SWEEP_N2}), contraction provides "
+                f"{improvement:.1f}× value stability improvement.\n"
+            )
+            f.write(
+                f"   **Evidence**: Table 2 (main). R=0 B0 Δ_V (pooled over all states and seeds): "
+                f"No Contraction = {dV_a.mean:.3f}±{dV_a.std:.3f}, Contraction = {dV_b.mean:.3f}±{dV_b.std:.3f}.\n"
+            )
             f.write("   **Interpretation**: This demonstrates that stability on initial states comes from contraction enforcement, not projection clipping.\n\n")
 
         # B1 R=0 - what actually improves
@@ -385,7 +403,10 @@ def write_fixed_claims(
         # Summary
         f.write("## One-Sentence Summary (for paper)\n\n")
         f.write("On initial states, contraction enforcement provides value stability guarantees ")
-        f.write("independent of projection radius (4.8× improvement even at R=0); ")
+        f.write(
+            f"independent of projection radius ({r0_improvement:.1f}× improvement at fixed "
+            f"n={N_TRAIN}→{RADIUS_SWEEP_N2} even at R=0); "
+        )
         f.write("on successor states, contraction consistently improves latent stability and action agreement, ")
         f.write("though value-function estimates require projection to avoid increased variance.\n")
 
