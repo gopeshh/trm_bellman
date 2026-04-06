@@ -80,7 +80,7 @@ def test_logging_and_eval_hooks_run():
 
 
 def test_dataset_bootstrap_fallback_is_explicit():
-    with patch("upi_trm_train.PuzzleDataset", side_effect=RuntimeError("boom")):
+    with patch("rl.training_setup.PuzzleDataset", side_effect=RuntimeError("boom")):
         with patch("builtins.print") as mock_print:
             dataset, *_ = build_dataset_from_paths(["missing-dataset"], pool_size=4)
 
