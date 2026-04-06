@@ -53,6 +53,16 @@ python_library(
 )
 
 python_library(
+    name = "entrypoints",
+    srcs = glob(["entrypoints/*.py"]),
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_library(
     name = "puzzle_dataset_lib",
     srcs = ["puzzle_dataset.py"],
     base_module = "",
@@ -116,8 +126,7 @@ python_binary(
     base_module = "",
     main_module = "imitation_train",
     deps = [
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/numpy:numpy",
+        ":entrypoints",
     ],
 )
 
@@ -708,7 +717,11 @@ python_binary(
 # ICML Phase 1: Unroll Sensitivity Evaluation
 python_library(
     name = "eval_unroll_sensitivity_lib",
-    srcs = ["scripts/eval_unroll_sensitivity.py"],
+    srcs = [
+        "scripts/eval_unroll_sensitivity.py",
+        "scripts/eval/__init__.py",
+        "scripts/eval/unroll_sensitivity.py",
+    ],
     base_module = "",
     deps = [
         ":models",
@@ -725,11 +738,7 @@ python_binary(
     base_module = "",
     main_module = "scripts.eval_unroll_sensitivity",
     deps = [
-        ":models",
-        ":rl",
-        ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/numpy:numpy",
+        ":eval_unroll_sensitivity_lib",
     ],
 )
 
@@ -739,14 +748,11 @@ python_unittest(
         "tests/__init__.py",
         "tests/test_unroll_sensitivity_unittest.py",
         "scripts/eval_unroll_sensitivity.py",
+        "scripts/eval/unroll_sensitivity.py",
     ],
     base_module = "",
     deps = [
-        ":models",
-        ":rl",
-        ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/numpy:numpy",
+        ":eval_unroll_sensitivity_lib",
     ],
 )
 
