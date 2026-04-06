@@ -16,7 +16,7 @@ from rl.sudoku_utils import (
 )
 
 # Import the checker functions
-from upi_trm_train import (
+from rl.sudoku_checkers import (
     sudoku_progress_checker,
     sudoku_constraint_checker,
     sudoku_feasibility_checker,
@@ -483,4 +483,3 @@ class TestVectorized9x9ZeroCandidates(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

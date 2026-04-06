@@ -2,7 +2,6 @@
 import argparse
 import logging
 import os
-import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -28,7 +27,6 @@ except ImportError:  # pragma: no cover
     wandb = None
     WANDB_AVAILABLE = False
 
-from puzzle_dataset import PuzzleDataset, PuzzleDatasetConfig  # type: ignore
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from models.norec_encoder import NoRecursionEncoder, NoRecEncoderConfig
 from models.sparse_embedding import CastedSparseEmbeddingSignSGD_Distributed
@@ -40,14 +38,37 @@ from rl.algos.a2c import A2CTrainer, A2CConfig
 from rl.algos.dqn import DQNTrainer, DQNConfig
 from rl.sudoku_checkers import (
     dummy_checker,
-    make_sudoku_feasibility_checker,
     sudoku_checker,
     sudoku_constraint_checker,
     sudoku_feasibility_checker,
     sudoku_progress_checker,
 )
+from rl.training_setup import (
+    DummyPuzzleDataset,
+    OfflinePuzzleDataset,
+    build_dataset_from_paths,
+    resolve_checker_from_dataset,
+)
 from rl.sudoku_utils import sudoku_is_solved, sudoku_get_stats
 from utils.seeding import set_global_seed
+
+__all__ = [
+    "BaselineSelection",
+    "DummyPuzzleDataset",
+    "OfflinePuzzleDataset",
+    "build_dataset_from_paths",
+    "resolve_checker_from_dataset",
+    "dummy_checker",
+    "sudoku_checker",
+    "sudoku_constraint_checker",
+    "sudoku_feasibility_checker",
+    "sudoku_progress_checker",
+    "select_baseline_from_configs",
+    "build_trainer",
+    "load_checkpoint",
+    "save_checkpoint",
+    "resume_from_checkpoint",
+]
 
 
 # =============================================================================
@@ -485,120 +506,6 @@ def resume_from_checkpoint(
     return start_step
 
 
-class DummyPuzzleDataset:
-    """
-    DummyPuzzleDataset is only used when no real Sudoku dataset is found.
-    It provides a tiny synthetic environment for smoke-testing the RL loop.
-    Tiny in-memory dataset suitable for smoke tests of the RL loop.
-    """
-
-    def __init__(self, num_instances: int = 32, seq_len: int = 16, vocab_size: int = 32):
-        self.seq_len = seq_len
-        self.vocab_size = vocab_size
-        self.num_identifiers = num_instances
-
-        self.samples: List[dict] = []
-        for idx in range(num_instances):
-            inputs = torch.randint(low=0, high=vocab_size, size=(seq_len,), dtype=torch.long)
-            puzzle_identifier = torch.tensor(idx, dtype=torch.long)
-            sample = {
-                "inputs": inputs,  # tokenized Sudoku grid encoded like the real dataset
-                "puzzle_identifiers": puzzle_identifier,
-                "initial_plan": torch.zeros_like(inputs),
-                "solution": inputs.clone(),  # dummy solution identical to inputs
-            }
-            self.samples.append(sample)
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def __getitem__(self, idx: int):
-        return self.samples[idx]
-
-
-class OfflinePuzzleDataset:
-    """
-    Wraps a finite list of samples gathered from PuzzleDataset to provide __len__/__getitem__.
-    """
-
-    def __init__(self, samples: List[dict], seq_len: int, vocab_size: int, num_identifiers: int):
-        self.samples = samples
-        self.seq_len = seq_len
-        self.vocab_size = vocab_size
-        self.num_identifiers = num_identifiers
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def __getitem__(self, idx: int):
-        return self.samples[idx]
-
-
-def build_dataset_from_paths(
-    dataset_paths: Optional[List[str]],
-    pool_size: int,
-) -> Tuple[object, int, int, int]:
-    """
-    Attempt to load a handful of samples from the supervised PuzzleDataset to bootstrap RL.
-    Falls back to DummyPuzzleDataset if paths are missing or loading fails.
-    """
-
-    if dataset_paths:
-        try:
-            ds_cfg = PuzzleDatasetConfig(
-                seed=0,
-                dataset_paths=dataset_paths,
-                global_batch_size=pool_size,
-                test_set_mode=True,
-                epochs_per_iter=1,
-                rank=0,
-                num_replicas=1,
-            )
-            iterable = PuzzleDataset(ds_cfg, split="train")
-            samples: List[dict] = []
-            for _set_name, batch, _ in iterable:
-                batch_inputs = batch["inputs"]
-                batch_ids = batch["puzzle_identifiers"]
-                batch_labels = batch.get("labels")
-                batch_size = batch_inputs.shape[0]
-                for i in range(batch_size):
-                    inputs = batch_inputs[i].clone()
-                    puzzle_id = batch_ids[i].clone()
-                    solution = batch_labels[i].clone() if batch_labels is not None else None
-                    initial_plan = inputs.clone()
-                    samples.append(
-                        {
-                            "inputs": inputs,
-                            "puzzle_identifiers": puzzle_id,
-                            "initial_plan": initial_plan,
-                            **({"solution": solution} if solution is not None else {}),
-                        }
-                    )
-                    if len(samples) >= pool_size:
-                        break
-                if len(samples) >= pool_size:
-                    break
-            if samples:
-                num_identifiers = int(torch.stack([s["puzzle_identifiers"] for s in samples]).max().item() + 1)
-                dataset = OfflinePuzzleDataset(
-                    samples=samples,
-                    seq_len=samples[0]["inputs"].shape[-1],
-                    vocab_size=iterable.metadata.vocab_size,
-                    num_identifiers=max(num_identifiers, iterable.metadata.num_puzzle_identifiers),
-                )
-                return dataset, dataset.seq_len, dataset.vocab_size, dataset.num_identifiers
-        except Exception as exc:  # pragma: no cover - bootstrap stays permissive by design
-            message = (
-                "[upi_trm_train] Falling back to dummy dataset after supervised bootstrap "
-                f"failed ({type(exc).__name__}: {exc})"
-            )
-            warnings.warn(message, RuntimeWarning)
-            print(message)
-
-    dummy = DummyPuzzleDataset()
-    return dummy, dummy.seq_len, dummy.vocab_size, dummy.num_identifiers
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Train TinyRecursiveReasoningModel with plan-space RL.")
     parser.add_argument("--dataset-paths", nargs="+", default=None, help="Optional list of supervised dataset directories.")
@@ -837,48 +744,11 @@ def main():
         print(f"[DATASET] resolved_dataset_name=dummy")
         print(f"[DATASET] num_samples={len(dataset)}")
 
-    # Choose checker function based on task and dataset
-    # Priority: feasibility_checker > progress_checker > constraint_checker > solution_checker
-    # For 4x4 Sudoku (seq_len=16):
-    #   - feasibility_checker: score = filled - w_v*violations - w_z*zeroCand (RECOMMENDED)
-    #   - progress_checker: score = filled_cells (range 0-16)
-    #   - constraint_checker: score based on violations (range 0-10)
-    # For 9x9 Sudoku or when solution is available, use solution-matching checker
-    use_feasibility_checker = getattr(rl_cfg, "use_feasibility_checker", False)
-    use_progress_checker = getattr(rl_cfg, "use_progress_checker", False)
-    use_constraint_checker = getattr(rl_cfg, "use_constraint_checker", False)
-
-    # Get feasibility checker weights from config
-    w_v = getattr(rl_cfg, "feasibility_violation_weight", 2.0)
-    w_z = getattr(rl_cfg, "feasibility_zerocand_weight", 5.0)
-
-    checker_fn = sudoku_checker
-    checker_kind = "solution"
-    if len(dataset) == 0:
-        checker_fn = dummy_checker
-        checker_kind = "dummy"
-    else:
-        sample = dataset[0]
-        if not (isinstance(sample, dict) and "solution" in sample):
-            checker_fn = dummy_checker
-            checker_kind = "dummy"
-        elif use_feasibility_checker and seq_len in (16, 81):
-            checker_fn = make_sudoku_feasibility_checker(w_v=w_v, w_z=w_z)
-            checker_kind = "feasibility"
-            grid_size = "4x4" if seq_len == 16 else "9x9"
-            print(f"[INFO] Using feasibility-aware Sudoku checker for {grid_size}")
-            print(f"       score = filled - {w_v}*violations - {w_z}*zeroCand")
-            print(f"       Max score: {seq_len} (all filled, no violations)")
-        elif use_progress_checker and seq_len in (16, 81):
-            checker_fn = sudoku_progress_checker
-            checker_kind = "progress"
-            grid_size = "4x4" if seq_len == 16 else "9x9"
-            print(f"[INFO] Using progress-based Sudoku checker for {grid_size} (score = filled_cells, range 0-{seq_len})")
-        elif use_constraint_checker and seq_len in (16, 81):
-            checker_fn = sudoku_constraint_checker
-            checker_kind = "constraint"
-            grid_size = "4x4" if seq_len == 16 else "9x9"
-            print(f"[INFO] Using constraint-based Sudoku checker for {grid_size} for dense intermediate rewards")
+    checker_resolution = resolve_checker_from_dataset(rl_cfg=rl_cfg, dataset=dataset, seq_len=seq_len)
+    checker_fn = checker_resolution.checker_fn
+    checker_kind = checker_resolution.checker_kind
+    for line in checker_resolution.info_lines:
+        print(line)
     is_sudoku_checker = checker_kind in {"solution", "constraint", "progress", "feasibility"}
 
     env_cfg = PlanEditEnvConfig(

@@ -2,11 +2,12 @@ import math
 
 import torch
 
-from upi_trm_train import DummyPuzzleDataset, dummy_checker
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from rl.sudoku_checkers import dummy_checker
 from rl.task_config import DummyTaskConfig
+from rl.training_setup import DummyPuzzleDataset
 from rl.upi_trm_trainer import UPITrmTrainer
 
 
@@ -116,4 +117,3 @@ def test_policy_update_uses_task_config_batch_mask():
 
     assert task_config.batch_called
     assert task_config.last_current_state_shape is not None
-

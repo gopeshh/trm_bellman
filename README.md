@@ -316,9 +316,10 @@ To run policy-only evaluation outside the training loop, load the model checkpoi
 import torch
 from evaluators.rl_plan_evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 from rl.envs.plan_edit_env import PlanEditEnvConfig
-from upi_trm_train import DummyPuzzleDataset, dummy_checker
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
+from rl.sudoku_checkers import dummy_checker
+from rl.training_setup import DummyPuzzleDataset
 
 model = TinyRecursiveReasoningModel_ACTV1({...})  # load weights/checkpoint
 model.load_state_dict(torch.load("path/to/checkpoint.pt"))

@@ -10,7 +10,8 @@ import torch
 from rl.evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.envs.plan_edit_env import PlanEditEnvConfig
-from upi_trm_train import DummyPuzzleDataset, dummy_checker
+from rl.sudoku_checkers import dummy_checker
+from rl.training_setup import DummyPuzzleDataset
 
 
 def _num_actions(seq_len: int, vocab_size: int) -> int:

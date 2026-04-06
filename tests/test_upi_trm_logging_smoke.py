@@ -1,10 +1,11 @@
 import torch
 from unittest.mock import patch
 
-from upi_trm_train import DummyPuzzleDataset, build_dataset_from_paths, dummy_checker
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from rl.sudoku_checkers import dummy_checker
+from rl.training_setup import DummyPuzzleDataset, build_dataset_from_paths
 from rl.upi_trm_trainer import UPITrmTrainer
 
 
