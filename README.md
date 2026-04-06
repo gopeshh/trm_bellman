@@ -7,6 +7,9 @@ This repository extends the Tiny Recursive Model (TRM) codebase with a plan-spac
 For the up-to-date 4×4 Sudoku feasibility-checker results (trivial 1–4 empties and harder 6–8 empties), random baselines, and artifact pointers, see:
 - `EXPERIMENT_RESULTS_4x4_FEASIBILITY.md`
 
+LaTeX paper repository:
+- `/home/buiksat/UPI_TRM/UPI_TRM_NIPS`
+
 For the current NeurIPS 2026 resubmission plan, see:
 - `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`
 

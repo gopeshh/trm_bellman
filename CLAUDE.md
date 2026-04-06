@@ -1,6 +1,9 @@
 # CLAUDE.md
 
 Operational guidance for Claude Code.
+LaTeX paper repository:
+`/home/buiksat/UPI_TRM/UPI_TRM_NIPS`
+
 Main experiment plan for the NeurIPS 2026 resubmission:
 `/home/buiksat/UPI_TRM/UPI_TRM_NIPS/NIPS_PLAN.md`
 
