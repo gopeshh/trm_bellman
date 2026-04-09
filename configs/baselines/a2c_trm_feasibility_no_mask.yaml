@@ -1,0 +1,56 @@
+# A2C baseline on hard 4x4 without constraint-aware masking.
+#
+# Matches the masked A2C baseline except for disable_constraint_masking=true,
+# so the environment only blocks edits to given cells.
+
+algorithm: "a2c"
+
+a2c_num_steps: 32
+vf_coef: 0.5
+max_grad_norm: 0.5
+
+gamma: 0.99
+inner_unroll_n: 2
+max_edits: 16
+num_train_steps: 20000
+
+reward_shaping: true
+use_feasibility_checker: true
+feasibility_violation_weight: 2.0
+feasibility_zerocand_weight: 5.0
+use_progress_checker: false
+use_constraint_checker: false
+disable_constraint_masking: true
+fail_terminal_reward: -16.0
+solve_terminal_reward: 1.0
+C_max: 16.0
+solved_threshold: null
+
+model_type: "trm"
+enable_contraction: false
+target_Lz: 0.9
+target_Lv: 5.0
+latent_ball_radius: 0.0
+
+policy_lr: 1.0e-4
+value_lr: 1.0e-4
+entropy_coef: 0.05
+value_target_clip: 50.0
+
+lr_schedule: "cosine"
+lr_warmup_steps: 200
+lr_min_factor: 0.1
+
+batch_size: 256
+rollout_episodes_per_step: 4
+
+episodic_latent: true
+
+stop_action_mode: "disabled"
+
+log_interval: 50
+eval_interval: 100
+eval_num_episodes: 50
+use_tqdm: true
+
+task_name: "sudoku"

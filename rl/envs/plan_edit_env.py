@@ -59,6 +59,7 @@ class PlanEditEnvConfig:
     # Terminal rewards (Paper Remark 2.6: rush-to-fail mitigation)
     fail_terminal_reward: float = 0.0   # Set to -C_max for theory alignment
     solve_terminal_reward: float = 0.0  # Optional bonus for solving
+    disable_constraint_masking: bool = False
 
 
 class PlanEditEnv:
@@ -230,6 +231,11 @@ class PlanEditEnv:
         """
         from rl.task_config import SudokuConstraintTracker, SudokuTaskConfig
 
+        if getattr(self.config, "disable_constraint_masking", False):
+            self._use_incremental_masking = False
+            self._constraint_tracker = None
+            return
+
         # Only use incremental masking for Sudoku with SudokuTaskConfig
         is_sudoku = (
             self.config.task_type == "sudoku"
@@ -357,6 +363,13 @@ class PlanEditEnv:
         if self._use_incremental_masking and self._constraint_tracker is not None:
             # The tracker was initialized in reset, just get the mask
             mask = self._constraint_tracker.get_mask(self.vocab_size, self.stop_action_id)
+        elif getattr(self.config, "disable_constraint_masking", False):
+            mask = self.compute_batch_action_mask(
+                inputs,
+                self.vocab_size,
+                self.stop_action_id,
+                stop_mode=self._stop_mode,
+            ).squeeze(0)
         elif self.task_config is not None:
             # Get current state for constraint-aware masking
             current_state = None
@@ -940,4 +953,3 @@ class PlanEditEnv:
             self._compute_action_mask(edit_position, old_digit, new_digit)
 
         return (self.x, self.y), r, done, info
-

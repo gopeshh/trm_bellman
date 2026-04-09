@@ -11,3 +11,14 @@ Seeds: 4 5 6 7 8 9
 [2026-04-06T11:43:37-07:00] [GPU 1] Starting persistent_nc seed=5
 [2026-04-06T11:43:37-07:00] [GPU 3] Starting persistent_nc seed=7
 [2026-04-06T11:43:37-07:00] [GPU 2] Starting persistent_nc seed=6
+[2026-04-06T13:58:31-07:00] [GPU 2] Finished persistent_nc seed=6 -> success=1.000
+[2026-04-06T13:58:50-07:00] [GPU 1] Finished persistent_nc seed=5 -> success=1.000
+[2026-04-06T13:59:27-07:00] [GPU 3] Finished persistent_nc seed=7 -> success=1.000
+[2026-04-06T14:02:17-07:00] [GPU 0] Finished persistent_nc seed=4 -> success=1.000
+[2026-04-06T14:59:09-07:00] Manual intervention: original H1 continuation launcher stuck after batch 1 because wait blocked on process-substitution tee; relaunching seeds 8-9 separately.
+=== H1 current-code manual batch 2/2: seeds 8 9 ===
+[2026-04-06T14:59:29-07:00] [GPU 0] Starting manual persistent_nc seed=8
+[2026-04-06T14:59:29-07:00] [GPU 1] Starting manual persistent_nc seed=9
+[2026-04-06T17:13:17-07:00] [GPU 1] Finished manual persistent_nc seed=9 -> success=1.000
+[2026-04-06T17:14:12-07:00] [GPU 0] Finished manual persistent_nc seed=8 -> success=1.000
+=== H1 current-code package complete ===

@@ -209,6 +209,39 @@ class TestConstraintAwareMasking(unittest.TestCase):
                 f"Token 2 should be masked at pos {pos}"
             )
 
+    def test_constraint_masking_can_be_disabled(self):
+        """Disabling constraint masking restores the given-cell-only action space."""
+        inputs = torch.tensor([
+            2, 1, 1, 1,
+            1, 1, 1, 1,
+            1, 1, 1, 1,
+            1, 1, 1, 1,
+        ])
+        stop_action_id = 16 * self.vocab_size_4x4
+
+        masked = self.config.compute_action_mask(
+            inputs, self.vocab_size_4x4, stop_action_id, current_state=inputs
+        )
+        unmasked_config = SudokuTaskConfig(disable_constraint_masking=True)
+        unmasked = unmasked_config.compute_action_mask(
+            inputs, self.vocab_size_4x4, stop_action_id, current_state=inputs
+        )
+        unmasked_batch = unmasked_config.compute_batch_action_mask(
+            inputs.unsqueeze(0),
+            self.vocab_size_4x4,
+            stop_action_id,
+            current_state=inputs.unsqueeze(0),
+        )
+
+        conflict_action = 1 * self.vocab_size_4x4 + 2
+        self.assertFalse(masked[conflict_action].item())
+        self.assertTrue(unmasked[conflict_action].item())
+        self.assertTrue(unmasked_batch[0, conflict_action].item())
+
+        self.assertFalse(unmasked[: self.vocab_size_4x4].any().item())
+        self.assertFalse(unmasked[1 * self.vocab_size_4x4 + 0].item())
+        self.assertFalse(unmasked[1 * self.vocab_size_4x4 + 1].item())
+
     def test_stop_action_always_valid(self):
         """Test that STOP action is always valid."""
         inputs = torch.ones(16, dtype=torch.long)

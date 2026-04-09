@@ -526,6 +526,7 @@ class SudokuTaskConfig(TaskConfig):
     
     solved_score: float = 10.0
     scale_factor: float = 10.0
+    disable_constraint_masking: bool = False
     
     @property
     def name(self) -> str:
@@ -583,6 +584,15 @@ class SudokuTaskConfig(TaskConfig):
             stop_action_id: Index of STOP action
             current_state: Current board state for constraint checking (optional)
         """
+        if self.disable_constraint_masking:
+            from rl.envs.plan_edit_env import PlanEditEnv
+
+            return PlanEditEnv.compute_batch_action_mask(
+                inputs,
+                vocab_size,
+                stop_action_id,
+            ).squeeze(0)
+
         # Handle input dimensionality
         is_1d = inputs.dim() == 1
         batch_inputs = inputs.unsqueeze(0) if is_1d else inputs
@@ -704,6 +714,15 @@ class SudokuTaskConfig(TaskConfig):
         Returns:
             [B, num_actions] boolean mask where True = action allowed
         """
+        if self.disable_constraint_masking:
+            from rl.envs.plan_edit_env import PlanEditEnv
+
+            return PlanEditEnv.compute_batch_action_mask(
+                inputs,
+                vocab_size,
+                stop_action_id,
+            )
+
         # Ensure batch dimension
         if inputs.dim() == 1:
             inputs = inputs.unsqueeze(0)

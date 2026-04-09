@@ -77,6 +77,9 @@ class RLConfig(BaseModel):
     use_feasibility_checker: bool = False
     feasibility_violation_weight: float = 2.0  # w_v: weight for constraint violations
     feasibility_zerocand_weight: float = 5.0   # w_z: weight for zero-candidate cells
+    # If True, disable Sudoku digit-constraint masking and only block edits to given cells.
+    # This restores the pre-constraint-aware action space used by historical 4x4 runs.
+    disable_constraint_masking: bool = False
     
     # Latent z mode
     # True (default): z is reinitialized from (x, y) at every step (episodic)

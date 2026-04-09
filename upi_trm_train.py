@@ -764,6 +764,7 @@ def main():
         # Terminal rewards (Paper Remark 2.6: rush-to-fail mitigation)
         fail_terminal_reward=getattr(rl_cfg, "fail_terminal_reward", 0.0),
         solve_terminal_reward=getattr(rl_cfg, "solve_terminal_reward", 0.0),
+        disable_constraint_masking=getattr(rl_cfg, "disable_constraint_masking", False),
     )
     
     # Optionally use task-specific configuration
@@ -772,7 +773,10 @@ def main():
         from rl.task_config import get_task_config
         task_name = getattr(rl_cfg, "task_name", "sudoku")
         if is_sudoku_checker:
-            task_config = get_task_config("sudoku")
+            task_config = get_task_config(
+                "sudoku",
+                disable_constraint_masking=getattr(rl_cfg, "disable_constraint_masking", False),
+            )
         elif checker_kind == "dummy":
             task_config = get_task_config("dummy")
     except ImportError:

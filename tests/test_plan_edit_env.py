@@ -1,6 +1,7 @@
 import torch
 
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from rl.task_config import SudokuTaskConfig
 
 
 class DummyDataset:
@@ -252,6 +253,121 @@ def test_action_masking_comprehensive():
     assert not mask[1, 15:20].any(), "Batch 1 Pos 3 is clue, should be fully masked"
     
     print("Comprehensive masking test passed!")
+
+
+def test_sudoku_no_mask_flag_restores_given_cell_only_actions():
+    inputs = torch.tensor([
+        2, 1, 1, 1,
+        1, 1, 1, 1,
+        1, 1, 1, 1,
+        1, 1, 1, 1,
+    ], dtype=torch.long)
+
+    class SudokuDataset:
+        def __init__(self, data):
+            self.data = [{"inputs": data, "puzzle_identifiers": torch.tensor([0])}]
+
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, idx):
+            return self.data[idx]
+
+    dataset = SudokuDataset(inputs)
+    stop_id = 16 * 6
+    conflict_action = 1 * 6 + 2
+
+    masked_cfg = PlanEditEnvConfig(
+        max_edits=4,
+        gamma=0.99,
+        vocab_size=6,
+        task_type="sudoku",
+        stop_action_mode="disabled",
+    )
+    masked_env = PlanEditEnv(
+        dataset,
+        dummy_checker,
+        masked_cfg,
+        task_config=SudokuTaskConfig(),
+    )
+    masked_env.set_stop_action_id(stop_id)
+    masked_env.reset(0)
+    masked_mask = masked_env.get_action_mask()
+
+    unmasked_cfg = PlanEditEnvConfig(
+        max_edits=4,
+        gamma=0.99,
+        vocab_size=6,
+        task_type="sudoku",
+        stop_action_mode="disabled",
+        disable_constraint_masking=True,
+    )
+    unmasked_env = PlanEditEnv(
+        dataset,
+        dummy_checker,
+        unmasked_cfg,
+        task_config=SudokuTaskConfig(disable_constraint_masking=True),
+    )
+    unmasked_env.set_stop_action_id(stop_id)
+    unmasked_env.reset(0)
+    unmasked_mask = unmasked_env.get_action_mask()
+
+    assert masked_env._use_incremental_masking is True
+    assert unmasked_env._use_incremental_masking is False
+    assert not masked_mask[conflict_action]
+    assert unmasked_mask[conflict_action]
+    assert not unmasked_mask[:6].any()
+
+
+def test_sudoku_no_mask_behavior_persists_after_step():
+    inputs = torch.tensor([
+        2, 1, 1, 1,
+        1, 1, 1, 1,
+        1, 1, 1, 1,
+        1, 1, 1, 1,
+    ], dtype=torch.long)
+
+    class SudokuDataset:
+        def __init__(self, data):
+            self.data = [{"inputs": data, "puzzle_identifiers": torch.tensor([0])}]
+
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, idx):
+            return self.data[idx]
+
+    dataset = SudokuDataset(inputs)
+    cfg = PlanEditEnvConfig(
+        max_edits=4,
+        gamma=0.99,
+        vocab_size=6,
+        task_type="sudoku",
+        stop_action_mode="disabled",
+        disable_constraint_masking=True,
+    )
+    env = PlanEditEnv(
+        dataset,
+        dummy_checker,
+        cfg,
+        task_config=SudokuTaskConfig(disable_constraint_masking=True),
+    )
+    stop_id = 16 * 6
+    env.set_stop_action_id(stop_id)
+    env.reset(0)
+
+    initial_mask = env.get_action_mask().clone()
+    first_edit = 1 * 6 + 2
+    (_, _), _, done, _ = env.step(first_edit)
+    assert not done
+
+    updated_mask = env.get_action_mask()
+    second_conflict_action = 2 * 6 + 2
+
+    assert env._use_incremental_masking is False
+    assert updated_mask[second_conflict_action]
+    assert not updated_mask[:6].any()
+    assert torch.equal(initial_mask, updated_mask)
 
 
 def test_sudoku_terminates_when_solved_via_sudoku_is_solved():
@@ -522,5 +638,3 @@ def test_task_type_none_does_not_trigger_sudoku_termination():
     assert info["solved"] is False, "info['solved'] should be False when task_type is None"
 
     print("task_type=None termination guard test passed!")
-
-
