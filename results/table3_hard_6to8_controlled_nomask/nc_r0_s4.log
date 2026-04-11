@@ -2741,3 +2741,417 @@ indices=tensor([53, 14, 52, 58, 88], device='cuda:0'))
 [DEBUG] train_step 17250: episodes collected, starting value_update
 [DEBUG] train_step 17250: value_update done, starting policy_update
 [DEBUG] train_step 17250: policy_update done
+[step 17300] value_loss=5.964058 policy_loss=-0.085898
+[step 17300] VALUE_DEBUG: target(mean=-7.20 std=8.34 min=-18.52 max=5.25) V(s)(mean=-6.75 std=8.36) reward(mean=-1.307 std=4.520) clip=50.0
+[step 17300] eval_success_rate=0.300 eval_mean_score=13.840 eval_policy_mode=greedy [solved=15/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 17300] PROGRESS: filled=13.84 violations=0.00 zero_cand=0.00
+[step 17300] DEBUG: ep_len=12.9 ep_ret=-4.271 stop_prob=0.000 score_chg=4.7500
+[DEBUG] train_step 17300: starting episode collection
+[DEBUG] train_step 17300: episodes collected, starting value_update
+[DEBUG] train_step 17300: value_update done, starting policy_update
+[DEBUG] train_step 17300: policy_update done
+[step 17350] value_loss=4.422951 policy_loss=0.018676
+[step 17350] VALUE_DEBUG: target(mean=-7.26 std=9.62 min=-23.73 max=7.76) V(s)(mean=-7.83 std=9.11) reward(mean=-0.556 std=4.326) clip=50.0
+[DEBUG] train_step 17350: starting episode collection
+[DEBUG] train_step 17350: episodes collected, starting value_update
+[DEBUG] train_step 17350: value_update done, starting policy_update
+[DEBUG] train_step 17350: policy_update done
+[step 17400] value_loss=5.528382 policy_loss=-1.110075
+[step 17400] VALUE_DEBUG: target(mean=-6.57 std=9.52 min=-21.42 max=7.98) V(s)(mean=-7.13 std=8.74) reward(mean=-0.745 std=4.891) clip=50.0
+[step 17400] eval_success_rate=0.300 eval_mean_score=13.700 eval_policy_mode=greedy [solved=15/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 17400] PROGRESS: filled=13.70 violations=0.00 zero_cand=0.00
+[step 17400] DEBUG: ep_len=12.4 ep_ret=-3.046 stop_prob=0.000 score_chg=4.9275
+[DEBUG] train_step 17400: starting episode collection
+[DEBUG] train_step 17400: episodes collected, starting value_update
+[DEBUG] train_step 17400: value_update done, starting policy_update
+[DEBUG] train_step 17400: policy_update done
+[step 17450] value_loss=3.386832 policy_loss=0.047693
+[step 17450] VALUE_DEBUG: target(mean=-4.67 std=8.99 min=-18.67 max=8.61) V(s)(mean=-4.78 std=8.80) reward(mean=-0.027 std=3.630) clip=50.0
+[DEBUG] train_step 17450: starting episode collection
+[DEBUG] train_step 17450: episodes collected, starting value_update
+[DEBUG] train_step 17450: value_update done, starting policy_update
+[DEBUG] train_step 17450: policy_update done
+[step 17500] value_loss=3.254753 policy_loss=-0.624836
+[step 17500] VALUE_DEBUG: target(mean=-9.36 std=8.49 min=-18.79 max=5.39) V(s)(mean=-9.43 std=8.58) reward(mean=-0.794 std=4.416) clip=50.0
+[step 17500] eval_success_rate=0.360 eval_mean_score=13.800 eval_policy_mode=greedy [solved=18/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 17500] PROGRESS: filled=13.80 violations=0.00 zero_cand=0.00
+[step 17500] DEBUG: ep_len=12.5 ep_ret=-3.785 stop_prob=0.000 score_chg=4.6000
+[DEBUG] train_step 17500: starting episode collection
+[DEBUG] train_step 17500: episodes collected, starting value_update
+[DEBUG] train_step 17500: value_update done, starting policy_update
+[DEBUG] train_step 17500: policy_update done
+[step 17550] value_loss=2.357679 policy_loss=-1.000000
+[step 17550] VALUE_DEBUG: target(mean=-10.72 std=8.37 min=-19.35 max=10.30) V(s)(mean=-11.39 std=7.93) reward(mean=0.005 std=3.441) clip=50.0
+[DEBUG] train_step 17550: starting episode collection
+[DEBUG] train_step 17550: episodes collected, starting value_update
+[DEBUG] train_step 17550: value_update done, starting policy_update
+[DEBUG] train_step 17550: policy_update done
+[step 17600] value_loss=18.395391 policy_loss=-0.537259
+[step 17600] VALUE_DEBUG: target(mean=-9.46 std=9.05 min=-24.85 max=6.07) V(s)(mean=-8.99 std=8.69) reward(mean=-0.614 std=5.794) clip=50.0
+[step 17600] eval_success_rate=0.340 eval_mean_score=13.740 eval_policy_mode=greedy [solved=17/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 17600] PROGRESS: filled=13.74 violations=0.00 zero_cand=0.00
+[step 17600] DEBUG: ep_len=12.8 ep_ret=-3.759 stop_prob=0.000 score_chg=4.8800
+[DEBUG] train_step 17600: starting episode collection
+[DEBUG] train_step 17600: episodes collected, starting value_update
+[DEBUG] train_step 17600: value_update done, starting policy_update
+[DEBUG] train_step 17600: policy_update done
+[step 17650] value_loss=5.941265 policy_loss=-0.023117
+[step 17650] VALUE_DEBUG: target(mean=-8.12 std=8.53 min=-22.09 max=5.54) V(s)(mean=-7.88 std=8.40) reward(mean=-0.088 std=4.099) clip=50.0
+[DEBUG] train_step 17650: starting episode collection
+[DEBUG] train_step 17650: episodes collected, starting value_update
+[DEBUG] train_step 17650: value_update done, starting policy_update
+[DEBUG] train_step 17650: policy_update done
+[step 17700] value_loss=9.536186 policy_loss=0.223709
+[step 17700] VALUE_DEBUG: target(mean=-9.08 std=7.72 min=-25.06 max=3.94) V(s)(mean=-9.51 std=7.22) reward(mean=-0.058 std=5.371) clip=50.0
+[step 17700] eval_success_rate=0.260 eval_mean_score=13.760 eval_policy_mode=greedy [solved=13/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 17700] PROGRESS: filled=13.76 violations=0.00 zero_cand=0.00
+[step 17700] DEBUG: ep_len=12.7 ep_ret=-3.245 stop_prob=0.000 score_chg=5.1175
+[DEBUG] train_step 17700: starting episode collection
+[DEBUG] train_step 17700: episodes collected, starting value_update
+[DEBUG] train_step 17700: value_update done, starting policy_update
+[DEBUG] train_step 17700: policy_update done
+[step 17750] value_loss=1.899776 policy_loss=0.156405
+[step 17750] VALUE_DEBUG: target(mean=-10.47 std=8.52 min=-19.20 max=5.95) V(s)(mean=-10.48 std=8.44) reward(mean=-0.148 std=3.323) clip=50.0
+[DEBUG] train_step 17750: starting episode collection
+[DEBUG] train_step 17750: episodes collected, starting value_update
+[DEBUG] train_step 17750: value_update done, starting policy_update
+[DEBUG] train_step 17750: policy_update done
+[step 17800] value_loss=19.204830 policy_loss=-0.163505
+[step 17800] VALUE_DEBUG: target(mean=-6.12 std=8.96 min=-17.87 max=8.04) V(s)(mean=-5.70 std=9.00) reward(mean=-0.710 std=4.781) clip=50.0
+[step 17800] eval_success_rate=0.280 eval_mean_score=13.740 eval_policy_mode=greedy [solved=14/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 17800] PROGRESS: filled=13.74 violations=0.00 zero_cand=0.00
+[step 17800] DEBUG: ep_len=12.5 ep_ret=-2.635 stop_prob=0.000 score_chg=5.1050
+[DEBUG] train_step 17800: starting episode collection
+[DEBUG] train_step 17800: episodes collected, starting value_update
+[DEBUG] train_step 17800: value_update done, starting policy_update
+[DEBUG] train_step 17800: policy_update done
+[step 17850] value_loss=8.066322 policy_loss=-0.701107
+[step 17850] VALUE_DEBUG: target(mean=-8.84 std=9.26 min=-19.20 max=10.02) V(s)(mean=-9.01 std=8.50) reward(mean=0.423 std=3.580) clip=50.0
+[DEBUG] train_step 17850: starting episode collection
+[DEBUG] train_step 17850: episodes collected, starting value_update
+[DEBUG] train_step 17850: value_update done, starting policy_update
+[DEBUG] train_step 17850: policy_update done
+[step 17900] value_loss=15.850464 policy_loss=0.404782
+[step 17900] VALUE_DEBUG: target(mean=-9.09 std=8.69 min=-20.53 max=6.84) V(s)(mean=-7.94 std=8.39) reward(mean=-1.954 std=5.738) clip=50.0
+[step 17900] eval_success_rate=0.280 eval_mean_score=13.660 eval_policy_mode=greedy [solved=14/50, score_range=11.00-16.00/16.0, initial=9.00]
+[step 17900] PROGRESS: filled=13.66 violations=0.00 zero_cand=0.00
+[step 17900] DEBUG: ep_len=12.2 ep_ret=-1.876 stop_prob=0.000 score_chg=5.4075
+[DEBUG] train_step 17900: starting episode collection
+[DEBUG] train_step 17900: episodes collected, starting value_update
+[DEBUG] train_step 17900: value_update done, starting policy_update
+[DEBUG] train_step 17900: policy_update done
+[step 17950] value_loss=3.064426 policy_loss=0.307142
+[step 17950] VALUE_DEBUG: target(mean=-8.16 std=8.82 min=-19.49 max=6.83) V(s)(mean=-8.37 std=8.58) reward(mean=-0.218 std=3.418) clip=50.0
+[DEBUG] train_step 17950: starting episode collection
+[DEBUG] train_step 17950: episodes collected, starting value_update
+[DEBUG] train_step 17950: value_update done, starting policy_update
+[DEBUG] train_step 17950: policy_update done
+[step 18000] value_loss=4.770402 policy_loss=0.102929
+[step 18000] VALUE_DEBUG: target(mean=-8.72 std=10.01 min=-20.33 max=11.34) V(s)(mean=-8.70 std=9.15) reward(mean=-1.237 std=5.398) clip=50.0
+[step 18000] eval_success_rate=0.320 eval_mean_score=13.840 eval_policy_mode=greedy [solved=16/50, score_range=11.00-16.00/16.0, initial=9.00]
+[step 18000] PROGRESS: filled=13.84 violations=0.00 zero_cand=0.00
+[step 18000] DEBUG: ep_len=12.3 ep_ret=-2.377 stop_prob=0.000 score_chg=5.1025
+[Checkpoint] Saved to buiksat_trm/checkpoints/table3_hard_6to8_controlled_nomask_nc_r0_s4/rl_checkpoint_step_18000.pt
+[DEBUG] train_step 18000: starting episode collection
+[DEBUG] train_step 18000: episodes collected, starting value_update
+[DEBUG] train_step 18000: value_update done, starting policy_update
+[DEBUG] train_step 18000: policy_update done
+[step 18050] value_loss=6.136174 policy_loss=-0.737602
+[step 18050] VALUE_DEBUG: target(mean=-7.98 std=8.16 min=-19.77 max=8.59) V(s)(mean=-7.96 std=7.75) reward(mean=0.291 std=2.457) clip=50.0
+[DEBUG] train_step 18050: starting episode collection
+[DEBUG] train_step 18050: episodes collected, starting value_update
+[DEBUG] train_step 18050: value_update done, starting policy_update
+[DEBUG] train_step 18050: policy_update done
+[step 18100] value_loss=7.273210 policy_loss=-0.311120
+[step 18100] VALUE_DEBUG: target(mean=-2.79 std=9.50 min=-22.78 max=9.02) V(s)(mean=-3.27 std=8.44) reward(mean=0.544 std=2.665) clip=50.0
+[step 18100] eval_success_rate=0.300 eval_mean_score=13.620 eval_policy_mode=greedy [solved=15/50, score_range=11.00-16.00/16.0, initial=9.00]
+[step 18100] PROGRESS: filled=13.62 violations=0.00 zero_cand=0.00
+[step 18100] DEBUG: ep_len=12.5 ep_ret=-2.681 stop_prob=0.000 score_chg=5.2050
+[DEBUG] train_step 18100: starting episode collection
+[DEBUG] train_step 18100: episodes collected, starting value_update
+[DEBUG] train_step 18100: value_update done, starting policy_update
+[DEBUG] train_step 18100: policy_update done
+[step 18150] value_loss=2.301630 policy_loss=0.142981
+[step 18150] VALUE_DEBUG: target(mean=-10.44 std=8.18 min=-21.28 max=5.57) V(s)(mean=-10.63 std=7.99) reward(mean=0.134 std=4.286) clip=50.0
+[DEBUG] train_step 18150: starting episode collection
+[DEBUG] train_step 18150: episodes collected, starting value_update
+[DEBUG] train_step 18150: value_update done, starting policy_update
+[DEBUG] train_step 18150: policy_update done
+[step 18200] value_loss=2.944877 policy_loss=-1.021755
+[step 18200] VALUE_DEBUG: target(mean=-7.46 std=9.08 min=-18.62 max=12.81) V(s)(mean=-7.56 std=8.24) reward(mean=0.217 std=3.453) clip=50.0
+[step 18200] eval_success_rate=0.280 eval_mean_score=13.540 eval_policy_mode=greedy [solved=14/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 18200] PROGRESS: filled=13.54 violations=0.00 zero_cand=0.00
+[step 18200] DEBUG: ep_len=12.5 ep_ret=-2.815 stop_prob=0.000 score_chg=5.0650
+[DEBUG] train_step 18200: starting episode collection
+[DEBUG] train_step 18200: episodes collected, starting value_update
+[DEBUG] train_step 18200: value_update done, starting policy_update
+[DEBUG] train_step 18200: policy_update done
+[step 18250] value_loss=4.889962 policy_loss=0.499953
+[step 18250] VALUE_DEBUG: target(mean=-6.83 std=8.87 min=-19.40 max=7.39) V(s)(mean=-7.31 std=8.62) reward(mean=-0.308 std=4.701) clip=50.0
+[DEBUG] train_step 18250: starting episode collection
+[DEBUG] train_step 18250: episodes collected, starting value_update
+[DEBUG] train_step 18250: value_update done, starting policy_update
+[DEBUG] train_step 18250: policy_update done
+[step 18300] value_loss=6.842134 policy_loss=-0.348597
+[step 18300] VALUE_DEBUG: target(mean=-6.28 std=10.44 min=-19.25 max=12.28) V(s)(mean=-6.42 std=9.66) reward(mean=-0.057 std=4.784) clip=50.0
+[step 18300] eval_success_rate=0.260 eval_mean_score=13.580 eval_policy_mode=greedy [solved=13/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 18300] PROGRESS: filled=13.58 violations=0.00 zero_cand=0.00
+[step 18300] DEBUG: ep_len=12.5 ep_ret=-2.522 stop_prob=0.000 score_chg=5.3425
+[DEBUG] train_step 18300: starting episode collection
+[DEBUG] train_step 18300: episodes collected, starting value_update
+[DEBUG] train_step 18300: value_update done, starting policy_update
+[DEBUG] train_step 18300: policy_update done
+[step 18350] value_loss=10.032103 policy_loss=0.035571
+[step 18350] VALUE_DEBUG: target(mean=-9.51 std=7.97 min=-21.74 max=5.48) V(s)(mean=-8.53 std=8.06) reward(mean=-1.391 std=4.633) clip=50.0
+[DEBUG] train_step 18350: starting episode collection
+[DEBUG] train_step 18350: episodes collected, starting value_update
+[DEBUG] train_step 18350: value_update done, starting policy_update
+[DEBUG] train_step 18350: policy_update done
+[step 18400] value_loss=15.002310 policy_loss=-0.284279
+[step 18400] VALUE_DEBUG: target(mean=-7.73 std=9.44 min=-21.59 max=9.14) V(s)(mean=-7.68 std=8.71) reward(mean=-0.558 std=4.299) clip=50.0
+[step 18400] eval_success_rate=0.240 eval_mean_score=13.520 eval_policy_mode=greedy [solved=12/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 18400] PROGRESS: filled=13.52 violations=0.00 zero_cand=0.00
+[step 18400] DEBUG: ep_len=12.6 ep_ret=-3.440 stop_prob=0.000 score_chg=5.0000
+[DEBUG] train_step 18400: starting episode collection
+[DEBUG] train_step 18400: episodes collected, starting value_update
+[DEBUG] train_step 18400: value_update done, starting policy_update
+[DEBUG] train_step 18400: policy_update done
+[step 18450] value_loss=4.887787 policy_loss=-0.924401
+[step 18450] VALUE_DEBUG: target(mean=-8.78 std=8.72 min=-22.22 max=6.17) V(s)(mean=-8.16 std=8.32) reward(mean=-0.145 std=3.051) clip=50.0
+[DEBUG] train_step 18450: starting episode collection
+[DEBUG] train_step 18450: episodes collected, starting value_update
+[DEBUG] train_step 18450: value_update done, starting policy_update
+[DEBUG] train_step 18450: policy_update done
+[step 18500] value_loss=12.238832 policy_loss=-0.274258
+[step 18500] VALUE_DEBUG: target(mean=-6.05 std=9.40 min=-23.84 max=10.67) V(s)(mean=-6.55 std=8.69) reward(mean=0.004 std=3.832) clip=50.0
+[step 18500] eval_success_rate=0.160 eval_mean_score=13.160 eval_policy_mode=greedy [solved=8/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 18500] PROGRESS: filled=13.16 violations=0.00 zero_cand=0.00
+[step 18500] DEBUG: ep_len=13.0 ep_ret=-3.760 stop_prob=0.000 score_chg=5.0475
+[DEBUG] train_step 18500: starting episode collection
+[DEBUG] train_step 18500: episodes collected, starting value_update
+[DEBUG] train_step 18500: value_update done, starting policy_update
+[DEBUG] train_step 18500: policy_update done
+[step 18550] value_loss=10.516121 policy_loss=0.762171
+[step 18550] VALUE_DEBUG: target(mean=-9.10 std=9.35 min=-24.89 max=7.24) V(s)(mean=-8.66 std=9.31) reward(mean=-1.608 std=4.473) clip=50.0
+[DEBUG] train_step 18550: starting episode collection
+[DEBUG] train_step 18550: episodes collected, starting value_update
+[DEBUG] train_step 18550: value_update done, starting policy_update
+[DEBUG] train_step 18550: policy_update done
+[step 18600] value_loss=10.542595 policy_loss=-1.076582
+[step 18600] VALUE_DEBUG: target(mean=-6.96 std=9.22 min=-19.52 max=9.34) V(s)(mean=-7.67 std=8.56) reward(mean=0.475 std=1.858) clip=50.0
+[step 18600] eval_success_rate=0.260 eval_mean_score=13.280 eval_policy_mode=greedy [solved=13/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 18600] PROGRESS: filled=13.28 violations=0.00 zero_cand=0.00
+[step 18600] DEBUG: ep_len=12.9 ep_ret=-4.020 stop_prob=0.000 score_chg=4.8725
+[DEBUG] train_step 18600: starting episode collection
+[DEBUG] train_step 18600: episodes collected, starting value_update
+[DEBUG] train_step 18600: value_update done, starting policy_update
+[DEBUG] train_step 18600: policy_update done
+[step 18650] value_loss=11.734550 policy_loss=0.059858
+[step 18650] VALUE_DEBUG: target(mean=-8.97 std=8.62 min=-22.06 max=6.54) V(s)(mean=-8.61 std=8.06) reward(mean=-0.802 std=4.947) clip=50.0
+[DEBUG] train_step 18650: starting episode collection
+[DEBUG] train_step 18650: episodes collected, starting value_update
+[DEBUG] train_step 18650: value_update done, starting policy_update
+[DEBUG] train_step 18650: policy_update done
+[step 18700] value_loss=3.206751 policy_loss=1.168763
+[step 18700] VALUE_DEBUG: target(mean=-7.01 std=8.80 min=-23.23 max=5.89) V(s)(mean=-7.03 std=8.23) reward(mean=-1.297 std=5.162) clip=50.0
+[step 18700] eval_success_rate=0.260 eval_mean_score=13.300 eval_policy_mode=greedy [solved=13/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 18700] PROGRESS: filled=13.30 violations=0.00 zero_cand=0.00
+[step 18700] DEBUG: ep_len=12.5 ep_ret=-3.124 stop_prob=0.000 score_chg=5.0050
+[DEBUG] train_step 18700: starting episode collection
+[DEBUG] train_step 18700: episodes collected, starting value_update
+[DEBUG] train_step 18700: value_update done, starting policy_update
+[DEBUG] train_step 18700: policy_update done
+[step 18750] value_loss=18.180897 policy_loss=-0.295176
+[step 18750] VALUE_DEBUG: target(mean=-5.80 std=9.77 min=-20.04 max=11.93) V(s)(mean=-6.36 std=8.68) reward(mean=-0.121 std=5.122) clip=50.0
+[DEBUG] train_step 18750: starting episode collection
+[DEBUG] train_step 18750: episodes collected, starting value_update
+[DEBUG] train_step 18750: value_update done, starting policy_update
+[DEBUG] train_step 18750: policy_update done
+[step 18800] value_loss=17.481730 policy_loss=0.191777
+[step 18800] VALUE_DEBUG: target(mean=-8.11 std=9.48 min=-22.07 max=9.94) V(s)(mean=-8.58 std=8.79) reward(mean=-0.774 std=5.191) clip=50.0
+[step 18800] eval_success_rate=0.300 eval_mean_score=13.480 eval_policy_mode=greedy [solved=15/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 18800] PROGRESS: filled=13.48 violations=0.00 zero_cand=0.00
+[step 18800] DEBUG: ep_len=12.8 ep_ret=-4.384 stop_prob=0.000 score_chg=4.7525
+[DEBUG] train_step 18800: starting episode collection
+[DEBUG] train_step 18800: episodes collected, starting value_update
+[DEBUG] train_step 18800: value_update done, starting policy_update
+[DEBUG] train_step 18800: policy_update done
+[step 18850] value_loss=9.208467 policy_loss=-0.773566
+[step 18850] VALUE_DEBUG: target(mean=-9.05 std=9.18 min=-22.01 max=8.79) V(s)(mean=-8.53 std=8.34) reward(mean=-0.427 std=3.947) clip=50.0
+[DEBUG] train_step 18850: starting episode collection
+[DEBUG] train_step 18850: episodes collected, starting value_update
+[DEBUG] train_step 18850: value_update done, starting policy_update
+[DEBUG] train_step 18850: policy_update done
+[step 18900] value_loss=5.031343 policy_loss=-1.726637
+[step 18900] VALUE_DEBUG: target(mean=-6.97 std=9.06 min=-18.75 max=6.86) V(s)(mean=-6.95 std=8.48) reward(mean=-0.615 std=4.006) clip=50.0
+[step 18900] eval_success_rate=0.200 eval_mean_score=13.080 eval_policy_mode=greedy [solved=10/50, score_range=9.00-16.00/16.0, initial=9.00]
+[step 18900] PROGRESS: filled=13.08 violations=0.00 zero_cand=0.00
+[step 18900] DEBUG: ep_len=12.4 ep_ret=-3.147 stop_prob=0.000 score_chg=4.8500
+[DEBUG] train_step 18900: starting episode collection
+[DEBUG] train_step 18900: episodes collected, starting value_update
+[DEBUG] train_step 18900: value_update done, starting policy_update
+[DEBUG] train_step 18900: policy_update done
+[step 18950] value_loss=6.017292 policy_loss=-0.282936
+[step 18950] VALUE_DEBUG: target(mean=-8.39 std=8.04 min=-21.78 max=5.90) V(s)(mean=-8.04 std=7.82) reward(mean=0.009 std=2.831) clip=50.0
+[DEBUG] train_step 18950: starting episode collection
+[DEBUG] train_step 18950: episodes collected, starting value_update
+[DEBUG] train_step 18950: value_update done, starting policy_update
+[DEBUG] train_step 18950: policy_update done
+[step 19000] value_loss=4.979009 policy_loss=0.077826
+[step 19000] VALUE_DEBUG: target(mean=-5.27 std=7.55 min=-19.67 max=6.39) V(s)(mean=-5.24 std=7.93) reward(mean=-0.551 std=3.624) clip=50.0
+[step 19000] eval_success_rate=0.320 eval_mean_score=13.600 eval_policy_mode=greedy [solved=16/50, score_range=9.00-16.00/16.0, initial=9.00]
+[step 19000] PROGRESS: filled=13.60 violations=0.00 zero_cand=0.00
+[step 19000] DEBUG: ep_len=12.5 ep_ret=-2.721 stop_prob=0.000 score_chg=5.2225
+[Checkpoint] Saved to buiksat_trm/checkpoints/table3_hard_6to8_controlled_nomask_nc_r0_s4/rl_checkpoint_step_19000.pt
+[DEBUG] train_step 19000: starting episode collection
+[DEBUG] train_step 19000: episodes collected, starting value_update
+[DEBUG] train_step 19000: value_update done, starting policy_update
+[DEBUG] train_step 19000: policy_update done
+[step 19050] value_loss=2.108779 policy_loss=0.497897
+[step 19050] VALUE_DEBUG: target(mean=-2.00 std=8.54 min=-17.69 max=9.01) V(s)(mean=-2.63 std=8.47) reward(mean=0.883 std=1.770) clip=50.0
+[DEBUG] train_step 19050: starting episode collection
+[DEBUG] train_step 19050: episodes collected, starting value_update
+[DEBUG] train_step 19050: value_update done, starting policy_update
+[DEBUG] train_step 19050: policy_update done
+[step 19100] value_loss=1.775052 policy_loss=-0.872208
+[step 19100] VALUE_DEBUG: target(mean=-6.03 std=8.37 min=-19.58 max=6.92) V(s)(mean=-6.03 std=8.23) reward(mean=-0.896 std=4.399) clip=50.0
+[step 19100] eval_success_rate=0.260 eval_mean_score=13.400 eval_policy_mode=greedy [solved=13/50, score_range=9.00-16.00/16.0, initial=9.00]
+[step 19100] PROGRESS: filled=13.40 violations=0.00 zero_cand=0.00
+[step 19100] DEBUG: ep_len=12.6 ep_ret=-2.987 stop_prob=0.000 score_chg=5.2500
+[DEBUG] train_step 19100: starting episode collection
+[DEBUG] train_step 19100: episodes collected, starting value_update
+[DEBUG] train_step 19100: value_update done, starting policy_update
+[DEBUG] train_step 19100: policy_update done
+[step 19150] value_loss=10.012016 policy_loss=-0.632428
+[step 19150] VALUE_DEBUG: target(mean=-5.13 std=7.68 min=-19.86 max=6.84) V(s)(mean=-6.53 std=6.97) reward(mean=1.252 std=2.508) clip=50.0
+[DEBUG] train_step 19150: starting episode collection
+[DEBUG] train_step 19150: episodes collected, starting value_update
+[DEBUG] train_step 19150: value_update done, starting policy_update
+[DEBUG] train_step 19150: policy_update done
+[step 19200] value_loss=8.797976 policy_loss=-1.140690
+[step 19200] VALUE_DEBUG: target(mean=-4.49 std=8.18 min=-20.73 max=7.03) V(s)(mean=-3.86 std=7.71) reward(mean=-0.355 std=2.501) clip=50.0
+[step 19200] eval_success_rate=0.240 eval_mean_score=13.320 eval_policy_mode=greedy [solved=12/50, score_range=9.00-16.00/16.0, initial=9.00]
+[step 19200] PROGRESS: filled=13.32 violations=0.00 zero_cand=0.00
+[step 19200] DEBUG: ep_len=12.4 ep_ret=-2.582 stop_prob=0.000 score_chg=5.0250
+[DEBUG] train_step 19200: starting episode collection
+[DEBUG] train_step 19200: episodes collected, starting value_update
+[DEBUG] train_step 19200: value_update done, starting policy_update
+[DEBUG] train_step 19200: policy_update done
+[step 19250] value_loss=8.898674 policy_loss=0.148591
+[step 19250] VALUE_DEBUG: target(mean=-3.37 std=9.64 min=-17.86 max=16.79) V(s)(mean=-4.32 std=8.44) reward(mean=0.630 std=4.341) clip=50.0
+[DEBUG] train_step 19250: starting episode collection
+[DEBUG] train_step 19250: episodes collected, starting value_update
+[DEBUG] train_step 19250: value_update done, starting policy_update
+[DEBUG] train_step 19250: policy_update done
+[step 19300] value_loss=5.957464 policy_loss=-1.043958
+[step 19300] VALUE_DEBUG: target(mean=-6.36 std=9.33 min=-19.64 max=11.75) V(s)(mean=-6.38 std=8.83) reward(mean=0.043 std=3.575) clip=50.0
+[step 19300] eval_success_rate=0.240 eval_mean_score=13.220 eval_policy_mode=greedy [solved=12/50, score_range=9.00-16.00/16.0, initial=9.00]
+[step 19300] PROGRESS: filled=13.22 violations=0.00 zero_cand=0.00
+[step 19300] DEBUG: ep_len=12.8 ep_ret=-4.565 stop_prob=0.000 score_chg=4.5600
+[DEBUG] train_step 19300: starting episode collection
+[DEBUG] train_step 19300: episodes collected, starting value_update
+[DEBUG] train_step 19300: value_update done, starting policy_update
+[DEBUG] train_step 19300: policy_update done
+[step 19350] value_loss=13.785217 policy_loss=-1.029946
+[step 19350] VALUE_DEBUG: target(mean=-6.85 std=8.87 min=-21.10 max=8.92) V(s)(mean=-6.67 std=8.25) reward(mean=0.445 std=4.780) clip=50.0
+[DEBUG] train_step 19350: starting episode collection
+[DEBUG] train_step 19350: episodes collected, starting value_update
+[DEBUG] train_step 19350: value_update done, starting policy_update
+[DEBUG] train_step 19350: policy_update done
+[step 19400] value_loss=8.119584 policy_loss=-0.776312
+[step 19400] VALUE_DEBUG: target(mean=-3.78 std=8.07 min=-17.52 max=14.34) V(s)(mean=-4.20 std=7.80) reward(mean=1.043 std=2.967) clip=50.0
+[step 19400] eval_success_rate=0.280 eval_mean_score=13.160 eval_policy_mode=greedy [solved=14/50, score_range=9.00-16.00/16.0, initial=9.00]
+[step 19400] PROGRESS: filled=13.16 violations=0.00 zero_cand=0.00
+[step 19400] DEBUG: ep_len=12.2 ep_ret=-2.345 stop_prob=0.000 score_chg=5.0625
+[DEBUG] train_step 19400: starting episode collection
+[DEBUG] train_step 19400: episodes collected, starting value_update
+[DEBUG] train_step 19400: value_update done, starting policy_update
+[DEBUG] train_step 19400: policy_update done
+[step 19450] value_loss=27.588905 policy_loss=-1.095502
+[step 19450] VALUE_DEBUG: target(mean=-4.83 std=9.11 min=-19.05 max=10.25) V(s)(mean=-4.86 std=8.36) reward(mean=0.073 std=4.118) clip=50.0
+[DEBUG] train_step 19450: starting episode collection
+[DEBUG] train_step 19450: episodes collected, starting value_update
+[DEBUG] train_step 19450: value_update done, starting policy_update
+[DEBUG] train_step 19450: policy_update done
+[step 19500] value_loss=8.882455 policy_loss=-0.780729
+[step 19500] VALUE_DEBUG: target(mean=-4.13 std=8.95 min=-19.59 max=15.27) V(s)(mean=-4.09 std=8.39) reward(mean=0.084 std=4.039) clip=50.0
+[step 19500] eval_success_rate=0.400 eval_mean_score=13.740 eval_policy_mode=greedy [solved=20/50, score_range=9.00-16.00/16.0, initial=9.00]
+[step 19500] PROGRESS: filled=13.74 violations=0.00 zero_cand=0.00
+[step 19500] DEBUG: ep_len=12.6 ep_ret=-3.419 stop_prob=0.000 score_chg=4.7925
+[DEBUG] train_step 19500: starting episode collection
+[DEBUG] train_step 19500: episodes collected, starting value_update
+[DEBUG] train_step 19500: value_update done, starting policy_update
+[DEBUG] train_step 19500: policy_update done
+[step 19550] value_loss=1.738744 policy_loss=-0.480692
+[step 19550] VALUE_DEBUG: target(mean=-3.75 std=8.05 min=-18.66 max=6.54) V(s)(mean=-4.09 std=7.73) reward(mean=0.748 std=1.052) clip=50.0
+[DEBUG] train_step 19550: starting episode collection
+[DEBUG] train_step 19550: episodes collected, starting value_update
+[DEBUG] train_step 19550: value_update done, starting policy_update
+[DEBUG] train_step 19550: policy_update done
+[step 19600] value_loss=13.428648 policy_loss=-0.158431
+[step 19600] VALUE_DEBUG: target(mean=-3.37 std=9.55 min=-19.70 max=11.09) V(s)(mean=-4.85 std=8.87) reward(mean=0.909 std=2.175) clip=50.0
+[step 19600] eval_success_rate=0.340 eval_mean_score=13.360 eval_policy_mode=greedy [solved=17/50, score_range=9.00-16.00/16.0, initial=9.00]
+[step 19600] PROGRESS: filled=13.36 violations=0.00 zero_cand=0.00
+[step 19600] DEBUG: ep_len=12.4 ep_ret=-2.468 stop_prob=0.000 score_chg=4.9950
+[DEBUG] train_step 19600: starting episode collection
+[DEBUG] train_step 19600: episodes collected, starting value_update
+[DEBUG] train_step 19600: value_update done, starting policy_update
+[DEBUG] train_step 19600: policy_update done
+[step 19650] value_loss=3.595809 policy_loss=1.153362
+[step 19650] VALUE_DEBUG: target(mean=-3.93 std=7.95 min=-17.57 max=6.72) V(s)(mean=-4.17 std=8.00) reward(mean=-0.269 std=3.591) clip=50.0
+[DEBUG] train_step 19650: starting episode collection
+[DEBUG] train_step 19650: episodes collected, starting value_update
+[DEBUG] train_step 19650: value_update done, starting policy_update
+[DEBUG] train_step 19650: policy_update done
+[step 19700] value_loss=9.411642 policy_loss=0.705253
+[step 19700] VALUE_DEBUG: target(mean=-4.32 std=8.34 min=-18.77 max=12.26) V(s)(mean=-3.75 std=7.20) reward(mean=-0.363 std=4.147) clip=50.0
+[step 19700] eval_success_rate=0.220 eval_mean_score=13.040 eval_policy_mode=greedy [solved=11/50, score_range=9.00-16.00/16.0, initial=9.00]
+[step 19700] PROGRESS: filled=13.04 violations=0.00 zero_cand=0.00
+[step 19700] DEBUG: ep_len=12.2 ep_ret=-1.920 stop_prob=0.000 score_chg=5.1975
+[DEBUG] train_step 19700: starting episode collection
+[DEBUG] train_step 19700: episodes collected, starting value_update
+[DEBUG] train_step 19700: value_update done, starting policy_update
+[DEBUG] train_step 19700: policy_update done
+[step 19750] value_loss=3.199714 policy_loss=-0.159980
+[step 19750] VALUE_DEBUG: target(mean=-7.68 std=8.48 min=-18.89 max=5.90) V(s)(mean=-7.35 std=8.12) reward(mean=-0.244 std=2.304) clip=50.0
+[DEBUG] train_step 19750: starting episode collection
+[DEBUG] train_step 19750: episodes collected, starting value_update
+[DEBUG] train_step 19750: value_update done, starting policy_update
+[DEBUG] train_step 19750: policy_update done
+[step 19800] value_loss=2.365403 policy_loss=0.496779
+[step 19800] VALUE_DEBUG: target(mean=-3.10 std=8.11 min=-19.37 max=6.72) V(s)(mean=-3.54 std=7.89) reward(mean=0.441 std=1.635) clip=50.0
+[step 19800] eval_success_rate=0.260 eval_mean_score=13.180 eval_policy_mode=greedy [solved=13/50, score_range=9.00-16.00/16.0, initial=9.00]
+[step 19800] PROGRESS: filled=13.18 violations=0.00 zero_cand=0.00
+[step 19800] DEBUG: ep_len=12.4 ep_ret=-2.457 stop_prob=0.000 score_chg=4.9550
+[DEBUG] train_step 19800: starting episode collection
+[DEBUG] train_step 19800: episodes collected, starting value_update
+[DEBUG] train_step 19800: value_update done, starting policy_update
+[DEBUG] train_step 19800: policy_update done
+[step 19850] value_loss=4.980567 policy_loss=0.352439
+[step 19850] VALUE_DEBUG: target(mean=-3.35 std=8.77 min=-17.69 max=12.82) V(s)(mean=-3.89 std=8.11) reward(mean=-0.063 std=4.765) clip=50.0
+[DEBUG] train_step 19850: starting episode collection
+[DEBUG] train_step 19850: episodes collected, starting value_update
+[DEBUG] train_step 19850: value_update done, starting policy_update
+[DEBUG] train_step 19850: policy_update done
+[step 19900] value_loss=4.168725 policy_loss=0.393167
+[step 19900] VALUE_DEBUG: target(mean=-6.66 std=7.80 min=-19.43 max=6.84) V(s)(mean=-6.12 std=7.68) reward(mean=-0.917 std=4.081) clip=50.0
+[step 19900] eval_success_rate=0.240 eval_mean_score=13.320 eval_policy_mode=greedy [solved=12/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 19900] PROGRESS: filled=13.32 violations=0.00 zero_cand=0.00
+[step 19900] DEBUG: ep_len=12.3 ep_ret=-2.379 stop_prob=0.000 score_chg=4.9450
+[DEBUG] train_step 19900: starting episode collection
+[DEBUG] train_step 19900: episodes collected, starting value_update
+[DEBUG] train_step 19900: value_update done, starting policy_update
+[DEBUG] train_step 19900: policy_update done
+[step 19950] value_loss=8.493406 policy_loss=-0.790546
+[step 19950] VALUE_DEBUG: target(mean=-6.00 std=8.72 min=-21.25 max=8.72) V(s)(mean=-6.65 std=8.04) reward(mean=-0.207 std=4.515) clip=50.0
+[DEBUG] train_step 19950: starting episode collection
+[DEBUG] train_step 19950: episodes collected, starting value_update
+[DEBUG] train_step 19950: value_update done, starting policy_update
+[DEBUG] train_step 19950: policy_update done
+[step 20000] value_loss=4.671161 policy_loss=-0.123008
+[step 20000] VALUE_DEBUG: target(mean=-3.92 std=9.01 min=-19.00 max=11.26) V(s)(mean=-4.58 std=8.18) reward(mean=0.814 std=2.350) clip=50.0
+[step 20000] eval_success_rate=0.260 eval_mean_score=13.180 eval_policy_mode=greedy [solved=13/50, score_range=10.00-16.00/16.0, initial=9.00]
+[step 20000] PROGRESS: filled=13.18 violations=0.00 zero_cand=0.00
+[step 20000] DEBUG: ep_len=12.2 ep_ret=-1.550 stop_prob=0.000 score_chg=5.0100
+[Checkpoint] Saved to buiksat_trm/checkpoints/table3_hard_6to8_controlled_nomask_nc_r0_s4/rl_checkpoint_step_20000.pt
+[Checkpoint] Saved to buiksat_trm/checkpoints/table3_hard_6to8_controlled_nomask_nc_r0_s4/rl_checkpoint_step_20000.pt
