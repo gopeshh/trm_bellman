@@ -1,0 +1,4 @@
+method,display_name,train_steps,num_seeds,success_rate_mean,success_rate_std,success_rate_ci_95_low,success_rate_ci_95_high,mean_return_mean,mean_return_std,invalid_action_rate_mean,invalid_action_rate_std,total_eval_points,all_eval_success_zero,final_eval_successes,final_eval_episodes,final_eval_wilson_95_low,final_eval_wilson_95_high
+upi_trm,UPI-TRM,20000,10,0.574,0.1218560170401482,0.4868355128277576,0.6611644871722423,,,,,,,,,,
+sb3_ppo,SB3 PPO,5000,10,0.0,0.0,0.0,0.0,-17.507759999999998,0.12295794402965526,0.988,0.025298221281347025,500,True,0,500,4.336808689942018e-19,0.007624340461552241
+sb3_a2c,SB3 A2C,5000,10,0.0,0.0,0.0,0.0,-18.058439999999997,0.6181503146934043,0.817125,0.17141268630932127,500,True,0,500,4.336808689942018e-19,0.007624340461552241
