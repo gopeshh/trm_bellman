@@ -21,6 +21,23 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+PER_STATE_METRIC_ALIASES = {
+    "delta_V": ("delta_V",),
+    "delta_pi": ("delta_pi",),
+    "delta_z": ("delta_z",),
+    "argmax_agree": ("argmax_agree",),
+    "saturated": ("saturated", "saturation"),
+}
+
+
+def get_metric_value(row: Dict[str, str], metric: str):
+    """Load a metric from a per-state CSV row, tolerating legacy names."""
+    for key in PER_STATE_METRIC_ALIASES.get(metric, (metric,)):
+        if key in row:
+            return float(row[key])
+    return None
+
+
 def load_radius_data(
     results_dir: str,
     seeds: List[int],
@@ -40,7 +57,7 @@ def load_radius_data(
     for R in radii:
         R_str = f"R{int(R)}" if R == int(R) else f"R{R}"
 
-        all_metrics = {"delta_V": [], "delta_pi": [], "delta_z": [], "argmax_agree": [], "saturation": []}
+        all_metrics = {"delta_V": [], "delta_pi": [], "delta_z": [], "argmax_agree": [], "saturated": []}
 
         for seed in seeds:
             csv_path = base / f"seed{seed}" / R_str / f"{model_name}_{batch}_per_state.csv"
@@ -56,12 +73,13 @@ def load_radius_data(
                 reader = csv.DictReader(f)
                 for row in reader:
                     for metric in all_metrics:
-                        if metric in row:
-                            val = float(row[metric])
-                            if metric == "saturation" and val < 0:
-                                # Skip N/A saturation values
-                                continue
-                            all_metrics[metric].append(val)
+                        val = get_metric_value(row, metric)
+                        if val is None:
+                            continue
+                        if metric == "saturated" and val < 0:
+                            # Skip N/A saturation values
+                            continue
+                        all_metrics[metric].append(val)
 
         # Compute mean ± std
         result[R] = {}
@@ -122,10 +140,10 @@ def plot_radius_sweep(
     ax.grid(True, alpha=0.3, axis='y')
 
     # Add saturation annotation
-    if show_saturation and "saturation" in data_a.get(radii[0], {}):
+    if show_saturation and "saturated" in data_a.get(radii[0], {}):
         ax2 = ax.twinx()
-        sat_a = [data_a[R].get("saturation", {}).get("mean", 0) * 100 for R in radii]
-        sat_b = [data_b[R].get("saturation", {}).get("mean", 0) * 100 for R in radii]
+        sat_a = [data_a[R].get("saturated", {}).get("mean", 0) * 100 for R in radii]
+        sat_b = [data_b[R].get("saturated", {}).get("mean", 0) * 100 for R in radii]
         ax2.plot(x - width/2, sat_a, 'o--', color='gray', alpha=0.5, markersize=4)
         ax2.plot(x + width/2, sat_b, 's--', color='gray', alpha=0.5, markersize=4)
         ax2.set_ylabel("Saturation Rate (%)", fontsize=10, color='gray')
@@ -143,7 +161,7 @@ def main():
     parser = argparse.ArgumentParser(description="Plot radius sweep results")
     parser.add_argument("--results_dir", type=str, required=True,
                         help="Base results directory")
-    parser.add_argument("--seeds", type=str, default="41,42,43",
+    parser.add_argument("--seeds", type=str, default="41,42,43,44,45,46,47,48,49,50",
                         help="Comma-separated list of seeds")
     parser.add_argument("--radii", type=str, default="10,30,100,0",
                         help="Comma-separated list of radii")

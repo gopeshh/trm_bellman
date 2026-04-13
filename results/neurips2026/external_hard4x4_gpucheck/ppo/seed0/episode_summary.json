@@ -1,0 +1,42 @@
+{
+  "action_space_n": 97,
+  "algo": "ppo",
+  "backend": "sb3",
+  "dataset_dir": "/home/buiksat/trm_bellman/data/sudoku-4x4-easy_6to8empties",
+  "env": "sudoku4x4",
+  "invalid_action_rate": 0.625,
+  "invalid_actions": 10,
+  "mode": "episode",
+  "observation_spec": {
+    "action_mask": {
+      "dtype": "bool",
+      "semantics": "flat edit mask with STOP in the final slot",
+      "shape": [
+        97
+      ]
+    },
+    "inputs": {
+      "dtype": "int",
+      "semantics": "original puzzle",
+      "shape": [
+        16
+      ]
+    },
+    "plan": {
+      "dtype": "int",
+      "semantics": "current editable plan",
+      "shape": [
+        16
+      ]
+    }
+  },
+  "policy_consumes_action_mask": false,
+  "policy_mask_note": "Vanilla SB3 PPO/A2C does not apply logit masking from action_mask; the policy acts in the full no-mask action space and invalid edits are penalized by the environment. This matches the paper's hard-4x4 no-mask protocol and should be compared against the internal no-mask A2C baseline.",
+  "puzzle_index": 864,
+  "return": -33.43999999999999,
+  "seed": 0,
+  "solved": false,
+  "split": "train",
+  "steps": 16,
+  "t0_2_status": "complete"
+}

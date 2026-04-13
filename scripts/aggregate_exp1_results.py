@@ -19,6 +19,32 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+PER_STATE_METRIC_ALIASES = {
+    "delta_V": ("delta_V",),
+    "delta_pi": ("delta_pi",),
+    "delta_z": ("delta_z",),
+    "argmax_agree": ("argmax_agree",),
+    "saturated": ("saturated", "saturation"),
+    "z_pre_norm": ("z_pre_norm",),
+    "z_post_norm": ("z_post_norm",),
+}
+
+
+def get_metric_value(row: Dict, metric: str):
+    """Load a metric from a per-state row, tolerating older column names."""
+    for key in PER_STATE_METRIC_ALIASES.get(metric, (metric,)):
+        if key in row:
+            return row[key]
+    return None
+
+
+def format_mean_std(stats: Dict[str, float], na_when_empty: bool = False) -> str:
+    """Format mean/std for markdown tables."""
+    if na_when_empty and stats.get("n", 0) == 0:
+        return "N/A"
+    return f"{stats['mean']:.4f}±{stats['std']:.4f}"
+
+
 def load_per_state_csv(csv_path: str) -> List[Dict]:
     """Load per-state CSV."""
     rows = []
@@ -67,16 +93,17 @@ def aggregate_unroll_sensitivity(
                 if n2 not in data[model]:
                     data[model][n2] = {
                         "delta_V": [], "delta_pi": [], "delta_z": [],
-                        "argmax_agree": [], "saturation": [],
+                        "argmax_agree": [], "saturated": [],
                         "z_pre_norm": [], "z_post_norm": [],
                     }
 
                 for metric in data[model][n2]:
-                    if metric in row:
-                        val = row[metric]
-                        if metric == "saturation" and val < 0:
-                            continue  # Skip N/A
-                        data[model][n2][metric].append(val)
+                    val = get_metric_value(row, metric)
+                    if val is None:
+                        continue
+                    if metric == "saturated" and val < 0:
+                        continue  # Skip N/A
+                    data[model][n2][metric].append(val)
 
     # Compute aggregates
     summary = {"model_a": {}, "model_b": {}}
@@ -155,7 +182,7 @@ def aggregate_radius_sweep(
             R_str = f"R{int(R)}" if R == int(R) else f"R{R}"
             data[model][R] = {
                 "delta_V": [], "delta_pi": [], "delta_z": [],
-                "argmax_agree": [], "saturation": [],
+                "argmax_agree": [], "saturated": [],
             }
 
             for seed in seeds:
@@ -178,11 +205,12 @@ def aggregate_radius_sweep(
                 rows = load_per_state_csv(str(csv_path))
                 for row in rows:
                     for metric in data[model][R]:
-                        if metric in row:
-                            val = row[metric]
-                            if metric == "saturation" and val < 0:
-                                continue
-                            data[model][R][metric].append(val)
+                        val = get_metric_value(row, metric)
+                        if val is None:
+                            continue
+                        if metric == "saturated" and val < 0:
+                            continue
+                        data[model][R][metric].append(val)
 
     # Compute aggregates
     summary = {"model_a": {}, "model_b": {}}
@@ -220,8 +248,13 @@ def aggregate_radius_sweep(
         f.write(f"**Seeds**: {seeds}\n\n")
         f.write(f"**Radii**: {radii}\n\n")
 
-        for metric in ["delta_V", "delta_z", "argmax_agree", "saturation"]:
-            f.write(f"## {metric}\n\n")
+        for metric, label in [
+            ("delta_V", "delta_V"),
+            ("delta_z", "delta_z"),
+            ("argmax_agree", "argmax_agree"),
+            ("saturated", "saturation"),
+        ]:
+            f.write(f"## {label}\n\n")
             f.write("| Radius | Model A (mean±std) | Model B (mean±std) |\n")
             f.write("|--------|--------------------|--------------------|")
 
@@ -229,7 +262,11 @@ def aggregate_radius_sweep(
                 stats_a = summary["model_a"].get(R, {}).get(metric, {"mean": 0, "std": 0})
                 stats_b = summary["model_b"].get(R, {}).get(metric, {"mean": 0, "std": 0})
                 R_label = f"R={int(R)}" if R > 0 else "disabled"
-                f.write(f"\n| {R_label} | {stats_a['mean']:.4f}±{stats_a['std']:.4f} | {stats_b['mean']:.4f}±{stats_b['std']:.4f} |")
+                show_na = metric == "saturated"
+                f.write(
+                    f"\n| {R_label} | {format_mean_std(stats_a, na_when_empty=show_na)} | "
+                    f"{format_mean_std(stats_b, na_when_empty=show_na)} |"
+                )
 
             f.write("\n\n")
 
@@ -244,7 +281,7 @@ def main():
                         help="Which results to aggregate")
     parser.add_argument("--results_dir", type=str, required=True,
                         help="Base results directory")
-    parser.add_argument("--seeds", type=str, default="41,42,43",
+    parser.add_argument("--seeds", type=str, default="41,42,43,44,45,46,47,48,49,50",
                         help="Comma-separated list of seeds")
     parser.add_argument("--radii", type=str, default="10,100,0",
                         help="Comma-separated list of radii (for radius mode)")

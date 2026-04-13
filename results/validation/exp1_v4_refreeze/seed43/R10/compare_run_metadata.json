@@ -1,0 +1,50 @@
+{
+  "checkpoint_a": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed43/model_step_5000.pt",
+  "checkpoint_b": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_b/seed43/model_step_5000.pt",
+  "config_a": {
+    "hidden_size": 64,
+    "vocab_size": 6,
+    "seq_len": 16,
+    "num_actions": 97,
+    "inner_unroll_n": 2,
+    "enable_contraction": false,
+    "target_Lz": 0.9,
+    "disable_value_head_norm": true,
+    "episodic_latent": true,
+    "latent_ball_radius": 10.0,
+    "use_feasibility_checker": true,
+    "config_source": "yaml"
+  },
+  "config_b": {
+    "hidden_size": 64,
+    "vocab_size": 6,
+    "seq_len": 16,
+    "num_actions": 97,
+    "inner_unroll_n": 2,
+    "enable_contraction": true,
+    "target_Lz": 0.9,
+    "disable_value_head_norm": true,
+    "episodic_latent": true,
+    "latent_ball_radius": 10.0,
+    "use_feasibility_checker": true,
+    "config_source": "yaml"
+  },
+  "n_train": 2,
+  "n_mults": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "n_values": [
+    2,
+    4,
+    8,
+    16
+  ],
+  "seed": 43,
+  "git_sha": "521bfc1d5438",
+  "creation_time": "2026-04-11T22:38:57.472670",
+  "hat_lz_a": null,
+  "hat_lz_b": null
+}

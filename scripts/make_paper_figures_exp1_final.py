@@ -31,17 +31,23 @@ import numpy as np
 # Configuration
 # =============================================================================
 
-SEEDS = [41, 42, 43]
+SEEDS = list(range(41, 51))
 N_TRAIN = 2
+UNROLL_MAIN_N2 = 8  # Main-text unroll comparison uses the fixed 2→8 mismatch.
 RADIUS_SWEEP_N2 = 8  # Paper-facing radius sweep uses the fixed 2→8 comparison.
 N2_VALUES = [4, 8, 16]  # Evaluation depths
 RADII = [0.0, 10.0, 100.0]
 
-BASE_DIR = Path("/home/buiksat/trm_bellman/results/validation/exp1_v4")
+REFREEZE_RESULTS_DIR = Path("/home/buiksat/trm_bellman/results/validation/exp1_v4_refreeze")
+REFREEZE_CHECKPOINT_DIR = Path("/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze")
+REFREEZE_BATCH_DIR = Path("/home/buiksat/trm_bellman/artifacts/eval_batches/exp1_v4_refreeze")
 TABLES_DIR = Path("/home/buiksat/trm_bellman/results/tables")
 OUT_DIR = Path("/home/buiksat/trm_bellman/results/paper_ready/exp1")  # docs & tables
 FIG_DIR = Path("/home/buiksat/UPI_TRM/UPI_TRM_NIPS/figures")  # figures for paper
 PAPER_TABLE_DIR = Path("/home/buiksat/UPI_TRM/UPI_TRM_NIPS/tables")  # mirrored TeX tables for paper
+
+CONFIG_A = "configs/ablations/upi_trm_feasibility_no_contraction_no_vhead_norm.yaml"
+CONFIG_B = "configs/ablations/upi_trm_feasibility_contraction_no_vhead_norm.yaml"
 
 LABEL_MAP = {
     "model_a": "No Contraction",
@@ -322,6 +328,8 @@ def write_unroll_sensitivity_tex(
 ):
     """Write LaTeX table for unroll sensitivity (B0, main paper)."""
     n2_values = sorted(set(data_b0["model_a"].keys()) & set(data_b0["model_b"].keys()))
+    table_n2 = UNROLL_MAIN_N2 if UNROLL_MAIN_N2 in n2_values else max(n2_values)
+    depth_mult = table_n2 / N_TRAIN
 
     with open(out_path, "w") as f:
         f.write("% Unroll Sensitivity Table (B0 - Main Paper)\n")
@@ -330,19 +338,19 @@ def write_unroll_sensitivity_tex(
         f.write("\\centering\n")
         f.write("\\small\n")
         f.write("\\caption{Unroll sensitivity on B0 (initial states). ")
-        f.write("Training depth $n_{\\text{train}}{=}2$, evaluated at $8\\times$ depth ($n_2{=}16$).}\n")
+        f.write(
+            f"Training depth $n_{{\\text{{train}}}}{{=}}2$, evaluated at fixed {depth_mult:.0f}$\\times$ depth "
+            f"($n_2{{=}}{table_n2}$).}}\n"
+        )
         f.write("\\label{tab:unroll_sensitivity}\n")
         f.write("\\begin{tabular}{lcccc}\n")
         f.write("\\toprule\n")
         f.write("Condition & $\\Delta_V$ & $\\Delta_\\pi$ & $\\Delta_z$ & Argmax \\\\\n")
         f.write("\\midrule\n")
 
-        # Use deepest n2 (16 = 8× depth)
-        deepest_n2 = max(n2_values)
-
         for model in ["model_a", "model_b"]:
             label = LABEL_MAP[model]
-            stats = data_b0[model].get(deepest_n2, {})
+            stats = data_b0[model].get(table_n2, {})
 
             dV = stats.get("delta_V", AggregatedStats(0, 0, 0))
             dpi = stats.get("delta_pi", AggregatedStats(0, 0, 0))
@@ -393,7 +401,8 @@ def write_radius_sweep_tex(
             f.write("\\label{tab:radius_sweep}\n")
         else:
             f.write("\\caption{Radius sweep on B1 (successor states). ")
-            f.write("$\\Delta_V$ at R=0 does not improve with contraction.}\n")
+            f.write("Under the refrozen 10-seed protocol, contraction improves all three metrics at R=0, ")
+            f.write("though absolute instability remains higher than on B0.}\n")
             f.write("\\label{tab:radius_sweep_b1}\n")
 
         f.write("\\begin{tabular}{llccc}\n")
@@ -428,6 +437,11 @@ def write_radius_sweep_tex(
 
         f.write("\\bottomrule\n")
         f.write("\\end{tabular}\n")
+        f.write("\\vspace{0.25em}\n")
+        f.write("\\begin{minipage}{0.95\\linewidth}\n")
+        f.write("\\footnotesize Note: The $R=100$ rows match the disabled rows because ")
+        f.write("pre-projection latent norms stay well below 100, so clipping never activates at this radius.\n")
+        f.write("\\end{minipage}\n")
         f.write("\\end{table}\n")
 
     print(f"[LaTeX] {out_path}")
@@ -448,6 +462,47 @@ def mirror_tex_outputs(out_dir: Path, paper_table_dir: Path):
         print(f"[Paper TeX] {dst}")
 
 
+def mirror_figure_outputs(fig_dir: Path, out_dir: Path):
+    """Copy canonical figure PDFs into the paper-ready bundle."""
+    figure_names = [
+        "fig_exp1_unroll_sensitivity_main.pdf",
+        "fig_exp1_unroll_sensitivity_appendix.pdf",
+        "fig_exp1_radius_sweep_main.pdf",
+        "fig_exp1_radius_sweep_appendix.pdf",
+    ]
+
+    for name in figure_names:
+        src = fig_dir / name
+        dst = out_dir / name
+        shutil.copy2(src, dst)
+        print(f"[Bundle Figure] {dst}")
+
+    # Preserve legacy aliases in the bundle as copies of the main-paper B0 figures.
+    shutil.copy2(fig_dir / "fig_exp1_unroll_sensitivity_main.pdf", out_dir / "fig_exp1_unroll_sensitivity.pdf")
+    shutil.copy2(fig_dir / "fig_exp1_radius_sweep_main.pdf", out_dir / "fig_exp1_radius_sweep.pdf")
+    print(f"[Bundle Figure] {out_dir / 'fig_exp1_unroll_sensitivity.pdf'}")
+    print(f"[Bundle Figure] {out_dir / 'fig_exp1_radius_sweep.pdf'}")
+
+
+def mirror_markdown_outputs(out_dir: Path):
+    """Copy paper-facing markdown summaries into the bundle."""
+    shutil.copy2(TABLES_DIR / "unroll_sensitivity_b0_mismatch.md", out_dir / "table_exp1_unroll_sensitivity.md")
+    shutil.copy2(TABLES_DIR / "radius_sweep_b0_summary.md", out_dir / "table_exp1_radius_sweep_main.md")
+    shutil.copy2(TABLES_DIR / "radius_sweep_b1_summary.md", out_dir / "table_exp1_radius_sweep_appendix.md")
+
+    combined_md = out_dir / "table_exp1_radius_sweep.md"
+    combined_md.write_text(
+        "# Experiment 1 Radius Sweep\n\n"
+        "- Main-paper B0 summary: `table_exp1_radius_sweep_main.md`\n"
+        "- Appendix B1 summary: `table_exp1_radius_sweep_appendix.md`\n"
+    )
+
+    print(f"[Bundle MD] {out_dir / 'table_exp1_unroll_sensitivity.md'}")
+    print(f"[Bundle MD] {out_dir / 'table_exp1_radius_sweep_main.md'}")
+    print(f"[Bundle MD] {out_dir / 'table_exp1_radius_sweep_appendix.md'}")
+    print(f"[Bundle MD] {combined_md}")
+
+
 # =============================================================================
 # PROVENANCE.md
 # =============================================================================
@@ -456,11 +511,17 @@ def get_git_hash() -> str:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=str(Path(__file__).parent.parent)
+            capture_output=True,
+            text=True,
+            cwd=str(Path(__file__).resolve().parents[1]),
         )
-        return result.stdout.strip()[:7]
+        if result.returncode == 0:
+            git_hash = result.stdout.strip()
+            if git_hash:
+                return git_hash[:7]
     except Exception:
-        return "unknown"
+        pass
+    return "unknown"
 
 
 def write_provenance(out_path: Path):
@@ -472,6 +533,11 @@ def write_provenance(out_path: Path):
         f.write(f"**Generated**: {datetime.now().isoformat()}\n")
         f.write(f"**Commit**: {git_hash}\n\n")
 
+        f.write("## Protocol Note\n\n")
+        f.write("- This bundle uses the refrozen replacement protocol under `exp1_v4_refreeze`.\n")
+        f.write("- Historical `exp1_v4` checkpoints and frozen batches were not recoverable on this machine.\n")
+        f.write("- Replacement `B0/B1` preserve the intended composition semantics, but are not byte-identical to the historical artifacts.\n")
+
         f.write("## Input CSVs\n\n")
         f.write("| Purpose | Path |\n")
         f.write("|---------|------|\n")
@@ -480,34 +546,51 @@ def write_provenance(out_path: Path):
         f.write("| Radius B0 | `results/tables/radius_sweep_b0_aggregated.csv` |\n")
         f.write("| Radius B1 | `results/tables/radius_sweep_b1_aggregated.csv` |\n")
 
+        f.write("\n## Refreeze Sources\n\n")
+        f.write(f"- Results root: `{REFREEZE_RESULTS_DIR}`\n")
+        f.write(f"- Checkpoints: `{REFREEZE_CHECKPOINT_DIR}`\n")
+        f.write(f"- Frozen batches: `{REFREEZE_BATCH_DIR}`\n")
+
         f.write("\n## Checkpoints\n\n")
         f.write("| Seed | No Contraction | Contraction |\n")
         f.write("|------|----------------|-------------|\n")
         for seed in SEEDS:
-            f.write(f"| {seed} | `checkpoints/exp1_v4/model_a_prime_seed{seed}.pt` ")
-            f.write(f"| `checkpoints/exp1_v4/model_b_seed{seed}.pt` |\n")
+            f.write(
+                f"| {seed} | `checkpoints/exp1_v4_refreeze/model_a_prime/seed{seed}/model_step_5000.pt` "
+            )
+            f.write(f"| `checkpoints/exp1_v4_refreeze/model_b/seed{seed}/model_step_5000.pt` |\n")
 
         f.write("\n## YAML Configs\n\n")
-        f.write("- No Contraction: `configs/ablations/upi_trm_feasibility_no_contraction.yaml`\n")
-        f.write("- Contraction: `configs/ablations/upi_trm_feasibility_contraction.yaml`\n")
+        f.write(f"- No Contraction: `{CONFIG_A}`\n")
+        f.write(f"- Contraction: `{CONFIG_B}`\n")
 
         f.write("\n## Key Parameters\n\n")
         f.write("| Parameter | Value |\n")
         f.write("|-----------|-------|\n")
         f.write(f"| n_train | {N_TRAIN} |\n")
         f.write(f"| n2 (eval depths) | {N2_VALUES} |\n")
+        f.write(f"| main unroll comparison | {N_TRAIN}→{UNROLL_MAIN_N2} |\n")
         f.write(f"| Radii | {RADII} |\n")
         f.write(f"| Seeds | {SEEDS} |\n")
         f.write("| disable_value_head_norm | true |\n")
         f.write("| target_Lz (contraction) | 0.9 |\n")
+        f.write("| projection at R=10 | active 100% on B0/B1 |\n")
 
         f.write("\n## Regeneration Commands\n\n")
         f.write("```bash\n")
+        f.write("# Refresh paper-facing CSVs from the refrozen eval outputs\n")
+        f.write(
+            "python scripts/postprocess_exp1_v4_1.py "
+            "--results_dir /home/buiksat/trm_bellman/results/validation/exp1_v4_refreeze "
+            "--out_dir /home/buiksat/trm_bellman/results/tables "
+            "--seeds 41,42,43,44,45,46,47,48,49,50 "
+            "--radii 10,100,0 --n_train 2 --radius_n2 8\n\n"
+        )
         f.write("# Generate all paper-ready artifacts\n")
-        f.write("buck2 run //buiksat_trm:make_paper_figures_exp1_final\n")
-        f.write("\n")
-        f.write("# Or directly with Python\n")
         f.write("python scripts/make_paper_figures_exp1_final.py\n")
+        f.write("\n")
+        f.write("# Full audit\n")
+        f.write("python scripts/audit_exp1_paper_ready.py\n")
         f.write("```\n")
 
         f.write("\n## Output Artifacts\n\n")
@@ -536,41 +619,55 @@ def write_claims(
 ):
     """Write claims with explicit B0/B1 scoping."""
     n2_values = sorted(unroll_b0["model_a"].keys())
-    deepest_n2 = max(n2_values) if n2_values else 16
+    main_n2 = UNROLL_MAIN_N2 if UNROLL_MAIN_N2 in n2_values else max(n2_values)
 
     with open(out_path, "w") as f:
         f.write("# Experiment 1: Paper Claims\n\n")
-        f.write("All claims are precisely scoped to B0 or B1.\n\n")
+        f.write("All claims are scoped to the refrozen 10-seed Exp1 protocol.\n")
+        f.write("B0 remains the main-text anchor; B1 is appendix-only supporting context.\n\n")
 
         # Unroll sensitivity claims (B0)
         f.write("## Unroll Sensitivity (B0 - Main Result)\n\n")
 
-        dV_a = unroll_b0["model_a"].get(deepest_n2, {}).get("delta_V", AggregatedStats(0, 0, 0))
-        dV_b = unroll_b0["model_b"].get(deepest_n2, {}).get("delta_V", AggregatedStats(0, 0, 0))
-        dpi_a = unroll_b0["model_a"].get(deepest_n2, {}).get("delta_pi", AggregatedStats(0, 0, 0))
-        dpi_b = unroll_b0["model_b"].get(deepest_n2, {}).get("delta_pi", AggregatedStats(0, 0, 0))
-        dz_a = unroll_b0["model_a"].get(deepest_n2, {}).get("delta_z", AggregatedStats(0, 0, 0))
-        dz_b = unroll_b0["model_b"].get(deepest_n2, {}).get("delta_z", AggregatedStats(0, 0, 0))
-        argmax_a = unroll_b0["model_a"].get(deepest_n2, {}).get("argmax_agree", AggregatedStats(0, 0, 0))
-        argmax_b = unroll_b0["model_b"].get(deepest_n2, {}).get("argmax_agree", AggregatedStats(0, 0, 0))
+        dV_a = unroll_b0["model_a"].get(main_n2, {}).get("delta_V", AggregatedStats(0, 0, 0))
+        dV_b = unroll_b0["model_b"].get(main_n2, {}).get("delta_V", AggregatedStats(0, 0, 0))
+        dpi_a = unroll_b0["model_a"].get(main_n2, {}).get("delta_pi", AggregatedStats(0, 0, 0))
+        dpi_b = unroll_b0["model_b"].get(main_n2, {}).get("delta_pi", AggregatedStats(0, 0, 0))
+        dz_a = unroll_b0["model_a"].get(main_n2, {}).get("delta_z", AggregatedStats(0, 0, 0))
+        dz_b = unroll_b0["model_b"].get(main_n2, {}).get("delta_z", AggregatedStats(0, 0, 0))
+        argmax_a = unroll_b0["model_a"].get(main_n2, {}).get("argmax_agree", AggregatedStats(0, 0, 0))
+        argmax_b = unroll_b0["model_b"].get(main_n2, {}).get("argmax_agree", AggregatedStats(0, 0, 0))
 
         v_improvement = dV_a.mean / dV_b.mean if dV_b.mean > 0 else 0
         pi_improvement = dpi_a.mean / dpi_b.mean if dpi_b.mean > 0 else 0
         z_improvement = dz_a.mean / dz_b.mean if dz_b.mean > 0 else 0
 
-        f.write(f"1. **Claim**: Contraction reduces Δ_V by {v_improvement:.1f}× at 8× depth on B0.\n")
+        f.write(
+            f"1. **Claim**: At fixed n={N_TRAIN}→{main_n2} mismatch on B0, contraction reduces Δ_V by "
+            f"{v_improvement:.1f}×.\n"
+        )
         f.write(f"   **Evidence**: Δ_V {dV_a.mean:.3f}±{dV_a.std:.3f} → {dV_b.mean:.3f}±{dV_b.std:.3f}\n\n")
 
-        f.write(f"2. **Claim**: Policy KL reduced by {pi_improvement:.0f}× on B0.\n")
-        f.write(f"   **Evidence**: Δ_π {dpi_a.mean:.4f} → {dpi_b.mean:.4f}\n\n")
+        f.write("2. **Observation**: Δ_π is near zero for both models at this comparison and is not a primary discriminator.\n")
+        f.write(
+            f"   **Evidence**: Δ_π {dpi_a.mean:.4f} → {dpi_b.mean:.4f} "
+            f"({pi_improvement:.1f}× ratio on small absolute values)\n\n"
+        )
 
-        f.write(f"3. **Claim**: Latent drift reduced by {z_improvement:.1f}× on B0.\n")
+        f.write(f"3. **Claim**: Latent drift is reduced by {z_improvement:.1f}× on B0.\n")
         f.write(f"   **Evidence**: Δ_z {dz_a.mean:.2f} → {dz_b.mean:.2f}\n\n")
 
         f.write(f"4. **Claim**: Action agreement improves from {argmax_a.mean:.1%} to {argmax_b.mean:.1%} on B0.\n\n")
 
         # Radius sweep claims (B0)
         f.write("## Radius Sweep (B0 - Isolation Result)\n\n")
+
+        r10_a = radius_b0.get(10.0, {}).get("model_a", {}).get("delta_V", AggregatedStats(0, 0, 0))
+        r10_b = radius_b0.get(10.0, {}).get("model_b", {}).get("delta_V", AggregatedStats(0, 0, 0))
+        sat10_a = radius_b0.get(10.0, {}).get("model_a", {}).get("saturated", AggregatedStats(0, 0, 0))
+        sat10_b = radius_b0.get(10.0, {}).get("model_b", {}).get("saturated", AggregatedStats(0, 0, 0))
+        sat100_a = radius_b0.get(100.0, {}).get("model_a", {}).get("saturated", AggregatedStats(0, 0, 0))
+        sat100_b = radius_b0.get(100.0, {}).get("model_b", {}).get("saturated", AggregatedStats(0, 0, 0))
 
         if 0.0 in radius_b0:
             dV_a_r0 = radius_b0[0.0]["model_a"].get("delta_V", AggregatedStats(0, 0, 0))
@@ -586,29 +683,53 @@ def write_claims(
                 f"   **Evidence**: Δ_V (pooled over all states and seeds) "
                 f"{dV_a_r0.mean:.3f} → {dV_b_r0.mean:.3f}\n"
             )
-            f.write("   **Interpretation**: Stability comes from contraction, not projection clipping.\n\n")
+            f.write("   **Interpretation**: Contraction contributes a projection-independent stability benefit.\n\n")
+
+            proj_gain_a = dV_a_r0.mean / r10_a.mean if r10_a.mean > 0 else 0
+            proj_gain_b = dV_b_r0.mean / r10_b.mean if r10_b.mean > 0 else 0
+            f.write("6. **Observation**: Projection remains the dominant stabilizer on top of contraction.\n")
+            f.write(
+                f"   **Evidence**: On B0, moving from R=0 to R=10 reduces Δ_V "
+                f"{dV_a_r0.mean:.3f} → {r10_a.mean:.3f} for No Contraction ({proj_gain_a:.1f}×) and "
+                f"{dV_b_r0.mean:.3f} → {r10_b.mean:.3f} for Contraction ({proj_gain_b:.1f}×).\n"
+            )
+            f.write(
+                f"   **Saturation**: R=10 is active 100% of the time "
+                f"({sat10_a.mean:.0%} / {sat10_b.mean:.0%}); R=100 never fires "
+                f"({sat100_a.mean:.0%} / {sat100_b.mean:.0%}).\n\n"
+            )
+        else:
+            r0_improvement = 0.0
 
         # B1 warning
-        f.write("## B1 Observation (NOT a main claim)\n\n")
+        f.write("## B1 Observation (Appendix-Only Supporting Context)\n\n")
 
         if 0.0 in radius_b1:
             dV_a_b1 = radius_b1[0.0]["model_a"].get("delta_V", AggregatedStats(0, 0, 0))
             dV_b_b1 = radius_b1[0.0]["model_b"].get("delta_V", AggregatedStats(0, 0, 0))
+            dz_a_b1 = radius_b1[0.0]["model_a"].get("delta_z", AggregatedStats(0, 0, 0))
+            dz_b_b1 = radius_b1[0.0]["model_b"].get("delta_z", AggregatedStats(0, 0, 0))
+            argmax_a_b1 = radius_b1[0.0]["model_a"].get("argmax_agree", AggregatedStats(0, 0, 0))
+            argmax_b_b1 = radius_b1[0.0]["model_b"].get("argmax_agree", AggregatedStats(0, 0, 0))
 
-            f.write("⚠️ **Warning**: On B1 (successor states) with R=0, Δ_V does NOT improve with contraction.\n")
-            f.write(f"   B1 R=0 Δ_V: {dV_a_b1.mean:.3f} → {dV_b_b1.mean:.3f} (increased)\n")
-            f.write("   Latent drift and action agreement still improve on B1.\n")
-            f.write("   The main R=0 claim is scoped to B0 initial states only.\n\n")
+            f.write("⚠️ **Warning**: B1 remains appendix-only and should not replace the B0 main-text anchor.\n")
+            f.write(
+                f"   Under the refrozen 10-seed protocol, B1 is directionally consistent with B0 even at R=0: "
+                f"Δ_V {dV_a_b1.mean:.3f} → {dV_b_b1.mean:.3f}, "
+                f"Δ_z {dz_a_b1.mean:.2f} → {dz_b_b1.mean:.2f}, "
+                f"argmax {argmax_a_b1.mean:.1%} → {argmax_b_b1.mean:.1%}.\n"
+            )
+            f.write("   Absolute variability is still higher than on B0, so the main claim remains scoped to B0 initial states.\n\n")
 
         # Summary
         f.write("## One-Sentence Summary\n\n")
-        f.write("On initial states (B0), contraction enforcement provides value stability guarantees ")
+        f.write("On initial states (B0), contraction enforcement provides a consistent projection-independent stability benefit ")
         f.write(
             f"independent of projection radius ({r0_improvement:.1f}× improvement at fixed "
             f"n={N_TRAIN}→{RADIUS_SWEEP_N2} even at R=0); "
         )
-        f.write("on successor states (B1), contraction improves latent and action stability, ")
-        f.write("but value estimates require projection to avoid increased variance.\n")
+        f.write("projection then provides an additional order-of-magnitude reduction on top of that effect; ")
+        f.write("B1 follows the same qualitative direction but remains supporting appendix evidence rather than the main-text claim anchor.\n")
 
     print(f"[Claims] {out_path}")
 
@@ -738,6 +859,7 @@ def main():
     create_unroll_sensitivity_figure(unroll_b1, FIG_DIR / "fig_exp1_unroll_sensitivity_appendix.pdf", "B1: Successor States")
     create_radius_sweep_figure(radius_b0, FIG_DIR / "fig_exp1_radius_sweep_main.pdf", "B0: Initial States")
     create_radius_sweep_figure(radius_b1, FIG_DIR / "fig_exp1_radius_sweep_appendix.pdf", "B1: Successor States")
+    mirror_figure_outputs(FIG_DIR, OUT_DIR)
 
     # Generate LaTeX tables
     print("\n=== Generating LaTeX Tables ===")
@@ -745,6 +867,7 @@ def main():
     write_radius_sweep_tex(radius_b0, OUT_DIR / "table_exp1_radius_sweep_main.tex", "B0", is_main=True)
     write_radius_sweep_tex(radius_b1, OUT_DIR / "table_exp1_radius_sweep_appendix.tex", "B1", is_main=False)
     mirror_tex_outputs(OUT_DIR, PAPER_TABLE_DIR)
+    mirror_markdown_outputs(OUT_DIR)
 
     # Generate documentation
     print("\n=== Generating Documentation ===")

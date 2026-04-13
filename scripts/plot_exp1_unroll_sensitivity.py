@@ -167,7 +167,7 @@ def main():
     parser = argparse.ArgumentParser(description="Plot unroll sensitivity results")
     parser.add_argument("--results_dir", type=str, required=True,
                         help="Base results directory (e.g., results/validation/exp1_v4)")
-    parser.add_argument("--seeds", type=str, default="41,42,43",
+    parser.add_argument("--seeds", type=str, default="41,42,43,44,45,46,47,48,49,50",
                         help="Comma-separated list of seeds")
     parser.add_argument("--n_train", type=int, default=2,
                         help="Training depth")

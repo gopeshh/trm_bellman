@@ -1,7 +1,7 @@
 # Experiment 1 Audit Report
 
-**Generated**: 2026-04-05T21:53:48.786449
-**Git Commit**: 931d94c696c909841f3f864ae8b1fa4bb50839cf
+**Generated**: 2026-04-12T10:29:13.079175
+**Git Commit**: 521bfc1d543811410cadd1f970c57729778d8127
 
 ## Overall Result: ✓ PASS (5/5 checks passed)
 
@@ -10,12 +10,12 @@
 ### Claims vs Tables Consistency: ✓ PASS
 
 ```
-Δ_V No Contraction: claim=0.1560, table=0.1560, diff=0.0000
-Δ_V Contraction: claim=0.0380, table=0.0380, diff=0.0000
-Δ_π No Contraction: claim=0.0063, table=0.0063, diff=0.0000
-Δ_π Contraction: claim=0.0002, table=0.0002, diff=0.0000
-R=0 Δ_V No Contraction: claim=1.0780, table=1.0780, diff=0.0000
-R=0 Δ_V Contraction: claim=0.2400, table=0.2400, diff=0.0000
+Δ_V No Contraction: claim=0.1660, table=0.1660, diff=0.0000
+Δ_V Contraction: claim=0.0640, table=0.0640, diff=0.0000
+Δ_π No Contraction: claim=0.0002, table=0.0002, diff=0.0000
+Δ_π Contraction: claim=0.0001, table=0.0001, diff=0.0000
+R=0 Δ_V No Contraction: claim=2.2750, table=2.2750, diff=0.0000
+R=0 Δ_V Contraction: claim=1.0970, table=1.0970, diff=0.0000
 ```
 
 ### Saturation Metric Sanity: ✓ PASS
@@ -23,10 +23,10 @@ R=0 Δ_V Contraction: claim=0.2400, table=0.2400, diff=0.0000
 ```
 OK: R=0 model_a saturation n=0 (correctly N/A)
 OK: R=0 model_b saturation n=0 (correctly N/A)
-OK: R=10 model_a saturation=1.00, n=300
-OK: R=10 model_b saturation=1.00, n=300
-OK: R=100 model_a saturation=0.00, n=300
-OK: R=100 model_b saturation=0.00, n=300
+OK: R=10 model_a saturation=1.00, n=1000
+OK: R=10 model_b saturation=1.00, n=1000
+OK: R=100 model_a saturation=0.00, n=1000
+OK: R=100 model_b saturation=0.00, n=1000
 ```
 
 ### Label Correctness: ✓ PASS
@@ -68,21 +68,21 @@ All artifacts were validated for:
 
 ## Files in Bundle
 
-- `AUDIT.md` (2742 bytes)
-- `CLAIMS.md` (1471 bytes)
+- `AUDIT.md` (2793 bytes)
+- `CLAIMS.md` (2238 bytes)
 - `PAPER_INSERT_SNIPPET.tex` (2871 bytes)
-- `PROVENANCE.md` (2137 bytes)
-- `exp1_paper_ready_bundle.zip` (137907 bytes)
-- `fig_exp1_radius_sweep.pdf` (31911 bytes)
-- `fig_exp1_radius_sweep_appendix.pdf` (31581 bytes)
-- `fig_exp1_radius_sweep_main.pdf` (32083 bytes)
-- `fig_exp1_unroll_sensitivity.pdf` (38090 bytes)
-- `fig_exp1_unroll_sensitivity_appendix.pdf` (34668 bytes)
-- `fig_exp1_unroll_sensitivity_main.pdf` (34249 bytes)
-- `table_exp1_radius_sweep.md` (1652 bytes)
-- `table_exp1_radius_sweep_appendix.md` (1186 bytes)
-- `table_exp1_radius_sweep_appendix.tex` (877 bytes)
-- `table_exp1_radius_sweep_main.md` (1212 bytes)
-- `table_exp1_radius_sweep_main.tex` (953 bytes)
-- `table_exp1_unroll_sensitivity.md` (948 bytes)
-- `table_exp1_unroll_sensitivity.tex` (636 bytes)
+- `PROVENANCE.md` (3948 bytes)
+- `exp1_paper_ready_bundle.zip` (174803 bytes)
+- `fig_exp1_radius_sweep.pdf` (31070 bytes)
+- `fig_exp1_radius_sweep_appendix.pdf` (30844 bytes)
+- `fig_exp1_radius_sweep_main.pdf` (31070 bytes)
+- `fig_exp1_unroll_sensitivity.pdf` (32364 bytes)
+- `fig_exp1_unroll_sensitivity_appendix.pdf` (32763 bytes)
+- `fig_exp1_unroll_sensitivity_main.pdf` (32364 bytes)
+- `table_exp1_radius_sweep.md` (149 bytes)
+- `table_exp1_radius_sweep_appendix.md` (1889 bytes)
+- `table_exp1_radius_sweep_appendix.tex` (1189 bytes)
+- `table_exp1_radius_sweep_main.md` (1889 bytes)
+- `table_exp1_radius_sweep_main.tex` (1179 bytes)
+- `table_exp1_unroll_sensitivity.md` (2050 bytes)
+- `table_exp1_unroll_sensitivity.tex` (641 bytes)

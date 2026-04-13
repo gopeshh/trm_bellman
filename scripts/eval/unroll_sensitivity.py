@@ -1102,8 +1102,9 @@ def write_summary_csv(
             argmax_rate = np.mean([m.argmax_agree for m in ms])
             row += f",{argmax_rate:.4f}"
 
-            # Saturation rate
-            sat_rate = np.mean([m.saturated for m in ms])
+            # Saturation rate. R=0 uses -1 as an N/A sentinel.
+            valid_sat = [m.saturated for m in ms if m.saturated >= 0]
+            sat_rate = np.mean(valid_sat) if valid_sat else -1.0
             row += f",{sat_rate:.4f}"
 
             f.write(row + "\n")

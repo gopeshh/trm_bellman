@@ -1,23 +1,53 @@
-# Experiment 1: Projection Radius Sweep (Main Paper)
+# Radius Sweep Summary (B0)
 
-**Batch**: B0 (initial states only)
+**Seeds**: [41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
 
-**Purpose**: Demonstrate that stability comes from contraction, not projection clipping.
+**Delta definition**: fixed mismatch Δ(n_train=2, n₂=8) (4× depth), pooled across all per-state rows.
 
-**Configuration**: Both models use value-head spectral norm OFF.
+## delta_V
 
-**Delta definition**: fixed mismatch Δ(n_train=2, n₂=8) (4× depth), pooled across all states and seeds.
+| Radius | Model A (mean±std) | Model B (mean±std) |
+|--------|--------------------|--------------------|
+| disabled | 2.2751±3.4125 | 1.0972±0.9124 |
+| R=10 | 0.1658±0.2874 | 0.0643±0.0598 |
+| R=100 | 2.2751±3.4125 | 1.0972±0.9124 |
 
-| Radius | Condition | Δ_V (mean±std) | Δ_z (mean±std) | Argmax [95% CI] | Sat. |
-|--------|-----------|----------------|----------------|-----------------|------|
-| disabled | No Contraction | 1.078±1.772 | 33.01±8.96 | 0.653 [0.598, 0.705] | N/A |
-|  | Contraction | 0.240±0.199 | 17.18±2.92 | 0.933 [0.899, 0.956] | N/A |
-| R=10 | No Contraction | 0.152±0.205 | 4.08±1.98 | 0.957 [0.927, 0.975] | 100% |
-|  | Contraction | 0.038±0.054 | 1.33±0.23 | 0.990 [0.971, 0.997] | 100% |
-| R=100 | No Contraction | 1.078±1.772 | 33.01±8.96 | 0.653 [0.598, 0.705] | 0% |
-|  | Contraction | 0.240±0.199 | 17.18±2.92 | 0.933 [0.899, 0.956] | 0% |
+## delta_z
 
-## Key Finding
+| Radius | Model A (mean±std) | Model B (mean±std) |
+|--------|--------------------|--------------------|
+| disabled | 36.1060±7.8721 | 22.5728±3.3151 |
+| R=10 | 4.2616±1.5333 | 1.6726±0.2822 |
+| R=100 | 36.1060±7.8721 | 22.5728±3.3151 |
 
-With projection disabled (R=0), at fixed n=2→8, contraction provides **4.5× improvement** in Δ_V.
-This proves stability comes from contraction enforcement, not projection clipping.
+## argmax_agree
+
+| Radius | Model A [mean, 95% CI] | Model B [mean, 95% CI] |
+|--------|------------------------|------------------------|
+| disabled | 0.4730 [0.4422, 0.5040] | 0.6470 [0.6169, 0.6760] |
+| R=10 | 0.9020 [0.8820, 0.9189] | 0.9550 [0.9403, 0.9662] |
+| R=100 | 0.4730 [0.4422, 0.5040] | 0.6470 [0.6169, 0.6760] |
+
+## saturation (with sample count)
+
+| Radius | Model A (mean±std, n) | Model B (mean±std, n) |
+|--------|----------------------|----------------------|
+| disabled | N/A (disabled) | N/A (disabled) |
+| R=10 | 1.0000±0.0000 (n=1000) | 1.0000±0.0000 (n=1000) |
+| R=100 | 0.0000±0.0000 (n=1000) | 0.0000±0.0000 (n=1000) |
+
+## z_pre_norm (mean / p95 / max)
+
+| Radius | Model A | Model B |
+|--------|---------|---------|
+| disabled | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 |
+| R=10 | 31.84 / 33.19 / 33.19 | 31.84 / 33.19 / 33.19 |
+| R=100 | 31.84 / 33.19 / 33.19 | 31.84 / 33.19 / 33.19 |
+
+## z_post_norm (mean / p95 / max)
+
+| Radius | Model A | Model B |
+|--------|---------|---------|
+| disabled | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 |
+| R=10 | 10.00 / 10.00 / 10.00 | 10.00 / 10.00 / 10.00 |
+| R=100 | 31.84 / 33.19 / 33.19 | 31.84 / 33.19 / 33.19 |

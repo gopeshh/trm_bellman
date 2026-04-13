@@ -1,10 +1,13 @@
 # Experiment 1 Provenance
 
-**Generated**: 2026-04-05T21:53:48.176023
-**Git Commit**: 931d94c696c909841f3f864ae8b1fa4bb50839cf
-**Python Version**: 3.12.13+meta
-**Torch Version**: not available
+**Generated**: 2026-04-12T10:12:20.914275
+**Commit**: 521bfc1
 
+## Protocol Note
+
+- This bundle uses the refrozen replacement protocol under `exp1_v4_refreeze`.
+- Historical `exp1_v4` checkpoints and frozen batches were not recoverable on this machine.
+- Replacement `B0/B1` preserve the intended composition semantics, but are not byte-identical to the historical artifacts.
 ## Input CSVs
 
 | Purpose | Path |
@@ -14,18 +17,31 @@
 | Radius B0 | `results/tables/radius_sweep_b0_aggregated.csv` |
 | Radius B1 | `results/tables/radius_sweep_b1_aggregated.csv` |
 
+## Refreeze Sources
+
+- Results root: `/home/buiksat/trm_bellman/results/validation/exp1_v4_refreeze`
+- Checkpoints: `/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze`
+- Frozen batches: `/home/buiksat/trm_bellman/artifacts/eval_batches/exp1_v4_refreeze`
+
 ## Checkpoints
 
 | Seed | No Contraction | Contraction |
 |------|----------------|-------------|
-| 41 | `checkpoints/exp1_v4/model_a_prime_seed41.pt` | `checkpoints/exp1_v4/model_b_seed41.pt` |
-| 42 | `checkpoints/exp1_v4/model_a_prime_seed42.pt` | `checkpoints/exp1_v4/model_b_seed42.pt` |
-| 43 | `checkpoints/exp1_v4/model_a_prime_seed43.pt` | `checkpoints/exp1_v4/model_b_seed43.pt` |
+| 41 | `checkpoints/exp1_v4_refreeze/model_a_prime/seed41/model_step_5000.pt` | `checkpoints/exp1_v4_refreeze/model_b/seed41/model_step_5000.pt` |
+| 42 | `checkpoints/exp1_v4_refreeze/model_a_prime/seed42/model_step_5000.pt` | `checkpoints/exp1_v4_refreeze/model_b/seed42/model_step_5000.pt` |
+| 43 | `checkpoints/exp1_v4_refreeze/model_a_prime/seed43/model_step_5000.pt` | `checkpoints/exp1_v4_refreeze/model_b/seed43/model_step_5000.pt` |
+| 44 | `checkpoints/exp1_v4_refreeze/model_a_prime/seed44/model_step_5000.pt` | `checkpoints/exp1_v4_refreeze/model_b/seed44/model_step_5000.pt` |
+| 45 | `checkpoints/exp1_v4_refreeze/model_a_prime/seed45/model_step_5000.pt` | `checkpoints/exp1_v4_refreeze/model_b/seed45/model_step_5000.pt` |
+| 46 | `checkpoints/exp1_v4_refreeze/model_a_prime/seed46/model_step_5000.pt` | `checkpoints/exp1_v4_refreeze/model_b/seed46/model_step_5000.pt` |
+| 47 | `checkpoints/exp1_v4_refreeze/model_a_prime/seed47/model_step_5000.pt` | `checkpoints/exp1_v4_refreeze/model_b/seed47/model_step_5000.pt` |
+| 48 | `checkpoints/exp1_v4_refreeze/model_a_prime/seed48/model_step_5000.pt` | `checkpoints/exp1_v4_refreeze/model_b/seed48/model_step_5000.pt` |
+| 49 | `checkpoints/exp1_v4_refreeze/model_a_prime/seed49/model_step_5000.pt` | `checkpoints/exp1_v4_refreeze/model_b/seed49/model_step_5000.pt` |
+| 50 | `checkpoints/exp1_v4_refreeze/model_a_prime/seed50/model_step_5000.pt` | `checkpoints/exp1_v4_refreeze/model_b/seed50/model_step_5000.pt` |
 
 ## YAML Configs
 
-- No Contraction: `configs/ablations/upi_trm_feasibility_no_contraction.yaml`
-- Contraction: `configs/ablations/upi_trm_feasibility_contraction.yaml`
+- No Contraction: `configs/ablations/upi_trm_feasibility_no_contraction_no_vhead_norm.yaml`
+- Contraction: `configs/ablations/upi_trm_feasibility_contraction_no_vhead_norm.yaml`
 
 ## Key Parameters
 
@@ -33,20 +49,20 @@
 |-----------|-------|
 | n_train | 2 |
 | n2 (eval depths) | [4, 8, 16] |
+| main unroll comparison | 2→8 |
 | Radii | [0.0, 10.0, 100.0] |
-| Seeds | [41, 42, 43] |
+| Seeds | [41, 42, 43, 44, 45, 46, 47, 48, 49, 50] |
 | disable_value_head_norm | true |
 | target_Lz (contraction) | 0.9 |
-| latent_ball_radius | 10.0 |
+| projection at R=10 | active 100% on B0/B1 |
 
 ## Regeneration Commands
 
 ```bash
-# One-command regeneration
-cd /data/repos/fbsource/fbcode
-buck2 run //buiksat_trm:make_paper_figures_exp1_final
+# Refresh paper-facing CSVs from the refrozen eval outputs
+python scripts/postprocess_exp1_v4_1.py --results_dir /home/buiksat/trm_bellman/results/validation/exp1_v4_refreeze --out_dir /home/buiksat/trm_bellman/results/tables --seeds 41,42,43,44,45,46,47,48,49,50 --radii 10,100,0 --n_train 2 --radius_n2 8
 
-# Or directly with Python (from trm_bellman root)
+# Generate all paper-ready artifacts
 python scripts/make_paper_figures_exp1_final.py
 
 # Full audit
@@ -65,8 +81,3 @@ python scripts/audit_exp1_paper_ready.py
 - `fig_exp1_unroll_sensitivity_appendix.pdf` (B1, 1×3)
 - `fig_exp1_radius_sweep_appendix.pdf` (B1, 1×3)
 - `table_exp1_radius_sweep_appendix.tex`
-
-### Documentation
-- `CLAIMS.md` - Scoped claims with evidence
-- `PROVENANCE.md` - This file
-- `AUDIT.md` - Validation report

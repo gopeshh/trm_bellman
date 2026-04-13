@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 """
-Generate plots for Table 3 Hard CONTROLLED 2×2 experiment.
-
-Deconfounds contraction vs projection effects on hard 4x4 Sudoku (6-8 empties).
+Generate plots for the locked no-mask hard 4x4 controlled 2×2 experiment.
 
 2×2 Design:
   Factor A: enable_contraction ∈ {false, true}
   Factor B: latent_ball_radius R ∈ {0.0, 10.0}
 
 Outputs:
-  - table3_hard_controlled_2x2_bar.pdf: Bar chart with 2×2 layout
-  - table3_hard_controlled_curves.pdf: Learning curves for all 4 cells
-
-Usage:
-    buck2 run //buiksat_trm:plot_table3_hard_controlled
+  - table3_hard_controlled_2x2_bar.pdf
+  - table3_hard_controlled_curves.pdf
 """
 
 import re
@@ -142,12 +137,14 @@ def get_final_success_rates(results_dir: Path) -> Dict[str, Dict[str, float]]:
 
     for cell in CELL_CONFIG.keys():
         final_rates[cell] = {}
-        for seed in [42, 123, 456]:
-            log_file = results_dir / f"{cell}_s{seed}.log"
-            if log_file.exists():
-                data = parse_log_file(log_file)
-                if data:
-                    final_rates[cell][seed] = data[-1][1]  # Last success rate
+        for log_file in sorted(results_dir.glob(f"{cell}_s*.log")):
+            match = re.search(r"_s(\d+)\.log$", log_file.name)
+            if not match:
+                continue
+            seed = int(match.group(1))
+            data = parse_log_file(log_file)
+            if data:
+                final_rates[cell][seed] = data[-1][1]  # Last success rate
 
     return final_rates
 
@@ -163,7 +160,7 @@ def plot_2x2_bar_chart(results_dir: Path, output_dir: Path):
         if cell in final_rates and final_rates[cell]:
             values = list(final_rates[cell].values())
             cell_means[cell] = np.mean(values)
-            cell_stds[cell] = np.std(values)
+            cell_stds[cell] = np.std(values, ddof=1) if len(values) > 1 else 0.0
         else:
             cell_means[cell] = 0
             cell_stds[cell] = 0
@@ -314,7 +311,11 @@ def print_summary_table(results_dir: Path):
     print("\n" + "=" * 60)
     print("2×2 Controlled Experiment Results")
     print("=" * 60)
-    print("\nFinal Success Rates (mean ± std over 3 seeds):")
+    seed_counts = {cell: len(vals) for cell, vals in final_rates.items()}
+    n_values = sorted(set(seed_counts.values()) - {0})
+    n_text = f"{n_values[0]} seeds" if len(n_values) == 1 else "mixed seed counts"
+
+    print(f"\nFinal Success Rates (mean ± std over {n_text}):")
     print()
     print("                     R=0 (proj OFF)     R=10 (proj ON)")
     print("-" * 60)
@@ -325,8 +326,10 @@ def print_summary_table(results_dir: Path):
         r0_vals = list(final_rates.get(f"{prefix}_r0", {}).values())
         r10_vals = list(final_rates.get(f"{prefix}_r10", {}).values())
 
-        r0_str = f"{np.mean(r0_vals):.3f} ± {np.std(r0_vals):.3f}" if r0_vals else "N/A"
-        r10_str = f"{np.mean(r10_vals):.3f} ± {np.std(r10_vals):.3f}" if r10_vals else "N/A"
+        r0_std = np.std(r0_vals, ddof=1) if len(r0_vals) > 1 else 0.0
+        r10_std = np.std(r10_vals, ddof=1) if len(r10_vals) > 1 else 0.0
+        r0_str = f"{np.mean(r0_vals):.3f} ± {r0_std:.3f}" if r0_vals else "N/A"
+        r10_str = f"{np.mean(r10_vals):.3f} ± {r10_std:.3f}" if r10_vals else "N/A"
 
         print(f"{label}     {r0_str}         {r10_str}")
 
@@ -372,8 +375,8 @@ def print_summary_table(results_dir: Path):
 def main():
     apply_paper_style()
 
-    results_dir = Path("/home/buiksat/trm_bellman/results/table3_hard_6to8_controlled")
-    output_dir = Path("/home/buiksat/UPI_TRM/UPI_TRM_ICML/figures")
+    results_dir = Path("/home/buiksat/trm_bellman/results/table3_hard_6to8_controlled_nomask")
+    output_dir = Path("/home/buiksat/UPI_TRM/UPI_TRM_NIPS/figures")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if not results_dir.exists():

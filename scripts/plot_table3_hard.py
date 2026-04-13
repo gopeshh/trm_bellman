@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """
-Generate learning curve plots for Table 3 baselines - HARDER 4x4 Sudoku (6-8 empties).
-Matches paper style from plot_feasibility_curves.py and plot_6to8empties_paper_style.py
+Generate the hard-4x4 no-mask capability anchor figure.
 
-Creates hard_4x4_baselines_success_vs_steps.pdf
-
-Usage:
-    buck2 run //buiksat_trm:plot_table3_hard
+Creates hard_4x4_baselines_success_vs_steps.pdf for the NeurIPS paper repo.
 """
 
 import re
@@ -38,38 +34,16 @@ def apply_paper_style():
     })
 
 
-# Algorithm config with correct naming
-# Note: persistent_nc and episodic_nc use R=10, episodic_c_clean uses R=0 (proj. off)
 ALGO_CONFIG = {
-    "persistent_nc": {
-        "name": "UPI-TRM (Persistent-z, no contraction, R=10)",
+    "m1_persistent_nc_nomask": {
+        "name": "UPI-TRM (No Mask)",
         "color": "#e377c2",  # pink
         "marker": "P"
     },
-    "episodic_nc": {
-        "name": "UPI-TRM (Episodic-z, no contraction, R=10)",
-        "color": "#8c564b",  # brown
-        "marker": "<"
-    },
-    "episodic_c_clean": {
-        "name": "UPI-TRM (Episodic-z, contraction, proj. off)",
-        "color": "#1f77b4",  # blue
-        "marker": "o"
-    },
-    "ppo": {
-        "name": "PPO",
-        "color": "#ff7f0e",  # orange
-        "marker": "s"
-    },
-    "a2c": {
-        "name": "A2C",
+    "m1_a2c_nomask": {
+        "name": "A2C (No Mask)",
         "color": "#2ca02c",  # green
         "marker": "^"
-    },
-    "dqn": {
-        "name": "DQN",
-        "color": "#d62728",  # red
-        "marker": "D"
     },
 }
 
@@ -144,29 +118,21 @@ def compute_mean_std(seed_data: Dict[int, List[Tuple[int, float]]]) -> Tuple[np.
 def main():
     apply_paper_style()
 
-    # Use hard dataset results
+    # Use the locked no-mask hard-4x4 capability runs.
     repo_root = Path(__file__).parent.parent
     results_dir = repo_root / "results" / "table3_hard_6to8"
-    output_dir = Path.home() / "UPI_TRM" / "UPI_TRM_ICML" / "figures"
+    output_dir = Path.home() / "UPI_TRM" / "UPI_TRM_NIPS" / "figures"
 
     # Define methods and their log file patterns
     methods = {
-        "persistent_nc": list(results_dir.glob("persistent_nc_s*.log")),
-        "episodic_nc": list(results_dir.glob("episodic_nc_s*.log")),
-        "episodic_c_clean": list(results_dir.glob("episodic_c_clean_s*.log")),
-        "ppo": list(results_dir.glob("ppo_s*.log")),
-        "a2c": list(results_dir.glob("a2c_s*.log")),
-        "dqn": list(results_dir.glob("dqn_s*.log")),
+        "m1_persistent_nc_nomask": list(results_dir.glob("m1_persistent_nc_nomask_s*.log")),
+        "m1_a2c_nomask": list(results_dir.glob("m1_a2c_nomask_s*.log")),
     }
 
-    # Plotting order (UPI-TRM variants first, then baselines)
+    # Plot UPI-TRM first, then the in-house A2C baseline.
     algo_order = [
-        "persistent_nc",
-        "episodic_nc",
-        "episodic_c_clean",
-        "ppo",
-        "a2c",
-        "dqn",
+        "m1_persistent_nc_nomask",
+        "m1_a2c_nomask",
     ]
 
     # Create figure - match paper style size
@@ -223,9 +189,9 @@ def main():
     ax.set_xlabel("Training Steps")
     ax.set_ylabel("Success Rate")
     ax.set_title(
-        "4×4 Sudoku (6–8 empties, T=16)\n"
+        "4×4 Sudoku (6–8 empties, no-mask protocol, T=16)\n"
         "Success Rate vs Training Steps\n"
-        "(Feasibility Checker, 20k steps, 3 seeds)"
+        "(20k steps, greedy evaluation)"
     )
     ax.set_ylim(0, 1.0)
     ax.set_xlim(0, 20000)
@@ -235,7 +201,7 @@ def main():
     ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.22),
-        ncol=2,
+        ncol=1,
         frameon=False,
         handlelength=2.0,
         columnspacing=1.2,
@@ -243,7 +209,7 @@ def main():
     ax.tick_params(axis="both", which="major")
 
     # Leave room for legend under axes
-    fig.subplots_adjust(bottom=0.38)
+    fig.subplots_adjust(bottom=0.28)
 
     # Save figures
     output_dir.mkdir(parents=True, exist_ok=True)

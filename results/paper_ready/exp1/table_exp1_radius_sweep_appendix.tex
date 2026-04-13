@@ -3,18 +3,22 @@
 \begin{table}[t]
 \centering
 \small
-\caption{Radius sweep on B1 (successor states). $\Delta_V$ at R=0 does not improve with contraction.}
+\caption{Radius sweep on B1 (successor states). Under the refrozen 10-seed protocol, contraction improves all three metrics at R=0, though absolute instability remains higher than on B0.}
 \label{tab:radius_sweep_b1}
 \begin{tabular}{llccc}
 \toprule
 Radius & Condition & $\Delta_V$ & $\Delta_z$ & Argmax \\
 \midrule
-disabled & No Contraction & 1.169$\pm$1.756 & 32.9$\pm$8.6 & 0.62 \tiny{[0.60,0.64]} \\
- & Contraction & 1.848$\pm$4.987 & 18.2$\pm$4.8 & 0.90 \tiny{[0.88,0.91]} \\
-R=10 & No Contraction & 0.152$\pm$0.226 & 4.0$\pm$1.9 & 0.95 \tiny{[0.94,0.96]} \\
- & Contraction & 0.120$\pm$0.312 & 1.4$\pm$0.4 & 0.99 \tiny{[0.99,0.99]} \\
-R=100 & No Contraction & 1.169$\pm$1.756 & 32.9$\pm$8.6 & 0.62 \tiny{[0.60,0.64]} \\
- & Contraction & 1.848$\pm$4.987 & 18.2$\pm$4.8 & 0.90 \tiny{[0.88,0.91]} \\
+disabled & No Contraction & 2.230$\pm$3.477 & 35.3$\pm$8.7 & 0.47 \tiny{[0.46,0.48]} \\
+ & Contraction & 1.064$\pm$0.929 & 22.7$\pm$3.5 & 0.65 \tiny{[0.64,0.66]} \\
+R=10 & No Contraction & 0.218$\pm$0.396 & 4.6$\pm$1.8 & 0.89 \tiny{[0.89,0.90]} \\
+ & Contraction & 0.066$\pm$0.060 & 1.7$\pm$0.3 & 0.96 \tiny{[0.95,0.96]} \\
+R=100 & No Contraction & 2.230$\pm$3.477 & 35.3$\pm$8.7 & 0.47 \tiny{[0.46,0.48]} \\
+ & Contraction & 1.064$\pm$0.929 & 22.7$\pm$3.5 & 0.65 \tiny{[0.64,0.66]} \\
 \bottomrule
 \end{tabular}
+\vspace{0.25em}
+\begin{minipage}{0.95\linewidth}
+\footnotesize Note: The $R=100$ rows match the disabled rows because pre-projection latent norms stay well below 100, so clipping never activates at this radius.
+\end{minipage}
 \end{table}

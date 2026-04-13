@@ -520,7 +520,7 @@ def main():
                         help="Base results directory")
     parser.add_argument("--out_dir", type=str, default="results/figures/exp1_v4.1",
                         help="Output directory for figures")
-    parser.add_argument("--seeds", type=str, default="41,42,43",
+    parser.add_argument("--seeds", type=str, default="41,42,43,44,45,46,47,48,49,50",
                         help="Comma-separated list of seeds")
     parser.add_argument("--radii", type=str, default="10,100,0",
                         help="Comma-separated list of radii")

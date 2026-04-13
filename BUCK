@@ -1283,3 +1283,29 @@ python_binary(
         "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
+
+python_library(
+    name = "external_baselines_lib",
+    srcs = glob(["external_baselines/*.py"]),
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/gym:gym",
+        "fbsource//third-party/pypi/gymnasium:gymnasium",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_binary(
+    name = "run_baseline",
+    srcs = ["run_baseline.py"],
+    base_module = "",
+    main_module = "run_baseline",
+    deps = [
+        ":external_baselines_lib",
+        "fbsource//third-party/pypi/gym:gym",
+        "fbsource//third-party/pypi/gymnasium:gymnasium",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/shimmy:shimmy",
+        "fbsource//third-party/pypi/stable-baselines3:stable-baselines3",
+    ],
+)

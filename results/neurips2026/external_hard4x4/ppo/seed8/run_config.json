@@ -1,0 +1,26 @@
+{
+  "algo": "ppo",
+  "backend": "sb3",
+  "checkpoint_freq": 1000,
+  "dataset_dir": "/home/buiksat/trm_bellman/data/sudoku-4x4-easy_6to8empties",
+  "device": "cuda",
+  "eval_episodes": 50,
+  "eval_freq": 100,
+  "eval_split": "test",
+  "mode": "train",
+  "policy_consumes_action_mask": false,
+  "policy_mask_note": "Vanilla SB3 PPO/A2C does not apply logit masking from action_mask; the policy acts in the full no-mask action space and invalid edits are penalized by the environment. This matches the paper's hard-4x4 no-mask protocol and should be compared against the internal no-mask A2C baseline.",
+  "sb3_hparams": {
+    "batch_size": 16,
+    "ent_coef": 0.05,
+    "gamma": 0.99,
+    "learning_rate": 0.0001,
+    "max_grad_norm": 0.5,
+    "n_epochs": 4,
+    "n_steps": 64,
+    "vf_coef": 0.5
+  },
+  "seed": 8,
+  "train_split": "train",
+  "train_steps": 5000
+}
