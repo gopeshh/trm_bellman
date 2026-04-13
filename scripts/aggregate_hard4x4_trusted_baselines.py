@@ -303,7 +303,7 @@ def _write_per_seed_csv(output_dir: Path, all_rows: list[dict[str, Any]]) -> Pat
         "source",
     ]
     with output_path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(all_rows)
     return output_path
@@ -332,7 +332,7 @@ def _write_summary_csv(output_dir: Path, summaries: dict[str, Any]) -> Path:
         "final_eval_wilson_95_high",
     ]
     with output_path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for method in METHOD_ORDER:
             data = summaries[method]
@@ -363,7 +363,7 @@ def _write_summary_csv(output_dir: Path, summaries: dict[str, Any]) -> Path:
 
 def _write_summary_json(output_dir: Path, payload: dict[str, Any]) -> Path:
     output_path = output_dir / "summary.json"
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return output_path
 
 
