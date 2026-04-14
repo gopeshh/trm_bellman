@@ -32,12 +32,14 @@ TEXT_REPLACEMENTS = {
     "CLAUDE.md": "submission guidance",
     "ICML": "earlier",
     str(REPO_ROOT) + "/": "",
+    "/home/buiksat/fbsource/fbcode": "<internal_build_root>",
     "/home/buiksat/fbsource/fbcode/buiksat_trm/": "",
     str(PAPER_ROOT) + "/": "paper/",
     "/data/repos/fbsource/fbcode/": "<internal_build_root>/",
     "fbcode//buiksat_trm:run_baseline": "artifact_target:run_baseline",
     "//buiksat_trm:upi_trm_train": "artifact_target:upi_trm_train",
     "//buiksat_trm:eval_unroll_sensitivity": "artifact_target:eval_unroll_sensitivity",
+    "//buiksat_trm:exp1_value_head_lipschitz": "artifact_target:exp1_value_head_lipschitz",
     "fbsource//third-party/pypi/": "third_party/",
     "_buiksat_cpu_one_hot_patch": "_artifact_cpu_one_hot_patch",
 }
@@ -86,6 +88,12 @@ def _sanitize_string_value(value: str) -> str:
         return f"code/{sanitized}"
     if sanitized.startswith("run_baseline.py"):
         return "code/run_baseline.py"
+    if sanitized.startswith("results/neurips2026/external_hard4x4_20k/"):
+        return sanitized.replace(
+            "results/neurips2026/external_hard4x4_20k/",
+            "results/reproduction_inputs/trusted_external_raw/",
+            1,
+        )
     if sanitized.startswith("results/neurips2026/external_hard4x4/"):
         return sanitized.replace(
             "results/neurips2026/external_hard4x4/",
@@ -182,12 +190,28 @@ def _patch_hard4x4_aggregate_script(text: str) -> str:
         'default="results/reproduction_inputs/hard4x4_upi_nomask_logs"',
     )
     patched = patched.replace(
+        'default="/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k"',
+        'default="results/reproduction_inputs/trusted_external_raw"',
+    )
+    patched = patched.replace(
+        'default="results/neurips2026/external_hard4x4_20k"',
+        'default="results/reproduction_inputs/trusted_external_raw"',
+    )
+    patched = patched.replace(
         'default="/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4"',
         'default="results/reproduction_inputs/trusted_external_raw"',
     )
     patched = patched.replace(
         'default="results/neurips2026/external_hard4x4"',
         'default="results/reproduction_inputs/trusted_external_raw"',
+    )
+    patched = patched.replace(
+        'default="/home/buiksat/trm_bellman/results/paper_ready/hard4x4_trusted_baselines_20k"',
+        'default="results/reproduced/hard4x4_trusted_baselines"',
+    )
+    patched = patched.replace(
+        'default="results/paper_ready/hard4x4_trusted_baselines_20k"',
+        'default="results/reproduced/hard4x4_trusted_baselines"',
     )
     patched = patched.replace(
         'default="/home/buiksat/trm_bellman/results/paper_ready/hard4x4_trusted_baselines"',
@@ -220,6 +244,31 @@ def _patch_controlled_2x2_plot_script(text: str) -> str:
     return patched
 
 
+def _patch_exp1_value_head_lipschitz_script(text: str) -> str:
+    patched = _sanitize_text(text)
+    patched = patched.replace(
+        'DEFAULT_CHECKPOINT_BASE = PROJECT_ROOT / "checkpoints" / "exp1_v4_refreeze"',
+        'DEFAULT_CHECKPOINT_BASE = PROJECT_ROOT / "omitted_from_artifact" / "exp1_v4_refreeze_checkpoints"',
+    )
+    patched = patched.replace(
+        'DEFAULT_BATCH_PATH = PROJECT_ROOT / "artifacts" / "eval_batches" / "exp1_v4_refreeze" / "b0.pt"',
+        'DEFAULT_BATCH_PATH = PROJECT_ROOT / "results" / "reproduction_inputs" / "exp1_v4_refreeze_batches" / "b0.pt"',
+    )
+    patched = patched.replace(
+        'DEFAULT_OUT_DIR = PROJECT_ROOT / "results" / "paper_ready" / "exp1_value_head_lipschitz"',
+        'DEFAULT_OUT_DIR = PROJECT_ROOT / "results" / "reproduced" / "exp1_value_head_lipschitz"',
+    )
+    patched = patched.replace(
+        '"cd /home/buiksat/fbsource/fbcode",',
+        '"cd <internal_build_root>",',
+    )
+    patched = patched.replace(
+        '"buck2 run //buiksat_trm:exp1_value_head_lipschitz -- "',
+        '"buck2 run artifact_target:exp1_value_head_lipschitz -- "',
+    )
+    return patched
+
+
 def _stage_code() -> None:
     _copy_sanitized_text(REPO_ROOT / "run_baseline.py", STAGE_ROOT / "code" / "run_baseline.py")
     _copy_sanitized_text(REPO_ROOT / "requirements.txt", STAGE_ROOT / "code" / "requirements.txt")
@@ -234,6 +283,17 @@ def _stage_code() -> None:
     _write_text(
         STAGE_ROOT / "code" / "scripts" / "aggregate_hard4x4_trusted_baselines.py",
         _patch_hard4x4_aggregate_script(aggregate_text),
+    )
+
+    _copy_sanitized_text(
+        REPO_ROOT / "scripts" / "analyze_exp1_finite_r_sweep.py",
+        STAGE_ROOT / "code" / "scripts" / "analyze_exp1_finite_r_sweep.py",
+    )
+    _write_text(
+        STAGE_ROOT / "code" / "scripts" / "exp1_value_head_lipschitz.py",
+        _patch_exp1_value_head_lipschitz_script(
+            (REPO_ROOT / "scripts" / "exp1_value_head_lipschitz.py").read_text()
+        ),
     )
 
     controlled_text = (REPO_ROOT / "scripts" / "plot_table3_hard_controlled.py").read_text()
@@ -305,7 +365,7 @@ def _sanitize_external_train_summary(payload: dict[str, Any], algo: str, seed: i
 
 
 def _stage_external_baseline_inputs() -> None:
-    src_root = REPO_ROOT / "results" / "neurips2026" / "external_hard4x4"
+    src_root = REPO_ROOT / "results" / "neurips2026" / "external_hard4x4_20k"
     dst_root = STAGE_ROOT / "results" / "reproduction_inputs" / "trusted_external_raw"
     for algo in ("ppo", "a2c"):
         for seed in range(10):
@@ -357,9 +417,45 @@ def _stage_appendix_inputs() -> None:
     for filename in ("b0_metadata.json", "b1_metadata.json"):
         _copy_sanitized_json(batch_src / filename, batch_dst / filename)
 
+    finite_r_src = REPO_ROOT / "results" / "plot_data" / "exp1_v4_refreeze_finite_r_stage1_b0"
+    finite_r_dst = STAGE_ROOT / "results" / "reproduction_inputs" / "finite_r_stage1_b0"
+    for filename in (
+        "finite_r_b0_n1_2_n2_8.csv",
+        "finite_r_b0_n1_2_n2_8.md",
+        "finite_r_transition_window.json",
+        "stage1_gate_report.json",
+        "stage1_gate_report.md",
+    ):
+        src = finite_r_src / filename
+        dst = finite_r_dst / filename
+        if src.suffix == ".json":
+            _copy_sanitized_json(src, dst)
+        else:
+            _copy_sanitized_text(src, dst)
+    for filename in (
+        "finite_r_primary_b0_n1_2_n2_8.png",
+        "finite_r_mechanism_b0_n1_2_n2_8.png",
+    ):
+        _copy_binary(finite_r_src / filename, finite_r_dst / filename)
+
+    lv_src = REPO_ROOT / "results" / "paper_ready" / "exp1_value_head_lipschitz"
+    lv_dst = STAGE_ROOT / "results" / "paper_ready" / "exp1_value_head_lipschitz"
+    for filename in (
+        "summary.json",
+        "CLAIMS.md",
+        "PROVENANCE.md",
+        "table_exp1_value_head_lipschitz.tex",
+    ):
+        src = lv_src / filename
+        dst = lv_dst / filename
+        if src.suffix == ".json":
+            _copy_sanitized_json(src, dst)
+        else:
+            _copy_sanitized_text(src, dst)
+
 
 def _stage_hard4x4_paper_ready_outputs() -> None:
-    src_dir = REPO_ROOT / "results" / "paper_ready" / "hard4x4_trusted_baselines"
+    src_dir = REPO_ROOT / "results" / "paper_ready" / "hard4x4_trusted_baselines_20k"
     dst_dir = STAGE_ROOT / "results" / "paper_ready" / "hard4x4_trusted_baselines"
 
     for filename in ("SUMMARY.md", "summary.csv", "summary.json", "table_hard4x4_trusted_baselines.tex"):
@@ -412,7 +508,9 @@ def _write_readme() -> None:
         - `code/`: trusted-baseline harness, aggregation scripts, and experiment configs
         - `data/`: small synthetic 4x4 Sudoku datasets used by the paper
         - `results/reproduction_inputs/`: sanitized result snapshots and derived logs used for inspection
+        - `results/reproduction_inputs/finite_r_stage1_b0/`: fixed-pair finite-R appendix summaries and plots
         - `results/paper_ready/`: paper-facing hard-4x4 trusted-baseline aggregate outputs
+        - `results/paper_ready/exp1_value_head_lipschitz/`: sanitized local `L_V` estimates used by Appendix Table 5
 
         ## Rebuild The Submission PDF
 
@@ -461,7 +559,9 @@ def _write_readme() -> None:
         ## Notes
 
         - The dataset directory name `sudoku-4x4-easy_6to8empties` is historical. It is the paper's hard 4x4 no-mask suite.
-        - The bundled baseline harness includes the exact PPO/A2C hyperparameters used in the reported sweep.
+        - The bundled baseline harness includes the exact PPO/A2C hyperparameters used in the matched-budget 20k trusted-baseline sweep.
+        - The finite-R appendix evidence is bundled as a small fixed-pair analysis package under `results/reproduction_inputs/finite_r_stage1_b0/` plus the source analysis script in `code/scripts/analyze_exp1_finite_r_sweep.py`.
+        - The appendix `L_V` diagnostic is bundled as sanitized summaries under `results/paper_ready/exp1_value_head_lipschitz/` plus the measurement script in `code/scripts/exp1_value_head_lipschitz.py`.
         - Recomputing the trusted-baseline aggregate does not require Stable-Baselines3; it reads the sanitized JSON histories already included here.
         - Running `code/run_baseline.py` for fresh PPO/A2C training requires local installs of `torch`, `numpy`, `stable-baselines3`, and either `gym` or `gymnasium`. Those packages are not required to rebuild the paper PDF or the included aggregate outputs.
         """
