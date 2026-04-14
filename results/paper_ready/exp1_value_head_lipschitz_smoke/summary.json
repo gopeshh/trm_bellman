@@ -1,0 +1,265 @@
+{
+  "generated": "2026-04-14T02:00:08.020755+00:00",
+  "args": {
+    "checkpoint_base": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze",
+    "batch_path": "/home/buiksat/trm_bellman/artifacts/eval_batches/exp1_v4_refreeze/b0.pt",
+    "out_dir": "/home/buiksat/trm_bellman/results/paper_ready/exp1_value_head_lipschitz_smoke",
+    "seeds": [
+      41,
+      42
+    ],
+    "eps_list": [
+      0.0001,
+      0.001
+    ],
+    "central_eps": 0.0001,
+    "n_eval": 8,
+    "num_trials": 2,
+    "num_directions": 4,
+    "device": "cpu"
+  },
+  "records": [
+    {
+      "condition": "model_a_prime",
+      "condition_label": "Model A' (no contraction)",
+      "seed": 41,
+      "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed41/model_step_5000.pt",
+      "n_eval": 8,
+      "batch_name": "b0",
+      "batch_size": 100,
+      "eps": 0.0001,
+      "num_trials": 2,
+      "num_directions": 4,
+      "trial_maxes": [
+        0.0762939453125,
+        0.0667572021484375
+      ],
+      "trial_mean": 0.07152557373046875,
+      "trial_std": 0.00476837158203125,
+      "trial_min": 0.0667572021484375,
+      "trial_max": 0.0762939453125
+    },
+    {
+      "condition": "model_a_prime",
+      "condition_label": "Model A' (no contraction)",
+      "seed": 41,
+      "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed41/model_step_5000.pt",
+      "n_eval": 8,
+      "batch_name": "b0",
+      "batch_size": 100,
+      "eps": 0.001,
+      "num_trials": 2,
+      "num_directions": 4,
+      "trial_maxes": [
+        0.06198882684111595,
+        0.06628036499023438
+      ],
+      "trial_mean": 0.06413459591567516,
+      "trial_std": 0.0021457690745592117,
+      "trial_min": 0.06198882684111595,
+      "trial_max": 0.06628036499023438
+    },
+    {
+      "condition": "model_a_prime",
+      "condition_label": "Model A' (no contraction)",
+      "seed": 42,
+      "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed42/model_step_5000.pt",
+      "n_eval": 8,
+      "batch_name": "b0",
+      "batch_size": 100,
+      "eps": 0.0001,
+      "num_trials": 2,
+      "num_directions": 4,
+      "trial_maxes": [
+        0.08106231689453125,
+        0.1049041748046875
+      ],
+      "trial_mean": 0.09298324584960938,
+      "trial_std": 0.011920928955078125,
+      "trial_min": 0.08106231689453125,
+      "trial_max": 0.1049041748046875
+    },
+    {
+      "condition": "model_a_prime",
+      "condition_label": "Model A' (no contraction)",
+      "seed": 42,
+      "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed42/model_step_5000.pt",
+      "n_eval": 8,
+      "batch_name": "b0",
+      "batch_size": 100,
+      "eps": 0.001,
+      "num_trials": 2,
+      "num_directions": 4,
+      "trial_maxes": [
+        0.07915496081113815,
+        0.0915527269244194
+      ],
+      "trial_mean": 0.08535384386777878,
+      "trial_std": 0.006198883056640625,
+      "trial_min": 0.07915496081113815,
+      "trial_max": 0.0915527269244194
+    },
+    {
+      "condition": "model_b",
+      "condition_label": "Model B (contraction)",
+      "seed": 41,
+      "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_b/seed41/model_step_5000.pt",
+      "n_eval": 8,
+      "batch_name": "b0",
+      "batch_size": 100,
+      "eps": 0.0001,
+      "num_trials": 2,
+      "num_directions": 4,
+      "trial_maxes": [
+        0.0667572021484375,
+        0.0667572021484375
+      ],
+      "trial_mean": 0.0667572021484375,
+      "trial_std": 0.0,
+      "trial_min": 0.0667572021484375,
+      "trial_max": 0.0667572021484375
+    },
+    {
+      "condition": "model_b",
+      "condition_label": "Model B (contraction)",
+      "seed": 41,
+      "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_b/seed41/model_step_5000.pt",
+      "n_eval": 8,
+      "batch_name": "b0",
+      "batch_size": 100,
+      "eps": 0.001,
+      "num_trials": 2,
+      "num_directions": 4,
+      "trial_maxes": [
+        0.07772445678710938,
+        0.05316733941435814
+      ],
+      "trial_mean": 0.06544589810073376,
+      "trial_std": 0.012278558686375618,
+      "trial_min": 0.05316733941435814,
+      "trial_max": 0.07772445678710938
+    },
+    {
+      "condition": "model_b",
+      "condition_label": "Model B (contraction)",
+      "seed": 42,
+      "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_b/seed42/model_step_5000.pt",
+      "n_eval": 8,
+      "batch_name": "b0",
+      "batch_size": 100,
+      "eps": 0.0001,
+      "num_trials": 2,
+      "num_directions": 4,
+      "trial_maxes": [
+        0.095367431640625,
+        0.0858306884765625
+      ],
+      "trial_mean": 0.09059906005859375,
+      "trial_std": 0.00476837158203125,
+      "trial_min": 0.0858306884765625,
+      "trial_max": 0.095367431640625
+    },
+    {
+      "condition": "model_b",
+      "condition_label": "Model B (contraction)",
+      "seed": 42,
+      "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_b/seed42/model_step_5000.pt",
+      "n_eval": 8,
+      "batch_name": "b0",
+      "batch_size": 100,
+      "eps": 0.001,
+      "num_trials": 2,
+      "num_directions": 4,
+      "trial_maxes": [
+        0.09012221544981003,
+        0.11396407335996628
+      ],
+      "trial_mean": 0.10204314440488815,
+      "trial_std": 0.011920928955078125,
+      "trial_min": 0.09012221544981003,
+      "trial_max": 0.11396407335996628
+    }
+  ],
+  "aggregated": {
+    "by_condition": {
+      "model_a_prime": {
+        "condition_label": "Model A' (no contraction)",
+        "central_eps": 0.0001,
+        "eps_grid": [
+          0.0001,
+          0.001
+        ],
+        "per_eps": {
+          "0.0001": {
+            "condition_label": "Model A' (no contraction)",
+            "eps": 0.0001,
+            "n_seeds": 2,
+            "seed_mean_of_trial_mean": 0.08225440979003906,
+            "seed_std_of_trial_mean": 0.015172865463921851,
+            "seed_min_of_trial_mean": 0.07152557373046875,
+            "seed_max_of_trial_mean": 0.09298324584960938,
+            "seed_mean_of_trial_max": 0.09059906005859375,
+            "seed_std_of_trial_max": 0.020230487285229134
+          },
+          "0.001": {
+            "condition_label": "Model A' (no contraction)",
+            "eps": 0.001,
+            "n_seeds": 2,
+            "seed_mean_of_trial_mean": 0.07474421989172697,
+            "seed_std_of_trial_mean": 0.015004274118611228,
+            "seed_min_of_trial_mean": 0.06413459591567516,
+            "seed_max_of_trial_mean": 0.08535384386777878,
+            "seed_mean_of_trial_max": 0.07891654595732689,
+            "seed_std_of_trial_max": 0.017870258500263005
+          }
+        },
+        "scale_span": {
+          "min_eps": 0.001,
+          "max_eps": 0.0001,
+          "min_mean": 0.07474421989172697,
+          "max_mean": 0.08225440979003906,
+          "ratio": 1.1004785374600365
+        }
+      },
+      "model_b": {
+        "condition_label": "Model B (contraction)",
+        "central_eps": 0.0001,
+        "eps_grid": [
+          0.0001,
+          0.001
+        ],
+        "per_eps": {
+          "0.0001": {
+            "condition_label": "Model B (contraction)",
+            "eps": 0.0001,
+            "n_seeds": 2,
+            "seed_mean_of_trial_mean": 0.07867813110351562,
+            "seed_std_of_trial_mean": 0.016858739404357614,
+            "seed_min_of_trial_mean": 0.0667572021484375,
+            "seed_max_of_trial_mean": 0.09059906005859375,
+            "seed_mean_of_trial_max": 0.08106231689453125,
+            "seed_std_of_trial_max": 0.020230487285229134
+          },
+          "0.001": {
+            "condition_label": "Model B (contraction)",
+            "eps": 0.001,
+            "n_seeds": 2,
+            "seed_mean_of_trial_mean": 0.08374452125281096,
+            "seed_std_of_trial_mean": 0.02587816103442189,
+            "seed_min_of_trial_mean": 0.06544589810073376,
+            "seed_max_of_trial_mean": 0.10204314440488815,
+            "seed_mean_of_trial_max": 0.09584426507353783,
+            "seed_std_of_trial_max": 0.025625278626267508
+          }
+        },
+        "scale_span": {
+          "min_eps": 0.0001,
+          "max_eps": 0.001,
+          "min_mean": 0.07867813110351562,
+          "max_mean": 0.08374452125281096,
+          "ratio": 1.0643938802083333
+        }
+      }
+    }
+  }
+}
