@@ -389,7 +389,7 @@ def _stage_hard4x4_paper_ready_outputs() -> None:
 
     _ensure_parent(dst_dir / "per_seed_metrics.csv")
     with (dst_dir / "per_seed_metrics.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
