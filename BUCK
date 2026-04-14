@@ -941,6 +941,19 @@ python_binary(
 )
 
 python_binary(
+    name = "exp1_value_head_lipschitz",
+    srcs = ["scripts/exp1_value_head_lipschitz.py"],
+    base_module = "",
+    main_module = "scripts.exp1_value_head_lipschitz",
+    deps = [
+        ":eval_unroll_sensitivity_lib",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
     name = "audit_exp1_lipschitz_diag",
     srcs = ["scripts/audit_exp1_lipschitz_diag.py"],
     base_module = "",
