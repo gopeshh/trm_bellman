@@ -1,0 +1,16 @@
+========================================
+External SB3 Baseline Sweep
+========================================
+Repo root: /home/buiksat/trm_bellman
+Dataset: /home/buiksat/trm_bellman/data/sudoku-4x4-easy_6to8empties
+Output: /home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k
+Device: cuda
+GPU: 1
+Train steps: 20000
+Eval freq: 100
+Eval episodes: 50
+Checkpoint freq: 1000
+Algos: a2c
+Seeds: 0 1 2 3 4 5 6 7 8 9
+Buck flags: -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true --local-only
+========================================
