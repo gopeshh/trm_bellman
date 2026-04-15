@@ -29,3 +29,13 @@ sb3_a2c,6,20000,0.0,-17.907999999999998,0.84,200,True,/home/buiksat/trm_bellman/
 sb3_a2c,7,20000,0.0,-18.571199999999997,0.66,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/a2c/seed7/train_summary.json
 sb3_a2c,8,20000,0.0,-18.252999999999997,0.7,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/a2c/seed8/train_summary.json
 sb3_a2c,9,20000,0.0,-18.924,0.59875,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/a2c/seed9/train_summary.json
+sb3_dqn,0,20000,0.0,-17.882399999999997,0.8575,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed0/train_summary.json
+sb3_dqn,1,20000,0.0,-18.0998,0.78,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/train_summary.json
+sb3_dqn,2,20000,0.0,-18.050399999999996,0.86,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed2/train_summary.json
+sb3_dqn,3,20000,0.0,-17.5448,0.92,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed3/train_summary.json
+sb3_dqn,4,20000,0.0,-17.966399999999997,0.79875,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed4/train_summary.json
+sb3_dqn,5,20000,0.0,-17.865599999999997,0.88,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed5/train_summary.json
+sb3_dqn,6,20000,0.0,-18.098999999999997,0.84,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed6/train_summary.json
+sb3_dqn,7,20000,0.0,-17.747999999999998,0.92,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed7/train_summary.json
+sb3_dqn,8,20000,0.0,-17.879199999999997,0.7775,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed8/train_summary.json
+sb3_dqn,9,20000,0.0,-18.0168,0.79875,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed9/train_summary.json

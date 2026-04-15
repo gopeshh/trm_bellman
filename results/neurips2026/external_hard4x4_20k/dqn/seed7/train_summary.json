@@ -1,0 +1,72 @@
+{
+  "action_space_n": 97,
+  "algo": "dqn",
+  "artifacts": {
+    "eval_history_jsonl": "/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed7/eval_history.jsonl",
+    "final_model": "/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed7/model_final.zip",
+    "run_config_json": "/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed7/run_config.json"
+  },
+  "backend": "sb3",
+  "best_eval_success_rate": 0.0,
+  "checkpoint_freq": 1000,
+  "dataset_dir": "/home/buiksat/trm_bellman/data/sudoku-4x4-easy_6to8empties",
+  "device": "cuda",
+  "env": "sudoku4x4",
+  "eval_episodes": 50,
+  "eval_freq": 100,
+  "eval_split": "test",
+  "final_eval": {
+    "episodes": 50,
+    "invalid_action_rate": 0.92,
+    "mean_return": -17.747999999999998,
+    "mean_steps": 16.0,
+    "split": "test",
+    "success_rate": 0.0
+  },
+  "mode": "train",
+  "num_eval_points": 200,
+  "observation_spec": {
+    "action_mask": {
+      "dtype": "bool",
+      "semantics": "flat edit mask with STOP in the final slot",
+      "shape": [
+        97
+      ]
+    },
+    "inputs": {
+      "dtype": "int",
+      "semantics": "original puzzle",
+      "shape": [
+        16
+      ]
+    },
+    "plan": {
+      "dtype": "int",
+      "semantics": "current editable plan",
+      "shape": [
+        16
+      ]
+    }
+  },
+  "policy_consumes_action_mask": false,
+  "policy_mask_note": "Vanilla SB3 PPO/A2C/DQN does not apply logit masking from action_mask; the policy acts in the full no-mask action space and invalid edits are penalized by the environment. This matches the paper's hard-4x4 no-mask protocol and should be compared against the internal no-mask A2C baseline.",
+  "sb3_hparams": {
+    "batch_size": 64,
+    "buffer_size": 10000,
+    "exploration_final_eps": 0.05,
+    "exploration_fraction": 0.15,
+    "exploration_initial_eps": 1.0,
+    "gamma": 0.99,
+    "gradient_steps": 1,
+    "learning_rate": 0.0005,
+    "learning_starts": 200,
+    "max_grad_norm": 10.0,
+    "target_update_interval": 200,
+    "train_freq": 4
+  },
+  "seed": 7,
+  "t0_2_status": "complete",
+  "t0_3_ready": true,
+  "train_split": "train",
+  "train_steps": 20000
+}

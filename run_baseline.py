@@ -29,6 +29,20 @@ DEFAULT_SB3_HPARAMS = {
         "max_grad_norm": 0.5,
         "n_steps": 32,
     },
+    "dqn": {
+        "learning_rate": 5.0e-4,
+        "gamma": 0.99,
+        "buffer_size": 10000,
+        "learning_starts": 200,
+        "batch_size": 64,
+        "train_freq": 4,
+        "gradient_steps": 1,
+        "target_update_interval": 200,
+        "exploration_fraction": 0.15,
+        "exploration_initial_eps": 1.0,
+        "exploration_final_eps": 0.05,
+        "max_grad_norm": 10.0,
+    },
 }
 
 
@@ -36,7 +50,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Entrypoint for trusted external baseline integration."
     )
-    parser.add_argument("--algo", choices=("ppo", "a2c"), required=True)
+    parser.add_argument("--algo", choices=("ppo", "a2c", "dqn"), required=True)
     parser.add_argument("--env", choices=("sudoku4x4",), required=True)
     parser.add_argument("--backend", choices=("auto", "sb3", "smoke"), default="auto")
     parser.add_argument("--mode", choices=("episode", "train"), default="episode")
@@ -63,6 +77,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--n-steps", type=int, default=None)
     parser.add_argument("--ppo-batch-size", type=int, default=None)
     parser.add_argument("--ppo-epochs", type=int, default=None)
+    parser.add_argument("--dqn-buffer-size", type=int, default=None)
+    parser.add_argument("--dqn-learning-starts", type=int, default=None)
+    parser.add_argument("--dqn-batch-size", type=int, default=None)
+    parser.add_argument("--dqn-train-freq", type=int, default=None)
+    parser.add_argument("--dqn-gradient-steps", type=int, default=None)
+    parser.add_argument("--dqn-target-update-interval", type=int, default=None)
+    parser.add_argument("--dqn-exploration-fraction", type=float, default=None)
+    parser.add_argument("--dqn-exploration-initial-eps", type=float, default=None)
+    parser.add_argument("--dqn-exploration-final-eps", type=float, default=None)
     parser.add_argument(
         "--output-root",
         default="results/neurips2026/external_hard4x4",
@@ -75,8 +98,10 @@ def _try_load_sb3(algo: str):
     try:
         if algo == "ppo":
             from stable_baselines3 import PPO as Algo
-        else:
+        elif algo == "a2c":
             from stable_baselines3 import A2C as Algo
+        else:
+            from stable_baselines3 import DQN as Algo
         _patch_sb3_preprocess_obs()
         return Algo, None
     except ImportError as exc:  # pragma: no cover - depends on local packages
@@ -153,16 +178,30 @@ def _merge_sb3_hparams(args: argparse.Namespace) -> dict[str, Any]:
     if args.algo == "ppo":
         overrides["batch_size"] = args.ppo_batch_size
         overrides["n_epochs"] = args.ppo_epochs
+    elif args.algo == "dqn":
+        overrides.update(
+            {
+                "buffer_size": args.dqn_buffer_size,
+                "learning_starts": args.dqn_learning_starts,
+                "batch_size": args.dqn_batch_size,
+                "train_freq": args.dqn_train_freq,
+                "gradient_steps": args.dqn_gradient_steps,
+                "target_update_interval": args.dqn_target_update_interval,
+                "exploration_fraction": args.dqn_exploration_fraction,
+                "exploration_initial_eps": args.dqn_exploration_initial_eps,
+                "exploration_final_eps": args.dqn_exploration_final_eps,
+            }
+        )
 
     for key, value in overrides.items():
-        if value is not None:
+        if value is not None and key in defaults:
             defaults[key] = value
     return defaults
 
 
 def _policy_mask_note() -> str:
     return (
-        "Vanilla SB3 PPO/A2C does not apply logit masking from action_mask; "
+        "Vanilla SB3 PPO/A2C/DQN does not apply logit masking from action_mask; "
         "the policy acts in the full no-mask action space and invalid edits are "
         "penalized by the environment. This matches the paper's hard-4x4 no-mask "
         "protocol and should be compared against the internal no-mask A2C baseline."

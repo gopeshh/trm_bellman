@@ -30,11 +30,11 @@ This mirrors the internal environment at the level needed for baseline integrati
 
 The plain `python3` shell environment on this machine still does not have SB3/Gym/NumPy importable.
 The supported path is Buck: `fbcode//buiksat_trm:run_baseline` pulls the third-party packages from `fbsource//third-party/pypi/...`.
-`T0.2` is complete via that Buck target: both PPO and A2C now finish one SB3-backed episode successfully on the hard 4x4 wrapper.
+`T0.2` is complete via that Buck target for PPO/A2C, and the same harness now accepts SB3 DQN as well.
 
 ## Masking semantics
 
-The environment exposes `action_mask` in the observation, but vanilla SB3 PPO/A2C does not use that mask for logit masking.
+The environment exposes `action_mask` in the observation, but vanilla SB3 PPO/A2C/DQN does not use that mask for logit masking.
 That is intentional here: the paper's locked hard-4x4 capability anchor is the no-mask protocol, so the external policy should face the same unmasked action space and let the environment penalize invalid edits.
 
 For internal fairness, compare against the repo's no-mask A2C baseline config:
@@ -70,6 +70,11 @@ buck2 run fbcode//buiksat_trm:run_baseline -- \
   --algo a2c --env sudoku4x4 --backend sb3 \
   --dataset-dir /home/buiksat/trm_bellman/data/sudoku-4x4-easy_6to8empties \
   --output-root /home/buiksat/trm_bellman/results/neurips2026/external_hard4x4
+
+buck2 run fbcode//buiksat_trm:run_baseline -- \
+  --algo dqn --env sudoku4x4 --backend sb3 \
+  --dataset-dir /home/buiksat/trm_bellman/data/sudoku-4x4-easy_6to8empties \
+  --output-root /home/buiksat/trm_bellman/results/neurips2026/external_hard4x4
 ```
 
 The command writes a summary JSON to:
@@ -80,9 +85,9 @@ results/neurips2026/external_hard4x4/<algo>/seed<seed>/episode_summary.json
 
 ## Training mode
 
-`run_baseline.py` also supports `--mode train` for T0.3 launch prep. That path:
+`run_baseline.py` also supports `--mode train` for launch prep. That path:
 
-- trains PPO or A2C with SB3 on the hard-4x4 train split
+- trains PPO, A2C, or DQN with SB3 on the hard-4x4 train split
 - evaluates periodically on the test split
 - writes non-colliding artifacts per seed
 - saves intermediate checkpoints and a final model

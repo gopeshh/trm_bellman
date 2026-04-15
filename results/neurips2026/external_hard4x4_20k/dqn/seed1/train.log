@@ -1,0 +1,236 @@
+[2026-04-14T16:55:15.369-07:00] Buck UI: https://www.internalfb.com/buck2/f124e101-f87f-46ef-b888-e77b804b0b79
+[2026-04-14T16:55:15.511-07:00] Network: Up: 0B  Down: 0B
+BUILD SUCCEEDED - starting your binary
+WARNING:root:===========[FB_TRITON]=========== Triton Version: 3.5.0+fb
+INFO:2026-04-14 16:55:26 1265760:1265760 CuptiCallbackApi.cpp:69] Callback: domain = 3, cbid = 1
+INFO:2026-04-14 16:55:26 1265760:1265760 CuptiActivityProfiler.cpp:93] CUDA versions. CUPTI: 22; Runtime: 12040; Driver: 12040
+INFO:2026-04-14 16:55:26 1265760:1268072 FBConfig.cpp:330] Perfetto builder enabled: 1
+INFO:2026-04-14 16:55:26 1265760:1268072 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+INFO:2026-04-14 16:55:26 1265760:1268072 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+[step 00100] eval_success_rate=0.000 eval_mean_return=-18.101 eval_invalid_action_rate=0.800
+[step 00200] eval_success_rate=0.000 eval_mean_return=-18.101 eval_invalid_action_rate=0.800
+[step 00300] eval_success_rate=0.000 eval_mean_return=-18.118 eval_invalid_action_rate=0.819
+[step 00400] eval_success_rate=0.000 eval_mean_return=-18.302 eval_invalid_action_rate=0.718
+[step 00500] eval_success_rate=0.000 eval_mean_return=-18.958 eval_invalid_action_rate=0.459
+[step 00600] eval_success_rate=0.000 eval_mean_return=-19.210 eval_invalid_action_rate=0.516
+[step 00700] eval_success_rate=0.000 eval_mean_return=-19.515 eval_invalid_action_rate=0.399
+[step 00800] eval_success_rate=0.000 eval_mean_return=-18.567 eval_invalid_action_rate=0.655
+[step 00900] eval_success_rate=0.000 eval_mean_return=-19.142 eval_invalid_action_rate=0.615
+[step 01000] eval_success_rate=0.000 eval_mean_return=-18.504 eval_invalid_action_rate=0.600
+[step 01000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_1000.zip
+[step 01100] eval_success_rate=0.000 eval_mean_return=-17.866 eval_invalid_action_rate=0.800
+[step 01200] eval_success_rate=0.000 eval_mean_return=-17.849 eval_invalid_action_rate=0.720
+[step 01300] eval_success_rate=0.000 eval_mean_return=-18.185 eval_invalid_action_rate=0.636
+[step 01400] eval_success_rate=0.000 eval_mean_return=-18.806 eval_invalid_action_rate=0.559
+[step 01500] eval_success_rate=0.000 eval_mean_return=-18.050 eval_invalid_action_rate=0.719
+[step 01600] eval_success_rate=0.000 eval_mean_return=-17.597 eval_invalid_action_rate=0.839
+[step 01700] eval_success_rate=0.000 eval_mean_return=-17.765 eval_invalid_action_rate=0.860
+[step 01800] eval_success_rate=0.000 eval_mean_return=-17.630 eval_invalid_action_rate=0.657
+[step 01900] eval_success_rate=0.000 eval_mean_return=-18.000 eval_invalid_action_rate=0.715
+[step 02000] eval_success_rate=0.000 eval_mean_return=-17.810 eval_invalid_action_rate=0.739
+[step 02000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_2000.zip
+[step 02100] eval_success_rate=0.000 eval_mean_return=-17.630 eval_invalid_action_rate=0.739
+[step 02200] eval_success_rate=0.000 eval_mean_return=-18.017 eval_invalid_action_rate=0.619
+[step 02300] eval_success_rate=0.000 eval_mean_return=-17.798 eval_invalid_action_rate=0.899
+[step 02400] eval_success_rate=0.000 eval_mean_return=-18.454 eval_invalid_action_rate=0.677
+[step 02500] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.659
+[step 02600] eval_success_rate=0.000 eval_mean_return=-17.731 eval_invalid_action_rate=0.818
+[step 02700] eval_success_rate=0.000 eval_mean_return=-18.605 eval_invalid_action_rate=0.716
+[step 02800] eval_success_rate=0.000 eval_mean_return=-18.336 eval_invalid_action_rate=0.760
+[step 02900] eval_success_rate=0.000 eval_mean_return=-17.493 eval_invalid_action_rate=0.859
+[step 03000] eval_success_rate=0.000 eval_mean_return=-18.151 eval_invalid_action_rate=0.776
+[step 03000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_3000.zip
+[step 03100] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.880
+[step 03200] eval_success_rate=0.000 eval_mean_return=-18.692 eval_invalid_action_rate=0.560
+[step 03300] eval_success_rate=0.000 eval_mean_return=-17.966 eval_invalid_action_rate=0.679
+[step 03400] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.759
+[step 03500] eval_success_rate=0.000 eval_mean_return=-18.134 eval_invalid_action_rate=0.794
+[step 03600] eval_success_rate=0.000 eval_mean_return=-18.000 eval_invalid_action_rate=0.699
+[step 03700] eval_success_rate=0.000 eval_mean_return=-18.142 eval_invalid_action_rate=0.657
+[step 03800] eval_success_rate=0.000 eval_mean_return=-18.571 eval_invalid_action_rate=0.680
+[step 03900] eval_success_rate=0.000 eval_mean_return=-17.664 eval_invalid_action_rate=0.858
+[step 04000] eval_success_rate=0.000 eval_mean_return=-17.882 eval_invalid_action_rate=0.780
+[step 04000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_4000.zip
+[step 04100] eval_success_rate=0.000 eval_mean_return=-17.748 eval_invalid_action_rate=0.838
+[step 04200] eval_success_rate=0.000 eval_mean_return=-17.815 eval_invalid_action_rate=0.835
+[step 04300] eval_success_rate=0.000 eval_mean_return=-17.563 eval_invalid_action_rate=0.920
+[step 04400] eval_success_rate=0.000 eval_mean_return=-18.151 eval_invalid_action_rate=0.859
+[step 04500] eval_success_rate=0.000 eval_mean_return=-18.082 eval_invalid_action_rate=0.819
+[step 04600] eval_success_rate=0.000 eval_mean_return=-18.101 eval_invalid_action_rate=0.799
+[step 04700] eval_success_rate=0.000 eval_mean_return=-18.151 eval_invalid_action_rate=0.780
+[step 04800] eval_success_rate=0.000 eval_mean_return=-17.798 eval_invalid_action_rate=0.880
+[step 04900] eval_success_rate=0.000 eval_mean_return=-17.983 eval_invalid_action_rate=0.899
+[step 05000] eval_success_rate=0.000 eval_mean_return=-18.437 eval_invalid_action_rate=0.715
+[step 05000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_5000.zip
+[step 05100] eval_success_rate=0.000 eval_mean_return=-17.748 eval_invalid_action_rate=0.897
+[step 05200] eval_success_rate=0.000 eval_mean_return=-17.647 eval_invalid_action_rate=0.879
+[step 05300] eval_success_rate=0.000 eval_mean_return=-18.067 eval_invalid_action_rate=0.775
+[step 05400] eval_success_rate=0.000 eval_mean_return=-17.982 eval_invalid_action_rate=0.777
+[step 05500] eval_success_rate=0.000 eval_mean_return=-17.731 eval_invalid_action_rate=0.959
+[step 05600] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.840
+[step 05700] eval_success_rate=0.000 eval_mean_return=-18.050 eval_invalid_action_rate=0.840
+[step 05800] eval_success_rate=0.000 eval_mean_return=-17.915 eval_invalid_action_rate=0.877
+[step 05900] eval_success_rate=0.000 eval_mean_return=-18.007 eval_invalid_action_rate=0.719
+[step 06000] eval_success_rate=0.000 eval_mean_return=-18.302 eval_invalid_action_rate=0.757
+[step 06000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_6000.zip
+[step 06100] eval_success_rate=0.000 eval_mean_return=-18.134 eval_invalid_action_rate=0.779
+[step 06200] eval_success_rate=0.000 eval_mean_return=-18.237 eval_invalid_action_rate=0.739
+[step 06300] eval_success_rate=0.000 eval_mean_return=-17.977 eval_invalid_action_rate=0.877
+[step 06400] eval_success_rate=0.000 eval_mean_return=-17.983 eval_invalid_action_rate=0.860
+[step 06500] eval_success_rate=0.000 eval_mean_return=-18.235 eval_invalid_action_rate=0.814
+[step 06600] eval_success_rate=0.000 eval_mean_return=-17.930 eval_invalid_action_rate=0.859
+[step 06700] eval_success_rate=0.000 eval_mean_return=-18.134 eval_invalid_action_rate=0.858
+[step 06800] eval_success_rate=0.000 eval_mean_return=-17.849 eval_invalid_action_rate=0.877
+[step 06900] eval_success_rate=0.000 eval_mean_return=-17.984 eval_invalid_action_rate=0.899
+[step 07000] eval_success_rate=0.000 eval_mean_return=-17.983 eval_invalid_action_rate=0.919
+[step 07000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_7000.zip
+[step 07100] eval_success_rate=0.000 eval_mean_return=-17.916 eval_invalid_action_rate=0.838
+[step 07200] eval_success_rate=0.000 eval_mean_return=-17.630 eval_invalid_action_rate=0.979
+[step 07300] eval_success_rate=0.000 eval_mean_return=-18.067 eval_invalid_action_rate=0.838
+[step 07400] eval_success_rate=0.000 eval_mean_return=-17.933 eval_invalid_action_rate=0.860
+[step 07500] eval_success_rate=0.000 eval_mean_return=-18.336 eval_invalid_action_rate=0.740
+[step 07600] eval_success_rate=0.000 eval_mean_return=-18.052 eval_invalid_action_rate=0.800
+[step 07700] eval_success_rate=0.000 eval_mean_return=-17.714 eval_invalid_action_rate=0.916
+[step 07800] eval_success_rate=0.000 eval_mean_return=-17.748 eval_invalid_action_rate=0.879
+[step 07900] eval_success_rate=0.000 eval_mean_return=-18.067 eval_invalid_action_rate=0.859
+[step 08000] eval_success_rate=0.000 eval_mean_return=-17.647 eval_invalid_action_rate=0.958
+[step 08000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_8000.zip
+[step 08100] eval_success_rate=0.000 eval_mean_return=-17.647 eval_invalid_action_rate=0.975
+[step 08200] eval_success_rate=0.000 eval_mean_return=-18.067 eval_invalid_action_rate=0.777
+[step 08300] eval_success_rate=0.000 eval_mean_return=-17.866 eval_invalid_action_rate=0.940
+[step 08400] eval_success_rate=0.000 eval_mean_return=-18.554 eval_invalid_action_rate=0.698
+[step 08500] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.859
+[step 08600] eval_success_rate=0.000 eval_mean_return=-17.916 eval_invalid_action_rate=0.876
+[step 08700] eval_success_rate=0.000 eval_mean_return=-17.664 eval_invalid_action_rate=0.860
+[step 08800] eval_success_rate=0.000 eval_mean_return=-18.101 eval_invalid_action_rate=0.858
+[step 08900] eval_success_rate=0.000 eval_mean_return=-18.125 eval_invalid_action_rate=0.797
+[step 09000] eval_success_rate=0.000 eval_mean_return=-17.681 eval_invalid_action_rate=0.917
+[step 09000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_9000.zip
+[step 09100] eval_success_rate=0.000 eval_mean_return=-18.033 eval_invalid_action_rate=0.759
+[step 09200] eval_success_rate=0.000 eval_mean_return=-18.126 eval_invalid_action_rate=0.800
+[step 09300] eval_success_rate=0.000 eval_mean_return=-18.067 eval_invalid_action_rate=0.819
+[step 09400] eval_success_rate=0.000 eval_mean_return=-18.099 eval_invalid_action_rate=0.838
+[step 09500] eval_success_rate=0.000 eval_mean_return=-17.933 eval_invalid_action_rate=0.819
+[step 09600] eval_success_rate=0.000 eval_mean_return=-18.302 eval_invalid_action_rate=0.759
+[step 09700] eval_success_rate=0.000 eval_mean_return=-17.748 eval_invalid_action_rate=0.920
+[step 09800] eval_success_rate=0.000 eval_mean_return=-17.916 eval_invalid_action_rate=0.860
+[step 09900] eval_success_rate=0.000 eval_mean_return=-17.962 eval_invalid_action_rate=0.720
+[step 10000] eval_success_rate=0.000 eval_mean_return=-18.112 eval_invalid_action_rate=0.718
+[step 10000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_10000.zip
+[step 10100] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.919
+[step 10200] eval_success_rate=0.000 eval_mean_return=-18.285 eval_invalid_action_rate=0.854
+[step 10300] eval_success_rate=0.000 eval_mean_return=-17.950 eval_invalid_action_rate=0.916
+[step 10400] eval_success_rate=0.000 eval_mean_return=-17.800 eval_invalid_action_rate=0.859
+[step 10500] eval_success_rate=0.000 eval_mean_return=-17.664 eval_invalid_action_rate=0.940
+[step 10600] eval_success_rate=0.000 eval_mean_return=-17.530 eval_invalid_action_rate=0.960
+[step 10700] eval_success_rate=0.000 eval_mean_return=-17.933 eval_invalid_action_rate=0.879
+[step 10800] eval_success_rate=0.000 eval_mean_return=-17.832 eval_invalid_action_rate=0.875
+[step 10900] eval_success_rate=0.000 eval_mean_return=-17.597 eval_invalid_action_rate=0.899
+[step 11000] eval_success_rate=0.000 eval_mean_return=-18.084 eval_invalid_action_rate=0.819
+[step 11000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_11000.zip
+[step 11100] eval_success_rate=0.000 eval_mean_return=-18.319 eval_invalid_action_rate=0.780
+[step 11200] eval_success_rate=0.000 eval_mean_return=-18.284 eval_invalid_action_rate=0.780
+[step 11300] eval_success_rate=0.000 eval_mean_return=-17.950 eval_invalid_action_rate=0.840
+[step 11400] eval_success_rate=0.000 eval_mean_return=-17.818 eval_invalid_action_rate=0.880
+[step 11500] eval_success_rate=0.000 eval_mean_return=-18.051 eval_invalid_action_rate=0.779
+[step 11600] eval_success_rate=0.000 eval_mean_return=-18.000 eval_invalid_action_rate=0.756
+[step 11700] eval_success_rate=0.000 eval_mean_return=-18.322 eval_invalid_action_rate=0.836
+[step 11800] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.859
+[step 11900] eval_success_rate=0.000 eval_mean_return=-18.202 eval_invalid_action_rate=0.859
+[step 12000] eval_success_rate=0.000 eval_mean_return=-17.798 eval_invalid_action_rate=0.920
+[step 12000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_12000.zip
+[step 12100] eval_success_rate=0.000 eval_mean_return=-18.454 eval_invalid_action_rate=0.718
+[step 12200] eval_success_rate=0.000 eval_mean_return=-17.826 eval_invalid_action_rate=0.859
+[step 12300] eval_success_rate=0.000 eval_mean_return=-18.222 eval_invalid_action_rate=0.896
+[step 12400] eval_success_rate=0.000 eval_mean_return=-18.101 eval_invalid_action_rate=0.877
+[step 12500] eval_success_rate=0.000 eval_mean_return=-18.336 eval_invalid_action_rate=0.799
+[step 12600] eval_success_rate=0.000 eval_mean_return=-18.067 eval_invalid_action_rate=0.779
+[step 12700] eval_success_rate=0.000 eval_mean_return=-17.546 eval_invalid_action_rate=0.940
+[step 12800] eval_success_rate=0.000 eval_mean_return=-17.731 eval_invalid_action_rate=0.879
+[step 12900] eval_success_rate=0.000 eval_mean_return=-17.681 eval_invalid_action_rate=0.960
+[step 13000] eval_success_rate=0.000 eval_mean_return=-18.034 eval_invalid_action_rate=0.800
+[step 13000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_13000.zip
+[step 13100] eval_success_rate=0.000 eval_mean_return=-18.185 eval_invalid_action_rate=0.799
+[step 13200] eval_success_rate=0.000 eval_mean_return=-17.496 eval_invalid_action_rate=0.920
+[step 13300] eval_success_rate=0.000 eval_mean_return=-18.218 eval_invalid_action_rate=0.780
+[step 13400] eval_success_rate=0.000 eval_mean_return=-17.664 eval_invalid_action_rate=0.940
+[step 13500] eval_success_rate=0.000 eval_mean_return=-18.194 eval_invalid_action_rate=0.677
+[step 13600] eval_success_rate=0.000 eval_mean_return=-17.866 eval_invalid_action_rate=0.877
+[step 13700] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.820
+[step 13800] eval_success_rate=0.000 eval_mean_return=-17.614 eval_invalid_action_rate=0.940
+[step 13900] eval_success_rate=0.000 eval_mean_return=-17.681 eval_invalid_action_rate=0.876
+[step 14000] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.896
+[step 14000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_14000.zip
+[step 14100] eval_success_rate=0.000 eval_mean_return=-17.462 eval_invalid_action_rate=0.979
+[step 14200] eval_success_rate=0.000 eval_mean_return=-17.681 eval_invalid_action_rate=0.920
+[step 14300] eval_success_rate=0.000 eval_mean_return=-17.731 eval_invalid_action_rate=0.900
+[step 14400] eval_success_rate=0.000 eval_mean_return=-18.218 eval_invalid_action_rate=0.636
+[step 14500] eval_success_rate=0.000 eval_mean_return=-17.916 eval_invalid_action_rate=0.876
+[step 14600] eval_success_rate=0.000 eval_mean_return=-17.496 eval_invalid_action_rate=0.939
+[step 14700] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.899
+[step 14800] eval_success_rate=0.000 eval_mean_return=-17.462 eval_invalid_action_rate=0.960
+[step 14900] eval_success_rate=0.000 eval_mean_return=-17.647 eval_invalid_action_rate=0.940
+[step 15000] eval_success_rate=0.000 eval_mean_return=-17.966 eval_invalid_action_rate=0.820
+[step 15000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_15000.zip
+[step 15100] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.899
+[step 15200] eval_success_rate=0.000 eval_mean_return=-17.530 eval_invalid_action_rate=0.960
+[step 15300] eval_success_rate=0.000 eval_mean_return=-18.049 eval_invalid_action_rate=0.838
+[step 15400] eval_success_rate=0.000 eval_mean_return=-17.832 eval_invalid_action_rate=0.900
+[step 15500] eval_success_rate=0.000 eval_mean_return=-17.748 eval_invalid_action_rate=0.920
+[step 15600] eval_success_rate=0.000 eval_mean_return=-17.731 eval_invalid_action_rate=0.919
+[step 15700] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.858
+[step 15800] eval_success_rate=0.000 eval_mean_return=-17.866 eval_invalid_action_rate=0.879
+[step 15900] eval_success_rate=0.000 eval_mean_return=-18.000 eval_invalid_action_rate=0.799
+[step 16000] eval_success_rate=0.000 eval_mean_return=-17.748 eval_invalid_action_rate=0.879
+[step 16000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_16000.zip
+[step 16100] eval_success_rate=0.000 eval_mean_return=-18.387 eval_invalid_action_rate=0.639
+[step 16200] eval_success_rate=0.000 eval_mean_return=-17.817 eval_invalid_action_rate=0.900
+[step 16300] eval_success_rate=0.000 eval_mean_return=-17.916 eval_invalid_action_rate=0.800
+[step 16400] eval_success_rate=0.000 eval_mean_return=-17.614 eval_invalid_action_rate=0.979
+[step 16500] eval_success_rate=0.000 eval_mean_return=-17.815 eval_invalid_action_rate=0.780
+[step 16600] eval_success_rate=0.000 eval_mean_return=-17.462 eval_invalid_action_rate=1.000
+[step 16700] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.820
+[step 16800] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.880
+[step 16900] eval_success_rate=0.000 eval_mean_return=-17.748 eval_invalid_action_rate=0.879
+[step 17000] eval_success_rate=0.000 eval_mean_return=-17.664 eval_invalid_action_rate=0.959
+[step 17000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_17000.zip
+[step 17100] eval_success_rate=0.000 eval_mean_return=-17.882 eval_invalid_action_rate=0.900
+[step 17200] eval_success_rate=0.000 eval_mean_return=-17.933 eval_invalid_action_rate=0.799
+[step 17300] eval_success_rate=0.000 eval_mean_return=-18.253 eval_invalid_action_rate=0.580
+[step 17400] eval_success_rate=0.000 eval_mean_return=-18.554 eval_invalid_action_rate=0.578
+[step 17500] eval_success_rate=0.000 eval_mean_return=-17.984 eval_invalid_action_rate=0.719
+[step 17600] eval_success_rate=0.000 eval_mean_return=-17.681 eval_invalid_action_rate=0.900
+[step 17700] eval_success_rate=0.000 eval_mean_return=-17.731 eval_invalid_action_rate=0.860
+[step 17800] eval_success_rate=0.000 eval_mean_return=-17.479 eval_invalid_action_rate=0.980
+[step 17900] eval_success_rate=0.000 eval_mean_return=-17.563 eval_invalid_action_rate=0.940
+[step 18000] eval_success_rate=0.000 eval_mean_return=-17.513 eval_invalid_action_rate=0.940
+[step 18000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_18000.zip
+[step 18100] eval_success_rate=0.000 eval_mean_return=-17.815 eval_invalid_action_rate=0.879
+[step 18200] eval_success_rate=0.000 eval_mean_return=-18.420 eval_invalid_action_rate=0.780
+[step 18300] eval_success_rate=0.000 eval_mean_return=-17.681 eval_invalid_action_rate=0.880
+[step 18400] eval_success_rate=0.000 eval_mean_return=-18.201 eval_invalid_action_rate=0.760
+[step 18500] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.879
+[step 18600] eval_success_rate=0.000 eval_mean_return=-17.882 eval_invalid_action_rate=0.859
+[step 18700] eval_success_rate=0.000 eval_mean_return=-17.950 eval_invalid_action_rate=0.799
+[step 18800] eval_success_rate=0.000 eval_mean_return=-17.831 eval_invalid_action_rate=0.840
+[step 18900] eval_success_rate=0.000 eval_mean_return=-18.234 eval_invalid_action_rate=0.815
+[step 19000] eval_success_rate=0.000 eval_mean_return=-18.859 eval_invalid_action_rate=0.579
+[step 19000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_19000.zip
+[step 19100] eval_success_rate=0.000 eval_mean_return=-17.647 eval_invalid_action_rate=0.936
+[step 19200] eval_success_rate=0.000 eval_mean_return=-17.943 eval_invalid_action_rate=0.757
+[step 19300] eval_success_rate=0.000 eval_mean_return=-17.933 eval_invalid_action_rate=0.900
+[step 19400] eval_success_rate=0.000 eval_mean_return=-17.764 eval_invalid_action_rate=0.860
+[step 19500] eval_success_rate=0.000 eval_mean_return=-18.252 eval_invalid_action_rate=0.835
+[step 19600] eval_success_rate=0.000 eval_mean_return=-18.756 eval_invalid_action_rate=0.679
+[step 19700] eval_success_rate=0.000 eval_mean_return=-17.950 eval_invalid_action_rate=0.838
+[step 19800] eval_success_rate=0.000 eval_mean_return=-17.546 eval_invalid_action_rate=0.936
+[step 19900] eval_success_rate=0.000 eval_mean_return=-18.234 eval_invalid_action_rate=0.759
+[step 20000] eval_success_rate=0.000 eval_mean_return=-18.134 eval_invalid_action_rate=0.799
+[step 20000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/model_step_20000.zip
+[baseline] env=sudoku4x4 algo=dqn backend=sb3
+[baseline] action_space_n=97 observation_keys=inputs,plan,action_mask
+[baseline] finished training: steps=20000 final_eval_success_rate=0.000 final_eval_mean_return=-18.100
+[baseline] t0.3_ready=True
+[baseline] t0.2_status=complete
+[baseline] note: Vanilla SB3 PPO/A2C/DQN does not apply logit masking from action_mask; the policy acts in the full no-mask action space and invalid edits are penalized by the environment. This matches the paper's hard-4x4 no-mask protocol and should be compared against the internal no-mask A2C baseline.
+[baseline] summary written to /home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed1/train_summary.json

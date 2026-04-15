@@ -2,7 +2,8 @@
   "gap_analysis": {
     "best_external_methods": [
       "SB3 PPO",
-      "SB3 A2C"
+      "SB3 A2C",
+      "SB3 DQN"
     ],
     "best_external_success_mean": 0.0,
     "bootstrap_samples": 100000,
@@ -13,6 +14,12 @@
     ],
     "reference_method_for_gap_ci": "SB3 A2C"
   },
+  "method_order": [
+    "upi_trm",
+    "sb3_ppo",
+    "sb3_a2c",
+    "sb3_dqn"
+  ],
   "methods": {
     "sb3_a2c": {
       "all_eval_success_zero": true,
@@ -28,6 +35,42 @@
       "mean_return_mean": -18.091699999999996,
       "mean_return_std": 0.5200420602647874,
       "method": "sb3_a2c",
+      "num_seeds": 10,
+      "per_seed_success_rates": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "success_rate_ci_95": [
+        0.0,
+        0.0
+      ],
+      "success_rate_mean": 0.0,
+      "success_rate_std": 0.0,
+      "total_eval_points": 2000,
+      "train_steps": 20000
+    },
+    "sb3_dqn": {
+      "all_eval_success_zero": true,
+      "display_name": "SB3 DQN",
+      "final_eval_episodes": 500,
+      "final_eval_success_rate_wilson_95": [
+        4.336808689942018e-19,
+        0.007624340461552241
+      ],
+      "final_eval_successes": 0,
+      "invalid_action_rate_mean": 0.84325,
+      "invalid_action_rate_std": 0.05365527829476697,
+      "mean_return_mean": -17.915239999999997,
+      "mean_return_std": 0.17290544108140576,
+      "method": "sb3_dqn",
       "num_seeds": 10,
       "per_seed_success_rates": [
         0.0,
