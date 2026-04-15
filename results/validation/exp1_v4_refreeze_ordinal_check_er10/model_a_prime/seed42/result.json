@@ -1,0 +1,59 @@
+{
+  "seed": 42,
+  "condition": "model_a_prime",
+  "condition_label": "Model A' (no contraction)",
+  "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed42/model_step_5000.pt",
+  "config_yaml": "/home/buiksat/trm_bellman/configs/ablations/upi_trm_feasibility_no_contraction_no_vhead_norm.yaml",
+  "unroll_n": 8,
+  "mixture_alpha": 0.1,
+  "update_states": 50,
+  "eval_states": 50,
+  "collection_passes": 1,
+  "eval_repeats": 10,
+  "theory_metrics_heldout": {
+    "hat_Cz": 19.723739624023438,
+    "hat_Lz": 0.3538958430290222,
+    "hat_Lv": 0.08153915405273438,
+    "unrolling_term": 0.000612430226797992,
+    "bellman_residual_mean": 1.1161103248596191,
+    "bellman_residual_max": 9.11113452911377,
+    "bellman_residual_std": 2.195575714111328,
+    "replay_size": 175.0
+  },
+  "policy_update": {
+    "loss_policy": -0.5786980390548706
+  },
+  "old_eval": {
+    "mode": "old",
+    "discounted_return_mean": 3.493838833656292,
+    "discounted_return_std": 2.922006663871502,
+    "final_score_mean": 15.88,
+    "final_score_std": 1.193984924527944,
+    "success_rate_mean": 0.99,
+    "success_rate_std": 0.099498743710662,
+    "num_rollouts": 500
+  },
+  "mixture_eval": {
+    "mode": "mixture",
+    "discounted_return_mean": 3.487088499101611,
+    "discounted_return_std": 2.8497612176235423,
+    "final_score_mean": 15.896,
+    "final_score_std": 1.0959854013626276,
+    "success_rate_mean": 0.988,
+    "success_rate_std": 0.10888526071052959,
+    "num_rollouts": 500
+  },
+  "candidate_eval": {
+    "mode": "candidate",
+    "discounted_return_mean": 3.407542322563126,
+    "discounted_return_std": 3.244060361985586,
+    "final_score_mean": 15.84,
+    "final_score_std": 1.438888459888396,
+    "success_rate_mean": 0.986,
+    "success_rate_std": 0.11749042514179613,
+    "num_rollouts": 500
+  },
+  "delta_discounted_return_mixture_vs_old": -0.006750334554681103,
+  "delta_final_score_mixture_vs_old": 0.016000000000000014,
+  "delta_success_rate_mixture_vs_old": -0.0020000000000000018
+}

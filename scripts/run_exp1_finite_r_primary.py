@@ -15,11 +15,17 @@ import argparse
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import torch
 
 from rl.envs.plan_edit_env import PlanEditEnv
+from scripts.eval_theorem_facing_ordinal_check import (
+    FrozenBatchDataset,
+    compute_heldout_theory_metrics,
+    load_theory_exact_rl_config,
+    make_checker,
+)
 from scripts.eval.unroll_sensitivity import (
     EvalMetrics,
     check_model_compatibility,
@@ -163,6 +169,62 @@ def evaluate_model_batched(
     return all_metrics
 
 
+def compute_model_theory_summary(
+    *,
+    model: torch.nn.Module,
+    config_yaml_path: str,
+    model_cfg: Dict[str, object],
+    states,
+    theory_unroll_n: int,
+    collection_passes: int,
+    device: str,
+    seed: int,
+    radius: float,
+    batch_label: str,
+    model_key: str,
+    checkpoint_path: str,
+) -> Dict[str, object]:
+    dataset = FrozenBatchDataset(states)
+    rl_cfg = load_theory_exact_rl_config(
+        config_yaml_path,
+        unroll_n=theory_unroll_n,
+        batch_size=min(32, max(4, len(dataset))),
+    )
+    rl_cfg.latent_ball_radius = float(radius)
+    checker = make_checker(rl_cfg)
+    metrics = compute_heldout_theory_metrics(
+        model=model,
+        rl_cfg=rl_cfg,
+        dataset=dataset,
+        checker=checker,
+        vocab_size=int(model_cfg["vocab_size"]),
+        collection_passes=collection_passes,
+        device=device,
+        seed=seed,
+    )
+    required_metrics = ("bellman_residual_mean", "hat_Lv", "hat_Lz")
+    missing_metrics = [name for name in required_metrics if name not in metrics]
+    if missing_metrics:
+        available = ", ".join(sorted(metrics.keys()))
+        raise RuntimeError(
+            f"Missing required held-out theory metrics {missing_metrics} for {model_key} seed {seed} "
+            f"radius {radius}. Available metrics: [{available}]"
+        )
+    return {
+        "model": model_key,
+        "checkpoint": checkpoint_path,
+        "config_yaml": config_yaml_path,
+        "seed": seed,
+        "radius": radius,
+        "batch": batch_label,
+        "theory_unroll_n": theory_unroll_n,
+        "collection_passes": collection_passes,
+        "num_states": len(dataset),
+        "device": device,
+        "metrics": {key: float(value) for key, value in metrics.items()},
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Batched primary finite-R evaluator")
     parser.add_argument("--checkpoint_a", required=True)
@@ -175,6 +237,9 @@ def main() -> int:
     parser.add_argument("--n_values", default="2,8")
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--eval_batch_size", type=int, default=100)
+    parser.add_argument("--batch_label", default="b0")
+    parser.add_argument("--theory_unroll_n", type=int, default=None)
+    parser.add_argument("--theory_collection_passes", type=int, default=1)
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
 
@@ -187,6 +252,7 @@ def main() -> int:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     n_values = parse_int_list(args.n_values)
+    theory_unroll_n = args.theory_unroll_n if args.theory_unroll_n is not None else max(n_values)
 
     model_a, config_a = load_model_for_eval(
         args.checkpoint_a,
@@ -229,6 +295,39 @@ def main() -> int:
     write_per_state_csv(metrics_b, str(out_dir / "model_b_b0_per_state.csv"))
     write_summary_csv(metrics_b, "b0", str(out_dir / "model_b_b0_summary.csv"))
 
+    theory_a = compute_model_theory_summary(
+        model=model_a,
+        config_yaml_path=args.config_a,
+        model_cfg=config_a,
+        states=b0_states,
+        theory_unroll_n=theory_unroll_n,
+        collection_passes=args.theory_collection_passes,
+        device=device,
+        seed=args.seed,
+        radius=args.radius,
+        batch_label=args.batch_label,
+        model_key="model_a",
+        checkpoint_path=args.checkpoint_a,
+    )
+    theory_b = compute_model_theory_summary(
+        model=model_b,
+        config_yaml_path=args.config_b,
+        model_cfg=config_b,
+        states=b0_states,
+        theory_unroll_n=theory_unroll_n,
+        collection_passes=args.theory_collection_passes,
+        device=device,
+        seed=args.seed,
+        radius=args.radius,
+        batch_label=args.batch_label,
+        model_key="model_b",
+        checkpoint_path=args.checkpoint_b,
+    )
+    with open(out_dir / "model_a_b0_theory_summary.json", "w") as handle:
+        json.dump(theory_a, handle, indent=2)
+    with open(out_dir / "model_b_b0_theory_summary.json", "w") as handle:
+        json.dump(theory_b, handle, indent=2)
+
     run_meta = {
         "checkpoint_a": args.checkpoint_a,
         "checkpoint_b": args.checkpoint_b,
@@ -239,6 +338,9 @@ def main() -> int:
         "seed": args.seed,
         "device": device,
         "eval_batch_size": args.eval_batch_size,
+        "batch_label": args.batch_label,
+        "theory_unroll_n": theory_unroll_n,
+        "theory_collection_passes": args.theory_collection_passes,
         "git_sha": get_git_sha(),
     }
     with open(out_dir / "finite_r_primary_run_metadata.json", "w") as handle:

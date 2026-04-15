@@ -501,7 +501,7 @@ class UPITrmTrainer:
             z = self.model.init_latent(batch_x, batch_y)
         
         # Debug: check action mask on first episode
-        if self._next_episode_id == 0:
+        if self.debug_checks and self._next_episode_id == 0:
             mask = self.env.get_action_mask()
             if mask is not None:
                 valid_count = mask.sum().item()
@@ -534,7 +534,7 @@ class UPITrmTrainer:
 
             # Data collection should not build autograd graphs.
             # This avoids massive graph growth and potential stalls when mixing two policy forwards.
-            if self._next_episode_id < 5 and (t < 5 or t % 20 == 0):
+            if self.debug_checks and self._next_episode_id < 5 and (t < 5 or t % 20 == 0):
                 print(f"[DEBUG] Episode {self._next_episode_id}, Step {t}: calling _mixed_policy_dist", flush=True)
             with torch.no_grad():
                 dist, z_new = self._mixed_policy_dist(
@@ -562,7 +562,7 @@ class UPITrmTrainer:
                 self._debug_stop_probs.append(stop_prob)
 
                 # Debug: on first episode, print full probability info
-                if self._next_episode_id == 0:
+                if self.debug_checks and self._next_episode_id == 0:
                     if probs.dim() > 1:
                         probs = probs[0]
                     edit_probs = probs[:-1].sum().item()
@@ -575,7 +575,7 @@ class UPITrmTrainer:
             (x_next, y_next), reward, done, info = self.env.step(action.item())
 
             # Debug: track each step for first few episodes
-            if self._next_episode_id < 5 and (t < 5 or t % 20 == 0):
+            if self.debug_checks and self._next_episode_id < 5 and (t < 5 or t % 20 == 0):
                 print(f"[DEBUG] Episode {self._next_episode_id}, Step {t} complete: action={action.item()}, reward={reward:.4f}, done={done}", flush=True)
 
             if _profile_enabled:
@@ -623,7 +623,7 @@ class UPITrmTrainer:
             t += 1
 
         # Debug: confirm episode completion
-        if self._next_episode_id < 5:
+        if self.debug_checks and self._next_episode_id < 5:
             reason = last_info.get("done_reason", "unknown") if last_info else "unknown"
             print(f"[DEBUG] Episode {self._next_episode_id} finished: {t} steps, done={done}, reason={reason}", flush=True)
 
@@ -1566,11 +1566,14 @@ class UPITrmTrainer:
                 
                 # Estimate L_v if value head exists
                 if self.model.value_head is not None:
-                    z_vec = z_n.z_H.mean(dim=1)
+                    # Match model.used_value() and test_theory_metrics.py:
+                    # the value head is trained on flattened latent/context features,
+                    # not pooled summaries.
+                    z_vec = z_n.z_H.view(z_n.z_H.shape[0], -1)
                     input_embeddings = context["input_embeddings"]
                     plan_embeddings = context["plan_embeddings"]
-                    x_embed = self.model._pool_embedding(input_embeddings)
-                    y_embed = self.model._pool_embedding(plan_embeddings)
+                    x_embed = input_embeddings.view(input_embeddings.shape[0], -1)
+                    y_embed = plan_embeddings.view(plan_embeddings.shape[0], -1)
                     combined_embed = torch.cat([x_embed, y_embed], dim=-1)
                     hat_Lv = estimate_Lv(self.model.value_head, z_vec, combined_embed, num_samples=4)
                     metrics["hat_Lv"] = hat_Lv

@@ -1,0 +1,59 @@
+{
+  "seed": 43,
+  "condition": "model_b",
+  "condition_label": "Model B (contraction)",
+  "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_b/seed43/model_step_5000.pt",
+  "config_yaml": "/home/buiksat/trm_bellman/configs/ablations/upi_trm_feasibility_contraction_no_vhead_norm.yaml",
+  "unroll_n": 8,
+  "mixture_alpha": 0.1,
+  "update_states": 50,
+  "eval_states": 50,
+  "collection_passes": 1,
+  "eval_repeats": 10,
+  "theory_metrics_heldout": {
+    "hat_Cz": 18.025693893432617,
+    "hat_Lz": 0.2479655146598816,
+    "hat_Lv": 0.055789947509765625,
+    "unrolling_term": 1.911351136531658e-05,
+    "bellman_residual_mean": 1.2986559867858887,
+    "bellman_residual_max": 9.934478759765625,
+    "bellman_residual_std": 2.790076971054077,
+    "replay_size": 196.0
+  },
+  "policy_update": {
+    "loss_policy": 0.25232505798339844
+  },
+  "old_eval": {
+    "mode": "old",
+    "discounted_return_mean": 3.5061822331062555,
+    "discounted_return_std": 2.7959870774773576,
+    "final_score_mean": 15.896,
+    "final_score_std": 1.0831361871897736,
+    "success_rate_mean": 0.99,
+    "success_rate_std": 0.099498743710662,
+    "num_rollouts": 500
+  },
+  "mixture_eval": {
+    "mode": "mixture",
+    "discounted_return_mean": 3.3483911300160396,
+    "discounted_return_std": 3.2021518933992525,
+    "final_score_mean": 15.848,
+    "final_score_std": 1.3103037815712812,
+    "success_rate_mean": 0.982,
+    "success_rate_std": 0.13295111883696203,
+    "num_rollouts": 500
+  },
+  "candidate_eval": {
+    "mode": "candidate",
+    "discounted_return_mean": 3.4379651114633982,
+    "discounted_return_std": 2.9150857001508266,
+    "final_score_mean": 15.888,
+    "final_score_std": 1.1311304080432105,
+    "success_rate_mean": 0.986,
+    "success_rate_std": 0.11749042514179613,
+    "num_rollouts": 500
+  },
+  "delta_discounted_return_mixture_vs_old": -0.15779110309021593,
+  "delta_final_score_mixture_vs_old": -0.04800000000000004,
+  "delta_success_rate_mixture_vs_old": -0.008000000000000007
+}

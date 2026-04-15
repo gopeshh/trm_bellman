@@ -1,0 +1,59 @@
+{
+  "seed": 50,
+  "condition": "model_a_prime",
+  "condition_label": "Model A' (no contraction)",
+  "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed50/model_step_5000.pt",
+  "config_yaml": "/home/buiksat/trm_bellman/configs/ablations/upi_trm_feasibility_no_contraction_no_vhead_norm.yaml",
+  "unroll_n": 8,
+  "mixture_alpha": 0.1,
+  "update_states": 50,
+  "eval_states": 50,
+  "collection_passes": 1,
+  "eval_repeats": 10,
+  "theory_metrics_heldout": {
+    "hat_Cz": 19.666667938232422,
+    "hat_Lz": 0.41942155361175537,
+    "hat_Lv": 0.05817413330078125,
+    "unrolling_term": 0.0018871471033503574,
+    "bellman_residual_mean": 1.22934889793396,
+    "bellman_residual_max": 10.699457168579102,
+    "bellman_residual_std": 2.4559454917907715,
+    "replay_size": 189.0
+  },
+  "policy_update": {
+    "loss_policy": -0.07638578861951828
+  },
+  "old_eval": {
+    "mode": "old",
+    "discounted_return_mean": 3.5347885759005533,
+    "discounted_return_std": 2.808701423010812,
+    "final_score_mean": 15.892,
+    "final_score_std": 1.2248820351364453,
+    "success_rate_mean": 0.992,
+    "success_rate_std": 0.08908422980528036,
+    "num_rollouts": 500
+  },
+  "mixture_eval": {
+    "mode": "mixture",
+    "discounted_return_mean": 3.3960504585570876,
+    "discounted_return_std": 3.245749460685681,
+    "final_score_mean": 15.838,
+    "final_score_std": 1.4559381855010192,
+    "success_rate_mean": 0.986,
+    "success_rate_std": 0.11749042514179613,
+    "num_rollouts": 500
+  },
+  "candidate_eval": {
+    "mode": "candidate",
+    "discounted_return_mean": 3.4380597068889687,
+    "discounted_return_std": 2.934669895504861,
+    "final_score_mean": 15.888,
+    "final_score_std": 1.0878676390076139,
+    "success_rate_mean": 0.986,
+    "success_rate_std": 0.11749042514179613,
+    "num_rollouts": 500
+  },
+  "delta_discounted_return_mixture_vs_old": -0.13873811734346564,
+  "delta_final_score_mixture_vs_old": -0.05400000000000027,
+  "delta_success_rate_mixture_vs_old": -0.006000000000000005
+}

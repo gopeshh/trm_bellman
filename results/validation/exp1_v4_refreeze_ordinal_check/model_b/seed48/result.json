@@ -1,0 +1,59 @@
+{
+  "seed": 48,
+  "condition": "model_b",
+  "condition_label": "Model B (contraction)",
+  "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_b/seed48/model_step_5000.pt",
+  "config_yaml": "/home/buiksat/trm_bellman/configs/ablations/upi_trm_feasibility_contraction_no_vhead_norm.yaml",
+  "unroll_n": 8,
+  "mixture_alpha": 0.1,
+  "update_states": 50,
+  "eval_states": 50,
+  "collection_passes": 1,
+  "eval_repeats": 4,
+  "theory_metrics_heldout": {
+    "hat_Cz": 18.948760986328125,
+    "hat_Lz": 0.2530357241630554,
+    "hat_Lv": 0.07534027099609375,
+    "unrolling_term": 3.211906434988139e-05,
+    "bellman_residual_mean": 1.6213299036026,
+    "bellman_residual_max": 10.353433609008789,
+    "bellman_residual_std": 2.5370707511901855,
+    "replay_size": 191.0
+  },
+  "policy_update": {
+    "loss_policy": 1.0475716590881348
+  },
+  "old_eval": {
+    "mode": "old",
+    "discounted_return_mean": 3.3866479814692902,
+    "discounted_return_std": 2.903411714453413,
+    "final_score_mean": 15.92,
+    "final_score_std": 0.862322445492404,
+    "success_rate_mean": 0.98,
+    "success_rate_std": 0.14,
+    "num_rollouts": 200
+  },
+  "mixture_eval": {
+    "mode": "mixture",
+    "discounted_return_mean": 3.5163487629377332,
+    "discounted_return_std": 2.89912051988521,
+    "final_score_mean": 15.88,
+    "final_score_std": 1.193984924527944,
+    "success_rate_mean": 0.99,
+    "success_rate_std": 0.099498743710662,
+    "num_rollouts": 200
+  },
+  "candidate_eval": {
+    "mode": "candidate",
+    "discounted_return_mean": 3.1978570011896865,
+    "discounted_return_std": 3.6046308285432773,
+    "final_score_mean": 15.775,
+    "final_score_std": 1.5602483776629925,
+    "success_rate_mean": 0.975,
+    "success_rate_std": 0.15612494995995996,
+    "num_rollouts": 200
+  },
+  "delta_discounted_return_mixture_vs_old": 0.129700781468443,
+  "delta_final_score_mixture_vs_old": -0.03999999999999915,
+  "delta_success_rate_mixture_vs_old": 0.010000000000000009
+}

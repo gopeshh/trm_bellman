@@ -1,0 +1,59 @@
+{
+  "seed": 46,
+  "condition": "model_b",
+  "condition_label": "Model B (contraction)",
+  "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_b/seed46/model_step_5000.pt",
+  "config_yaml": "/home/buiksat/trm_bellman/configs/ablations/upi_trm_feasibility_contraction_no_vhead_norm.yaml",
+  "unroll_n": 8,
+  "mixture_alpha": 0.1,
+  "update_states": 50,
+  "eval_states": 50,
+  "collection_passes": 1,
+  "eval_repeats": 10,
+  "theory_metrics_heldout": {
+    "hat_Cz": 17.966625213623047,
+    "hat_Lz": 0.2676853537559509,
+    "hat_Lv": 0.049114227294921875,
+    "unrolling_term": 3.176676436022698e-05,
+    "bellman_residual_mean": 1.2269270420074463,
+    "bellman_residual_max": 10.396215438842773,
+    "bellman_residual_std": 2.8721795082092285,
+    "replay_size": 183.0
+  },
+  "policy_update": {
+    "loss_policy": 0.28712403774261475
+  },
+  "old_eval": {
+    "mode": "old",
+    "discounted_return_mean": 3.4257510977082677,
+    "discounted_return_std": 3.0873356988622143,
+    "final_score_mean": 15.86,
+    "final_score_std": 1.3566134305689297,
+    "success_rate_mean": 0.986,
+    "success_rate_std": 0.11749042514179613,
+    "num_rollouts": 500
+  },
+  "mixture_eval": {
+    "mode": "mixture",
+    "discounted_return_mean": 3.4015421639383634,
+    "discounted_return_std": 3.1091046547612997,
+    "final_score_mean": 15.848,
+    "final_score_std": 1.3830748352854954,
+    "success_rate_mean": 0.986,
+    "success_rate_std": 0.11749042514179613,
+    "num_rollouts": 500
+  },
+  "candidate_eval": {
+    "mode": "candidate",
+    "discounted_return_mean": 3.476257355917246,
+    "discounted_return_std": 2.6698659194272696,
+    "final_score_mean": 15.926,
+    "final_score_std": 0.8200756062705438,
+    "success_rate_mean": 0.986,
+    "success_rate_std": 0.11749042514179613,
+    "num_rollouts": 500
+  },
+  "delta_discounted_return_mixture_vs_old": -0.024208933769904295,
+  "delta_final_score_mixture_vs_old": -0.011999999999998678,
+  "delta_success_rate_mixture_vs_old": 0.0
+}

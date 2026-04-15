@@ -1,0 +1,59 @@
+{
+  "seed": 42,
+  "condition": "model_b",
+  "condition_label": "Model B (contraction)",
+  "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_b/seed42/model_step_5000.pt",
+  "config_yaml": "/home/buiksat/trm_bellman/configs/ablations/upi_trm_feasibility_contraction_no_vhead_norm.yaml",
+  "unroll_n": 8,
+  "mixture_alpha": 0.1,
+  "update_states": 50,
+  "eval_states": 50,
+  "collection_passes": 1,
+  "eval_repeats": 4,
+  "theory_metrics_heldout": {
+    "hat_Cz": 18.295682907104492,
+    "hat_Lz": 0.2549809515476227,
+    "hat_Lv": 0.09918212890625,
+    "unrolling_term": 4.351876617163811e-05,
+    "bellman_residual_mean": 1.3498611450195312,
+    "bellman_residual_max": 10.314778327941895,
+    "bellman_residual_std": 2.3587570190429688,
+    "replay_size": 196.0
+  },
+  "policy_update": {
+    "loss_policy": 1.3380627632141113
+  },
+  "old_eval": {
+    "mode": "old",
+    "discounted_return_mean": 3.6395522338333164,
+    "discounted_return_std": 2.319227558541608,
+    "final_score_mean": 15.95,
+    "final_score_std": 0.7053367989832943,
+    "success_rate_mean": 0.995,
+    "success_rate_std": 0.07053367989832943,
+    "num_rollouts": 200
+  },
+  "mixture_eval": {
+    "mode": "mixture",
+    "discounted_return_mean": 3.589585347015336,
+    "discounted_return_std": 2.62950904794973,
+    "final_score_mean": 15.91,
+    "final_score_std": 1.2696062381699296,
+    "success_rate_mean": 0.995,
+    "success_rate_std": 0.07053367989832943,
+    "num_rollouts": 200
+  },
+  "candidate_eval": {
+    "mode": "candidate",
+    "discounted_return_mean": 3.1710224477287094,
+    "discounted_return_std": 3.340069833552738,
+    "final_score_mean": 15.86,
+    "final_score_std": 1.0584894897919392,
+    "success_rate_mean": 0.97,
+    "success_rate_std": 0.1705872210923198,
+    "num_rollouts": 200
+  },
+  "delta_discounted_return_mixture_vs_old": -0.04996688681798034,
+  "delta_final_score_mixture_vs_old": -0.03999999999999915,
+  "delta_success_rate_mixture_vs_old": 0.0
+}

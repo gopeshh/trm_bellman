@@ -53,6 +53,22 @@ python_library(
 )
 
 python_library(
+    name = "script_eval_unroll_sensitivity_lib",
+    srcs = ["scripts/eval/unroll_sensitivity.py"],
+    base_module = "",
+    deps = [
+        ":models",
+        ":utils",
+        ":rl",
+        ":puzzle_dataset_lib",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_library(
     name = "entrypoints",
     srcs = glob(["entrypoints/*.py"]),
     base_module = "",
@@ -207,6 +223,55 @@ python_binary(
         ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
+    name = "eval_theorem_facing_ordinal_check",
+    srcs = ["scripts/eval_theorem_facing_ordinal_check.py"],
+    base_module = "",
+    main_module = "scripts.eval_theorem_facing_ordinal_check",
+    deps = [
+        ":models",
+        ":utils",
+        ":rl",
+        ":puzzle_dataset_lib",
+        ":script_eval_unroll_sensitivity_lib",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_binary(
+    name = "run_exp1_finite_r_primary",
+    srcs = [
+        "scripts/run_exp1_finite_r_primary.py",
+        "scripts/eval_theorem_facing_ordinal_check.py",
+    ],
+    base_module = "",
+    main_module = "scripts.run_exp1_finite_r_primary",
+    deps = [
+        ":models",
+        ":utils",
+        ":rl",
+        ":puzzle_dataset_lib",
+        ":script_eval_unroll_sensitivity_lib",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_binary(
+    name = "analyze_exp1_finite_r_sweep",
+    srcs = ["scripts/analyze_exp1_finite_r_sweep.py"],
+    base_module = "",
+    main_module = "scripts.analyze_exp1_finite_r_sweep",
+    deps = [
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
 

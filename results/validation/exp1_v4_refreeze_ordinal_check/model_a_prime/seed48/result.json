@@ -1,0 +1,59 @@
+{
+  "seed": 48,
+  "condition": "model_a_prime",
+  "condition_label": "Model A' (no contraction)",
+  "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed48/model_step_5000.pt",
+  "config_yaml": "/home/buiksat/trm_bellman/configs/ablations/upi_trm_feasibility_no_contraction_no_vhead_norm.yaml",
+  "unroll_n": 8,
+  "mixture_alpha": 0.1,
+  "update_states": 50,
+  "eval_states": 50,
+  "collection_passes": 1,
+  "eval_repeats": 4,
+  "theory_metrics_heldout": {
+    "hat_Cz": 19.889562606811523,
+    "hat_Lz": 0.4575934112071991,
+    "hat_Lv": 0.062465667724609375,
+    "unrolling_term": 0.0044033150844612935,
+    "bellman_residual_mean": 1.2460838556289673,
+    "bellman_residual_max": 9.78396987915039,
+    "bellman_residual_std": 2.6762759685516357,
+    "replay_size": 184.0
+  },
+  "policy_update": {
+    "loss_policy": -0.1549866497516632
+  },
+  "old_eval": {
+    "mode": "old",
+    "discounted_return_mean": 3.1363884471248213,
+    "discounted_return_std": 3.8817644962697253,
+    "final_score_mean": 15.72,
+    "final_score_std": 1.9291448882859992,
+    "success_rate_mean": 0.975,
+    "success_rate_std": 0.15612494995995996,
+    "num_rollouts": 200
+  },
+  "mixture_eval": {
+    "mode": "mixture",
+    "discounted_return_mean": 3.5002541762691455,
+    "discounted_return_std": 2.881949176433039,
+    "final_score_mean": 15.88,
+    "final_score_std": 1.193984924527944,
+    "success_rate_mean": 0.99,
+    "success_rate_std": 0.099498743710662,
+    "num_rollouts": 200
+  },
+  "candidate_eval": {
+    "mode": "candidate",
+    "discounted_return_mean": 3.114294618473386,
+    "discounted_return_std": 4.0245356093915365,
+    "final_score_mean": 15.685,
+    "final_score_std": 2.0312003840094164,
+    "success_rate_mean": 0.975,
+    "success_rate_std": 0.15612494995995996,
+    "num_rollouts": 200
+  },
+  "delta_discounted_return_mixture_vs_old": 0.36386572914432413,
+  "delta_final_score_mixture_vs_old": 0.16000000000000014,
+  "delta_success_rate_mixture_vs_old": 0.015000000000000013
+}

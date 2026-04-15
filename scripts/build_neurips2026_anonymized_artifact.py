@@ -417,7 +417,7 @@ def _stage_appendix_inputs() -> None:
     for filename in ("b0_metadata.json", "b1_metadata.json"):
         _copy_sanitized_json(batch_src / filename, batch_dst / filename)
 
-    finite_r_src = REPO_ROOT / "results" / "plot_data" / "exp1_v4_refreeze_finite_r_stage1_b0"
+    finite_r_src = REPO_ROOT / "results" / "plot_data" / "exp1_v4_refreeze_finite_r_residual_stage1_b0"
     finite_r_dst = STAGE_ROOT / "results" / "reproduction_inputs" / "finite_r_stage1_b0"
     for filename in (
         "finite_r_b0_n1_2_n2_8.csv",
@@ -435,6 +435,7 @@ def _stage_appendix_inputs() -> None:
     for filename in (
         "finite_r_primary_b0_n1_2_n2_8.png",
         "finite_r_mechanism_b0_n1_2_n2_8.png",
+        "finite_r_theory_b0_n1_2_n2_8.png",
     ):
         _copy_binary(finite_r_src / filename, finite_r_dst / filename)
 

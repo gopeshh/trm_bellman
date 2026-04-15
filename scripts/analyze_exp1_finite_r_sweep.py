@@ -27,6 +27,7 @@ MODELS = ("model_a", "model_b")
 PRIMARY_METRICS = ("delta_V", "delta_z", "argmax_agree")
 SUPPORTING_METRICS = ("delta_pi",)
 MECHANISM_METRICS = ("saturated", "z_pre_norm", "z_post_norm", "proj_disp_proxy")
+THEORY_METRICS = ("bellman_residual_mean", "hat_Lv", "hat_Lz")
 ALL_METRICS = PRIMARY_METRICS + SUPPORTING_METRICS + MECHANISM_METRICS
 
 LABELS = {
@@ -48,6 +49,9 @@ METRIC_LABELS = {
     "z_pre_norm": "z_pre_norm",
     "z_post_norm": "z_post_norm",
     "proj_disp_proxy": "proj_disp_proxy",
+    "bellman_residual_mean": "Bellman Residual",
+    "hat_Lv": "hat_L_V",
+    "hat_Lz": "hat_L_z",
 }
 
 REQUIRED_COLUMNS = (
@@ -140,6 +144,21 @@ def find_csv(
     return None
 
 
+def find_theory_json(
+    results_roots: Sequence[Path],
+    seed: int,
+    radius: float,
+    model: str,
+    batch: str,
+) -> Optional[Path]:
+    rel = Path(f"seed{seed}") / radius_dir(radius) / f"{model}_{batch}_theory_summary.json"
+    for root in results_roots:
+        candidate = root / rel
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def load_rows(csv_path: Path) -> Tuple[List[Dict[str, str]], List[str]]:
     with open(csv_path, "r") as handle:
         reader = csv.DictReader(handle)
@@ -209,6 +228,24 @@ def format_stat(stat: StatSummary, digits: int = 4) -> str:
     return f"{stat.mean:.{digits}f}±{stat.std:.{digits}f} (n={stat.n})"
 
 
+def has_any_data(
+    stats: Dict[str, Dict[float, Dict[str, StatSummary]]],
+    metrics: Sequence[str],
+) -> bool:
+    for model in MODELS:
+        for radius in stats[model].keys():
+            for metric in metrics:
+                if stats[model][radius][metric].n > 0:
+                    return True
+    return False
+
+
+def load_theory_metrics(json_path: Path) -> Dict[str, float]:
+    payload = json.loads(json_path.read_text())
+    metrics = payload.get("metrics", payload)
+    return {metric: float(metrics[metric]) for metric in THEORY_METRICS}
+
+
 def render_gate_table(gates: Dict[str, GateResult]) -> str:
     lines = ["| Gate | Status | Details |", "|---|---|---|"]
     for gate_name, gate in gates.items():
@@ -221,6 +258,7 @@ def render_gate_table(gates: Dict[str, GateResult]) -> str:
 def write_csv_summary(
     out_path: Path,
     stats: Dict[str, Dict[float, Dict[str, StatSummary]]],
+    theory_stats: Optional[Dict[str, Dict[float, Dict[str, StatSummary]]]] = None,
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", newline="") as handle:
@@ -231,12 +269,17 @@ def write_csv_summary(
                 for metric in ALL_METRICS:
                     stat = stats[model][radius][metric]
                     writer.writerow([model, radius, metric, stat.mean, stat.std, stat.n])
+                if theory_stats is not None:
+                    for metric in THEORY_METRICS:
+                        stat = theory_stats[model][radius][metric]
+                        writer.writerow([model, radius, metric, stat.mean, stat.std, stat.n])
 
 
 def write_markdown_summary(
     out_path: Path,
     stage_label: str,
     stats: Dict[str, Dict[float, Dict[str, StatSummary]]],
+    theory_stats: Optional[Dict[str, Dict[float, Dict[str, StatSummary]]]],
     radii: Sequence[float],
     n1: int,
     n2: int,
@@ -267,6 +310,20 @@ def write_markdown_summary(
             b = format_stat(stats["model_b"][radius][metric], digits=4)
             lines.append(f"| {radius_label(radius)} | {a} | {b} |")
         lines.append("")
+
+    if theory_stats is not None and has_any_data(theory_stats, THEORY_METRICS):
+        lines.append("## Held-out Theory Metrics")
+        lines.append("")
+        for metric in THEORY_METRICS:
+            lines.append(f"### {METRIC_LABELS[metric]}")
+            lines.append("")
+            lines.append("| Radius | No Contraction | Contraction |")
+            lines.append("|---|---|---|")
+            for radius in radii:
+                a = format_stat(theory_stats["model_a"][radius][metric], digits=4)
+                b = format_stat(theory_stats["model_b"][radius][metric], digits=4)
+                lines.append(f"| {radius_label(radius)} | {a} | {b} |")
+            lines.append("")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines) + "\n")
@@ -378,6 +435,51 @@ def plot_mechanism_metrics(
     plt.close(fig)
 
 
+def plot_theory_metrics(
+    out_path: Path,
+    theory_stats: Dict[str, Dict[float, Dict[str, StatSummary]]],
+    radii: Sequence[float],
+    batch: str,
+    n1: int,
+    n2: int,
+) -> None:
+    if plt is None or not has_any_data(theory_stats, THEORY_METRICS):
+        return
+    labels = [radius_label(r) for r in radii]
+    x = list(range(len(radii)))
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+    for ax, metric in zip(axes, THEORY_METRICS):
+        for model in MODELS:
+            means = []
+            errs = []
+            for radius in radii:
+                stat = theory_stats[model][radius][metric]
+                means.append(stat.mean if stat.n > 0 else float("nan"))
+                errs.append(stat.std if stat.n > 1 else 0.0)
+            ax.errorbar(
+                x,
+                means,
+                yerr=errs,
+                marker="o",
+                capsize=4,
+                linewidth=2.0,
+                label=LABELS[model],
+                color=COLORS[model],
+            )
+        ax.set_title(METRIC_LABELS[metric])
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=30, ha="right")
+        ax.grid(alpha=0.3)
+
+    axes[-1].legend(loc="best")
+    fig.suptitle(f"Finite-R Held-out Theory Metrics ({batch}, n1={n1}, n2={n2})")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+
 def write_transition_window(
     out_path: Path,
     z_pre_values: Sequence[float],
@@ -405,6 +507,7 @@ def build_gate_results(
     integrity_ok: bool,
     schema_ok: bool,
     z_window: Dict[str, float],
+    radii: Sequence[float],
 ) -> Dict[str, GateResult]:
     gates: Dict[str, GateResult] = {}
 
@@ -418,16 +521,19 @@ def build_gate_results(
         details="All analyzed CSVs expose the preferred `saturated` schema." if schema_ok else "At least one CSV failed the preferred `saturated` schema check.",
     )
 
+    endpoint_active = 10.0 if 10.0 in radii else min(radii)
+    endpoint_inactive = 100.0 if 100.0 in radii else max(radii)
+
     def endpoint_pass(model: str) -> Tuple[bool, str]:
-        active = stats[model][10.0]
-        inactive = stats[model][100.0]
+        active = stats[model][endpoint_active]
+        inactive = stats[model][endpoint_inactive]
         checks = [
             active["delta_V"].mean < inactive["delta_V"].mean,
             active["delta_z"].mean < inactive["delta_z"].mean,
             active["argmax_agree"].mean > inactive["argmax_agree"].mean,
         ]
         details = (
-            f"{LABELS[model]}: R=10 vs R=100 "
+            f"{LABELS[model]}: {radius_label(endpoint_active)} vs {radius_label(endpoint_inactive)} "
             f"Delta_V {active['delta_V'].mean:.4f} < {inactive['delta_V'].mean:.4f}, "
             f"Delta_z {active['delta_z'].mean:.4f} < {inactive['delta_z'].mean:.4f}, "
             f"Argmax {active['argmax_agree'].mean:.4f} > {inactive['argmax_agree'].mean:.4f}"
@@ -455,7 +561,7 @@ def build_gate_results(
     inactive_details = []
     for model in MODELS:
         off = stats[model][0.0]
-        inactive = stats[model][100.0]
+        inactive = stats[model][endpoint_inactive]
         diffs = {
             metric: abs(off[metric].mean - inactive[metric].mean)
             for metric in PRIMARY_METRICS
@@ -463,7 +569,7 @@ def build_gate_results(
         model_ok = diffs["delta_V"] <= 1e-6 and diffs["delta_z"] <= 1e-6 and diffs["argmax_agree"] <= 1e-6
         inactive_ok &= model_ok
         inactive_details.append(
-            f"{LABELS[model]} off vs R=100 diffs "
+            f"{LABELS[model]} off vs {radius_label(endpoint_inactive)} diffs "
             f"(Delta_V={diffs['delta_V']:.6f}, Delta_z={diffs['delta_z']:.6f}, Argmax={diffs['argmax_agree']:.6f})"
         )
     gates["inactive_plateau_check"] = GateResult(
@@ -472,11 +578,13 @@ def build_gate_results(
     )
 
     if stage_label == "stage1":
-        intermediate_radii = [r for r in stats["model_a"].keys() if r not in {0.0, 10.0, 100.0}]
+        intermediate_radii = [
+            r for r in stats["model_a"].keys() if r not in {0.0, endpoint_active, endpoint_inactive}
+        ]
 
         def intermediate_pass(model: str) -> Tuple[bool, str]:
-            active = stats[model][10.0]
-            inactive = stats[model][100.0]
+            active = stats[model][endpoint_active]
+            inactive = stats[model][endpoint_inactive]
             hits = []
             for radius in intermediate_radii:
                 cur = stats[model][radius]
@@ -565,7 +673,17 @@ def analyze(
         model: {radius: {metric: [] for metric in ALL_METRICS} for radius in radii}
         for model in MODELS
     }
+    theory_stats: Dict[str, Dict[float, Dict[str, StatSummary]]] = {
+        model: {radius: {} for radius in radii} for model in MODELS
+    }
+    theory_seed_tables: Dict[str, Dict[float, Dict[str, List[float]]]] = {
+        model: {radius: {metric: [] for metric in THEORY_METRICS} for radius in radii}
+        for model in MODELS
+    }
     transition_values: List[float] = []
+    missing_theory_files: List[str] = []
+    theory_errors: List[str] = []
+    theory_file_count = 0
 
     for radius in radii:
         for model in MODELS:
@@ -596,6 +714,23 @@ def analyze(
                 for metric in ALL_METRICS:
                     seed_tables[model][radius][metric].append(seed_summary[metric])
 
+                theory_json = find_theory_json(results_roots, seed, radius, model, batch)
+                if theory_json is None:
+                    missing_theory_files.append(
+                        f"seed{seed}/{radius_dir(radius)}/{model}_{batch}_theory_summary.json"
+                    )
+                    continue
+
+                theory_file_count += 1
+                try:
+                    theory_metrics = load_theory_metrics(theory_json)
+                except (KeyError, ValueError, json.JSONDecodeError) as exc:
+                    theory_errors.append(f"{theory_json}: {exc}")
+                    continue
+
+                for metric in THEORY_METRICS:
+                    theory_seed_tables[model][radius][metric].append(theory_metrics[metric])
+
     integrity_ok = not missing_files
     schema_ok = not schema_errors
 
@@ -603,6 +738,10 @@ def analyze(
         for radius in radii:
             for metric in ALL_METRICS:
                 stats[model][radius][metric] = aggregate_seed_means(seed_tables[model][radius][metric])
+            for metric in THEORY_METRICS:
+                theory_stats[model][radius][metric] = aggregate_seed_means(
+                    theory_seed_tables[model][radius][metric]
+                )
 
     if not transition_values:
         raise RuntimeError("No R=10 z_pre_norm values found for transition-window estimation")
@@ -624,18 +763,36 @@ def analyze(
         notes.append(f"Missing files: {len(missing_files)}")
     if schema_errors:
         notes.append(f"Schema errors: {len(schema_errors)}")
+    if theory_file_count > 0:
+        notes.append("Held-out theory metrics were loaded from per-seed JSON summaries.")
+        if missing_theory_files:
+            notes.append(f"Missing theory summaries: {len(missing_theory_files)}")
+        if theory_errors:
+            notes.append(f"Theory summary errors: {len(theory_errors)}")
 
     csv_name = f"finite_r_{batch}_n1_{n1}_n2_{n2}.csv"
     md_name = f"finite_r_{batch}_n1_{n1}_n2_{n2}.md"
     primary_png = f"finite_r_primary_{batch}_n1_{n1}_n2_{n2}.png"
     mech_png = f"finite_r_mechanism_{batch}_n1_{n1}_n2_{n2}.png"
+    theory_png = f"finite_r_theory_{batch}_n1_{n1}_n2_{n2}.png"
 
-    write_csv_summary(out_dir / csv_name, stats)
-    write_markdown_summary(out_dir / md_name, stage_label, stats, radii, n1, n2, batch, notes)
+    write_csv_summary(out_dir / csv_name, stats, theory_stats if theory_file_count > 0 else None)
+    write_markdown_summary(
+        out_dir / md_name,
+        stage_label,
+        stats,
+        theory_stats if theory_file_count > 0 else None,
+        radii,
+        n1,
+        n2,
+        batch,
+        notes,
+    )
     plot_primary_metrics(out_dir / primary_png, stats, radii, batch, n1, n2)
     plot_mechanism_metrics(out_dir / mech_png, stats, radii, batch, n1, n2)
+    plot_theory_metrics(out_dir / theory_png, theory_stats, radii, batch, n1, n2)
 
-    gates = build_gate_results(stage_label, stats, integrity_ok, schema_ok, transition_window)
+    gates = build_gate_results(stage_label, stats, integrity_ok, schema_ok, transition_window, radii)
     write_gate_report(
         out_dir / f"{stage_label}_gate_report.md",
         stage_label,
@@ -656,6 +813,7 @@ def analyze(
             for name, gate in gates.items()
         },
         "transition_window": transition_window,
+        "theory_metrics_available": theory_file_count > 0,
     }
     (out_dir / f"{stage_label}_gate_report.json").write_text(json.dumps(payload, indent=2) + "\n")
 

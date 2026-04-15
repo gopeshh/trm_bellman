@@ -1,0 +1,59 @@
+{
+  "seed": 43,
+  "condition": "model_a_prime",
+  "condition_label": "Model A' (no contraction)",
+  "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed43/model_step_5000.pt",
+  "config_yaml": "/home/buiksat/trm_bellman/configs/ablations/upi_trm_feasibility_no_contraction_no_vhead_norm.yaml",
+  "unroll_n": 8,
+  "mixture_alpha": 0.1,
+  "update_states": 50,
+  "eval_states": 50,
+  "collection_passes": 1,
+  "eval_repeats": 10,
+  "theory_metrics_heldout": {
+    "hat_Cz": 19.997573852539062,
+    "hat_Lz": 0.3837842643260956,
+    "hat_Lv": 0.06532669067382812,
+    "unrolling_term": 0.0009977747196193395,
+    "bellman_residual_mean": 3.250824213027954,
+    "bellman_residual_max": 17.699848175048828,
+    "bellman_residual_std": 5.257922649383545,
+    "replay_size": 186.0
+  },
+  "policy_update": {
+    "loss_policy": -0.4096909165382385
+  },
+  "old_eval": {
+    "mode": "old",
+    "discounted_return_mean": 3.3428198927184933,
+    "discounted_return_std": 3.1314080286138988,
+    "final_score_mean": 15.872,
+    "final_score_std": 1.136492850835411,
+    "success_rate_mean": 0.98,
+    "success_rate_std": 0.14,
+    "num_rollouts": 500
+  },
+  "mixture_eval": {
+    "mode": "mixture",
+    "discounted_return_mean": 3.347688342943769,
+    "discounted_return_std": 3.195494534089195,
+    "final_score_mean": 15.85,
+    "final_score_std": 1.2773018437315433,
+    "success_rate_mean": 0.982,
+    "success_rate_std": 0.13295111883696203,
+    "num_rollouts": 500
+  },
+  "candidate_eval": {
+    "mode": "candidate",
+    "discounted_return_mean": 3.5107087991426855,
+    "discounted_return_std": 2.86932417404114,
+    "final_score_mean": 15.89,
+    "final_score_std": 1.2255202976695245,
+    "success_rate_mean": 0.99,
+    "success_rate_std": 0.099498743710662,
+    "num_rollouts": 500
+  },
+  "delta_discounted_return_mixture_vs_old": 0.004868450225275822,
+  "delta_final_score_mixture_vs_old": -0.02200000000000024,
+  "delta_success_rate_mixture_vs_old": 0.0020000000000000018
+}

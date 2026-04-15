@@ -1,0 +1,59 @@
+{
+  "seed": 50,
+  "condition": "model_a_prime",
+  "condition_label": "Model A' (no contraction)",
+  "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed50/model_step_5000.pt",
+  "config_yaml": "/home/buiksat/trm_bellman/configs/ablations/upi_trm_feasibility_no_contraction_no_vhead_norm.yaml",
+  "unroll_n": 8,
+  "mixture_alpha": 0.1,
+  "update_states": 50,
+  "eval_states": 50,
+  "collection_passes": 1,
+  "eval_repeats": 4,
+  "theory_metrics_heldout": {
+    "hat_Cz": 19.666667938232422,
+    "hat_Lz": 0.41942155361175537,
+    "hat_Lv": 0.05817413330078125,
+    "unrolling_term": 0.0018871471033503574,
+    "bellman_residual_mean": 1.22934889793396,
+    "bellman_residual_max": 10.699457168579102,
+    "bellman_residual_std": 2.4559454917907715,
+    "replay_size": 189.0
+  },
+  "policy_update": {
+    "loss_policy": -0.07638578861951828
+  },
+  "old_eval": {
+    "mode": "old",
+    "discounted_return_mean": 3.748478923774623,
+    "discounted_return_std": 1.8177079342460662,
+    "final_score_mean": 16.0,
+    "final_score_std": 0.0,
+    "success_rate_mean": 1.0,
+    "success_rate_std": 0.0,
+    "num_rollouts": 200
+  },
+  "mixture_eval": {
+    "mode": "mixture",
+    "discounted_return_mean": 3.5386149229295416,
+    "discounted_return_std": 2.678622227753721,
+    "final_score_mean": 15.925,
+    "final_score_std": 0.9270248108869579,
+    "success_rate_mean": 0.99,
+    "success_rate_std": 0.099498743710662,
+    "num_rollouts": 200
+  },
+  "candidate_eval": {
+    "mode": "candidate",
+    "discounted_return_mean": 3.4114213140008287,
+    "discounted_return_std": 3.114399571072518,
+    "final_score_mean": 15.865,
+    "final_score_std": 1.2111048674660672,
+    "success_rate_mean": 0.985,
+    "success_rate_std": 0.12155245781143217,
+    "num_rollouts": 200
+  },
+  "delta_discounted_return_mixture_vs_old": -0.2098640008450814,
+  "delta_final_score_mixture_vs_old": -0.07499999999999929,
+  "delta_success_rate_mixture_vs_old": -0.010000000000000009
+}

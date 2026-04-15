@@ -1,0 +1,59 @@
+{
+  "seed": 46,
+  "condition": "model_a_prime",
+  "condition_label": "Model A' (no contraction)",
+  "checkpoint": "/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze/model_a_prime/seed46/model_step_5000.pt",
+  "config_yaml": "/home/buiksat/trm_bellman/configs/ablations/upi_trm_feasibility_no_contraction_no_vhead_norm.yaml",
+  "unroll_n": 8,
+  "mixture_alpha": 0.1,
+  "update_states": 50,
+  "eval_states": 50,
+  "collection_passes": 1,
+  "eval_repeats": 10,
+  "theory_metrics_heldout": {
+    "hat_Cz": 20.868446350097656,
+    "hat_Lz": 0.3895198404788971,
+    "hat_Lv": 0.080108642578125,
+    "unrolling_term": 0.0014512245123515005,
+    "bellman_residual_mean": 1.3304095268249512,
+    "bellman_residual_max": 9.992109298706055,
+    "bellman_residual_std": 2.7066097259521484,
+    "replay_size": 182.0
+  },
+  "policy_update": {
+    "loss_policy": 0.1110573261976242
+  },
+  "old_eval": {
+    "mode": "old",
+    "discounted_return_mean": 3.5273470205619017,
+    "discounted_return_std": 2.828972979016344,
+    "final_score_mean": 15.898,
+    "final_score_std": 1.2327189460700279,
+    "success_rate_mean": 0.99,
+    "success_rate_std": 0.099498743710662,
+    "num_rollouts": 500
+  },
+  "mixture_eval": {
+    "mode": "mixture",
+    "discounted_return_mean": 3.269015146430871,
+    "discounted_return_std": 3.4295482543511224,
+    "final_score_mean": 15.8,
+    "final_score_std": 1.5556349186104046,
+    "success_rate_mean": 0.98,
+    "success_rate_std": 0.14,
+    "num_rollouts": 500
+  },
+  "candidate_eval": {
+    "mode": "candidate",
+    "discounted_return_mean": 3.5335554029104275,
+    "discounted_return_std": 2.603400375415764,
+    "final_score_mean": 15.924,
+    "final_score_std": 0.9067656808679958,
+    "success_rate_mean": 0.99,
+    "success_rate_std": 0.099498743710662,
+    "num_rollouts": 500
+  },
+  "delta_discounted_return_mixture_vs_old": -0.25833187413103076,
+  "delta_final_score_mixture_vs_old": -0.09799999999999898,
+  "delta_success_rate_mixture_vs_old": -0.010000000000000009
+}

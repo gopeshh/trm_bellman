@@ -1,0 +1,22 @@
+{
+  "model": "model_b",
+  "checkpoint": "checkpoints/exp1_v4_refreeze/model_b/seed50/model_step_5000.pt",
+  "config_yaml": "configs/ablations/upi_trm_feasibility_contraction_no_vhead_norm.yaml",
+  "seed": 50,
+  "radius": 0.0,
+  "batch": "b0",
+  "theory_unroll_n": 8,
+  "collection_passes": 1,
+  "num_states": 100,
+  "device": "cpu",
+  "metrics": {
+    "hat_Cz": 47.53145980834961,
+    "hat_Lz": 0.4131275415420532,
+    "hat_Lv": 0.1029968187212944,
+    "unrolling_term": 0.007078388958388904,
+    "bellman_residual_mean": 2.962435245513916,
+    "bellman_residual_max": 16.431781768798828,
+    "bellman_residual_std": 3.7465145587921143,
+    "replay_size": 456.0
+  }
+}
