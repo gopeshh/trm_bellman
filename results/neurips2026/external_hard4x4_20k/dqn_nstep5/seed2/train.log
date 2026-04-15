@@ -1,0 +1,416 @@
+[2026-04-14T18:00:52.292-07:00] Buck UI: https://www.internalfb.com/buck2/6a5b6a9a-df50-4559-8e0b-9f7d84ea945e
+[2026-04-14T18:00:52.460-07:00] Network: Up: 0B  Down: 0B
+BUILD SUCCEEDED - starting your binary
+WARNING:root:===========[FB_TRITON]=========== Triton Version: 3.5.0+fb
+INFO:2026-04-14 18:01:01 1786066:1786066 CuptiCallbackApi.cpp:69] Callback: domain = 3, cbid = 1
+INFO:2026-04-14 18:01:01 1786066:1786066 CuptiActivityProfiler.cpp:93] CUDA versions. CUPTI: 22; Runtime: 12040; Driver: 12040
+INFO:2026-04-14 18:01:01 1786066:1788214 FBConfig.cpp:330] Perfetto builder enabled: 1
+INFO:2026-04-14 18:01:01 1786066:1788214 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+INFO:2026-04-14 18:01:01 1786066:1788214 DynoConfigLoader.cpp:61] Setting communication fabric enabled = 0
+[step 00100] eval_success_rate=0.000 eval_mean_return=-18.220 eval_invalid_action_rate=0.739
+[step 00100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_100.zip
+[step 00200] eval_success_rate=0.000 eval_mean_return=-18.220 eval_invalid_action_rate=0.739
+[step 00200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_200.zip
+[step 00300] eval_success_rate=0.000 eval_mean_return=-18.571 eval_invalid_action_rate=0.579
+[step 00300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_300.zip
+[step 00400] eval_success_rate=0.000 eval_mean_return=-19.264 eval_invalid_action_rate=0.579
+[step 00400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_400.zip
+[step 00500] eval_success_rate=0.000 eval_mean_return=-19.070 eval_invalid_action_rate=0.040
+[step 00500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_500.zip
+[step 00600] eval_success_rate=0.000 eval_mean_return=-18.689 eval_invalid_action_rate=0.460
+[step 00600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_600.zip
+[step 00700] eval_success_rate=0.000 eval_mean_return=-17.462 eval_invalid_action_rate=1.000
+[step 00700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_700.zip
+[step 00800] eval_success_rate=0.000 eval_mean_return=-17.966 eval_invalid_action_rate=0.860
+[step 00800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_800.zip
+[step 00900] eval_success_rate=0.000 eval_mean_return=-17.664 eval_invalid_action_rate=0.940
+[step 00900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_900.zip
+[step 01000] eval_success_rate=0.000 eval_mean_return=-17.462 eval_invalid_action_rate=1.000
+[step 01000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_1000.zip
+[step 01100] eval_success_rate=0.000 eval_mean_return=-18.050 eval_invalid_action_rate=0.720
+[step 01100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_1100.zip
+[step 01200] eval_success_rate=0.000 eval_mean_return=-18.370 eval_invalid_action_rate=0.779
+[step 01200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_1200.zip
+[step 01300] eval_success_rate=0.000 eval_mean_return=-18.605 eval_invalid_action_rate=0.698
+[step 01300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_1300.zip
+[step 01400] eval_success_rate=0.000 eval_mean_return=-17.983 eval_invalid_action_rate=0.859
+[step 01400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_1400.zip
+[step 01500] eval_success_rate=0.000 eval_mean_return=-17.770 eval_invalid_action_rate=0.840
+[step 01500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_1500.zip
+[step 01600] eval_success_rate=0.000 eval_mean_return=-18.470 eval_invalid_action_rate=0.640
+[step 01600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_1600.zip
+[step 01700] eval_success_rate=0.000 eval_mean_return=-17.714 eval_invalid_action_rate=0.940
+[step 01700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_1700.zip
+[step 01800] eval_success_rate=0.000 eval_mean_return=-18.282 eval_invalid_action_rate=0.680
+[step 01800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_1800.zip
+[step 01900] eval_success_rate=0.000 eval_mean_return=-17.864 eval_invalid_action_rate=0.880
+[step 01900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_1900.zip
+[step 02000] eval_success_rate=0.000 eval_mean_return=-18.180 eval_invalid_action_rate=0.680
+[step 02000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_2000.zip
+[step 02100] eval_success_rate=0.000 eval_mean_return=-17.462 eval_invalid_action_rate=1.000
+[step 02100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_2100.zip
+[step 02200] eval_success_rate=0.000 eval_mean_return=-18.538 eval_invalid_action_rate=0.520
+[step 02200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_2200.zip
+[step 02300] eval_success_rate=0.000 eval_mean_return=-18.437 eval_invalid_action_rate=0.620
+[step 02300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_2300.zip
+[step 02400] eval_success_rate=0.000 eval_mean_return=-17.614 eval_invalid_action_rate=0.880
+[step 02400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_2400.zip
+[step 02500] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.838
+[step 02500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_2500.zip
+[step 02600] eval_success_rate=0.000 eval_mean_return=-17.462 eval_invalid_action_rate=1.000
+[step 02600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_2600.zip
+[step 02700] eval_success_rate=0.000 eval_mean_return=-18.000 eval_invalid_action_rate=0.797
+[step 02700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_2700.zip
+[step 02800] eval_success_rate=0.000 eval_mean_return=-18.633 eval_invalid_action_rate=0.240
+[step 02800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_2800.zip
+[step 02900] eval_success_rate=0.000 eval_mean_return=-18.034 eval_invalid_action_rate=0.760
+[step 02900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_2900.zip
+[step 03000] eval_success_rate=0.000 eval_mean_return=-18.000 eval_invalid_action_rate=0.816
+[step 03000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_3000.zip
+[step 03100] eval_success_rate=0.000 eval_mean_return=-18.118 eval_invalid_action_rate=0.819
+[step 03100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_3100.zip
+[step 03200] eval_success_rate=0.000 eval_mean_return=-17.530 eval_invalid_action_rate=0.959
+[step 03200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_3200.zip
+[step 03300] eval_success_rate=0.000 eval_mean_return=-17.697 eval_invalid_action_rate=0.899
+[step 03300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_3300.zip
+[step 03400] eval_success_rate=0.000 eval_mean_return=-17.563 eval_invalid_action_rate=0.940
+[step 03400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_3400.zip
+[step 03500] eval_success_rate=0.000 eval_mean_return=-17.690 eval_invalid_action_rate=0.879
+[step 03500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_3500.zip
+[step 03600] eval_success_rate=0.000 eval_mean_return=-18.450 eval_invalid_action_rate=0.459
+[step 03600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_3600.zip
+[step 03700] eval_success_rate=0.000 eval_mean_return=-18.134 eval_invalid_action_rate=0.838
+[step 03700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_3700.zip
+[step 03800] eval_success_rate=0.000 eval_mean_return=-17.681 eval_invalid_action_rate=0.859
+[step 03800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_3800.zip
+[step 03900] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.897
+[step 03900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_3900.zip
+[step 04000] eval_success_rate=0.000 eval_mean_return=-17.890 eval_invalid_action_rate=0.880
+[step 04000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_4000.zip
+[step 04100] eval_success_rate=0.000 eval_mean_return=-18.168 eval_invalid_action_rate=0.799
+[step 04100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_4100.zip
+[step 04200] eval_success_rate=0.000 eval_mean_return=-18.151 eval_invalid_action_rate=0.757
+[step 04200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_4200.zip
+[step 04300] eval_success_rate=0.000 eval_mean_return=-17.731 eval_invalid_action_rate=0.879
+[step 04300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_4300.zip
+[step 04400] eval_success_rate=0.000 eval_mean_return=-18.024 eval_invalid_action_rate=0.819
+[step 04400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_4400.zip
+[step 04500] eval_success_rate=0.000 eval_mean_return=-17.809 eval_invalid_action_rate=0.932
+[step 04500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_4500.zip
+[step 04600] eval_success_rate=0.000 eval_mean_return=-17.849 eval_invalid_action_rate=0.879
+[step 04600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_4600.zip
+[step 04700] eval_success_rate=0.000 eval_mean_return=-17.849 eval_invalid_action_rate=0.895
+[step 04700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_4700.zip
+[step 04800] eval_success_rate=0.000 eval_mean_return=-18.269 eval_invalid_action_rate=0.720
+[step 04800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_4800.zip
+[step 04900] eval_success_rate=0.000 eval_mean_return=-17.731 eval_invalid_action_rate=0.919
+[step 04900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_4900.zip
+[step 05000] eval_success_rate=0.000 eval_mean_return=-17.866 eval_invalid_action_rate=0.800
+[step 05000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_5000.zip
+[step 05100] eval_success_rate=0.000 eval_mean_return=-18.127 eval_invalid_action_rate=0.836
+[step 05100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_5100.zip
+[step 05200] eval_success_rate=0.000 eval_mean_return=-18.018 eval_invalid_action_rate=0.797
+[step 05200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_5200.zip
+[step 05300] eval_success_rate=0.000 eval_mean_return=-18.185 eval_invalid_action_rate=0.818
+[step 05300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_5300.zip
+[step 05400] eval_success_rate=0.000 eval_mean_return=-18.449 eval_invalid_action_rate=0.777
+[step 05400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_5400.zip
+[step 05500] eval_success_rate=0.000 eval_mean_return=-17.798 eval_invalid_action_rate=0.917
+[step 05500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_5500.zip
+[step 05600] eval_success_rate=0.000 eval_mean_return=-18.119 eval_invalid_action_rate=0.835
+[step 05600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_5600.zip
+[step 05700] eval_success_rate=0.000 eval_mean_return=-17.798 eval_invalid_action_rate=0.900
+[step 05700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_5700.zip
+[step 05800] eval_success_rate=0.000 eval_mean_return=-17.664 eval_invalid_action_rate=0.920
+[step 05800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_5800.zip
+[step 05900] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.919
+[step 05900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_5900.zip
+[step 06000] eval_success_rate=0.000 eval_mean_return=-18.142 eval_invalid_action_rate=0.797
+[step 06000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_6000.zip
+[step 06100] eval_success_rate=0.000 eval_mean_return=-18.081 eval_invalid_action_rate=0.859
+[step 06100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_6100.zip
+[step 06200] eval_success_rate=0.000 eval_mean_return=-18.169 eval_invalid_action_rate=0.776
+[step 06200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_6200.zip
+[step 06300] eval_success_rate=0.000 eval_mean_return=-18.310 eval_invalid_action_rate=0.756
+[step 06300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_6300.zip
+[step 06400] eval_success_rate=0.000 eval_mean_return=-18.307 eval_invalid_action_rate=0.660
+[step 06400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_6400.zip
+[step 06500] eval_success_rate=0.000 eval_mean_return=-18.205 eval_invalid_action_rate=0.719
+[step 06500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_6500.zip
+[step 06600] eval_success_rate=0.000 eval_mean_return=-17.784 eval_invalid_action_rate=0.819
+[step 06600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_6600.zip
+[step 06700] eval_success_rate=0.000 eval_mean_return=-18.017 eval_invalid_action_rate=0.838
+[step 06700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_6700.zip
+[step 06800] eval_success_rate=0.000 eval_mean_return=-17.916 eval_invalid_action_rate=0.896
+[step 06800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_6800.zip
+[step 06900] eval_success_rate=0.000 eval_mean_return=-17.765 eval_invalid_action_rate=0.859
+[step 06900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_6900.zip
+[step 07000] eval_success_rate=0.000 eval_mean_return=-18.052 eval_invalid_action_rate=0.838
+[step 07000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_7000.zip
+[step 07100] eval_success_rate=0.000 eval_mean_return=-17.900 eval_invalid_action_rate=0.920
+[step 07100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_7100.zip
+[step 07200] eval_success_rate=0.000 eval_mean_return=-17.832 eval_invalid_action_rate=0.900
+[step 07200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_7200.zip
+[step 07300] eval_success_rate=0.000 eval_mean_return=-18.087 eval_invalid_action_rate=0.877
+[step 07300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_7300.zip
+[step 07400] eval_success_rate=0.000 eval_mean_return=-18.370 eval_invalid_action_rate=0.797
+[step 07400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_7400.zip
+[step 07500] eval_success_rate=0.000 eval_mean_return=-17.966 eval_invalid_action_rate=0.859
+[step 07500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_7500.zip
+[step 07600] eval_success_rate=0.000 eval_mean_return=-17.849 eval_invalid_action_rate=0.859
+[step 07600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_7600.zip
+[step 07700] eval_success_rate=0.000 eval_mean_return=-18.117 eval_invalid_action_rate=0.836
+[step 07700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_7700.zip
+[step 07800] eval_success_rate=0.000 eval_mean_return=-17.948 eval_invalid_action_rate=0.877
+[step 07800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_7800.zip
+[step 07900] eval_success_rate=0.000 eval_mean_return=-17.917 eval_invalid_action_rate=0.920
+[step 07900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_7900.zip
+[step 08000] eval_success_rate=0.000 eval_mean_return=-17.662 eval_invalid_action_rate=0.880
+[step 08000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_8000.zip
+[step 08100] eval_success_rate=0.000 eval_mean_return=-17.864 eval_invalid_action_rate=0.879
+[step 08100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_8100.zip
+[step 08200] eval_success_rate=0.000 eval_mean_return=-17.614 eval_invalid_action_rate=0.900
+[step 08200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_8200.zip
+[step 08300] eval_success_rate=0.000 eval_mean_return=-17.731 eval_invalid_action_rate=0.880
+[step 08300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_8300.zip
+[step 08400] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.880
+[step 08400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_8400.zip
+[step 08500] eval_success_rate=0.000 eval_mean_return=-17.578 eval_invalid_action_rate=0.900
+[step 08500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_8500.zip
+[step 08600] eval_success_rate=0.000 eval_mean_return=-17.824 eval_invalid_action_rate=0.820
+[step 08600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_8600.zip
+[step 08700] eval_success_rate=0.000 eval_mean_return=-17.563 eval_invalid_action_rate=0.917
+[step 08700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_8700.zip
+[step 08800] eval_success_rate=0.000 eval_mean_return=-17.662 eval_invalid_action_rate=0.899
+[step 08800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_8800.zip
+[step 08900] eval_success_rate=0.000 eval_mean_return=-17.831 eval_invalid_action_rate=0.897
+[step 08900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_8900.zip
+[step 09000] eval_success_rate=0.000 eval_mean_return=-17.914 eval_invalid_action_rate=0.819
+[step 09000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_9000.zip
+[step 09100] eval_success_rate=0.000 eval_mean_return=-17.928 eval_invalid_action_rate=0.839
+[step 09100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_9100.zip
+[step 09200] eval_success_rate=0.000 eval_mean_return=-17.893 eval_invalid_action_rate=0.820
+[step 09200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_9200.zip
+[step 09300] eval_success_rate=0.000 eval_mean_return=-17.734 eval_invalid_action_rate=0.860
+[step 09300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_9300.zip
+[step 09400] eval_success_rate=0.000 eval_mean_return=-17.893 eval_invalid_action_rate=0.797
+[step 09400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_9400.zip
+[step 09500] eval_success_rate=0.000 eval_mean_return=-17.807 eval_invalid_action_rate=0.796
+[step 09500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_9500.zip
+[step 09600] eval_success_rate=0.000 eval_mean_return=-17.530 eval_invalid_action_rate=0.938
+[step 09600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_9600.zip
+[step 09700] eval_success_rate=0.000 eval_mean_return=-17.563 eval_invalid_action_rate=0.940
+[step 09700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_9700.zip
+[step 09800] eval_success_rate=0.000 eval_mean_return=-17.965 eval_invalid_action_rate=0.875
+[step 09800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_9800.zip
+[step 09900] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.879
+[step 09900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_9900.zip
+[step 10000] eval_success_rate=0.000 eval_mean_return=-17.676 eval_invalid_action_rate=0.877
+[step 10000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_10000.zip
+[step 10100] eval_success_rate=0.000 eval_mean_return=-17.673 eval_invalid_action_rate=0.819
+[step 10100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_10100.zip
+[step 10200] eval_success_rate=0.000 eval_mean_return=-17.662 eval_invalid_action_rate=0.880
+[step 10200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_10200.zip
+[step 10300] eval_success_rate=0.000 eval_mean_return=-17.908 eval_invalid_action_rate=0.780
+[step 10300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_10300.zip
+[step 10400] eval_success_rate=0.000 eval_mean_return=-17.681 eval_invalid_action_rate=0.936
+[step 10400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_10400.zip
+[step 10500] eval_success_rate=0.000 eval_mean_return=-17.748 eval_invalid_action_rate=0.919
+[step 10500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_10500.zip
+[step 10600] eval_success_rate=0.000 eval_mean_return=-17.762 eval_invalid_action_rate=0.880
+[step 10600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_10600.zip
+[step 10700] eval_success_rate=0.000 eval_mean_return=-17.730 eval_invalid_action_rate=0.897
+[step 10700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_10700.zip
+[step 10800] eval_success_rate=0.000 eval_mean_return=-18.009 eval_invalid_action_rate=0.757
+[step 10800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_10800.zip
+[step 10900] eval_success_rate=0.000 eval_mean_return=-17.866 eval_invalid_action_rate=0.875
+[step 10900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_10900.zip
+[step 11000] eval_success_rate=0.000 eval_mean_return=-18.437 eval_invalid_action_rate=0.815
+[step 11000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_11000.zip
+[step 11100] eval_success_rate=0.000 eval_mean_return=-17.966 eval_invalid_action_rate=0.894
+[step 11100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_11100.zip
+[step 11200] eval_success_rate=0.000 eval_mean_return=-17.935 eval_invalid_action_rate=0.897
+[step 11200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_11200.zip
+[step 11300] eval_success_rate=0.000 eval_mean_return=-17.798 eval_invalid_action_rate=0.917
+[step 11300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_11300.zip
+[step 11400] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.919
+[step 11400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_11400.zip
+[step 11500] eval_success_rate=0.000 eval_mean_return=-17.893 eval_invalid_action_rate=0.818
+[step 11500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_11500.zip
+[step 11600] eval_success_rate=0.000 eval_mean_return=-18.133 eval_invalid_action_rate=0.876
+[step 11600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_11600.zip
+[step 11700] eval_success_rate=0.000 eval_mean_return=-17.714 eval_invalid_action_rate=0.920
+[step 11700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_11700.zip
+[step 11800] eval_success_rate=0.000 eval_mean_return=-17.915 eval_invalid_action_rate=0.875
+[step 11800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_11800.zip
+[step 11900] eval_success_rate=0.000 eval_mean_return=-18.151 eval_invalid_action_rate=0.874
+[step 11900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_11900.zip
+[step 12000] eval_success_rate=0.000 eval_mean_return=-17.765 eval_invalid_action_rate=0.858
+[step 12000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_12000.zip
+[step 12100] eval_success_rate=0.000 eval_mean_return=-17.765 eval_invalid_action_rate=0.916
+[step 12100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_12100.zip
+[step 12200] eval_success_rate=0.000 eval_mean_return=-17.696 eval_invalid_action_rate=0.938
+[step 12200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_12200.zip
+[step 12300] eval_success_rate=0.000 eval_mean_return=-17.916 eval_invalid_action_rate=0.895
+[step 12300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_12300.zip
+[step 12400] eval_success_rate=0.000 eval_mean_return=-17.900 eval_invalid_action_rate=0.896
+[step 12400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_12400.zip
+[step 12500] eval_success_rate=0.000 eval_mean_return=-17.797 eval_invalid_action_rate=0.858
+[step 12500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_12500.zip
+[step 12600] eval_success_rate=0.000 eval_mean_return=-18.487 eval_invalid_action_rate=0.718
+[step 12600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_12600.zip
+[step 12700] eval_success_rate=0.000 eval_mean_return=-18.085 eval_invalid_action_rate=0.799
+[step 12700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_12700.zip
+[step 12800] eval_success_rate=0.000 eval_mean_return=-17.832 eval_invalid_action_rate=0.858
+[step 12800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_12800.zip
+[step 12900] eval_success_rate=0.000 eval_mean_return=-17.983 eval_invalid_action_rate=0.877
+[step 12900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_12900.zip
+[step 13000] eval_success_rate=0.000 eval_mean_return=-18.184 eval_invalid_action_rate=0.858
+[step 13000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_13000.zip
+[step 13100] eval_success_rate=0.000 eval_mean_return=-18.302 eval_invalid_action_rate=0.759
+[step 13100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_13100.zip
+[step 13200] eval_success_rate=0.000 eval_mean_return=-18.151 eval_invalid_action_rate=0.856
+[step 13200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_13200.zip
+[step 13300] eval_success_rate=0.000 eval_mean_return=-18.101 eval_invalid_action_rate=0.858
+[step 13300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_13300.zip
+[step 13400] eval_success_rate=0.000 eval_mean_return=-17.882 eval_invalid_action_rate=0.879
+[step 13400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_13400.zip
+[step 13500] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.935
+[step 13500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_13500.zip
+[step 13600] eval_success_rate=0.000 eval_mean_return=-18.168 eval_invalid_action_rate=0.895
+[step 13600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_13600.zip
+[step 13700] eval_success_rate=0.000 eval_mean_return=-17.714 eval_invalid_action_rate=0.938
+[step 13700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_13700.zip
+[step 13800] eval_success_rate=0.000 eval_mean_return=-17.931 eval_invalid_action_rate=0.836
+[step 13800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_13800.zip
+[step 13900] eval_success_rate=0.000 eval_mean_return=-17.713 eval_invalid_action_rate=0.917
+[step 13900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_13900.zip
+[step 14000] eval_success_rate=0.000 eval_mean_return=-18.268 eval_invalid_action_rate=0.819
+[step 14000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_14000.zip
+[step 14100] eval_success_rate=0.000 eval_mean_return=-17.882 eval_invalid_action_rate=0.917
+[step 14100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_14100.zip
+[step 14200] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.958
+[step 14200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_14200.zip
+[step 14300] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.939
+[step 14300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_14300.zip
+[step 14400] eval_success_rate=0.000 eval_mean_return=-17.965 eval_invalid_action_rate=0.838
+[step 14400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_14400.zip
+[step 14500] eval_success_rate=0.000 eval_mean_return=-17.882 eval_invalid_action_rate=0.879
+[step 14500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_14500.zip
+[step 14600] eval_success_rate=0.000 eval_mean_return=-17.714 eval_invalid_action_rate=0.919
+[step 14600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_14600.zip
+[step 14700] eval_success_rate=0.000 eval_mean_return=-17.882 eval_invalid_action_rate=0.917
+[step 14700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_14700.zip
+[step 14800] eval_success_rate=0.000 eval_mean_return=-17.884 eval_invalid_action_rate=0.879
+[step 14800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_14800.zip
+[step 14900] eval_success_rate=0.000 eval_mean_return=-17.765 eval_invalid_action_rate=0.899
+[step 14900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_14900.zip
+[step 15000] eval_success_rate=0.000 eval_mean_return=-17.615 eval_invalid_action_rate=0.940
+[step 15000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_15000.zip
+[step 15100] eval_success_rate=0.000 eval_mean_return=-17.614 eval_invalid_action_rate=0.939
+[step 15100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_15100.zip
+[step 15200] eval_success_rate=0.000 eval_mean_return=-17.630 eval_invalid_action_rate=0.920
+[step 15200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_15200.zip
+[step 15300] eval_success_rate=0.000 eval_mean_return=-17.681 eval_invalid_action_rate=0.919
+[step 15300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_15300.zip
+[step 15400] eval_success_rate=0.000 eval_mean_return=-18.000 eval_invalid_action_rate=0.858
+[step 15400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_15400.zip
+[step 15500] eval_success_rate=0.000 eval_mean_return=-17.815 eval_invalid_action_rate=0.899
+[step 15500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_15500.zip
+[step 15600] eval_success_rate=0.000 eval_mean_return=-18.034 eval_invalid_action_rate=0.879
+[step 15600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_15600.zip
+[step 15700] eval_success_rate=0.000 eval_mean_return=-18.034 eval_invalid_action_rate=0.818
+[step 15700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_15700.zip
+[step 15800] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.859
+[step 15800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_15800.zip
+[step 15900] eval_success_rate=0.000 eval_mean_return=-17.676 eval_invalid_action_rate=0.840
+[step 15900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_15900.zip
+[step 16000] eval_success_rate=0.000 eval_mean_return=-17.765 eval_invalid_action_rate=0.879
+[step 16000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_16000.zip
+[step 16100] eval_success_rate=0.000 eval_mean_return=-17.731 eval_invalid_action_rate=0.859
+[step 16100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_16100.zip
+[step 16200] eval_success_rate=0.000 eval_mean_return=-17.580 eval_invalid_action_rate=0.880
+[step 16200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_16200.zip
+[step 16300] eval_success_rate=0.000 eval_mean_return=-17.715 eval_invalid_action_rate=0.879
+[step 16300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_16300.zip
+[step 16400] eval_success_rate=0.000 eval_mean_return=-17.798 eval_invalid_action_rate=0.899
+[step 16400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_16400.zip
+[step 16500] eval_success_rate=0.000 eval_mean_return=-17.782 eval_invalid_action_rate=0.860
+[step 16500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_16500.zip
+[step 16600] eval_success_rate=0.000 eval_mean_return=-17.815 eval_invalid_action_rate=0.879
+[step 16600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_16600.zip
+[step 16700] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.856
+[step 16700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_16700.zip
+[step 16800] eval_success_rate=0.000 eval_mean_return=-17.896 eval_invalid_action_rate=0.860
+[step 16800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_16800.zip
+[step 16900] eval_success_rate=0.000 eval_mean_return=-18.152 eval_invalid_action_rate=0.820
+[step 16900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_16900.zip
+[step 17000] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.900
+[step 17000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_17000.zip
+[step 17100] eval_success_rate=0.000 eval_mean_return=-17.714 eval_invalid_action_rate=0.880
+[step 17100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_17100.zip
+[step 17200] eval_success_rate=0.000 eval_mean_return=-17.934 eval_invalid_action_rate=0.840
+[step 17200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_17200.zip
+[step 17300] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.897
+[step 17300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_17300.zip
+[step 17400] eval_success_rate=0.000 eval_mean_return=-17.748 eval_invalid_action_rate=0.860
+[step 17400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_17400.zip
+[step 17500] eval_success_rate=0.000 eval_mean_return=-17.916 eval_invalid_action_rate=0.899
+[step 17500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_17500.zip
+[step 17600] eval_success_rate=0.000 eval_mean_return=-17.563 eval_invalid_action_rate=0.899
+[step 17600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_17600.zip
+[step 17700] eval_success_rate=0.000 eval_mean_return=-17.833 eval_invalid_action_rate=0.879
+[step 17700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_17700.zip
+[step 17800] eval_success_rate=0.000 eval_mean_return=-17.630 eval_invalid_action_rate=0.900
+[step 17800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_17800.zip
+[step 17900] eval_success_rate=0.000 eval_mean_return=-17.866 eval_invalid_action_rate=0.897
+[step 17900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_17900.zip
+[step 18000] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.880
+[step 18000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_18000.zip
+[step 18100] eval_success_rate=0.000 eval_mean_return=-17.698 eval_invalid_action_rate=0.880
+[step 18100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_18100.zip
+[step 18200] eval_success_rate=0.000 eval_mean_return=-17.614 eval_invalid_action_rate=0.920
+[step 18200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_18200.zip
+[step 18300] eval_success_rate=0.000 eval_mean_return=-17.546 eval_invalid_action_rate=0.940
+[step 18300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_18300.zip
+[step 18400] eval_success_rate=0.000 eval_mean_return=-17.799 eval_invalid_action_rate=0.919
+[step 18400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_18400.zip
+[step 18500] eval_success_rate=0.000 eval_mean_return=-17.546 eval_invalid_action_rate=0.939
+[step 18500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_18500.zip
+[step 18600] eval_success_rate=0.000 eval_mean_return=-17.614 eval_invalid_action_rate=0.880
+[step 18600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_18600.zip
+[step 18700] eval_success_rate=0.000 eval_mean_return=-17.530 eval_invalid_action_rate=0.979
+[step 18700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_18700.zip
+[step 18800] eval_success_rate=0.000 eval_mean_return=-17.597 eval_invalid_action_rate=0.939
+[step 18800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_18800.zip
+[step 18900] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.880
+[step 18900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_18900.zip
+[step 19000] eval_success_rate=0.000 eval_mean_return=-17.798 eval_invalid_action_rate=0.919
+[step 19000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_19000.zip
+[step 19100] eval_success_rate=0.000 eval_mean_return=-17.679 eval_invalid_action_rate=0.880
+[step 19100] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_19100.zip
+[step 19200] eval_success_rate=0.000 eval_mean_return=-17.899 eval_invalid_action_rate=0.877
+[step 19200] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_19200.zip
+[step 19300] eval_success_rate=0.000 eval_mean_return=-17.867 eval_invalid_action_rate=0.840
+[step 19300] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_19300.zip
+[step 19400] eval_success_rate=0.000 eval_mean_return=-17.630 eval_invalid_action_rate=0.920
+[step 19400] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_19400.zip
+[step 19500] eval_success_rate=0.000 eval_mean_return=-17.765 eval_invalid_action_rate=0.858
+[step 19500] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_19500.zip
+[step 19600] eval_success_rate=0.000 eval_mean_return=-17.429 eval_invalid_action_rate=0.960
+[step 19600] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_19600.zip
+[step 19700] eval_success_rate=0.000 eval_mean_return=-17.496 eval_invalid_action_rate=0.960
+[step 19700] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_19700.zip
+[step 19800] eval_success_rate=0.000 eval_mean_return=-17.597 eval_invalid_action_rate=0.880
+[step 19800] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_19800.zip
+[step 19900] eval_success_rate=0.000 eval_mean_return=-17.748 eval_invalid_action_rate=0.859
+[step 19900] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_19900.zip
+[step 20000] eval_success_rate=0.000 eval_mean_return=-17.614 eval_invalid_action_rate=0.900
+[step 20000] checkpoint=/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/model_step_20000.zip
+[baseline] env=sudoku4x4 algo=dqn backend=sb3
+[baseline] action_space_n=97 observation_keys=inputs,plan,action_mask
+[baseline] finished training: steps=20000 final_eval_success_rate=0.000 final_eval_mean_return=-17.614
+[baseline] t0.3_ready=True
+[baseline] t0.2_status=complete
+[baseline] note: Vanilla SB3 PPO/A2C/DQN does not apply logit masking from action_mask; the policy acts in the full no-mask action space and invalid edits are penalized by the environment. This matches the paper's hard-4x4 no-mask protocol and should be compared against the internal no-mask A2C baseline.
+[baseline] summary written to /home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/train_summary.json

@@ -6,7 +6,7 @@ import argparse
 import json
 import random
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from external_baselines import GymSudoku4x4Env, Sudoku4x4ExternalEnv
 
@@ -32,6 +32,7 @@ DEFAULT_SB3_HPARAMS = {
     "dqn": {
         "learning_rate": 5.0e-4,
         "gamma": 0.99,
+        "n_steps": 1,
         "buffer_size": 10000,
         "learning_starts": 200,
         "batch_size": 64,
@@ -44,6 +45,8 @@ DEFAULT_SB3_HPARAMS = {
         "max_grad_norm": 10.0,
     },
 }
+
+_DQN_WITH_NSTEP_CLS = None
 
 
 def _parse_args() -> argparse.Namespace:
@@ -86,12 +89,218 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--dqn-exploration-fraction", type=float, default=None)
     parser.add_argument("--dqn-exploration-initial-eps", type=float, default=None)
     parser.add_argument("--dqn-exploration-final-eps", type=float, default=None)
+    parser.add_argument("--dqn-n-steps", type=int, default=None)
     parser.add_argument(
         "--output-root",
         default="results/neurips2026/external_hard4x4",
         help="Root directory for baseline artifacts and summaries.",
     )
     return parser.parse_args()
+
+
+def _algo_output_name(args: argparse.Namespace) -> str:
+    if args.algo == "dqn" and args.dqn_n_steps is not None and args.dqn_n_steps > 1:
+        return f"dqn_nstep{args.dqn_n_steps}"
+    return args.algo
+
+
+def _get_dqn_with_nstep_cls():
+    global _DQN_WITH_NSTEP_CLS
+    if _DQN_WITH_NSTEP_CLS is not None:
+        return _DQN_WITH_NSTEP_CLS
+
+    from collections import deque
+
+    import numpy as np
+    import torch as th
+    from stable_baselines3 import DQN as SB3DQN
+    from stable_baselines3.common.buffers import DictReplayBuffer
+    from stable_baselines3.common.type_aliases import TensorDict
+    from torch.nn import functional as F
+
+    class NStepDictReplayBufferSamples(NamedTuple):
+        observations: TensorDict
+        actions: th.Tensor
+        next_observations: TensorDict
+        dones: th.Tensor
+        rewards: th.Tensor
+        discounts: th.Tensor
+
+    class NStepDictReplayBuffer(DictReplayBuffer):
+        def __init__(
+            self,
+            buffer_size: int,
+            observation_space: Any,
+            action_space: Any,
+            device: Any = "cpu",
+            n_envs: int = 1,
+            optimize_memory_usage: bool = False,
+            handle_timeout_termination: bool = True,
+            n_steps: int = 1,
+            gamma: float = 0.99,
+        ) -> None:
+            super().__init__(
+                buffer_size,
+                observation_space,
+                action_space,
+                device=device,
+                n_envs=n_envs,
+                optimize_memory_usage=optimize_memory_usage,
+                handle_timeout_termination=handle_timeout_termination,
+            )
+            if n_envs != 1:
+                raise ValueError("NStepDictReplayBuffer only supports n_envs=1")
+            if n_steps < 1:
+                raise ValueError(f"n_steps must be >= 1, got {n_steps}")
+            self.n_steps = int(n_steps)
+            self.gamma = float(gamma)
+            self.discounts = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+            self._pending = [deque() for _ in range(self.n_envs)]
+
+        def reset(self) -> None:
+            super().reset()
+            self.discounts.fill(0.0)
+            self._pending = [deque() for _ in range(self.n_envs)]
+
+        def _copy_obs_slice(self, obs: dict[str, np.ndarray], env_idx: int) -> dict[str, np.ndarray]:
+            return {key: np.array(value[env_idx]).copy() for key, value in obs.items()}
+
+        def _emit_transition(self, env_idx: int, horizon: int) -> None:
+            pending = list(self._pending[env_idx])[:horizon]
+            first = pending[0]
+            last = pending[-1]
+
+            reward = 0.0
+            for step_idx, transition in enumerate(pending):
+                reward += (self.gamma**step_idx) * float(transition["reward"])
+
+            obs = {key: value[None, ...] for key, value in first["obs"].items()}
+            next_obs = {key: value[None, ...] for key, value in last["next_obs"].items()}
+            action = np.array([first["action"]], dtype=self.actions.dtype).reshape((1, self.action_dim))
+            done = np.array([float(last["done"])], dtype=np.float32)
+            reward_arr = np.array([reward], dtype=np.float32)
+
+            super().add(
+                obs,
+                next_obs,
+                action,
+                reward_arr,
+                done,
+                [last["info"]],
+            )
+            pos = (self.pos - 1) % self.buffer_size
+            self.discounts[pos, env_idx] = self.gamma**horizon
+
+        def add(
+            self,
+            obs: dict[str, np.ndarray],
+            next_obs: dict[str, np.ndarray],
+            action: np.ndarray,
+            reward: np.ndarray,
+            done: np.ndarray,
+            infos: list[dict[str, Any]],
+        ) -> None:
+            for env_idx in range(self.n_envs):
+                self._pending[env_idx].append(
+                    {
+                        "obs": self._copy_obs_slice(obs, env_idx),
+                        "next_obs": self._copy_obs_slice(next_obs, env_idx),
+                        "action": int(np.array(action[env_idx]).item()),
+                        "reward": float(np.array(reward[env_idx]).item()),
+                        "done": bool(np.array(done[env_idx]).item()),
+                        "info": dict(infos[env_idx]),
+                    }
+                )
+
+                if self._pending[env_idx][-1]["done"]:
+                    while self._pending[env_idx]:
+                        self._emit_transition(env_idx, len(self._pending[env_idx]))
+                        self._pending[env_idx].popleft()
+                elif len(self._pending[env_idx]) >= self.n_steps:
+                    self._emit_transition(env_idx, self.n_steps)
+                    self._pending[env_idx].popleft()
+
+        def _get_samples(self, batch_inds: np.ndarray, env: Any = None) -> NStepDictReplayBufferSamples:
+            env_indices = np.zeros((len(batch_inds),), dtype=np.int64)
+            obs_ = self._normalize_obs(
+                {key: obs[batch_inds, env_indices, :] for key, obs in self.observations.items()},
+                env,
+            )
+            next_obs_ = self._normalize_obs(
+                {key: obs[batch_inds, env_indices, :] for key, obs in self.next_observations.items()},
+                env,
+            )
+            observations = {key: self.to_torch(obs) for key, obs in obs_.items()}
+            next_observations = {key: self.to_torch(obs) for key, obs in next_obs_.items()}
+            dones = (
+                self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])
+            ).reshape(-1, 1)
+            rewards = self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env)
+            discounts = self.discounts[batch_inds, env_indices].reshape(-1, 1)
+            return NStepDictReplayBufferSamples(
+                observations=observations,
+                actions=self.to_torch(self.actions[batch_inds, env_indices]),
+                next_observations=next_observations,
+                dones=self.to_torch(dones),
+                rewards=self.to_torch(rewards),
+                discounts=self.to_torch(discounts),
+            )
+
+    class DQNWithNStep(SB3DQN):
+        def __init__(self, *args, n_steps: int = 1, **kwargs) -> None:
+            self.n_steps = int(n_steps) if n_steps is not None else 1
+            gamma = float(kwargs.get("gamma", 0.99))
+            if self.n_steps > 1:
+                replay_buffer_kwargs = dict(kwargs.pop("replay_buffer_kwargs", {}))
+                replay_buffer_kwargs.setdefault("n_steps", self.n_steps)
+                replay_buffer_kwargs.setdefault("gamma", gamma)
+                kwargs["replay_buffer_class"] = NStepDictReplayBuffer
+                kwargs["replay_buffer_kwargs"] = replay_buffer_kwargs
+            super().__init__(*args, **kwargs)
+
+        def train(self, gradient_steps: int, batch_size: int = 100) -> None:
+            self.policy.set_training_mode(True)
+            self._update_learning_rate(self.policy.optimizer)
+
+            losses = []
+            for _ in range(gradient_steps):
+                replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
+
+                with th.no_grad():
+                    next_q_values = self.q_net_target(replay_data.next_observations)
+                    next_q_values, _ = next_q_values.max(dim=1)
+                    next_q_values = next_q_values.reshape(-1, 1)
+                    if hasattr(replay_data, "discounts"):
+                        discount = replay_data.discounts
+                    else:
+                        discount = th.full_like(replay_data.dones, self.gamma)
+                    target_q_values = replay_data.rewards + (1 - replay_data.dones) * discount * next_q_values
+
+                current_q_values = self.q_net(replay_data.observations)
+                current_q_values = th.gather(current_q_values, dim=1, index=replay_data.actions.long())
+                loss = F.smooth_l1_loss(current_q_values, target_q_values)
+                losses.append(loss.item())
+
+                self.policy.optimizer.zero_grad()
+                loss.backward()
+                th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                self.policy.optimizer.step()
+
+            self._n_updates += gradient_steps
+            self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
+            self.logger.record("train/loss", np.mean(losses))
+
+    NStepDictReplayBufferSamples.__module__ = __name__
+    NStepDictReplayBufferSamples.__qualname__ = "NStepDictReplayBufferSamples"
+    NStepDictReplayBuffer.__module__ = __name__
+    NStepDictReplayBuffer.__qualname__ = "NStepDictReplayBuffer"
+    DQNWithNStep.__module__ = __name__
+    DQNWithNStep.__qualname__ = "DQNWithNStep"
+    globals()["NStepDictReplayBufferSamples"] = NStepDictReplayBufferSamples
+    globals()["NStepDictReplayBuffer"] = NStepDictReplayBuffer
+    globals()["DQNWithNStep"] = DQNWithNStep
+    _DQN_WITH_NSTEP_CLS = DQNWithNStep
+    return _DQN_WITH_NSTEP_CLS
 
 
 def _try_load_sb3(algo: str):
@@ -101,7 +310,7 @@ def _try_load_sb3(algo: str):
         elif algo == "a2c":
             from stable_baselines3 import A2C as Algo
         else:
-            from stable_baselines3 import DQN as Algo
+            Algo = _get_dqn_with_nstep_cls()
         _patch_sb3_preprocess_obs()
         return Algo, None
     except ImportError as exc:  # pragma: no cover - depends on local packages
@@ -162,7 +371,7 @@ def _patch_sb3_preprocess_obs() -> None:
 
 
 def _output_dir(args: argparse.Namespace) -> Path:
-    return Path(args.output_root) / args.algo / f"seed{args.seed}"
+    return Path(args.output_root) / _algo_output_name(args) / f"seed{args.seed}"
 
 
 def _merge_sb3_hparams(args: argparse.Namespace) -> dict[str, Any]:
@@ -173,14 +382,16 @@ def _merge_sb3_hparams(args: argparse.Namespace) -> dict[str, Any]:
         "ent_coef": args.entropy_coef,
         "vf_coef": args.vf_coef,
         "max_grad_norm": args.max_grad_norm,
-        "n_steps": args.n_steps,
     }
+    if args.algo in ("ppo", "a2c"):
+        overrides["n_steps"] = args.n_steps
     if args.algo == "ppo":
         overrides["batch_size"] = args.ppo_batch_size
         overrides["n_epochs"] = args.ppo_epochs
     elif args.algo == "dqn":
         overrides.update(
             {
+                "n_steps": args.dqn_n_steps,
                 "buffer_size": args.dqn_buffer_size,
                 "learning_starts": args.dqn_learning_starts,
                 "batch_size": args.dqn_batch_size,
@@ -364,6 +575,7 @@ def _run_smoke_episode(args: argparse.Namespace) -> dict[str, Any]:
         "policy_mask_note": _policy_mask_note(),
         "env": args.env,
         "algo": args.algo,
+        "algo_variant": _algo_output_name(args),
         "seed": args.seed,
         "split": args.split,
         "dataset_dir": str(Path(args.dataset_dir).resolve()),
@@ -388,8 +600,16 @@ def _run_sb3_episode(args: argparse.Namespace, algo_cls) -> dict[str, Any]:
         split=args.split,
         max_edits=args.max_edits,
     )
+    hparams = _merge_sb3_hparams(args)
     policy = "MultiInputPolicy"
-    model = algo_cls(policy, env, verbose=0, seed=args.seed, device=args.device)
+    model = algo_cls(
+        policy,
+        env,
+        verbose=0,
+        seed=args.seed,
+        device=args.device,
+        **hparams,
+    )
     episode = _run_one_policy_episode(
         model,
         env,
@@ -406,6 +626,7 @@ def _run_sb3_episode(args: argparse.Namespace, algo_cls) -> dict[str, Any]:
         "policy_mask_note": _policy_mask_note(),
         "env": args.env,
         "algo": args.algo,
+        "algo_variant": _algo_output_name(args),
         "seed": args.seed,
         "split": args.split,
         "dataset_dir": str(Path(args.dataset_dir).resolve()),
@@ -447,6 +668,7 @@ def _run_sb3_training(args: argparse.Namespace, algo_cls) -> dict[str, Any]:
 
     run_config = {
         "algo": args.algo,
+        "algo_variant": _algo_output_name(args),
         "backend": "sb3",
         "mode": "train",
         "seed": args.seed,
@@ -462,6 +684,8 @@ def _run_sb3_training(args: argparse.Namespace, algo_cls) -> dict[str, Any]:
         "policy_consumes_action_mask": False,
         "policy_mask_note": _policy_mask_note(),
     }
+    if args.algo == "dqn":
+        run_config["dqn_n_steps"] = int(hparams["n_steps"])
     (output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2, sort_keys=True))
     if eval_history_path.exists():
         eval_history_path.unlink()
@@ -504,7 +728,7 @@ def _run_sb3_training(args: argparse.Namespace, algo_cls) -> dict[str, Any]:
             f.write(json.dumps(final_entry, sort_keys=True) + "\n")
 
     best_success_rate = max((entry["success_rate"] for entry in history), default=0.0)
-    return {
+    summary = {
         "backend": "sb3",
         "mode": "train",
         "t0_2_status": "complete",
@@ -513,6 +737,7 @@ def _run_sb3_training(args: argparse.Namespace, algo_cls) -> dict[str, Any]:
         "policy_mask_note": _policy_mask_note(),
         "env": args.env,
         "algo": args.algo,
+        "algo_variant": _algo_output_name(args),
         "seed": args.seed,
         "train_split": args.split,
         "eval_split": args.eval_split,
@@ -534,6 +759,9 @@ def _run_sb3_training(args: argparse.Namespace, algo_cls) -> dict[str, Any]:
             "final_model": f"{final_model_base}.zip",
         },
     }
+    if args.algo == "dqn":
+        summary["dqn_n_steps"] = int(hparams["n_steps"])
+    return summary
 
 
 def _save_summary(args: argparse.Namespace, summary: dict[str, Any]) -> Path:

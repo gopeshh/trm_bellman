@@ -30,7 +30,7 @@ This mirrors the internal environment at the level needed for baseline integrati
 
 The plain `python3` shell environment on this machine still does not have SB3/Gym/NumPy importable.
 The supported path is Buck: `fbcode//buiksat_trm:run_baseline` pulls the third-party packages from `fbsource//third-party/pypi/...`.
-`T0.2` is complete via that Buck target for PPO/A2C, and the same harness now accepts SB3 DQN as well.
+`T0.2` is complete via that Buck target for PPO/A2C, and the same harness now accepts SB3 DQN as well as n-step DQN through `--dqn-n-steps`.
 
 ## Masking semantics
 
@@ -75,12 +75,23 @@ buck2 run fbcode//buiksat_trm:run_baseline -- \
   --algo dqn --env sudoku4x4 --backend sb3 \
   --dataset-dir /home/buiksat/trm_bellman/data/sudoku-4x4-easy_6to8empties \
   --output-root /home/buiksat/trm_bellman/results/neurips2026/external_hard4x4
+
+buck2 run fbcode//buiksat_trm:run_baseline -- \
+  --algo dqn --dqn-n-steps 5 --env sudoku4x4 --backend sb3 \
+  --dataset-dir /home/buiksat/trm_bellman/data/sudoku-4x4-easy_6to8empties \
+  --output-root /home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k
 ```
 
 The command writes a summary JSON to:
 
 ```bash
 results/neurips2026/external_hard4x4/<algo>/seed<seed>/episode_summary.json
+```
+
+For `--algo dqn --dqn-n-steps 5`, artifacts land under:
+
+```bash
+results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed<seed>/
 ```
 
 ## Training mode

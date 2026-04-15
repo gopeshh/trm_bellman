@@ -16,17 +16,23 @@ from typing import Any
 UPI_STEP = 20_000
 UPI_METHOD = "upi_trm"
 REQUIRED_EXTERNAL_METHODS = ("sb3_ppo", "sb3_a2c")
-OPTIONAL_EXTERNAL_METHODS = ("sb3_dqn",)
+OPTIONAL_EXTERNAL_METHODS = ("sb3_dqn", "sb3_dqn_nstep5")
 EXTERNAL_METHOD_DIRS = {
     "sb3_ppo": "ppo",
     "sb3_a2c": "a2c",
     "sb3_dqn": "dqn",
+    "sb3_dqn_nstep5": "dqn_nstep5",
 }
 DISPLAY_NAMES = {
     UPI_METHOD: "UPI-TRM",
     "sb3_ppo": "SB3 PPO",
     "sb3_a2c": "SB3 A2C",
     "sb3_dqn": "SB3 DQN",
+    "sb3_dqn_nstep5": "SB3 DQN (n=5)",
+}
+EXPECTED_DQN_N_STEPS = {
+    "sb3_dqn": 1,
+    "sb3_dqn_nstep5": 5,
 }
 T_CRIT_95 = {
     1: 12.706,
@@ -201,7 +207,12 @@ def _load_upi_results(log_dir: Path) -> dict[str, Any]:
     }
 
 
-def _load_external_results(method: str, algo_dir: Path) -> dict[str, Any]:
+def _load_external_results(
+    method: str,
+    algo_dir: Path,
+    *,
+    expected_dqn_n_steps: int | None = None,
+) -> dict[str, Any]:
     per_seed = []
     total_eval_points = 0
     all_eval_success_zero = True
@@ -219,6 +230,15 @@ def _load_external_results(method: str, algo_dir: Path) -> dict[str, Any]:
 
         summary = json.loads(summary_path.read_text())
         final_eval = summary["final_eval"]
+        if expected_dqn_n_steps is not None:
+            actual_dqn_n_steps = int(
+                summary.get("dqn_n_steps", summary.get("sb3_hparams", {}).get("n_steps", 1))
+            )
+            if actual_dqn_n_steps != expected_dqn_n_steps:
+                raise RuntimeError(
+                    f"Expected DQN n_steps={expected_dqn_n_steps} for {method}, "
+                    f"found {actual_dqn_n_steps} in {summary_path}"
+                )
         train_steps = int(summary["train_steps"])
         if expected_train_steps is None:
             expected_train_steps = train_steps
@@ -545,12 +565,20 @@ def main() -> int:
     included_external_methods = []
     for method in REQUIRED_EXTERNAL_METHODS:
         algo_dir = Path(args.external_root) / EXTERNAL_METHOD_DIRS[method]
-        all_results[method] = _load_external_results(method, algo_dir)
+        all_results[method] = _load_external_results(
+            method,
+            algo_dir,
+            expected_dqn_n_steps=EXPECTED_DQN_N_STEPS.get(method),
+        )
         included_external_methods.append(method)
     for method in OPTIONAL_EXTERNAL_METHODS:
         algo_dir = Path(args.external_root) / EXTERNAL_METHOD_DIRS[method]
         if _has_complete_external_results(algo_dir):
-            all_results[method] = _load_external_results(method, algo_dir)
+            all_results[method] = _load_external_results(
+                method,
+                algo_dir,
+                expected_dqn_n_steps=EXPECTED_DQN_N_STEPS.get(method),
+            )
             included_external_methods.append(method)
 
     method_order = [UPI_METHOD, *included_external_methods]

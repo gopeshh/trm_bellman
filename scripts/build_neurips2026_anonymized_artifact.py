@@ -367,7 +367,7 @@ def _sanitize_external_train_summary(payload: dict[str, Any], algo: str, seed: i
 def _stage_external_baseline_inputs() -> None:
     src_root = REPO_ROOT / "results" / "neurips2026" / "external_hard4x4_20k"
     dst_root = STAGE_ROOT / "results" / "reproduction_inputs" / "trusted_external_raw"
-    for algo in ("ppo", "a2c", "dqn"):
+    for algo in ("ppo", "a2c", "dqn", "dqn_nstep5"):
         for seed in range(10):
             src_dir = src_root / algo / f"seed{seed}"
             dst_dir = dst_root / algo / f"seed{seed}"
@@ -481,6 +481,7 @@ def _stage_hard4x4_paper_ready_outputs() -> None:
                     "sb3_ppo": "ppo",
                     "sb3_a2c": "a2c",
                     "sb3_dqn": "dqn",
+                    "sb3_dqn_nstep5": "dqn_nstep5",
                 }[method]
                 row["source"] = (
                     f"results/reproduction_inputs/trusted_external_raw/{algo}/seed{seed}/train_summary.json"
@@ -563,11 +564,11 @@ def _write_readme() -> None:
         ## Notes
 
         - The dataset directory name `sudoku-4x4-easy_6to8empties` is historical. It is the paper's hard 4x4 no-mask suite.
-        - The bundled baseline harness includes the exact PPO/A2C/DQN hyperparameters used in the matched-budget 20k trusted-baseline sweep.
+        - The bundled baseline harness includes the exact PPO/A2C/DQN and DQN (n=5) hyperparameters used in the matched-budget 20k trusted-baseline sweep.
         - The finite-R appendix evidence is bundled as a small fixed-pair analysis package under `results/reproduction_inputs/finite_r_stage1_b0/` plus the source analysis script in `code/scripts/analyze_exp1_finite_r_sweep.py`.
         - The appendix `L_V` diagnostic is bundled as sanitized summaries under `results/paper_ready/exp1_value_head_lipschitz/` plus the measurement script in `code/scripts/exp1_value_head_lipschitz.py`.
         - Recomputing the trusted-baseline aggregate does not require Stable-Baselines3; it reads the sanitized JSON histories already included here.
-        - Running `code/run_baseline.py` for fresh PPO/A2C/DQN training requires local installs of `torch`, `numpy`, `stable-baselines3`, and either `gym` or `gymnasium`. Those packages are not required to rebuild the paper PDF or the included aggregate outputs.
+        - Running `code/run_baseline.py` for fresh PPO/A2C/DQN and DQN (n=5) training requires local installs of `torch`, `numpy`, `stable-baselines3`, and either `gym` or `gymnasium`. Those packages are not required to rebuild the paper PDF or the included aggregate outputs.
         """
     )
     _write_text(STAGE_ROOT / "README.md", readme)

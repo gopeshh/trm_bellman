@@ -39,3 +39,13 @@ sb3_dqn,6,20000,0.0,-18.098999999999997,0.84,200,True,/home/buiksat/trm_bellman/
 sb3_dqn,7,20000,0.0,-17.747999999999998,0.92,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed7/train_summary.json
 sb3_dqn,8,20000,0.0,-17.879199999999997,0.7775,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed8/train_summary.json
 sb3_dqn,9,20000,0.0,-18.0168,0.79875,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn/seed9/train_summary.json
+sb3_dqn_nstep5,0,20000,0.0,-18.385399999999997,0.77875,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed0/train_summary.json
+sb3_dqn_nstep5,1,20000,0.0,-17.596799999999998,0.91875,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed1/train_summary.json
+sb3_dqn_nstep5,2,20000,0.0,-17.613599999999998,0.9,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed2/train_summary.json
+sb3_dqn_nstep5,3,20000,0.0,-18.100799999999996,0.83625,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed3/train_summary.json
+sb3_dqn_nstep5,4,20000,0.0,-18.151199999999996,0.85625,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed4/train_summary.json
+sb3_dqn_nstep5,5,20000,0.0,-18.166399999999996,0.7975,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed5/train_summary.json
+sb3_dqn_nstep5,6,20000,0.0,-18.3696,0.81625,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed6/train_summary.json
+sb3_dqn_nstep5,7,20000,0.0,-18.033599999999996,0.8375,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed7/train_summary.json
+sb3_dqn_nstep5,8,20000,0.0,-18.050399999999996,0.82,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed8/train_summary.json
+sb3_dqn_nstep5,9,20000,0.0,-17.798399999999997,0.86,200,True,/home/buiksat/trm_bellman/results/neurips2026/external_hard4x4_20k/dqn_nstep5/seed9/train_summary.json
