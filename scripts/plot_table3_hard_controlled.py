@@ -150,7 +150,12 @@ def get_final_success_rates(results_dir: Path) -> Dict[str, Dict[str, float]]:
 
 
 def plot_2x2_bar_chart(results_dir: Path, output_dir: Path):
-    """Create 2×2 bar chart showing final success rates."""
+    """
+    Create 4-separate-bars chart showing final success rates for each of the
+    2x2 cells (NC/C x R=0/R=10), using CELL_CONFIG colors and markers, with
+    error-bar line thickness matched to Figure 8's style (elinewidth=1.5,
+    capthick=1.5, capsize=6) and visible bar edges for paper-grade rendering.
+    """
     final_rates = get_final_success_rates(results_dir)
 
     # Compute means and stds for each cell
@@ -165,47 +170,59 @@ def plot_2x2_bar_chart(results_dir: Path, output_dir: Path):
             cell_means[cell] = 0
             cell_stds[cell] = 0
 
-    # Create figure
+    # Four bars in a row, in CELL_CONFIG order (matches paper figure)
+    cell_order = ["nc_r0", "nc_r10", "c_r0", "c_r10"]
+
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    # Bar positions: grouped by contraction, side-by-side by radius
-    x = np.array([0, 1])  # Two groups: No Contraction, Contraction
-    width = 0.35
+    x_positions = np.arange(len(cell_order))
+    means = [cell_means[c] for c in cell_order]
+    stds = [cell_stds[c] for c in cell_order]
+    colors = [CELL_CONFIG[c]["color"] for c in cell_order]
+    markers = [CELL_CONFIG[c]["marker"] for c in cell_order]
+    labels = [CELL_CONFIG[c]["short_name"] for c in cell_order]
 
-    # R=0 bars (left in each group)
-    r0_means = [cell_means["nc_r0"], cell_means["c_r0"]]
-    r0_stds = [cell_stds["nc_r0"], cell_stds["c_r0"]]
+    # Bars (with visible edges)
+    bars = ax.bar(
+        x_positions, means,
+        width=0.65,
+        color=colors,
+        edgecolor='black',
+        linewidth=1.2,
+        zorder=2,
+    )
 
-    # R=10 bars (right in each group)
-    r10_means = [cell_means["nc_r10"], cell_means["c_r10"]]
-    r10_stds = [cell_stds["nc_r10"], cell_stds["c_r10"]]
+    # Error bars (thick, matching Figure 8 line-thickness style)
+    ax.errorbar(
+        x_positions, means, yerr=stds,
+        fmt='none',
+        ecolor='black',
+        elinewidth=1.5,
+        capsize=6,
+        capthick=1.5,
+        zorder=3,
+    )
 
-    bars1 = ax.bar(x - width/2, r0_means, width, yerr=r0_stds,
-                   label='R=0 (Projection OFF)', color='#d62728', capsize=5)
-    bars2 = ax.bar(x + width/2, r10_means, width, yerr=r10_stds,
-                   label='R=10 (Projection ON)', color='#1f77b4', capsize=5)
+    # Marker on top of each bar for quick visual legend
+    for xi, m, c, mean_val in zip(x_positions, markers, colors, means):
+        ax.plot(
+            xi, mean_val, marker=m, color=c,
+            markersize=9, markeredgecolor='black', markeredgewidth=1.0,
+            linestyle='None', zorder=4,
+        )
 
     # Labels and formatting
     ax.set_ylabel('Final Success Rate')
-    ax.set_title('2×2 Controlled Experiment: Contraction × Projection\n(Hard 4×4 Sudoku, 6-8 empties, T=16, 20k steps)')
-    ax.set_xticks(x)
-    ax.set_xticklabels(['No Contraction', 'Contraction'])
-    ax.legend(loc='upper right')
+    ax.set_title(
+        'Controlled No-Mask Hard 4x4: Final Success Rates\n'
+        '(6-8 empties, T=16, 20k steps)'
+    )
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(labels)
     ax.set_ylim(0, 1.0)
-    ax.grid(True, alpha=0.3, axis='y')
-
-    # Add value labels on bars
-    def autolabel(bars):
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(f'{height:.2f}',
-                        xy=(bar.get_x() + bar.get_width() / 2, height),
-                        xytext=(0, 3),
-                        textcoords="offset points",
-                        ha='center', va='bottom', fontsize=10)
-
-    autolabel(bars1)
-    autolabel(bars2)
+    ax.grid(True, alpha=0.3, axis='y', linewidth=0.8, zorder=0)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
 
     plt.tight_layout()
 
@@ -246,9 +263,9 @@ def plot_learning_curves(results_dir: Path, output_dir: Path):
         for seed_idx, data in seed_data.items():
             steps = [d[0] for d in data]
             rates = [d[1] for d in data]
-            ax.plot(steps, rates, color=config["color"], alpha=0.18, linewidth=0.9)
+            ax.plot(steps, rates, color=config["color"], alpha=0.12, linewidth=1.0)
 
-        # Compute and plot mean curve (thick)
+        # Compute and plot mean curve (thick, matching Figure 8 line weight)
         steps, mean, std = compute_mean_std(seed_data)
 
         if len(steps) > 0:
@@ -257,9 +274,11 @@ def plot_learning_curves(results_dir: Path, output_dir: Path):
                 steps,
                 mean,
                 color=config["color"],
-                linewidth=3.0,
+                linewidth=2.5,
                 marker=config["marker"],
-                markersize=6,
+                markersize=7,
+                markeredgecolor='black',
+                markeredgewidth=0.8,
                 markevery=20,
                 label=f"{config['short_name']} (S={num_seeds})"
             )

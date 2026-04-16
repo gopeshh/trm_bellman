@@ -1,6 +1,6 @@
 # Exp2 Final: Paper Claims
 
-**Generated**: 2026-01-21T15:55:09.423053
+**Generated**: 2026-04-16T09:50:06.356173
 **Status**: Path B (Negative Result for Dial + Positive Result for Projection)
 
 ## Claim 1: Dial Failure (Negative Result)

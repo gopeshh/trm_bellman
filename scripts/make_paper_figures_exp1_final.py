@@ -231,10 +231,10 @@ def create_unroll_sensitivity_figure(
         if use_log:
             ax.set_yscale("log")
         else:
-            ax.set_ylim(0.9, 1.01)
+            ax.set_ylim(0.85, 1.01)
 
         if col == 2:
-            ax.legend(loc='lower left', framealpha=0.9, fontsize=12)
+            ax.legend(loc='upper right', framealpha=0.9, fontsize=12)
 
     fig.suptitle(f"Unroll Sensitivity ({batch_name})", fontsize=16, fontweight='bold', y=1.02)
     plt.tight_layout()
