@@ -1057,8 +1057,17 @@ def main():
                 dataset=dataset,
                 checker=checker_fn,
             )
-            print(f"[Post-imitation] eval_success_rate={eval_metrics['success_rate']:.3f} "
-                  f"eval_mean_score={eval_metrics['mean_score']:.3f}")
+            post_imitation_msg = (
+                f"[Post-imitation] eval_success_rate={eval_metrics['success_rate']:.3f} "
+                f"eval_mean_score={eval_metrics['mean_score']:.3f}"
+            )
+            if "mean_return" in eval_metrics:
+                post_imitation_msg += f" eval_mean_return={eval_metrics['mean_return']:.3f}"
+            if "invalid_action_rate" in eval_metrics:
+                post_imitation_msg += (
+                    f" eval_invalid_action_rate={eval_metrics['invalid_action_rate']:.3f}"
+                )
+            print(post_imitation_msg)
             print()
 
     # === Training loop with puzzle embedding updates and checkpointing ===
@@ -1177,6 +1186,8 @@ def main():
                 score_max = eval_metrics.get("score_max", 0.0)
                 max_possible = eval_metrics.get("max_possible_score")
                 initial_mean = eval_metrics.get("initial_score_mean", 0.0)
+                mean_return = eval_metrics.get("mean_return")
+                invalid_action_rate = eval_metrics.get("invalid_action_rate")
                 # Sudoku-specific progress metrics
                 filled_mean = eval_metrics.get("final_filled_mean")
                 violations_mean = eval_metrics.get("final_violations_mean")
@@ -1192,6 +1203,10 @@ def main():
                     f"{f'/{max_possible:.1f}' if max_possible else ''}, "
                     f"initial={initial_mean:.2f}]"
                 )
+                if mean_return is not None:
+                    eval_msg += f" eval_mean_return={mean_return:.3f}"
+                if invalid_action_rate is not None:
+                    eval_msg += f" eval_invalid_action_rate={invalid_action_rate:.3f}"
                 # Add progress metrics if available (Sudoku tasks)
                 if filled_mean is not None:
                     progress_msg = (

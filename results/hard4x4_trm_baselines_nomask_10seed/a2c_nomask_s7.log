@@ -1,0 +1,5 @@
+[2026-04-16T15:28:27.527-07:00] Buck UI: https://www.internalfb.com/buck2/efff2b9d-9c94-4228-86b1-429028c1c1e9
+BUILD FAILED
+package `fbcode//buiksat_trm:` does not exist
+         ^-----------------^
+    dir `fbcode//buiksat_trm` does not exist. 

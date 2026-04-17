@@ -599,7 +599,8 @@ class DQNTrainer:
             num_episodes: Number of evaluation episodes
 
         Returns:
-            Dict with mean_score, success_rate, filled/violations/zero_cand, etc.
+            Dict with mean_score, success_rate, mean_return, invalid_action_rate,
+            filled/violations/zero_cand, etc.
         """
         self.q_network.eval()
         device = self.device
@@ -616,6 +617,9 @@ class DQNTrainer:
         num_solved = 0
         total_score = 0.0
         episodes_ran = 0
+        total_return = 0.0
+        total_steps = 0
+        total_invalid_actions = 0
         all_final_scores: List[float] = []
         all_initial_scores: List[float] = []
         max_possible_score: Optional[float] = None
@@ -630,6 +634,9 @@ class DQNTrainer:
             for episode_idx in range(num_episodes):
                 x, y = eval_env.reset(idx=episode_idx % dataset_size)
                 done = False
+                episode_return = 0.0
+                episode_steps = 0
+                episode_invalid_actions = 0
                 
                 # Track initial score before any edits
                 initial_score = float(checker(x, y))
@@ -671,8 +678,14 @@ class DQNTrainer:
                         action_mask=action_mask,
                     )
                     action = q_values.argmax(dim=-1).item()
+
+                    if action_mask is not None:
+                        if action < 0 or action >= action_mask.numel() or not bool(action_mask[action].item()):
+                            episode_invalid_actions += 1
                     
-                    (x_next, y_next), _, done, _ = eval_env.step(action)
+                    (x_next, y_next), reward, done, _ = eval_env.step(action)
+                    episode_return += float(reward)
+                    episode_steps += 1
                     x, y = x_next, y_next
                     
                     if done:
@@ -682,6 +695,9 @@ class DQNTrainer:
                 total_score += final_score
                 all_final_scores.append(final_score)
                 episodes_ran += 1
+                total_return += episode_return
+                total_steps += episode_steps
+                total_invalid_actions += episode_invalid_actions
                 
                 # Get final plan tensor for Sudoku-specific checks
                 if isinstance(y, torch.Tensor):
@@ -718,6 +734,9 @@ class DQNTrainer:
             "score_max": max(all_final_scores) if all_final_scores else 0.0,
             "max_possible_score": max_possible_score,
             "initial_score_mean": sum(all_initial_scores) / len(all_initial_scores) if all_initial_scores else 0.0,
+            "mean_return": total_return / float(max(episodes_ran, 1)),
+            "mean_steps": total_steps / float(max(episodes_ran, 1)),
+            "invalid_action_rate": total_invalid_actions / float(max(total_steps, 1)),
         }
         
         # Add Sudoku-specific stats if applicable

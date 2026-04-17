@@ -51,6 +51,9 @@ def evaluate_plan_policy_with_scores(
             - score_max: maximum final score
             - max_possible_score: max score from solution (or None if no solution)
             - initial_score_mean: mean initial score before any edits
+            - mean_return: mean cumulative episode reward under the internal env
+            - mean_steps: mean number of steps per episode
+            - invalid_action_rate: invalid actions / total steps during eval
             - final_filled_mean: mean number of filled cells at episode end (Sudoku only)
             - final_violations_mean: mean violations at episode end (Sudoku only)
             - final_zero_cand_mean: mean zero-candidate cells at episode end (Sudoku only)
@@ -76,6 +79,9 @@ def evaluate_plan_policy_with_scores(
     num_solved = 0
     total_score = 0.0
     episodes_ran = 0
+    total_return = 0.0
+    total_steps = 0
+    total_invalid_actions = 0
     all_final_scores: list = []
     all_initial_scores: list = []
     max_possible_score: Optional[float] = None
@@ -90,6 +96,9 @@ def evaluate_plan_policy_with_scores(
         for episode_idx in range(num_episodes):
             x, y = env.reset(idx=episode_idx % dataset_size)
             done = False
+            episode_return = 0.0
+            episode_steps = 0
+            episode_invalid_actions = 0
 
             # Track initial score before any edits
             initial_score = float(checker(x, y))
@@ -146,11 +155,17 @@ def evaluate_plan_policy_with_scores(
                 else:
                     action = dist.sample().item()
 
+                if action_mask is not None:
+                    if action < 0 or action >= action_mask.numel() or not bool(action_mask[action].item()):
+                        episode_invalid_actions += 1
+
                 # Carry forward the updated latent in persistent mode
                 if not episodic_latent:
                     z = z_new
 
-                (x_next, y_next), _, done, _ = env.step(action)
+                (x_next, y_next), reward, done, _ = env.step(action)
+                episode_return += float(reward)
+                episode_steps += 1
                 x, y = x_next, y_next
 
                 if done:
@@ -160,6 +175,9 @@ def evaluate_plan_policy_with_scores(
             total_score += final_score
             all_final_scores.append(final_score)
             episodes_ran += 1
+            total_return += episode_return
+            total_steps += episode_steps
+            total_invalid_actions += episode_invalid_actions
 
             # Get the final plan tensor for Sudoku-specific checks
             if isinstance(y, torch.Tensor):
@@ -200,6 +218,9 @@ def evaluate_plan_policy_with_scores(
         "score_max": max(all_final_scores) if all_final_scores else 0.0,
         "max_possible_score": max_possible_score,
         "initial_score_mean": sum(all_initial_scores) / len(all_initial_scores) if all_initial_scores else 0.0,
+        "mean_return": total_return / float(max(episodes_ran, 1)),
+        "mean_steps": total_steps / float(max(episodes_ran, 1)),
+        "invalid_action_rate": total_invalid_actions / float(max(total_steps, 1)),
     }
 
     # Add Sudoku-specific stats if applicable
