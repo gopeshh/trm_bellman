@@ -1651,6 +1651,7 @@ class UPITrmTrainer:
             dataset=dataset,
             checker=checker,
             env_cfg=env_cfg,
+            task_config=getattr(self.env, "task_config", None),
             num_episodes=self.rl_cfg.eval_num_episodes,
             inner_unroll_n=self.rl_cfg.inner_unroll_n,
             episodic_latent=episodic_latent,

@@ -18,6 +18,7 @@ def evaluate_plan_policy_with_scores(
     dataset: Any,
     checker: Callable[[Any, Any], float],
     env_cfg: PlanEditEnvConfig,
+    task_config: Optional[Any] = None,
     num_episodes: int = 100,
     inner_unroll_n: Optional[int] = None,
     episodic_latent: bool = True,
@@ -32,6 +33,7 @@ def evaluate_plan_policy_with_scores(
         dataset: Dataset providing puzzle instances
         checker: Function (x, y) -> score
         env_cfg: Environment configuration
+        task_config: Optional task-specific masking logic to keep eval aligned with training
         num_episodes: Number of evaluation episodes
         inner_unroll_n: Number of latent unrolling steps (default: 4)
         episodic_latent: If True (default), reinitialize z from (x,y) at every step.
@@ -61,7 +63,7 @@ def evaluate_plan_policy_with_scores(
 
     device = next(model.parameters()).device
     model.eval()
-    env = PlanEditEnv(dataset=dataset, checker=checker, config=env_cfg)
+    env = PlanEditEnv(dataset=dataset, checker=checker, config=env_cfg, task_config=task_config)
 
     if env.stop_action_id is None:
         num_actions = getattr(model.config, "rl_num_actions", None)
@@ -237,6 +239,7 @@ def evaluate_plan_policy(
     dataset: Any,
     checker: Callable[[Any, Any], float],
     env_cfg: PlanEditEnvConfig,
+    task_config: Optional[Any] = None,
     num_episodes: int = 100,
     inner_unroll_n: Optional[int] = None,
     episodic_latent: bool = True,
@@ -256,6 +259,7 @@ def evaluate_plan_policy(
         dataset=dataset,
         checker=checker,
         env_cfg=env_cfg,
+        task_config=task_config,
         num_episodes=num_episodes,
         inner_unroll_n=inner_unroll_n,
         episodic_latent=episodic_latent,

@@ -164,19 +164,20 @@ class PPOTrainer:
 
     def _get_policy_params(self) -> List[nn.Parameter]:
         """Get policy head parameters."""
-        params = []
-        for name, param in self.model.named_parameters():
-            if "edit_policy" in name and param.requires_grad:
-                params.append(param)
-        return params if params else list(self.model.parameters())
+        named_params = [
+            (name, param) for name, param in self.model.named_parameters() if param.requires_grad
+        ]
+        params = [param for name, param in named_params if "edit_policy" in name]
+        return params if params else [param for _, param in named_params]
 
     def _get_value_params(self) -> List[nn.Parameter]:
         """Get value head and backbone parameters."""
-        params = []
-        for name, param in self.model.named_parameters():
-            if "edit_policy" not in name and param.requires_grad:
-                params.append(param)
-        return params if params else []
+        named_params = [
+            (name, param) for name, param in self.model.named_parameters() if param.requires_grad
+        ]
+        if not any("edit_policy" in name for name, _ in named_params):
+            return []
+        return [param for name, param in named_params if "edit_policy" not in name]
 
     def _prepare_batch_x(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Prepare state dict for model input."""
@@ -197,6 +198,17 @@ class PPOTrainer:
     def _stack_scalar_buffer(self, tensors: List[torch.Tensor]) -> torch.Tensor:
         """Stack scalar or singleton tensors into a flat 1D tensor."""
         return torch.stack(tensors).reshape(-1)
+
+    def _stack_action_masks(self, masks: List[Optional[torch.Tensor]]) -> Optional[torch.Tensor]:
+        """Stack optional action masks, filling missing rows with all-valid masks."""
+        template = next((mask for mask in masks if mask is not None), None)
+        if template is None:
+            return None
+        num_actions = template.numel()
+        return torch.stack([
+            mask if mask is not None else torch.ones(num_actions, dtype=torch.bool)
+            for mask in masks
+        ]).to(self.device)
 
     def collect_rollouts(self, num_steps: int) -> None:
         """
@@ -364,10 +376,7 @@ class PPOTrainer:
 
                 # Get action mask batch
                 mb_action_masks = [self.rollout_buffer.action_masks[i] for i in mb_indices]
-                if mb_action_masks[0] is not None:
-                    mb_action_mask = torch.stack(mb_action_masks).to(self.device)
-                else:
-                    mb_action_mask = None
+                mb_action_mask = self._stack_action_masks(mb_action_masks)
 
                 # Forward pass
                 dist, _ = self.model.policy_dist(
@@ -501,6 +510,7 @@ class PPOTrainer:
             dataset=dataset,
             checker=checker,
             env_cfg=env_cfg,
+            task_config=getattr(self.env, "task_config", None),
             num_episodes=num_episodes,
             inner_unroll_n=self.config.inner_unroll_n,
             episodic_latent=True,  # Baselines use episodic latent

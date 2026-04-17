@@ -64,6 +64,15 @@ class DQNConfig:
     eval_interval: int = 500
 
 
+def compute_epsilon_decay_steps(
+    num_train_steps: int,
+    exploration_fraction: float,
+    train_freq: int,
+) -> int:
+    """Convert the configured exploration fraction into environment-step units."""
+    return int(num_train_steps * train_freq * exploration_fraction)
+
+
 @dataclass
 class Transition:
     """A single transition in the replay buffer."""
@@ -116,6 +125,12 @@ class QNetwork(nn.Module):
         super().__init__()
         self.base_model = base_model
         self.num_actions = num_actions
+        self._uses_trm_latent = (
+            hasattr(base_model, "unroll_latent")
+            and hasattr(base_model, "inner")
+            and hasattr(base_model, "config")
+            and hasattr(base_model.config, "seq_len")
+        )
 
         # Compute input dimension for Q-head.
         # - TRM exposes the flattened latent state z_H with length seq_len + puzzle_emb_len.
@@ -128,7 +143,7 @@ class QNetwork(nn.Module):
             else:
                 hidden_size = hidden_dim
 
-            if hasattr(base_model, 'unroll_latent') and hasattr(base_model.config, 'seq_len'):
+            if self._uses_trm_latent:
                 puzzle_emb_len = 0
                 inner = getattr(base_model, 'inner', None)
                 if inner is not None:
@@ -173,7 +188,7 @@ class QNetwork(nn.Module):
             Q-values tensor of shape [batch_size, num_actions]
         """
         # Get latent representation from base model
-        if hasattr(self.base_model, 'unroll_latent'):
+        if self._uses_trm_latent:
             # TRM backbone: use latent state
             z_carry, _ = self.base_model.unroll_latent(x, y, n=n)
             # TRM returns a carry object with z_H attribute
@@ -209,7 +224,7 @@ class QNetwork(nn.Module):
 
     def get_latent(self, x: Dict[str, torch.Tensor], y: torch.Tensor, n: int = 4) -> torch.Tensor:
         """Get the latent representation for inspection/debugging."""
-        if hasattr(self.base_model, 'unroll_latent'):
+        if self._uses_trm_latent:
             z_carry, _ = self.base_model.unroll_latent(x, y, n=n)
             # TRM returns a carry object with z_H attribute
             if hasattr(z_carry, 'z_H'):
@@ -457,6 +472,15 @@ class DQNTrainer:
         batch_y_next = torch.stack([t.y_next for t in batch]).to(self.device)
 
         # Handle action masks
+        if any(t.action_mask is not None for t in batch):
+            batch_action_masks = torch.stack([
+                t.action_mask if t.action_mask is not None
+                else torch.ones(self.num_actions, dtype=torch.bool)
+                for t in batch
+            ]).to(self.device)
+        else:
+            batch_action_masks = None
+
         if any(t.next_action_mask is not None for t in batch):
             batch_next_masks = torch.stack([
                 t.next_action_mask if t.next_action_mask is not None
@@ -467,7 +491,12 @@ class DQNTrainer:
             batch_next_masks = None
 
         # Compute current Q-values
-        current_q = self.q_network(batch_x, batch_y, n=self.config.inner_unroll_n)
+        current_q = self.q_network(
+            batch_x,
+            batch_y,
+            n=self.config.inner_unroll_n,
+            action_mask=batch_action_masks,
+        )
         current_q = current_q.gather(1, batch_actions.unsqueeze(1)).squeeze(1)
 
         # Compute target Q-values
@@ -612,7 +641,12 @@ class DQNTrainer:
         device = self.device
         
         # Create evaluation environment
-        eval_env = PlanEditEnv(dataset=dataset, checker=checker, config=env_cfg)
+        eval_env = PlanEditEnv(
+            dataset=dataset,
+            checker=checker,
+            config=env_cfg,
+            task_config=getattr(self.env, "task_config", None),
+        )
         if eval_env.stop_action_id is None:
             eval_env.set_stop_action_id(stop_id=self.num_actions - 1)
         

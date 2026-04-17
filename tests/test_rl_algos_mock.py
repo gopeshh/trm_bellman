@@ -6,29 +6,37 @@ import torch.nn as nn
 from unittest.mock import MagicMock
 
 from rl.algos.a2c import A2CTrainer, A2CConfig
-from rl.algos.dqn import DQNTrainer, DQNConfig, Transition
+from rl.algos.dqn import (
+    DQNTrainer,
+    DQNConfig,
+    QNetwork,
+    Transition,
+    compute_epsilon_decay_steps,
+)
 from rl.algos.ppo import PPOTrainer, PPOConfig
+from rl.evaluator import evaluate_plan_policy_with_scores
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 
 class MockConfig:
-    def __init__(self, hidden_dim):
+    def __init__(self, hidden_dim, rl_num_actions=5):
         self.hidden_dim = hidden_dim
         # Add seq_len for QNetwork calculation (it checks config.seq_len)
-        self.seq_len = 1 
+        self.seq_len = 1
+        self.rl_num_actions = rl_num_actions
 
 class MockModel(nn.Module):
     def __init__(self, action_dim=10, hidden_dim=32):
         super().__init__()
         self.action_dim = action_dim
         self.hidden_dim = hidden_dim
-        self.config = MockConfig(hidden_dim)
+        self.config = MockConfig(hidden_dim, rl_num_actions=action_dim)
         
         # PPO splits params based on "edit_policy" in name
         self.edit_policy_head = nn.Linear(hidden_dim, action_dim)
         self.value_head = nn.Linear(hidden_dim, 1)
         self.encoder = nn.Linear(10, hidden_dim) 
         
-    def policy_dist(self, x, y, n=4, action_mask=None):
+    def policy_dist(self, x, y, n=4, action_mask=None, z=None):
         batch_size = x["inputs"].shape[0]
         # Use encoder to get gradients
         z = self.encoder(x["inputs"].float()) # [B, H]
@@ -67,6 +75,30 @@ class MockTRMModel(nn.Module):
         z_flat = self.latent_proj(x["inputs"].float())
         z_H = z_flat.view(batch_size, total_seq_len, self.config.hidden_size)
         return SimpleNamespace(z_H=z_H), None
+
+
+class MockNoRecStubModel(nn.Module):
+    def __init__(self, hidden_dim=8, seq_len=4):
+        super().__init__()
+        self.config = SimpleNamespace(hidden_dim=hidden_dim, seq_len=seq_len)
+        self.encoder = nn.Linear(10, hidden_dim)
+
+    def encode(self, x, y):
+        return self.encoder(x["inputs"].float())
+
+    def unroll_latent(self, x, y, n=4):
+        return None, None
+
+
+class FakeTaskConfig:
+    def __init__(self):
+        self.calls = 0
+
+    def compute_action_mask(self, inputs, vocab_size, stop_action_id, current_state=None):
+        self.calls += 1
+        mask = torch.zeros(stop_action_id + 1, dtype=torch.bool)
+        mask[stop_action_id] = True
+        return mask
 
 class TestRLAlgos(unittest.TestCase):
     def setUp(self):
@@ -177,6 +209,16 @@ class TestRLAlgos(unittest.TestCase):
 
         self.assertEqual(q_values.shape, (1, self.action_dim))
 
+    def test_dqn_qnetwork_uses_encode_path_for_norec_stub(self):
+        norec_model = MockNoRecStubModel(hidden_dim=8, seq_len=4)
+        q_network = QNetwork(norec_model, num_actions=self.action_dim)
+
+        x, y = self.env.reset.return_value
+        q_values = q_network(x, y, n=0)
+
+        self.assertEqual(q_network._input_dim, 8)
+        self.assertEqual(q_values.shape, (1, self.action_dim))
+
     def test_dqn_train_batch_keeps_masks_when_first_transition_is_terminal(self):
         config = DQNConfig(
             min_buffer_size=1,
@@ -237,12 +279,76 @@ class TestRLAlgos(unittest.TestCase):
         stats = trainer.train_batch()
 
         self.assertIn("loss_q", stats)
-        self.assertIsNone(online_masks[0])
+        self.assertIsNotNone(online_masks[0])
         self.assertIsNotNone(online_masks[1])
         self.assertIsNotNone(target_masks[0])
+        self.assertEqual(online_masks[0].shape, (2, self.action_dim))
         self.assertEqual(online_masks[1].shape, (2, self.action_dim))
+        self.assertTrue(torch.equal(online_masks[0][1].cpu(), torch.ones(self.action_dim, dtype=torch.bool)))
         self.assertTrue(torch.equal(online_masks[1][1].cpu(), next_mask))
         self.assertTrue(torch.equal(target_masks[0][1].cpu(), next_mask))
+
+    def test_compute_epsilon_decay_steps_scales_by_train_freq(self):
+        epsilon_decay_steps = compute_epsilon_decay_steps(
+            num_train_steps=5000,
+            exploration_fraction=0.1,
+            train_freq=4,
+        )
+
+        self.assertEqual(epsilon_decay_steps, 2000)
+
+    def test_build_trainer_dqn_scales_epsilon_decay_by_train_freq(self):
+        self.test_compute_epsilon_decay_steps_scales_by_train_freq()
+
+    def test_evaluator_threads_task_config_into_eval_env(self):
+        model = MockModel(action_dim=self.action_dim)
+        with torch.no_grad():
+            model.edit_policy_head.weight.zero_()
+            model.edit_policy_head.bias.zero_()
+            model.edit_policy_head.bias[2] = 10.0
+
+        dataset = [
+            {
+                "inputs": torch.ones(10, dtype=torch.long),
+                "puzzle_identifiers": torch.tensor([0]),
+                "initial_plan": torch.ones(10, dtype=torch.long),
+            }
+        ]
+        env_cfg = PlanEditEnvConfig(
+            max_edits=3,
+            gamma=0.99,
+            reward_shaping=False,
+            task_type="dummy",
+            vocab_size=4,
+            stop_action_mode="terminal",
+        )
+
+        checker = lambda x, y: float(torch.as_tensor(y).sum().item())
+        fake_task_config = FakeTaskConfig()
+
+        _, _, no_task_stats = evaluate_plan_policy_with_scores(
+            model=model,
+            dataset=dataset,
+            checker=checker,
+            env_cfg=env_cfg,
+            num_episodes=1,
+            inner_unroll_n=0,
+            greedy=True,
+        )
+        _, _, with_task_stats = evaluate_plan_policy_with_scores(
+            model=model,
+            dataset=dataset,
+            checker=checker,
+            env_cfg=env_cfg,
+            task_config=fake_task_config,
+            num_episodes=1,
+            inner_unroll_n=0,
+            greedy=True,
+        )
+
+        self.assertEqual(no_task_stats["mean_steps"], 3.0)
+        self.assertEqual(with_task_stats["mean_steps"], 1.0)
+        self.assertGreater(fake_task_config.calls, 0)
 
 if __name__ == "__main__":
     unittest.main()

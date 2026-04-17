@@ -183,7 +183,7 @@ def build_trainer(
     from rl.upi_trm_trainer import UPITrmTrainer
     from rl.algos.ppo import PPOTrainer, PPOConfig
     from rl.algos.a2c import A2CTrainer, A2CConfig
-    from rl.algos.dqn import DQNTrainer, DQNConfig
+    from rl.algos.dqn import DQNTrainer, DQNConfig, compute_epsilon_decay_steps
     
     selected_baseline = baseline_selection.selected_baseline
     yaml_algorithm = baseline_selection.yaml_algorithm
@@ -282,9 +282,13 @@ def build_trainer(
     elif selected_baseline in ("dqn", "ddqn"):
         # DQN/Double DQN baseline - wire YAML keys
         use_double = (selected_baseline == "ddqn") or get_yaml_key("dqn_double_dqn", False)
-        
+        train_freq = get_yaml_key("dqn_train_freq", 4)
         exploration_fraction = get_yaml_key("dqn_exploration_fraction", 0.1)
-        epsilon_decay_steps = int(rl_cfg.num_train_steps * exploration_fraction)
+        epsilon_decay_steps = compute_epsilon_decay_steps(
+            num_train_steps=rl_cfg.num_train_steps,
+            exploration_fraction=exploration_fraction,
+            train_freq=train_freq,
+        )
         
         dqn_cfg = DQNConfig(
             double_dqn=use_double,
@@ -299,7 +303,7 @@ def build_trainer(
             learning_rate=rl_cfg.value_lr,
             max_grad_norm=get_yaml_key("max_grad_norm", 1.0),
             inner_unroll_n=rl_cfg.inner_unroll_n,
-            train_freq=get_yaml_key("dqn_train_freq", 4),
+            train_freq=train_freq,
             gradient_steps=get_yaml_key("dqn_gradient_steps", 1),
             num_train_steps=rl_cfg.num_train_steps,
             log_interval=rl_cfg.log_interval,
@@ -1033,6 +1037,11 @@ def main():
 
     # === Imitation learning pre-training (optional but recommended) ===
     if args.imitation_pretrain:
+        if not hasattr(trainer, "imitation_pretrain"):
+            raise ValueError(
+                "--imitation-pretrain is only supported for the default UPI-TRM trainer, "
+                "not for PPO/A2C/DQN baselines."
+            )
         print("\n" + "="*60)
         print("IMITATION LEARNING PRE-TRAINING")
         print("="*60)

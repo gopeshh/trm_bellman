@@ -173,6 +173,17 @@ class A2CTrainer:
         """Stack scalar or singleton tensors into a flat 1D tensor."""
         return torch.stack(tensors).reshape(-1)
 
+    def _stack_action_masks(self, masks: List[Optional[torch.Tensor]]) -> Optional[torch.Tensor]:
+        """Stack optional action masks, filling missing rows with all-valid masks."""
+        template = next((mask for mask in masks if mask is not None), None)
+        if template is None:
+            return None
+        num_actions = template.numel()
+        return torch.stack([
+            mask if mask is not None else torch.ones(num_actions, dtype=torch.bool)
+            for mask in masks
+        ]).to(self.device)
+
     def collect_rollouts(self, num_steps: int) -> torch.Tensor:
         """
         Collect num_steps of experience using current policy.
@@ -304,10 +315,7 @@ class A2CTrainer:
         y_batch = torch.stack(self.rollout_buffer.y_list).to(self.device)
 
         # Get action mask batch
-        if self.rollout_buffer.action_masks[0] is not None:
-            action_mask = torch.stack(self.rollout_buffer.action_masks).to(self.device)
-        else:
-            action_mask = None
+        action_mask = self._stack_action_masks(self.rollout_buffer.action_masks)
 
         # Forward pass
         dist, _ = self.model.policy_dist(
@@ -437,6 +445,7 @@ class A2CTrainer:
             dataset=dataset,
             checker=checker,
             env_cfg=env_cfg,
+            task_config=getattr(self.env, "task_config", None),
             num_episodes=num_episodes,
             inner_unroll_n=self.config.inner_unroll_n,
             episodic_latent=True,  # Baselines use episodic latent

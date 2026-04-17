@@ -534,7 +534,7 @@ class PlanEditEnv:
         # === Mask out invalid token values (token 0 = PAD, token 1 = empty) ===
         # For Sudoku, only tokens 2-5 (digits 1-4) are valid cell values.
         # Setting a cell to PAD or empty is never useful for solving.
-        if exclude_empty_token and vocab_size > 2:
+        if exclude_empty_token:
             # For each position, mask out token 0 and token 1
             # Action index for (pos, tok) = pos * vocab_size + tok
             for tok in range(min(2, vocab_size)):  # tok=0 (PAD), tok=1 (empty)
