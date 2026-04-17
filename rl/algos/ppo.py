@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils as nn_utils
 
-from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan, normalize_puzzle_id
+from rl.batch_utils import prepare_batch_x, prepare_plan, normalize_puzzle_id
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.value_targets import compute_gae_trajectory
 
@@ -194,6 +194,10 @@ class PPOTrainer:
             return state.clone().cpu()
         return state
 
+    def _stack_scalar_buffer(self, tensors: List[torch.Tensor]) -> torch.Tensor:
+        """Stack scalar or singleton tensors into a flat 1D tensor."""
+        return torch.stack(tensors).reshape(-1)
+
     def collect_rollouts(self, num_steps: int) -> None:
         """
         Collect num_steps of experience using current policy.
@@ -234,8 +238,9 @@ class PPOTrainer:
                 )
 
                 # Sample action
-                action = dist.sample().squeeze()
-                log_prob = dist.log_prob(action)
+                action = dist.sample().reshape(())
+                log_prob = dist.log_prob(action).reshape(())
+                value = value.reshape(())
 
             # Step environment
             (x_next, y_next), reward, done, info = self.env.step(action.item())
@@ -277,7 +282,7 @@ class PPOTrainer:
             advantages: [num_steps] tensor of GAE advantages
         """
         rewards = torch.tensor(self.rollout_buffer.rewards, dtype=torch.float32)
-        values = torch.stack(self.rollout_buffer.values).squeeze()
+        values = self._stack_scalar_buffer(self.rollout_buffer.values)
         dones = torch.tensor(self.rollout_buffer.dones, dtype=torch.bool)
 
         # Get bootstrap value for last state
@@ -323,9 +328,9 @@ class PPOTrainer:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # Get old log probs
-        old_log_probs = torch.stack(self.rollout_buffer.log_probs).to(self.device)
-        actions = torch.stack(self.rollout_buffer.actions).to(self.device)
-        old_values = torch.stack(self.rollout_buffer.values).squeeze().to(self.device)
+        old_log_probs = self._stack_scalar_buffer(self.rollout_buffer.log_probs).to(self.device)
+        actions = self._stack_scalar_buffer(self.rollout_buffer.actions).to(self.device)
+        old_values = self._stack_scalar_buffer(self.rollout_buffer.values).to(self.device)
 
         # Prepare batch data
         num_steps = len(self.rollout_buffer)
@@ -371,6 +376,7 @@ class PPOTrainer:
                     action_mask=mb_action_mask
                 )
                 values, _ = self.model.used_value(mb_x, mb_y, n=self.config.inner_unroll_n)
+                values = values.reshape(-1)
 
                 # Compute log probs and entropy
                 log_probs = dist.log_prob(mb_actions)
@@ -386,15 +392,15 @@ class PPOTrainer:
                 if self.config.clip_vf_loss:
                     # Clipped value loss (optional)
                     v_clipped = mb_old_values + torch.clamp(
-                        values.squeeze() - mb_old_values,
+                        values - mb_old_values,
                         -self.config.clip_eps,
                         self.config.clip_eps
                     )
-                    vf_loss1 = F.mse_loss(values.squeeze(), mb_returns)
+                    vf_loss1 = F.mse_loss(values, mb_returns)
                     vf_loss2 = F.mse_loss(v_clipped, mb_returns)
                     value_loss = torch.max(vf_loss1, vf_loss2)
                 else:
-                    value_loss = F.mse_loss(values.squeeze(), mb_returns)
+                    value_loss = F.mse_loss(values, mb_returns)
 
                 # Total loss (Joint Update)
                 loss = (

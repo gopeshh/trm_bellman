@@ -588,6 +588,22 @@ python_unittest(
 )
 
 python_unittest(
+    name = "test_rl_algos_mock",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_rl_algos_mock.py",
+    ],
+    base_module = "",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/pytest:pytest",
+    ],
+)
+
+python_unittest(
     name = "test_undo_and_sequences",
     srcs = [
         "tests/__init__.py",

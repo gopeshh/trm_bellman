@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils as nn_utils
 
-from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan, normalize_puzzle_id
+from rl.batch_utils import prepare_batch_x, prepare_plan, normalize_puzzle_id
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.value_targets import compute_gae_trajectory, compute_td_advantage
 
@@ -169,6 +169,10 @@ class A2CTrainer:
             return state.clone().cpu()
         return state
 
+    def _stack_scalar_buffer(self, tensors: List[torch.Tensor]) -> torch.Tensor:
+        """Stack scalar or singleton tensors into a flat 1D tensor."""
+        return torch.stack(tensors).reshape(-1)
+
     def collect_rollouts(self, num_steps: int) -> torch.Tensor:
         """
         Collect num_steps of experience using current policy.
@@ -210,7 +214,8 @@ class A2CTrainer:
                 )
 
                 # Sample action
-                action = dist.sample().squeeze()
+                action = dist.sample().reshape(())
+                value = value.reshape(())
 
             # Step environment
             (x_next, y_next), reward, done, info = self.env.step(action.item())
@@ -267,9 +272,9 @@ class A2CTrainer:
 
         # Convert rollout data to tensors
         rewards = torch.tensor(self.rollout_buffer.rewards, dtype=torch.float32)
-        values = torch.stack(self.rollout_buffer.values).squeeze()
+        values = self._stack_scalar_buffer(self.rollout_buffer.values)
         dones = torch.tensor(self.rollout_buffer.dones, dtype=torch.bool)
-        actions = torch.stack(self.rollout_buffer.actions).to(self.device)
+        actions = self._stack_scalar_buffer(self.rollout_buffer.actions).to(self.device)
 
         # Compute advantages
         if self.config.use_gae:
@@ -311,6 +316,7 @@ class A2CTrainer:
             action_mask=action_mask
         )
         new_values, _ = self.model.used_value(x_batch, y_batch, n=self.config.inner_unroll_n)
+        new_values = new_values.reshape(-1)
 
         # Compute log probs and entropy
         log_probs = dist.log_prob(actions)
@@ -320,7 +326,7 @@ class A2CTrainer:
         policy_loss = -(log_probs * advantages.detach()).mean()
 
         # Value loss
-        value_loss = F.mse_loss(new_values.squeeze(), returns)
+        value_loss = F.mse_loss(new_values, returns)
 
         # Total loss
         loss = (

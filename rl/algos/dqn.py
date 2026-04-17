@@ -117,8 +117,9 @@ class QNetwork(nn.Module):
         self.base_model = base_model
         self.num_actions = num_actions
 
-        # Compute input dimension for Q-head
-        # For TRM: z_H shape is [batch, seq_len, hidden_size], so flattened is seq_len * hidden_size
+        # Compute input dimension for Q-head.
+        # - TRM exposes the flattened latent state z_H with length seq_len + puzzle_emb_len.
+        # - NoRec encoders already collapse to a single hidden vector.
         if hasattr(base_model, 'config'):
             if hasattr(base_model.config, 'hidden_size'):
                 hidden_size = base_model.config.hidden_size
@@ -127,9 +128,14 @@ class QNetwork(nn.Module):
             else:
                 hidden_size = hidden_dim
 
-            # For TRM, we need seq_len * hidden_size
-            if hasattr(base_model.config, 'seq_len'):
-                input_dim = base_model.config.seq_len * hidden_size
+            if hasattr(base_model, 'unroll_latent') and hasattr(base_model.config, 'seq_len'):
+                puzzle_emb_len = 0
+                inner = getattr(base_model, 'inner', None)
+                if inner is not None:
+                    puzzle_emb_len = int(getattr(inner, 'puzzle_emb_len', 0) or 0)
+                input_dim = (base_model.config.seq_len + puzzle_emb_len) * hidden_size
+            elif hasattr(base_model, 'encode'):
+                input_dim = hidden_size
             else:
                 input_dim = hidden_size
         else:
@@ -451,10 +457,10 @@ class DQNTrainer:
         batch_y_next = torch.stack([t.y_next for t in batch]).to(self.device)
 
         # Handle action masks
-        if batch[0].next_action_mask is not None:
+        if any(t.next_action_mask is not None for t in batch):
             batch_next_masks = torch.stack([
                 t.next_action_mask if t.next_action_mask is not None
-                else torch.ones(self.num_actions)
+                else torch.ones(self.num_actions, dtype=torch.bool)
                 for t in batch
             ]).to(self.device)
         else:
