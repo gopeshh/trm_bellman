@@ -576,6 +576,7 @@ python_unittest(
     srcs = [
         "tests/__init__.py",
         "tests/test_baselines_unittest.py",
+        "tests/test_baseline_selection.py",
     ],
     base_module = "",
     deps = [
@@ -584,6 +585,7 @@ python_unittest(
         ":utils",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 

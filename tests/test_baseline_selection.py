@@ -10,6 +10,7 @@ These tests verify:
 import os
 import sys
 import tempfile
+from types import SimpleNamespace
 from typing import Dict, Any
 from unittest.mock import MagicMock, patch
 
@@ -146,7 +147,8 @@ class MockBaseModel(nn.Module):
         self.config = MagicMock()
         self.config.seq_len = seq_len
         self.config.hidden_size = hidden_size
-        
+        self.inner = SimpleNamespace(puzzle_emb_len=0)
+
         # Simple embedding + MLP
         self.embed = nn.Embedding(10, hidden_size)
         self.fc = nn.Linear(seq_len * hidden_size, hidden_size)
@@ -1237,4 +1239,3 @@ ppo_minibatch_size: 8
         # Also verify config values from override.yaml are used
         assert trainer.config.num_steps == 16
         assert trainer.config.num_minibatches == 2  # 16 / 8 = 2
-
