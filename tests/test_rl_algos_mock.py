@@ -300,6 +300,210 @@ class TestRLAlgos(unittest.TestCase):
     def test_build_trainer_dqn_scales_epsilon_decay_by_train_freq(self):
         self.test_compute_epsilon_decay_steps_scales_by_train_freq()
 
+    def test_ppo_mask_stacking_with_mixed_none_and_tensor(self):
+        config = PPOConfig(num_steps=2, inner_unroll_n=0)
+        trainer = PPOTrainer(self.model, self.env, config)
+
+        partial_mask = torch.tensor([True, False, True, False, True], dtype=torch.bool)
+        masks = [None, partial_mask, None, partial_mask]
+        stacked = trainer._stack_action_masks(masks)
+
+        self.assertIsNotNone(stacked)
+        self.assertEqual(stacked.shape, (4, self.action_dim))
+        self.assertEqual(stacked.dtype, torch.bool)
+        all_valid = torch.ones(self.action_dim, dtype=torch.bool)
+        self.assertTrue(torch.equal(stacked[0].cpu(), all_valid))
+        self.assertTrue(torch.equal(stacked[2].cpu(), all_valid))
+        self.assertTrue(torch.equal(stacked[1].cpu(), partial_mask))
+        self.assertTrue(torch.equal(stacked[3].cpu(), partial_mask))
+
+    def test_ppo_mask_stacking_returns_none_when_all_none(self):
+        config = PPOConfig(num_steps=2, inner_unroll_n=0)
+        trainer = PPOTrainer(self.model, self.env, config)
+
+        self.assertIsNone(trainer._stack_action_masks([None, None, None]))
+
+    def test_a2c_mask_stacking_with_mixed_none_and_tensor(self):
+        config = A2CConfig(num_steps=2, inner_unroll_n=0)
+        trainer = A2CTrainer(self.model, self.env, config)
+
+        partial_mask = torch.tensor([True, False, True, False, True], dtype=torch.bool)
+        masks = [partial_mask, None]
+        stacked = trainer._stack_action_masks(masks)
+
+        self.assertIsNotNone(stacked)
+        self.assertEqual(stacked.shape, (2, self.action_dim))
+        self.assertEqual(stacked.dtype, torch.bool)
+        self.assertTrue(torch.equal(stacked[0].cpu(), partial_mask))
+        self.assertTrue(
+            torch.equal(stacked[1].cpu(), torch.ones(self.action_dim, dtype=torch.bool))
+        )
+
+    def test_baseline_trainers_lack_imitation_pretrain(self):
+        ppo_trainer = PPOTrainer(
+            self.model, self.env, PPOConfig(num_steps=2, inner_unroll_n=0)
+        )
+        a2c_trainer = A2CTrainer(
+            self.model, self.env, A2CConfig(num_steps=2, inner_unroll_n=0)
+        )
+        dqn_trainer = DQNTrainer(
+            self.model,
+            self.env,
+            DQNConfig(min_buffer_size=1, batch_size=1, inner_unroll_n=0),
+        )
+
+        self.assertFalse(hasattr(ppo_trainer, "imitation_pretrain"))
+        self.assertFalse(hasattr(a2c_trainer, "imitation_pretrain"))
+        self.assertFalse(hasattr(dqn_trainer, "imitation_pretrain"))
+
+    def test_ppo_raises_when_no_edit_policy_params(self):
+        class NoEditPolicyModel(nn.Module):
+            def __init__(self, action_dim=5, hidden_dim=8):
+                super().__init__()
+                self.config = MockConfig(hidden_dim, rl_num_actions=action_dim)
+                self.policy = nn.Linear(hidden_dim, action_dim)
+                self.value = nn.Linear(hidden_dim, 1)
+                self.encoder = nn.Linear(10, hidden_dim)
+
+            def policy_dist(self, x, y, n=4, action_mask=None, z=None):
+                z = self.encoder(x["inputs"].float())
+                logits = self.policy(z)
+                if action_mask is not None:
+                    logits = logits.masked_fill(~action_mask.bool(), -1e9)
+                return torch.distributions.Categorical(logits=logits), None
+
+            def used_value(self, x, y, n=4):
+                z = self.encoder(x["inputs"].float())
+                return self.value(z).squeeze(-1), None
+
+            def encode(self, x, y):
+                return self.encoder(x["inputs"].float())
+
+        model = NoEditPolicyModel(action_dim=self.action_dim)
+
+        with self.assertRaises(ValueError) as ctx:
+            PPOTrainer(model, self.env, PPOConfig(num_steps=2, inner_unroll_n=0))
+
+        self.assertIn("edit_policy", str(ctx.exception))
+
+    def test_baseline_configs_expose_eval_num_episodes_with_default_50(self):
+        ppo_cfg = PPOConfig()
+        a2c_cfg = A2CConfig()
+        dqn_cfg = DQNConfig()
+
+        self.assertEqual(ppo_cfg.eval_num_episodes, 50)
+        self.assertEqual(a2c_cfg.eval_num_episodes, 50)
+        self.assertEqual(dqn_cfg.eval_num_episodes, 50)
+
+        self.assertEqual(PPOConfig(eval_num_episodes=7).eval_num_episodes, 7)
+        self.assertEqual(A2CConfig(eval_num_episodes=7).eval_num_episodes, 7)
+        self.assertEqual(DQNConfig(eval_num_episodes=7).eval_num_episodes, 7)
+
+    def test_ppo_evaluate_policy_metrics_falls_back_to_config_eval_num_episodes(self):
+        captured = {}
+
+        def fake_eval(*args, **kwargs):
+            captured["num_episodes"] = kwargs.get("num_episodes")
+            return 0.0, 0.0, {}
+
+        import rl.evaluator as evaluator_mod
+
+        orig = evaluator_mod.evaluate_plan_policy_with_scores
+        evaluator_mod.evaluate_plan_policy_with_scores = fake_eval
+        try:
+            trainer = PPOTrainer(
+                self.model,
+                self.env,
+                PPOConfig(num_steps=2, inner_unroll_n=0, eval_num_episodes=7),
+            )
+            trainer.evaluate_policy_metrics(
+                env_cfg=MagicMock(),
+                dataset=[],
+                checker=lambda x, y: 0.0,
+            )
+        finally:
+            evaluator_mod.evaluate_plan_policy_with_scores = orig
+
+        self.assertEqual(captured["num_episodes"], 7)
+
+    def test_a2c_evaluate_policy_metrics_falls_back_to_config_eval_num_episodes(self):
+        captured = {}
+
+        def fake_eval(*args, **kwargs):
+            captured["num_episodes"] = kwargs.get("num_episodes")
+            return 0.0, 0.0, {}
+
+        import rl.evaluator as evaluator_mod
+
+        orig = evaluator_mod.evaluate_plan_policy_with_scores
+        evaluator_mod.evaluate_plan_policy_with_scores = fake_eval
+        try:
+            trainer = A2CTrainer(
+                self.model,
+                self.env,
+                A2CConfig(num_steps=2, inner_unroll_n=0, eval_num_episodes=3),
+            )
+            trainer.evaluate_policy_metrics(
+                env_cfg=MagicMock(),
+                dataset=[],
+                checker=lambda x, y: 0.0,
+            )
+        finally:
+            evaluator_mod.evaluate_plan_policy_with_scores = orig
+
+        self.assertEqual(captured["num_episodes"], 3)
+
+    def test_dqn_evaluate_policy_metrics_falls_back_to_config_eval_num_episodes(self):
+        from unittest.mock import patch
+        import rl.algos.dqn as dqn_mod
+
+        mock_eval_env = MagicMock()
+        mock_eval_env.stop_action_id = self.stop_action_id
+        mock_eval_env.reset.return_value = (
+            {"inputs": torch.zeros(1, 10), "puzzle_identifiers": torch.zeros(1)},
+            torch.zeros(1, 10),
+        )
+        mock_eval_env.step.return_value = (
+            (
+                {"inputs": torch.zeros(1, 10), "puzzle_identifiers": torch.zeros(1)},
+                torch.zeros(1, 10),
+            ),
+            0.0,
+            True,
+            {},
+        )
+        mock_eval_env.get_action_mask.return_value = torch.ones(
+            self.action_dim, dtype=torch.bool
+        )
+
+        trainer = DQNTrainer(
+            self.model,
+            self.env,
+            DQNConfig(
+                min_buffer_size=1,
+                batch_size=1,
+                inner_unroll_n=0,
+                eval_num_episodes=7,
+            ),
+        )
+
+        dataset = [
+            {
+                "inputs": torch.zeros(10, dtype=torch.long),
+                "puzzle_identifiers": torch.tensor([0]),
+            }
+        ]
+        env_cfg = SimpleNamespace(max_edits=1)
+
+        with patch.object(dqn_mod, "PlanEditEnv", return_value=mock_eval_env):
+            trainer.evaluate_policy_metrics(
+                env_cfg=env_cfg,
+                dataset=dataset,
+                checker=lambda x, y: 0.0,
+            )
+
+        self.assertEqual(mock_eval_env.reset.call_count, 7)
+
     def test_evaluator_threads_task_config_into_eval_env(self):
         model = MockModel(action_dim=self.action_dim)
         with torch.no_grad():

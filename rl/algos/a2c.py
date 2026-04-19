@@ -51,6 +51,12 @@ class A2CConfig:
     # Training
     num_train_steps: int = 10000
 
+    # Evaluation
+    # Episode count used by evaluate_policy_metrics() when the caller does
+    # not pass an explicit num_episodes; build_trainer() should set this
+    # from rl_cfg.eval_num_episodes so UPI-TRM and baselines stay in sync.
+    eval_num_episodes: int = 50
+
 
 @dataclass
 class A2CRolloutBuffer:
@@ -416,7 +422,7 @@ class A2CTrainer:
         env_cfg: PlanEditEnvConfig,
         dataset: Any,
         checker: Any,
-        num_episodes: int = 50,
+        num_episodes: Optional[int] = None,
     ) -> Dict[str, float]:
         """
         Evaluate the policy using greedy rollouts, returning success rate and mean score.
@@ -428,7 +434,11 @@ class A2CTrainer:
             env_cfg: Environment configuration
             dataset: Dataset providing puzzle instances
             checker: Checker function (x, y) -> score
-            num_episodes: Number of evaluation episodes (default 50)
+            num_episodes: Number of evaluation episodes. If None, falls back
+                to ``self.config.eval_num_episodes`` so UPI-TRM and baseline
+                trainers use the same episode count when callers rely on
+                defaults (the value that ``build_trainer`` threads in from
+                ``rl_cfg.eval_num_episodes``).
 
         Returns:
             Dict with:
@@ -440,13 +450,16 @@ class A2CTrainer:
         """
         from rl.evaluator import evaluate_plan_policy_with_scores
 
+        effective_num_episodes = (
+            num_episodes if num_episodes is not None else self.config.eval_num_episodes
+        )
         mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
             model=self.model,
             dataset=dataset,
             checker=checker,
             env_cfg=env_cfg,
             task_config=getattr(self.env, "task_config", None),
-            num_episodes=num_episodes,
+            num_episodes=effective_num_episodes,
             inner_unroll_n=self.config.inner_unroll_n,
             episodic_latent=True,  # Baselines use episodic latent
             greedy=True,  # Always greedy for deterministic evaluation

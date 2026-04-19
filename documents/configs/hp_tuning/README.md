@@ -1,13 +1,18 @@
 # Hyperparameter Tuning for Baselines on Hard 4×4 Sudoku
 
 ## Goal
-Improve PPO/A2C/DQN from 0% to >0% success on 6-8 empties dataset.
+Historical masked-control sweep for PPO/A2C/DQN on the 6-8 empties dataset. This is not the final locked no-mask Table 1 baseline package.
 
-## Current Baseline Performance
-- PPO: 0% (3 seeds)
-- A2C: 0% (3 seeds)
-- DQN: 0% (3 seeds)
-- UPI-TRM: 37-57% (reference)
+## Locked No-Mask Table 1 Results
+- TRM+PPO: 32.0% ± 15.3% (10 seeds)
+- TRM+A2C: 0.0% (10 seeds)
+- TRM+DQN: 0.0% (10 seeds)
+- UPI-TRM: 57.4% ± 12.2% (10 seeds)
+
+## What This Directory Contains
+- A supplementary masked-protocol tuning sweep.
+- Single-seed and small multi-seed hyperparameter explorations that all remained at 0% success in that masked control.
+- Historical notes that are still useful for ablation context but should not be cited as the final no-mask baseline outcome.
 
 ## Tuning Strategy
 

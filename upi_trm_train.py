@@ -247,6 +247,7 @@ def build_trainer(
             log_interval=rl_cfg.log_interval,
             eval_interval=rl_cfg.eval_interval,
             num_train_steps=rl_cfg.num_train_steps,
+            eval_num_episodes=rl_cfg.eval_num_episodes,
         )
         trainer = PPOTrainer(model=model, env=env, config=ppo_cfg, device=device)
         if verbose:
@@ -271,6 +272,7 @@ def build_trainer(
             log_interval=rl_cfg.log_interval,
             eval_interval=rl_cfg.eval_interval,
             num_train_steps=rl_cfg.num_train_steps,
+            eval_num_episodes=rl_cfg.eval_num_episodes,
         )
         trainer = A2CTrainer(model=model, env=env, config=a2c_cfg, device=device)
         if verbose:
@@ -308,6 +310,7 @@ def build_trainer(
             num_train_steps=rl_cfg.num_train_steps,
             log_interval=rl_cfg.log_interval,
             eval_interval=rl_cfg.eval_interval,
+            eval_num_episodes=rl_cfg.eval_num_episodes,
         )
         trainer = DQNTrainer(model=model, env=env, config=dqn_cfg, device=device)
         if verbose:

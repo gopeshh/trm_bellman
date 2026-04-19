@@ -134,10 +134,10 @@ Paper-facing anchor:
 - Task: hard `4x4` Sudoku, `6-8` empties, no-mask protocol.
 - Budget: `20k` training steps, horizon `T = 16`.
 - UPI-TRM: `57.4% +/- 12.2%` success over `10` seeds.
-- Architecture-matched baselines with the same TRM backbone:
-  - `TRM+PPO`: `0.0%` over `3` seeds.
-  - `TRM+A2C`: `0.0%` over `3` seeds.
-  - `TRM+DQN`: `0.0%` over `3` seeds.
+- Architecture-matched baselines with the same TRM backbone and checker-shaped reward:
+  - `TRM+PPO`: `32.0% +/- 15.3%` over `10` seeds.
+  - `TRM+A2C`: `0.0%` over `10` seeds.
+  - `TRM+DQN`: `0.0%` over `10` seeds.
 - External trusted baselines from SB3:
   - PPO: `0.0%` over `10` seeds.
   - A2C: `0.0%` over `10` seeds.
@@ -147,7 +147,8 @@ Paper-facing anchor:
 Meaning:
 
 - The paper now has both architecture-matched and independent-codebase baseline coverage.
-- The hard result is genuinely nontrivial within this domain.
+- `TRM+PPO` is a real baseline rather than a collapsed control.
+- UPI-TRM still leads the strongest fixed baseline by `25.4` percentage points with lower variance (`12.2` vs `15.3`).
 - The result uses `persistent-z`, so the paper treats it as empirical evidence, not direct validation of the clean episodic-`z` theorem.
 
 ### B. Projection is the dominant stabilizer on hard 4x4
@@ -433,7 +434,9 @@ As of the 2026-04 locked notes:
 - Main capability anchor: no-mask hard `4x4`, not masked hard `4x4`.
 - `M1` no-mask hard `4x4` is complete:
   - UPI: `0.574` mean, `0.122` std, seeds `0..9`
-  - in-house A2C: `0.000` over seeds `0..3`
+  - TRM+PPO: `0.320` mean, `0.153` std, seeds `0..9`
+  - TRM+A2C: `0.000` over seeds `0..9`
+  - TRM+DQN: `0.000` over seeds `0..9`
 - Controlled no-mask hard `4x4` `2x2` is complete:
   - `nc_r0 = 0.350`
   - `nc_r10 = 0.482`

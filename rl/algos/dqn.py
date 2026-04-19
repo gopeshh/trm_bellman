@@ -63,6 +63,12 @@ class DQNConfig:
     log_interval: int = 100
     eval_interval: int = 500
 
+    # Evaluation
+    # Episode count used by evaluate_policy_metrics() when the caller does
+    # not pass an explicit num_episodes; build_trainer() should set this
+    # from rl_cfg.eval_num_episodes so UPI-TRM and baselines stay in sync.
+    eval_num_episodes: int = 50
+
 
 def compute_epsilon_decay_steps(
     num_train_steps: int,
@@ -618,7 +624,7 @@ class DQNTrainer:
         env_cfg: PlanEditEnvConfig,
         dataset: Any,
         checker: Any,
-        num_episodes: int = 50,
+        num_episodes: Optional[int] = None,
     ) -> Dict[str, float]:
         """
         Evaluate the DQN policy using epsilon=0 greedy Q-network rollouts.
@@ -631,12 +637,19 @@ class DQNTrainer:
             env_cfg: Environment configuration
             dataset: Dataset providing puzzle instances
             checker: Checker function (x, y) -> score
-            num_episodes: Number of evaluation episodes
+            num_episodes: Number of evaluation episodes. If None, falls back
+                to ``self.config.eval_num_episodes`` so UPI-TRM and baseline
+                trainers use the same episode count when callers rely on
+                defaults (the value that ``build_trainer`` threads in from
+                ``rl_cfg.eval_num_episodes``).
 
         Returns:
             Dict with mean_score, success_rate, mean_return, invalid_action_rate,
             filled/violations/zero_cand, etc.
         """
+        num_episodes = (
+            num_episodes if num_episodes is not None else self.config.eval_num_episodes
+        )
         self.q_network.eval()
         device = self.device
         
