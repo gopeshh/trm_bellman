@@ -1,0 +1,4 @@
+gpu	method	seed	config	logfile	checkpoint_dir
+0	ppo	0	buiksat_trm/configs/sudoku9x9/ppo_9x9.yaml	/home/buiksat/trm_bellman/results/9x9_trm_baselines_post3c2e959_3seed/ppo_9x9_s0.log	/home/buiksat/trm_bellman/checkpoints/9x9_trm_baselines_post3c2e959_3seed/ppo_s0
+1	ppo	1	buiksat_trm/configs/sudoku9x9/ppo_9x9.yaml	/home/buiksat/trm_bellman/results/9x9_trm_baselines_post3c2e959_3seed/ppo_9x9_s1.log	/home/buiksat/trm_bellman/checkpoints/9x9_trm_baselines_post3c2e959_3seed/ppo_s1
+2	ppo	2	buiksat_trm/configs/sudoku9x9/ppo_9x9.yaml	/home/buiksat/trm_bellman/results/9x9_trm_baselines_post3c2e959_3seed/ppo_9x9_s2.log	/home/buiksat/trm_bellman/checkpoints/9x9_trm_baselines_post3c2e959_3seed/ppo_s2

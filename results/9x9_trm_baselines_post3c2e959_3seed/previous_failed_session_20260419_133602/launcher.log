@@ -1,0 +1,25 @@
+============================================================
+9x9 post-audit TRM+PPO baseline rerun (3 seeds, 50k steps)
+============================================================
+  Dataset:     buiksat_trm/data/sudoku-9x9
+  Config:      buiksat_trm/configs/sudoku9x9/ppo_9x9.yaml
+  Steps:       50000
+  Seeds:       0 1 2
+  Results:     /home/buiksat/trm_bellman/results/9x9_trm_baselines_post3c2e959_3seed
+  Checkpoints: /home/buiksat/trm_bellman/checkpoints/9x9_trm_baselines_post3c2e959_3seed
+  Manifest:    /home/buiksat/trm_bellman/results/9x9_trm_baselines_post3c2e959_3seed/job_manifest.tsv
+  Expected:    ~37h wall-clock (3 seeds on 3 GPUs in parallel)
+============================================================
+
+[GPU 0] Starting ppo seed=0
+  Config:     buiksat_trm/configs/sudoku9x9/ppo_9x9.yaml
+  Log:        /home/buiksat/trm_bellman/results/9x9_trm_baselines_post3c2e959_3seed/ppo_9x9_s0.log
+  Checkpoint: /home/buiksat/trm_bellman/checkpoints/9x9_trm_baselines_post3c2e959_3seed/ppo_s0
+[GPU 1] Starting ppo seed=1
+[GPU 2] Starting ppo seed=2
+  Config:     buiksat_trm/configs/sudoku9x9/ppo_9x9.yaml
+  Log:        /home/buiksat/trm_bellman/results/9x9_trm_baselines_post3c2e959_3seed/ppo_9x9_s1.log
+  Config:     buiksat_trm/configs/sudoku9x9/ppo_9x9.yaml
+  Checkpoint: /home/buiksat/trm_bellman/checkpoints/9x9_trm_baselines_post3c2e959_3seed/ppo_s1
+  Log:        /home/buiksat/trm_bellman/results/9x9_trm_baselines_post3c2e959_3seed/ppo_9x9_s2.log
+  Checkpoint: /home/buiksat/trm_bellman/checkpoints/9x9_trm_baselines_post3c2e959_3seed/ppo_s2
