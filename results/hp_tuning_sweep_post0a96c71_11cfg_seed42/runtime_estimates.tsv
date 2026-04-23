@@ -1,0 +1,2 @@
+source	commit_or_artifact	total_gpu_time	avg_time_per_4_gpus	critical_path	expected_wall_clock
+historical_logs	results/hp_tuning_sweep/*_s42.log	99:30:52	24:52:43	28:12:26	~28-30h
