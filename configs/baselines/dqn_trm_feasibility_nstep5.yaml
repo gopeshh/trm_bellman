@@ -1,0 +1,9 @@
+# Overlay config for `configs/baselines/dqn_trm_feasibility.yaml`.
+#
+# Use with:
+#   --config configs/baselines/dqn_trm_feasibility.yaml \
+#   --config configs/baselines/dqn_trm_feasibility_nstep5.yaml
+#
+# This keeps the baseline numerics identical except for the n-step TD target.
+
+dqn_n_step: 5

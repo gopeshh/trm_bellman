@@ -10,10 +10,9 @@ References:
 - Van Hasselt et al., "Deep Reinforcement Learning with Double Q-learning" (2016)
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 import random
-from collections import deque
 
 import torch
 import torch.nn as nn
@@ -44,12 +43,13 @@ class DQNConfig:
     min_buffer_size: int = 500  # Minimum transitions before training starts
 
     # Target network
-    target_update_freq: int = 100  # Steps between target network updates
+    target_update_freq: int = 100  # Env steps between target network updates
     soft_update_tau: float = 0.0  # If > 0, use soft update instead of hard copy
 
     # Learning
     learning_rate: float = 1e-4
     max_grad_norm: float = 1.0  # Gradient clipping norm
+    dqn_n_step: int = 1  # n-step TD target horizon (1 reproduces vanilla DQN)
 
     # Model
     inner_unroll_n: int = 4  # Latent unroll steps (for TRM backbone)
@@ -91,29 +91,161 @@ class Transition:
     done: bool
     action_mask: Optional[torch.Tensor] = None
     next_action_mask: Optional[torch.Tensor] = None
+    bootstrap_steps: int = 1
 
 
 class ReplayBuffer:
     """
     Experience replay buffer for DQN.
 
-    Stores transitions and provides random sampling for training.
-    Uses a deque for efficient O(1) append/pop operations.
+    Stores transitions in a flat ring buffer and supports n-step aggregation
+    at sampling time while respecting episode boundaries.
     """
 
     def __init__(self, capacity: int):
-        self.buffer: deque = deque(maxlen=capacity)
+        self.capacity = capacity
+        self.buffer: List[Optional[Transition]] = [None] * capacity
+        self.size = 0
+        self.next_index = 0
+        self._next_in_episode: List[Optional[int]] = [None] * capacity
+        self._current_episode_last_index: Optional[int] = None
+        self._current_episode_indices: List[int] = []
 
     def add(self, transition: Transition) -> None:
         """Add a transition to the buffer."""
-        self.buffer.append(transition)
+        idx = self.next_index
+        self.buffer[idx] = transition
+        self._next_in_episode[idx] = None
 
-    def sample(self, batch_size: int) -> List[Transition]:
-        """Sample a random batch of transitions."""
-        return random.sample(list(self.buffer), min(batch_size, len(self.buffer)))
+        if idx in self._current_episode_indices:
+            self._current_episode_indices = [
+                current_idx for current_idx in self._current_episode_indices if current_idx != idx
+            ]
+            if self._current_episode_last_index == idx:
+                self._current_episode_last_index = (
+                    self._current_episode_indices[-1] if self._current_episode_indices else None
+                )
+
+        if self._current_episode_last_index is not None:
+            self._next_in_episode[self._current_episode_last_index] = idx
+        self._current_episode_indices.append(idx)
+        self._current_episode_last_index = idx
+
+        if self.size < self.capacity:
+            self.size += 1
+        self.next_index = (self.next_index + 1) % self.capacity
+
+        if transition.done:
+            self._current_episode_last_index = None
+            self._current_episode_indices = []
+
+    def clear(self) -> None:
+        """Reset the replay buffer."""
+        self.buffer = [None] * self.capacity
+        self.size = 0
+        self.next_index = 0
+        self._next_in_episode = [None] * self.capacity
+        self._current_episode_last_index = None
+        self._current_episode_indices = []
+
+    def _valid_index_upper_bound(self) -> int:
+        return self.capacity if self.size == self.capacity else self.size
+
+    def _current_episode_unready_indices(self, n_step: int) -> set[int]:
+        # Overwrites happen oldest-first, so any completed episode retained in
+        # the ring buffer is kept as a suffix of that episode's time order.
+        # That means a stored transition cannot have an in-episode successor
+        # that was overwritten before it. The only forward links that may
+        # still be unavailable are the tail links of the current in-progress
+        # episode, which are blocked here for n-step sampling.
+        if n_step <= 1 or not self._current_episode_indices:
+            return set()
+        return set(self._current_episode_indices[-(n_step - 1):])
+
+    def build_n_step_transition(
+        self,
+        index: int,
+        n_step: int,
+        gamma: float,
+    ) -> Transition:
+        """Construct an n-step aggregate transition from a stored index."""
+        if n_step <= 0:
+            raise ValueError(f"n_step must be >= 1, got {n_step}")
+        transition = self.buffer[index]
+        if transition is None:
+            raise IndexError(f"ReplayBuffer slot {index} is empty")
+
+        total_reward = 0.0
+        discount = 1.0
+        steps = 0
+        current_index: Optional[int] = index
+        final_transition = transition
+
+        while current_index is not None and steps < n_step:
+            current_transition = self.buffer[current_index]
+            if current_transition is None:
+                break
+            total_reward += discount * float(current_transition.reward)
+            final_transition = current_transition
+            steps += 1
+            if current_transition.done:
+                break
+            current_index = self._next_in_episode[current_index]
+            discount *= gamma
+
+        return Transition(
+            x=transition.x,
+            y=transition.y,
+            action=transition.action,
+            reward=total_reward,
+            x_next=final_transition.x_next,
+            y_next=final_transition.y_next,
+            done=final_transition.done,
+            action_mask=transition.action_mask,
+            next_action_mask=final_transition.next_action_mask,
+            bootstrap_steps=steps,
+        )
+
+    def sample(
+        self,
+        batch_size: int,
+        n_step: int = 1,
+        gamma: float = 1.0,
+    ) -> List[Transition]:
+        """Sample a random batch of transitions with optional n-step aggregation."""
+        if n_step <= 0:
+            raise ValueError(f"n_step must be >= 1, got {n_step}")
+        if self.size == 0:
+            return []
+
+        upper_bound = self._valid_index_upper_bound()
+        blocked_indices = self._current_episode_unready_indices(n_step)
+        ready_count = max(0, upper_bound - len(blocked_indices))
+        if ready_count == 0:
+            return []
+
+        sample_size = min(batch_size, ready_count)
+        if sample_size == ready_count:
+            sampled_indices = [
+                idx
+                for idx in range(upper_bound)
+                if self.buffer[idx] is not None and idx not in blocked_indices
+            ]
+        else:
+            sampled_set = set()
+            while len(sampled_set) < sample_size:
+                idx = random.randrange(upper_bound)
+                if idx in blocked_indices or self.buffer[idx] is None:
+                    continue
+                sampled_set.add(idx)
+            sampled_indices = list(sampled_set)
+        return [
+            self.build_n_step_transition(idx, n_step=n_step, gamma=gamma)
+            for idx in sampled_indices
+        ]
 
     def __len__(self) -> int:
-        return len(self.buffer)
+        return self.size
 
 
 class QNetwork(nn.Module):
@@ -311,9 +443,13 @@ class DQNTrainer:
         # Training state
         self._train_step_count = 0
         self._env_step_count = 0
+        self._last_target_update_env_step = 0
         self._episode_count = 0
         self._epsilon = config.epsilon_start
         self.term_stats = {"stop": 0, "solved": 0, "budget": 0}
+
+        if self.config.dqn_n_step < 1:
+            raise ValueError(f"dqn_n_step must be >= 1, got {self.config.dqn_n_step}")
 
         # Current episode state
         self._current_x: Optional[Dict[str, torch.Tensor]] = None
@@ -465,7 +601,13 @@ class DQNTrainer:
         self.q_network.train()
 
         # Sample batch
-        batch = self.replay_buffer.sample(self.config.batch_size)
+        batch = self.replay_buffer.sample(
+            self.config.batch_size,
+            n_step=self.config.dqn_n_step,
+            gamma=self.config.gamma,
+        )
+        if not batch:
+            return {"loss_q": 0.0, "mean_q": 0.0, "mean_target_q": 0.0, "epsilon": self._get_epsilon()}
 
         # Prepare batch tensors
         batch_x = self._stack_x_batch([t.x for t in batch])
@@ -473,6 +615,9 @@ class DQNTrainer:
         batch_actions = torch.tensor([t.action for t in batch], dtype=torch.long, device=self.device)
         batch_rewards = torch.tensor([t.reward for t in batch], dtype=torch.float32, device=self.device)
         batch_dones = torch.tensor([t.done for t in batch], dtype=torch.bool, device=self.device)
+        batch_bootstrap_steps = torch.tensor(
+            [t.bootstrap_steps for t in batch], dtype=torch.long, device=self.device
+        )
 
         batch_x_next = self._stack_x_batch([t.x_next for t in batch])
         batch_y_next = torch.stack([t.y_next for t in batch]).to(self.device)
@@ -535,7 +680,11 @@ class DQNTrainer:
             next_q = next_q.masked_fill(batch_dones, 0.0)
 
             # Compute TD target
-            target_q = batch_rewards + self.config.gamma * next_q
+            discounts = torch.pow(
+                torch.full_like(batch_rewards, self.config.gamma),
+                batch_bootstrap_steps.to(batch_rewards.dtype),
+            )
+            target_q = batch_rewards + discounts * next_q
 
         # Compute loss
         loss = F.mse_loss(current_q, target_q)
@@ -600,9 +749,13 @@ class DQNTrainer:
 
         self._train_step_count += 1
 
-        # Update target network periodically
-        if self._train_step_count % self.config.target_update_freq == 0:
+        # Update target network periodically in env-step units.
+        if (
+            self._env_step_count - self._last_target_update_env_step
+            >= self.config.target_update_freq
+        ):
             self.update_target_network()
+            self._last_target_update_env_step = self._env_step_count
 
         return train_stats
 

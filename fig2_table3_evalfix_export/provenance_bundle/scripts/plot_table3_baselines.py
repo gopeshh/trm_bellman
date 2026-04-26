@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-Generate learning curve plots for Table 3 baselines.
-Matches paper style from plot_feasibility_curves.py and plot_6to8empties_paper_style.py
+Generate learning-curve plots for Table 3 baselines.
 
-Creates trivial_baselines_vs_no_contraction_success_vs_steps.pdf
-
-Usage:
-    python plot_table3_baselines.py --results-dir results/table3_baselines_rerun_evalfix_2026_01_22 \
-                                     --output-dir figures/
+By default this script plots success rate against environment interactions,
+not outer trainer steps, so PPO/A2C/DQN curves are comparable after the
+baseline audit. Use ``plot_table3_baselines_outer.py`` for the legacy
+outer-step view.
 """
 
 import argparse
@@ -72,13 +70,28 @@ ALGO_CONFIG = {
         "color": "#d62728",  # red
         "marker": "D"
     },
+    "dqn_nstep5": {
+        "name": "DQN (n=5)",
+        "color": "#9467bd",  # purple
+        "marker": "X"
+    },
+}
+
+ENV_STEPS_PER_OUTER = {
+    "persistent_nc": 1,
+    "episodic_nc": 1,
+    "episodic_c_clean": 1,
+    "ppo": 64,
+    "a2c": 32,
+    "dqn": 4,
+    "dqn_nstep5": 4,
 }
 
 # Random baseline for trivial dataset (52%)
 RANDOM_BASELINE = 0.52
 
 
-def parse_log_file(log_path: Path) -> List[Tuple[int, float]]:
+def parse_log_file(log_path: Path, step_scale: int = 1) -> List[Tuple[int, float]]:
     """
     Parse a training log file and extract (step, success_rate) pairs.
 
@@ -92,14 +105,17 @@ def parse_log_file(log_path: Path) -> List[Tuple[int, float]]:
         for line in f:
             match = re.search(pattern, line)
             if match:
-                step = int(match.group(1))
+                step = int(match.group(1)) * step_scale
                 success_rate = float(match.group(2))
                 data.append((step, success_rate))
 
     return data
 
 
-def aggregate_seeds(log_files: List[Path]) -> Dict[int, List[Tuple[int, float]]]:
+def aggregate_seeds(
+    log_files: List[Path],
+    step_scale: int = 1,
+) -> Dict[int, List[Tuple[int, float]]]:
     """
     Load data for each seed separately.
 
@@ -108,7 +124,7 @@ def aggregate_seeds(log_files: List[Path]) -> Dict[int, List[Tuple[int, float]]]
     """
     all_data = {}
     for i, log_file in enumerate(log_files):
-        data = parse_log_file(log_file)
+        data = parse_log_file(log_file, step_scale=step_scale)
         if data:
             all_data[i] = data
     return all_data
@@ -142,17 +158,40 @@ def compute_mean_std(seed_data: Dict[int, List[Tuple[int, float]]]) -> Tuple[np.
     return steps, mean, std
 
 
-def main():
+def _default_output_name(x_axis_mode: str) -> str:
+    if x_axis_mode == "outer":
+        return "trivial_baselines_vs_no_contraction_success_vs_outer_steps"
+    return "trivial_baselines_vs_no_contraction_success_vs_interactions"
+
+
+def _default_max_steps(x_axis_mode: str) -> int:
+    if x_axis_mode == "outer":
+        return 80000
+    return 320000
+
+
+def main(
+    default_x_axis_mode: str = "interactions",
+    default_output_name: str | None = None,
+    default_max_steps: int | None = None,
+):
     parser = argparse.ArgumentParser(description="Generate Figure 2: Table 3 baselines learning curves")
     parser.add_argument("--results-dir", type=str, required=True,
                         help="Directory containing training logs (e.g., results/table3_baselines_rerun_evalfix_2026_01_22)")
     parser.add_argument("--output-dir", type=str, required=True,
                         help="Directory to save output figures (e.g., figures/)")
+    parser.add_argument(
+        "--x-axis-mode",
+        choices=("interactions", "outer"),
+        default=default_x_axis_mode,
+        help="Plot environment interactions (default) or raw outer trainer steps.",
+    )
     parser.add_argument("--output-name", type=str,
-                        default="trivial_baselines_vs_no_contraction_success_vs_steps",
+                        default=default_output_name or _default_output_name(default_x_axis_mode),
                         help="Base name for output files (without extension)")
-    parser.add_argument("--max-steps", type=int, default=5000,
-                        help="Maximum x-axis value (default: 5000)")
+    parser.add_argument("--max-steps", type=int,
+                        default=default_max_steps or _default_max_steps(default_x_axis_mode),
+                        help="Maximum x-axis value")
     args = parser.parse_args()
 
     apply_paper_style()
@@ -172,6 +211,7 @@ def main():
         "ppo": list(results_dir.glob("ppo_s*.log")),
         "a2c": list(results_dir.glob("a2c_s*.log")),
         "dqn": list(results_dir.glob("dqn_s*.log")),
+        "dqn_nstep5": list(results_dir.glob("dqn_nstep5_s*.log")),
     }
 
     # Plotting order (UPI-TRM variants first, then baselines)
@@ -182,6 +222,7 @@ def main():
         "ppo",
         "a2c",
         "dqn",
+        "dqn_nstep5",
     ]
 
     # Create figure - match paper style size
@@ -197,7 +238,10 @@ def main():
         print(f"Processing {config['name']}: {len(log_files)} seeds")
 
         # Load data for each seed
-        seed_data = aggregate_seeds(log_files)
+        step_scale = 1
+        if args.x_axis_mode == "interactions":
+            step_scale = ENV_STEPS_PER_OUTER[algo_key]
+        seed_data = aggregate_seeds(log_files, step_scale=step_scale)
 
         if not seed_data:
             print(f"  No data found")
@@ -235,9 +279,22 @@ def main():
         label=f'Random ({RANDOM_BASELINE:.0%})'
     )
 
-    ax.set_xlabel("Training Steps")
+    if args.x_axis_mode == "interactions":
+        x_label = "Environment Interactions"
+        title = (
+            "4×4 Sudoku (1–4 empties, T=16): Success Rate vs Environment Interactions\n"
+            "(Feasibility Checker, 3 seeds)"
+        )
+    else:
+        x_label = "Outer Training Steps"
+        title = (
+            "4×4 Sudoku (1–4 empties, T=16): Success Rate vs Outer Training Steps\n"
+            "(Feasibility Checker, 3 seeds)"
+        )
+
+    ax.set_xlabel(x_label)
     ax.set_ylabel("Success Rate")
-    ax.set_title("4×4 Sudoku (1–4 empties, T=16): Success Rate vs Training Steps\n(Feasibility Checker, 5k steps, 3 seeds)")
+    ax.set_title(title)
     ax.set_ylim(0, 1.0)
     ax.set_xlim(0, args.max_steps)
     ax.grid(True, alpha=0.3)

@@ -117,6 +117,7 @@ python_binary(
     name = "upi_trm_train",
     srcs = ["upi_trm_train.py"],
     base_module = "",
+    keep_gpu_sections = True,
     main_module = "upi_trm_train",
     deps = [
         ":models",

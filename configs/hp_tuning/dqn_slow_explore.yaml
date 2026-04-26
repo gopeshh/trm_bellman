@@ -10,6 +10,7 @@ dqn_target_update_interval: 200
 dqn_exploration_fraction: 0.5  # INCREASED from 0.15 - much slower decay
 dqn_exploration_final_eps: 0.1  # INCREASED from 0.05
 dqn_double_dqn: true
+dqn_n_step: 1
 
 # Core RL
 gamma: 0.99

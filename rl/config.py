@@ -196,6 +196,7 @@ class RLConfig(BaseModel):
     # Optimization
     value_lr: float = 3e-4
     policy_lr: float = 3e-4
+    backbone_lr: Optional[float] = None  # If None, PPO uses policy_lr for the shared trunk
     entropy_coef: float = 0.01
     value_grad_clip: Optional[float] = 5.0
     policy_grad_clip: Optional[float] = 1.0

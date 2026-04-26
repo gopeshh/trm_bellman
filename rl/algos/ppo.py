@@ -45,6 +45,7 @@ class PPOConfig:
     # Learning rates
     policy_lr: float = 3e-4
     value_lr: float = 1e-4
+    backbone_lr: Optional[float] = None
 
     # Model
     inner_unroll_n: int = 4  # Latent unroll steps (for TRM backbone)
@@ -157,10 +158,17 @@ class PPOTrainer:
         self._episode_count = 0
         self.term_stats = {"stop": 0, "solved": 0, "budget": 0}
 
-        # Optimizer for all model parameters
+        # Optimizer with explicit policy / value / backbone groups.
+        policy_params, value_params, backbone_params = (
+            self._split_policy_value_backbone_params()
+        )
+        backbone_lr = (
+            config.policy_lr if config.backbone_lr is None else config.backbone_lr
+        )
         self.optimizer = torch.optim.Adam([
-            {"params": self._get_policy_params(), "lr": config.policy_lr},
-            {"params": self._get_value_params(), "lr": config.value_lr},
+            {"params": policy_params, "lr": config.policy_lr},
+            {"params": value_params, "lr": config.value_lr},
+            {"params": backbone_params, "lr": backbone_lr},
         ])
 
         # Current episode state
@@ -168,48 +176,52 @@ class PPOTrainer:
         self._current_y: Optional[torch.Tensor] = None
         self._episode_rewards: List[float] = []
 
-    def _split_policy_value_params(
+    def _split_policy_value_backbone_params(
         self,
-    ) -> Tuple[List[nn.Parameter], List[nn.Parameter]]:
-        """Split trainable parameters into (policy, value) groups.
+    ) -> Tuple[List[nn.Parameter], List[nn.Parameter], List[nn.Parameter]]:
+        """Split trainable parameters into (policy, value, backbone) groups.
 
-        The model is expected to expose at least one trainable parameter
-        whose qualified name contains ``"edit_policy"``. Those parameters
-        form the policy group; all other trainable parameters form the
-        value/backbone group.
+        Expected module names:
+        - ``edit_policy.*``: policy head
+        - ``value_head.*``: value head
+        - everything else: shared backbone / trunk
 
-        Raising (rather than silently falling back to ``all params`` /
-        ``[]``) prevents the policy/value learning-rate split from
-        collapsing without notice on backbones that do not expose the
-        expected marker, e.g., NoRec-style encoders.
+        Raising rather than silently folding empty groups prevents the
+        learning-rate split from collapsing without notice.
         """
-        marker = "edit_policy"
         named_params = [
             (name, param)
             for name, param in self.model.named_parameters()
             if param.requires_grad
         ]
-        policy_params = [param for name, param in named_params if marker in name]
+        policy_prefix = "edit_policy."
+        value_prefix = "value_head."
+        policy_params = [
+            param for name, param in named_params if name.startswith(policy_prefix)
+        ]
+        value_params = [
+            param for name, param in named_params if name.startswith(value_prefix)
+        ]
+        backbone_params = [
+            param
+            for name, param in named_params
+            if not name.startswith(policy_prefix) and not name.startswith(value_prefix)
+        ]
+        missing_groups = []
         if not policy_params:
+            missing_groups.append(policy_prefix.rstrip("."))
+        if not value_params:
+            missing_groups.append(value_prefix.rstrip("."))
+        if not backbone_params:
+            missing_groups.append("backbone")
+        if missing_groups:
             visible_names = [name for name, _ in named_params]
             raise ValueError(
-                "PPOTrainer requires at least one trainable parameter whose "
-                f"qualified name contains '{marker}' so the policy / value "
-                "learning-rate split can be applied. Trainable parameter "
-                f"names: {visible_names!r}. Name the policy head so its "
-                f"parameters contain '{marker}', or subclass PPOTrainer "
-                "to provide a custom param split."
+                "PPOTrainer requires non-empty edit_policy, value_head, and "
+                f"backbone parameter groups. Missing groups: {missing_groups!r}. "
+                f"Trainable parameter names: {visible_names!r}."
             )
-        value_params = [param for name, param in named_params if marker not in name]
-        return policy_params, value_params
-
-    def _get_policy_params(self) -> List[nn.Parameter]:
-        """Get policy head parameters."""
-        return self._split_policy_value_params()[0]
-
-    def _get_value_params(self) -> List[nn.Parameter]:
-        """Get value head and backbone parameters."""
-        return self._split_policy_value_params()[1]
+        return policy_params, value_params, backbone_params
 
     def _prepare_batch_x(self, x: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Prepare state dict for model input."""

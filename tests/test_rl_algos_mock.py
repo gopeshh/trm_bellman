@@ -10,6 +10,7 @@ from rl.algos.dqn import (
     DQNTrainer,
     DQNConfig,
     QNetwork,
+    ReplayBuffer,
     Transition,
     compute_epsilon_decay_steps,
 )
@@ -31,8 +32,8 @@ class MockModel(nn.Module):
         self.hidden_dim = hidden_dim
         self.config = MockConfig(hidden_dim, rl_num_actions=action_dim)
         
-        # PPO splits params based on "edit_policy" in name
-        self.edit_policy_head = nn.Linear(hidden_dim, action_dim)
+        # PPO splits params by module prefix: edit_policy.*, value_head.*, backbone
+        self.edit_policy = nn.Linear(hidden_dim, action_dim)
         self.value_head = nn.Linear(hidden_dim, 1)
         self.encoder = nn.Linear(10, hidden_dim) 
         
@@ -40,7 +41,7 @@ class MockModel(nn.Module):
         batch_size = x["inputs"].shape[0]
         # Use encoder to get gradients
         z = self.encoder(x["inputs"].float()) # [B, H]
-        logits = self.edit_policy_head(z) # [B, A]
+        logits = self.edit_policy(z) # [B, A]
         
         if action_mask is not None:
              logits = logits.masked_fill(~action_mask.bool(), -1e9)
@@ -151,6 +152,71 @@ class TestRLAlgos(unittest.TestCase):
         self.assertIn("loss_value", stats)
         self.assertIn("num_updates", stats)
 
+    def test_ppo_optimizer_splits_policy_value_and_backbone_groups(self):
+        policy_lr = 3e-4
+        value_lr = 1e-4
+        config = PPOConfig(
+            num_steps=2,
+            num_epochs=1,
+            num_minibatches=1,
+            inner_unroll_n=0,
+            policy_lr=policy_lr,
+            value_lr=value_lr,
+        )
+        trainer = PPOTrainer(self.model, self.env, config)
+
+        self.assertEqual(len(trainer.optimizer.param_groups), 3)
+
+        name_by_id = {
+            id(param): name for name, param in trainer.model.named_parameters()
+        }
+        groups = []
+        for group in trainer.optimizer.param_groups:
+            names = [name_by_id[id(param)] for param in group["params"]]
+            self.assertTrue(names)
+            groups.append((group["lr"], names))
+
+        policy_group = next(group for group in groups if group[0] == policy_lr and all(
+            name.startswith("edit_policy.") for name in group[1]
+        ))
+        value_group = next(group for group in groups if group[0] == value_lr and all(
+            name.startswith("value_head.") for name in group[1]
+        ))
+        backbone_group = next(group for group in groups if group[0] == policy_lr and all(
+            not name.startswith("edit_policy.") and not name.startswith("value_head.")
+            for name in group[1]
+        ))
+
+        self.assertTrue(policy_group[1])
+        self.assertTrue(value_group[1])
+        self.assertTrue(backbone_group[1])
+
+    def test_ppo_backbone_group_uses_explicit_backbone_lr(self):
+        config = PPOConfig(
+            num_steps=2,
+            num_epochs=1,
+            num_minibatches=1,
+            inner_unroll_n=0,
+            policy_lr=3e-4,
+            value_lr=1e-4,
+            backbone_lr=7e-4,
+        )
+        trainer = PPOTrainer(self.model, self.env, config)
+
+        name_by_id = {
+            id(param): name for name, param in trainer.model.named_parameters()
+        }
+        backbone_lrs = []
+        for group in trainer.optimizer.param_groups:
+            names = [name_by_id[id(param)] for param in group["params"]]
+            if all(
+                not name.startswith("edit_policy.") and not name.startswith("value_head.")
+                for name in names
+            ):
+                backbone_lrs.append(group["lr"])
+
+        self.assertEqual(backbone_lrs, [7e-4])
+
     def test_dqn_train_step(self):
         config = DQNConfig(
             min_buffer_size=2, # Small buffer to trigger training
@@ -256,8 +322,9 @@ class TestRLAlgos(unittest.TestCase):
             next_action_mask=next_mask,
         )
 
-        trainer.replay_buffer.buffer.clear()
-        trainer.replay_buffer.buffer.extend([terminal_transition, masked_transition])
+        trainer.replay_buffer.clear()
+        trainer.replay_buffer.add(terminal_transition)
+        trainer.replay_buffer.add(masked_transition)
         trainer.replay_buffer.sample = MagicMock(return_value=[terminal_transition, masked_transition])
 
         online_masks = []
@@ -299,6 +366,250 @@ class TestRLAlgos(unittest.TestCase):
 
     def test_build_trainer_dqn_scales_epsilon_decay_by_train_freq(self):
         self.test_compute_epsilon_decay_steps_scales_by_train_freq()
+
+    def test_dqn_target_network_updates_after_env_step_budget(self):
+        config = DQNConfig(
+            min_buffer_size=1,
+            batch_size=1,
+            train_freq=4,
+            gradient_steps=1,
+            target_update_freq=10,
+            inner_unroll_n=0,
+        )
+        trainer = DQNTrainer(self.model, self.env, config)
+
+        def fake_collect_step():
+            trainer._env_step_count += 1
+            return False
+
+        trainer.collect_step = MagicMock(side_effect=fake_collect_step)
+        trainer.train_batch = MagicMock(return_value={"loss_q": 0.0, "mean_q": 0.0})
+        trainer.update_target_network = MagicMock()
+
+        trainer.train_step()  # env_steps = 4
+        trainer.train_step()  # env_steps = 8
+        self.assertEqual(trainer.update_target_network.call_count, 0)
+
+        trainer.train_step()  # env_steps = 12
+        self.assertEqual(trainer.update_target_network.call_count, 1)
+        self.assertEqual(trainer._last_target_update_env_step, 12)
+
+    def test_dqn_replay_buffer_n_step_one_matches_single_step_transition(self):
+        buffer = ReplayBuffer(capacity=10)
+        transitions = [
+            Transition(
+                x={"inputs": torch.full((1, 10), float(i)), "puzzle_identifiers": torch.zeros(1)},
+                y=torch.full((1, 10), float(i)),
+                action=i % self.action_dim,
+                reward=float(i + 1),
+                x_next={"inputs": torch.full((1, 10), float(i + 1)), "puzzle_identifiers": torch.zeros(1)},
+                y_next=torch.full((1, 10), float(i + 1)),
+                done=(i == 2),
+                action_mask=torch.ones(self.action_dim, dtype=torch.bool),
+                next_action_mask=None if i == 2 else torch.ones(self.action_dim, dtype=torch.bool),
+            )
+            for i in range(3)
+        ]
+        for transition in transitions:
+            buffer.add(transition)
+
+        for index, expected in enumerate(transitions):
+            actual = buffer.build_n_step_transition(index=index, n_step=1, gamma=0.99)
+            self.assertEqual(actual.action, expected.action)
+            self.assertEqual(actual.reward, expected.reward)
+            self.assertEqual(actual.done, expected.done)
+            self.assertEqual(actual.bootstrap_steps, 1)
+            self.assertTrue(torch.equal(actual.y, expected.y))
+            self.assertTrue(torch.equal(actual.y_next, expected.y_next))
+            self.assertTrue(torch.equal(actual.x["inputs"], expected.x["inputs"]))
+            self.assertTrue(torch.equal(actual.x_next["inputs"], expected.x_next["inputs"]))
+            self.assertEqual(actual.next_action_mask is None, expected.next_action_mask is None)
+            if actual.next_action_mask is not None and expected.next_action_mask is not None:
+                self.assertTrue(torch.equal(actual.next_action_mask, expected.next_action_mask))
+
+    def test_dqn_n_step_three_target_matches_analytic_value(self):
+        gamma = 0.5
+        config = DQNConfig(
+            min_buffer_size=1,
+            batch_size=1,
+            train_freq=1,
+            gradient_steps=1,
+            inner_unroll_n=0,
+            gamma=gamma,
+            dqn_n_step=3,
+        )
+        trainer = DQNTrainer(self.model, self.env, config)
+
+        base_x = {"inputs": torch.zeros(1, 10), "puzzle_identifiers": torch.zeros(1)}
+        base_y = torch.zeros(1, 10)
+        mask = torch.ones(self.action_dim, dtype=torch.bool)
+        rewards = [1.0, 2.0, 3.0, 4.0]
+        dones = [False, False, False, True]
+        trainer.replay_buffer.clear()
+        for reward, done in zip(rewards, dones):
+            trainer.replay_buffer.add(
+                Transition(
+                    x=base_x,
+                    y=base_y,
+                    action=0,
+                    reward=reward,
+                    x_next=base_x,
+                    y_next=base_y,
+                    done=done,
+                    action_mask=mask,
+                    next_action_mask=None if done else mask,
+                )
+            )
+
+        sampled = trainer.replay_buffer.build_n_step_transition(index=0, n_step=3, gamma=gamma)
+        trainer.replay_buffer.sample = MagicMock(return_value=[sampled])
+
+        current_q = torch.zeros((1, self.action_dim), dtype=torch.float32, requires_grad=True)
+        next_q_online = torch.tensor([[0.0, 2.0, 1.0, -1.0, -2.0]], dtype=torch.float32)
+        next_q_target = torch.tensor([[3.0, 7.0, 4.0, -1.0, -2.0]], dtype=torch.float32)
+        trainer.q_network.forward = MagicMock(side_effect=[current_q, next_q_online])
+        trainer.target_network.forward = MagicMock(return_value=next_q_target)
+
+        stats = trainer.train_batch()
+
+        expected_target = 1.0 + gamma * 2.0 + (gamma ** 2) * 3.0 + (gamma ** 3) * 7.0
+        self.assertAlmostEqual(stats["mean_target_q"], expected_target, places=6)
+
+    def test_dqn_n_step_terminal_walk_zeroes_bootstrap(self):
+        gamma = 0.5
+        config = DQNConfig(
+            min_buffer_size=1,
+            batch_size=1,
+            train_freq=1,
+            gradient_steps=1,
+            inner_unroll_n=0,
+            gamma=gamma,
+            dqn_n_step=5,
+        )
+        trainer = DQNTrainer(self.model, self.env, config)
+
+        base_x = {"inputs": torch.zeros(1, 10), "puzzle_identifiers": torch.zeros(1)}
+        base_y = torch.zeros(1, 10)
+        mask = torch.ones(self.action_dim, dtype=torch.bool)
+        trainer.replay_buffer.clear()
+        trainer.replay_buffer.add(
+            Transition(
+                x=base_x,
+                y=base_y,
+                action=0,
+                reward=1.0,
+                x_next=base_x,
+                y_next=base_y,
+                done=False,
+                action_mask=mask,
+                next_action_mask=mask,
+            )
+        )
+        trainer.replay_buffer.add(
+            Transition(
+                x=base_x,
+                y=base_y,
+                action=0,
+                reward=2.0,
+                x_next=base_x,
+                y_next=base_y,
+                done=True,
+                action_mask=mask,
+                next_action_mask=None,
+            )
+        )
+
+        sampled = trainer.replay_buffer.build_n_step_transition(index=0, n_step=5, gamma=gamma)
+        trainer.replay_buffer.sample = MagicMock(return_value=[sampled])
+
+        current_q = torch.zeros((1, self.action_dim), dtype=torch.float32, requires_grad=True)
+        next_q_online = torch.tensor([[0.0, 20.0, 1.0, -1.0, -2.0]], dtype=torch.float32)
+        next_q_target = torch.tensor([[3.0, 70.0, 4.0, -1.0, -2.0]], dtype=torch.float32)
+        trainer.q_network.forward = MagicMock(side_effect=[current_q, next_q_online])
+        trainer.target_network.forward = MagicMock(return_value=next_q_target)
+
+        stats = trainer.train_batch()
+
+        expected_target = 1.0 + gamma * 2.0
+        self.assertTrue(sampled.done)
+        self.assertEqual(sampled.bootstrap_steps, 2)
+        self.assertAlmostEqual(stats["mean_target_q"], expected_target, places=6)
+
+    def test_dqn_n_step_truncates_when_episode_ends_before_horizon(self):
+        gamma = 0.75
+        buffer = ReplayBuffer(capacity=10)
+        base_x = {"inputs": torch.zeros(1, 10), "puzzle_identifiers": torch.zeros(1)}
+        base_y = torch.zeros(1, 10)
+        mask = torch.ones(self.action_dim, dtype=torch.bool)
+        for reward, done in [(1.0, False), (2.0, False), (3.0, False), (4.0, True)]:
+            buffer.add(
+                Transition(
+                    x=base_x,
+                    y=base_y,
+                    action=0,
+                    reward=reward,
+                    x_next=base_x,
+                    y_next=base_y,
+                    done=done,
+                    action_mask=mask,
+                    next_action_mask=None if done else mask,
+                )
+            )
+
+        truncated = buffer.build_n_step_transition(index=2, n_step=5, gamma=gamma)
+
+        self.assertTrue(truncated.done)
+        self.assertEqual(truncated.bootstrap_steps, 2)
+        self.assertAlmostEqual(truncated.reward, 3.0 + gamma * 4.0, places=6)
+        self.assertIsNone(truncated.next_action_mask)
+
+    def test_dqn_n_step_wraparound_keeps_remaining_episode_suffix_intact(self):
+        gamma = 0.5
+        buffer = ReplayBuffer(capacity=8)
+        base_x = {"inputs": torch.zeros(1, 10), "puzzle_identifiers": torch.zeros(1)}
+        base_y = torch.zeros(1, 10)
+        mask = torch.ones(self.action_dim, dtype=torch.bool)
+
+        # Episode A occupies slots 0..4, then Episode B wraps and overwrites slot 0.
+        for idx, reward in enumerate([10.0, 11.0, 12.0, 13.0, 14.0]):
+            buffer.add(
+                Transition(
+                    x=base_x,
+                    y=base_y,
+                    action=0,
+                    reward=reward,
+                    x_next=base_x,
+                    y_next=base_y,
+                    done=(idx == 4),
+                    action_mask=mask,
+                    next_action_mask=None if idx == 4 else mask,
+                )
+            )
+        for idx, reward in enumerate([100.0, 101.0, 102.0, 103.0]):
+            buffer.add(
+                Transition(
+                    x=base_x,
+                    y=base_y,
+                    action=0,
+                    reward=reward,
+                    x_next=base_x,
+                    y_next=base_y,
+                    done=(idx == 3),
+                    action_mask=mask,
+                    next_action_mask=None if idx == 3 else mask,
+                )
+            )
+
+        # Slot 1 still contains the second transition from Episode A, and its
+        # forward chain should remain entirely within the retained suffix
+        # {11, 12, 13, 14} rather than jumping into Episode B's wrapped slots.
+        wrapped = buffer.build_n_step_transition(index=1, n_step=4, gamma=gamma)
+
+        expected = 11.0 + gamma * 12.0 + (gamma ** 2) * 13.0 + (gamma ** 3) * 14.0
+        self.assertTrue(wrapped.done)
+        self.assertEqual(wrapped.bootstrap_steps, 4)
+        self.assertAlmostEqual(wrapped.reward, expected, places=6)
+        self.assertIsNone(wrapped.next_action_mask)
 
     def test_ppo_mask_stacking_with_mixed_none_and_tensor(self):
         config = PPOConfig(num_steps=2, inner_unroll_n=0)
@@ -507,9 +818,9 @@ class TestRLAlgos(unittest.TestCase):
     def test_evaluator_threads_task_config_into_eval_env(self):
         model = MockModel(action_dim=self.action_dim)
         with torch.no_grad():
-            model.edit_policy_head.weight.zero_()
-            model.edit_policy_head.bias.zero_()
-            model.edit_policy_head.bias[2] = 10.0
+            model.edit_policy.weight.zero_()
+            model.edit_policy.bias.zero_()
+            model.edit_policy.bias[2] = 10.0
 
         dataset = [
             {

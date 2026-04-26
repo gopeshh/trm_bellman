@@ -243,6 +243,7 @@ def build_trainer(
             clip_vf_loss=get_yaml_key("clip_vf_loss", False),
             policy_lr=rl_cfg.policy_lr,
             value_lr=rl_cfg.value_lr,
+            backbone_lr=rl_cfg.backbone_lr,
             inner_unroll_n=rl_cfg.inner_unroll_n,
             log_interval=rl_cfg.log_interval,
             eval_interval=rl_cfg.eval_interval,
@@ -304,6 +305,7 @@ def build_trainer(
             target_update_freq=get_yaml_key("dqn_target_update_interval", 100),
             learning_rate=rl_cfg.value_lr,
             max_grad_norm=get_yaml_key("max_grad_norm", 1.0),
+            dqn_n_step=get_yaml_key("dqn_n_step", 1),
             inner_unroll_n=rl_cfg.inner_unroll_n,
             train_freq=train_freq,
             gradient_steps=get_yaml_key("dqn_gradient_steps", 1),
@@ -318,7 +320,8 @@ def build_trainer(
             print(f"[TRAINER] {algo_name} baseline selected")
             print(f"[TRAINER] CLI --baseline: {cli_baseline}, YAML algorithm: {yaml_algorithm}")
             print(f"[TRAINER] DQN config: buffer={dqn_cfg.buffer_size}, batch={dqn_cfg.batch_size}, "
-                  f"target_update={dqn_cfg.target_update_freq}, epsilon_decay={epsilon_decay_steps}")
+                  f"target_update={dqn_cfg.target_update_freq}, epsilon_decay={epsilon_decay_steps}, "
+                  f"n_step={dqn_cfg.dqn_n_step}")
     
     else:
         raise ValueError(f"Unknown baseline algorithm: {selected_baseline}")

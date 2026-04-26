@@ -44,6 +44,7 @@ def get_method_display_name(method_key: str) -> str:
         "ppo": "PPO",
         "a2c": "A2C",
         "dqn": "DQN",
+        "dqn_nstep5": "DQN (n=5)",
     }
     return names.get(method_key, method_key)
 
@@ -71,6 +72,7 @@ def main():
         "ppo",
         "a2c",
         "dqn",
+        "dqn_nstep5",
     ]
     seeds = [42, 123, 456]
 
