@@ -1,0 +1,58 @@
+# CleanRL DQN (n=5) baseline — hard 4x4 Sudoku, no-mask variant.
+# Matched to in-house dqn_trm_feasibility.yaml + no_mask_overlay.yaml.
+algo: "dqn"
+algo_variant: "cleanrl_dqn_n5_trm"
+backend: "cleanrl"
+env_kind: "sudoku"
+
+dataset_path: "data/sudoku-4x4-easy_6to8empties"
+seed: 0
+device: "cuda"
+
+# DQN n-step hyperparameters (matched to in-house dqn_trm_feasibility.yaml)
+total_timesteps: 320000
+learning_rate: 2.5e-4
+gamma: 0.99
+buffer_size: 10000
+dqn_batch_size: 64
+learning_starts: 200
+train_freq: 4
+target_update_freq: 200
+epsilon_start: 1.0
+epsilon_end: 0.05
+exploration_fraction: 0.3
+max_grad_norm: 10.0
+n_step: 5
+
+# Environment (matched to in-house)
+max_edits: 16
+reward_shaping: true
+solved_threshold: null
+stop_action_mode: "disabled"
+disable_constraint_masking: true
+fail_terminal_reward: -16.0
+solve_terminal_reward: 1.0
+
+# Checker
+use_feasibility_checker: true
+feasibility_violation_weight: 2.0
+feasibility_zerocand_weight: 5.0
+use_progress_checker: false
+use_constraint_checker: false
+
+# TRM model
+hidden_size: 64
+h_cycles: 2
+l_cycles: 2
+l_layers: 1
+inner_unroll_n: 2
+enable_contraction: false
+target_Lz: 0.9
+target_Lv: 5.0
+latent_ball_radius: 0.0
+
+eval_interval: 10000
+eval_episodes: 50
+log_interval: 1000
+
+output_root: "results/cleanrl_benchmark/hard4x4"

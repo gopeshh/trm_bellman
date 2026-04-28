@@ -1,0 +1,90 @@
+% =============================================================================
+% Baseline Implementation Audit — Paper Insert Snippet
+% Generated: 2026-04-28
+% Source: results/cleanrl_benchmark/hard4x4/
+% Protocol: 320k env interactions, 10 seeds, no-mask, feasibility checker
+%
+% IMPORTANT: This is a standalone 320k audit. The in-house comparator rows
+% in the main paper use a different budget (20k steps). This appendix should
+% NOT be framed as a reproduction of the main table rows.
+% =============================================================================
+
+% --- Main text paragraph (insert after existing baseline comparison) ---
+% \begin{maintext}
+To assess baseline implementation sensitivity, we ran a separate
+320{,}000-environment-interaction audit on the hard no-mask 4$\times$4
+benchmark using independently implemented PPO/A2C training loops and an
+in-house DQN wrapper fallback. We reimplemented PPO and A2C with
+CleanRL-style reference code and reran DQN through a benchmark-harness
+wrapper around the in-house DQN trainer,
+all under the same dataset, checker, reward shaping, success criterion,
+and 10-seed protocol. The audited PPO and A2C baselines remained at
+0.0\% success over 10 seeds; the wrapper-based DQN rerun also remained
+at 0.0\%. These audits reinforce that standard RL baselines do not solve
+this benchmark even at a substantially larger interaction budget than the
+main paper's comparisons. Full audit results are reported in
+Appendix~\ref{app:baseline-audit}.
+% \end{maintext}
+
+% --- Table 1 caption addition ---
+% \begin{captionfootnote}
+A supplementary 320k-interaction implementation audit is reported in
+Appendix~\ref{app:baseline-audit}. Note that this audit uses a different
+interaction budget than the main table.
+% \end{captionfootnote}
+
+% --- Appendix subsection ---
+\subsection{Baseline Implementation Audit}
+\label{app:baseline-audit}
+
+To probe sensitivity to baseline implementation, we ran a supplementary
+audit on the hard no-mask 4$\times$4 Sudoku benchmark at a
+320{,}000-environment-interaction budget (larger than the main paper's
+baseline comparisons). PPO and A2C were rerun with independently
+implemented CleanRL-style training loops. DQN was rerun through a
+benchmark-harness wrapper around the in-house \texttt{DQNTrainer},
+because the Sudoku-specific CleanRL DQN port remained unresolved in the
+audited checkout. All runs used the same hard 4$\times$4 no-mask dataset,
+feasibility checker, reward shaping, success criterion, and 10-seed
+protocol. PPO and A2C used the standard plan-policy evaluator; DQN used
+greedy $\arg\max Q$ evaluation.
+
+\begin{table}[h]
+\centering
+\caption{Supplementary baseline implementation audit on hard no-mask
+4$\times$4 Sudoku at 320k environment interactions. Success rate and mean
+return are reported as mean $\pm$ std over 10 seeds. These rows use a
+different interaction budget than the main paper table and should not be
+compared directly to the main results.}
+\begin{tabular}{llcc}
+\toprule
+Algorithm & Implementation & Success Rate & Mean Return \\
+\midrule
+TRM+PPO & CleanRL-style audit & $0.000 \pm 0.000$ & $-26.55 \pm 1.22$ \\
+TRM+A2C & CleanRL-style audit & $0.000 \pm 0.000$ & $-20.64 \pm 0.48$ \\
+TRM+DQN & in-house wrapper audit & $0.000 \pm 0.000$ & $-18.42 \pm 0.36$ \\
+TRM+DQN (n=5) & independent audit & \multicolumn{2}{c}{\textit{not independently reproduced}} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All three audited baselines remained at 0.0\% success across all seeds,
+reinforcing that standard RL baselines do not solve this benchmark.
+The DQN audit row should not be interpreted as independent evidence,
+since it uses the in-house trainer through a benchmark wrapper rather
+than an independent CleanRL Sudoku DQN implementation. An independent
+Sudoku DQN ($n{=}5$) audit remained unresolved in the audited checkout
+and is therefore reported as unavailable rather than omitted.
+
+Note that this audit uses a 320k-interaction budget, which differs from
+the main paper's baseline comparisons. Direct numerical comparison
+between these audit rows and the main table rows is not appropriate
+without accounting for the budget difference.
+
+% --- Limitation sentence (for limitations section) ---
+% \begin{limitation}
+A supplementary implementation audit at 320k interactions found 0\%
+success for all audited baselines, but used a different interaction
+budget than the main paper's comparisons. An independent Sudoku DQN
+($n{=}5$) audit was not completed.
+% \end{limitation}

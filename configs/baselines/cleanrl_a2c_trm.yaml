@@ -1,0 +1,63 @@
+# CleanRL A2C baseline — hard 4x4 Sudoku, no-mask variant.
+# Matched to in-house a2c_trm_feasibility.yaml + no_mask_overlay.yaml.
+# A2C = PPO with update_epochs=1, num_minibatches=1, clip_coef=10.0 (never clips)
+algo: "a2c"
+algo_variant: "cleanrl_a2c_trm"
+backend: "cleanrl"
+env_kind: "sudoku"
+
+dataset_path: "data/sudoku-4x4-easy_6to8empties"
+seed: 0
+device: "cuda"
+
+# A2C overrides (thin PPO wrapper sets these, but explicit here for clarity)
+total_timesteps: 320000
+num_envs: 1
+num_steps: 64
+update_epochs: 1
+num_minibatches: 1
+clip_coef: 10.0
+clip_vloss: false
+norm_adv: false
+learning_rate: 1.0e-4
+anneal_lr: true
+gamma: 0.99
+gae_lambda: 0.95
+ent_coef: 0.05
+vf_coef: 0.5
+max_grad_norm: 0.5
+
+# Environment (matched to in-house)
+max_edits: 16
+reward_shaping: true
+solved_threshold: null
+stop_action_mode: "disabled"
+disable_constraint_masking: true
+fail_terminal_reward: -16.0
+solve_terminal_reward: 1.0
+
+# Checker
+use_feasibility_checker: true
+feasibility_violation_weight: 2.0
+feasibility_zerocand_weight: 5.0
+use_progress_checker: false
+use_constraint_checker: false
+
+# TRM model
+hidden_size: 64
+h_cycles: 2
+l_cycles: 2
+l_layers: 1
+inner_unroll_n: 2
+enable_contraction: false
+target_Lz: 0.9
+target_Lv: 5.0
+latent_ball_radius: 0.0
+
+batch_size: 256
+
+eval_interval: 10000
+eval_episodes: 50
+log_interval: 10
+
+output_root: "results/cleanrl_benchmark/hard4x4"

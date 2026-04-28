@@ -1,0 +1,33 @@
+algo: "dqn"
+algo_variant: "cleanrl_dqn_cartpole"
+backend: "cleanrl"
+env_kind: "cartpole"
+env_id: "CartPole-v1"
+
+seed: 0
+device: "cpu"
+torch_deterministic: true
+
+total_timesteps: 500000
+learning_rate: 2.5e-4
+gamma: 0.99
+buffer_size: 10000
+batch_size: 128
+learning_starts: 10000
+train_freq: 10
+target_update_freq: 500
+epsilon_start: 1.0
+epsilon_end: 0.05
+exploration_fraction: 0.5
+max_grad_norm: 10.0
+n_step: 1
+
+obs_dim: 4
+action_dim: 2
+hidden_dim: 128
+
+eval_interval: 25000
+eval_episodes: 20
+log_interval: 5000
+
+output_root: "results/cleanrl_dqn_cartpole_smoke"

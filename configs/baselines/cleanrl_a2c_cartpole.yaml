@@ -1,0 +1,32 @@
+algo: "a2c"
+algo_variant: "cleanrl_a2c_cartpole"
+backend: "cleanrl"
+env_kind: "cartpole"
+env_id: "CartPole-v1"
+
+seed: 0
+device: "cpu"
+torch_deterministic: true
+
+total_timesteps: 100000
+num_envs: 16
+num_steps: 5
+
+learning_rate: 7.0e-4
+anneal_lr: true
+gamma: 0.99
+gae_lambda: 1.0
+norm_adv: false
+ent_coef: 0.01
+vf_coef: 0.5
+max_grad_norm: 0.5
+
+obs_dim: 4
+action_dim: 2
+hidden_dim: 64
+
+eval_interval: 5000
+eval_episodes: 20
+log_interval: 50
+
+output_root: "results/cleanrl_a2c_cartpole_smoke"

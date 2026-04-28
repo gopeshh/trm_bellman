@@ -1,0 +1,65 @@
+# CleanRL PPO baseline — hard 4x4 Sudoku, no-mask variant.
+# Matched to in-house ppo_trm_feasibility.yaml + no_mask_overlay.yaml,
+# which is what the 10-seed baseline sweep (run_hard4x4_trm_baselines_nomask_10seed_4gpu.sh) uses.
+algo: "ppo"
+algo_variant: "cleanrl_ppo_trm"
+backend: "cleanrl"
+env_kind: "sudoku"
+
+dataset_path: "data/sudoku-4x4-easy_6to8empties"
+seed: 0
+device: "cuda"
+
+# PPO hyperparameters (matched to in-house ppo_trm_feasibility.yaml)
+total_timesteps: 320000
+num_envs: 1
+num_steps: 64
+num_minibatches: 4
+update_epochs: 4
+learning_rate: 1.0e-4
+anneal_lr: true
+gamma: 0.99
+gae_lambda: 0.95
+clip_coef: 0.2
+clip_vloss: false
+norm_adv: true
+ent_coef: 0.05
+vf_coef: 0.5
+max_grad_norm: 0.5
+
+# Environment
+max_edits: 16
+reward_shaping: true
+solved_threshold: null
+stop_action_mode: "disabled"
+disable_constraint_masking: true
+fail_terminal_reward: -16.0
+solve_terminal_reward: 1.0
+
+# Checker (feasibility — same as in-house)
+use_feasibility_checker: true
+feasibility_violation_weight: 2.0
+feasibility_zerocand_weight: 5.0
+use_progress_checker: false
+use_constraint_checker: false
+
+# TRM model (matched to in-house defaults)
+hidden_size: 64
+h_cycles: 2
+l_cycles: 2
+l_layers: 1
+inner_unroll_n: 2
+enable_contraction: false
+target_Lz: 0.9
+target_Lv: 5.0
+latent_ball_radius: 0.0
+
+# Training pool
+batch_size: 256
+
+# Evaluation
+eval_interval: 10000
+eval_episodes: 50
+log_interval: 10
+
+output_root: "results/cleanrl_benchmark/hard4x4"
