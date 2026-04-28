@@ -12,11 +12,12 @@
 set -euo pipefail
 
 FBCODE_DIR="$HOME/fbsource/fbcode"
+FBSOURCE_ROOT="$HOME/fbsource"
 CODE_ROOT="/home/buiksat/trm_bellman"
 PAPER_ROOT="/home/buiksat/UPI_TRM/UPI_TRM_NIPS"
 
-DATA_PATH="buiksat_trm/data/sudoku-4x4-easy_6to8empties"
-CONFIG_PATH="buiksat_trm/configs/revision/upi_trm_feasibility_episodic_z_hard_suite_theory_exact.yaml"
+DATA_PATH="$CODE_ROOT/data/sudoku-4x4-easy_6to8empties"
+CONFIG_PATH="$CODE_ROOT/configs/revision/upi_trm_feasibility_episodic_z_hard_suite_theory_exact.yaml"
 
 RESULTS_ROOT="$PAPER_ROOT/results/episodic_z_hard_suite_20k_seed41_50"
 LOG_DIR="$RESULTS_ROOT/logs"
@@ -30,6 +31,27 @@ SEEDS=(41 42 43 44 45 46 47 48 49 50)
 
 mkdir -p "$LOG_DIR" "$CHECKPOINT_ROOT"
 : > "$FAILURES_FILE"
+
+echo "Building upi_trm_train..."
+cd "$FBSOURCE_ROOT" || exit 1
+RUNNER_OUTPUT=$(buck2 build fbcode//buiksat_trm:upi_trm_train \
+    -c fbcode.nvcc_arch=a100 \
+    -c fbcode.enable_gpu_sections=true \
+    --show-output 2>&1)
+if ! echo "$RUNNER_OUTPUT" | grep -q "BUILD SUCCEEDED"; then
+    echo "ERROR: buck2 build failed"
+    echo "$RUNNER_OUTPUT"
+    exit 1
+fi
+RUNNER_REL=$(echo "$RUNNER_OUTPUT" | awk '/upi_trm_train/ {print $2}' | tail -n1)
+if [ -z "$RUNNER_REL" ]; then
+    echo "ERROR: could not resolve upi_trm_train output path"
+    echo "$RUNNER_OUTPUT"
+    exit 1
+fi
+RUNNER="$FBSOURCE_ROOT/$RUNNER_REL"
+echo "Using runner: $RUNNER"
+cd "$CODE_ROOT" || exit 1
 
 is_complete() {
     local logfile=$1
@@ -79,10 +101,8 @@ run_seed() {
     echo "  Log: $logfile"
     echo "  Checkpoints: $checkpoint_dir"
 
-    if CUDA_VISIBLE_DEVICES=$gpu buck2 run //buiksat_trm:upi_trm_train \
-        -c fbcode.nvcc_arch=a100 -c fbcode.enable_gpu_sections=true \
-        --local-only \
-        -- --config "$CONFIG_PATH" \
+    if CUDA_VISIBLE_DEVICES=$gpu "$RUNNER" \
+        --config "$CONFIG_PATH" \
         --seed "$seed" \
         --dataset-paths "$DATA_PATH" \
         --checkpoint-dir "$checkpoint_dir" \
