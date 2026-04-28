@@ -132,20 +132,22 @@ run_seed_diagnostics() {
 
 write_manifest() {
     printf "gpu\tseed\tconfig\tlogfile\tcheckpoint_dir\n" > "$MANIFEST"
-    local gpu
     local seed
-    for gpu in 0 1; do
-        for seed in "${SEEDS[@]}"; do
-            if [ $((seed % 2)) -ne $gpu ]; then
-                continue
-            fi
-            printf "%s\t%s\t%s\t%s\t%s\n" \
-                "$gpu" \
-                "$seed" \
-                "$CONFIG_PATH" \
-                "$LOG_DIR/seed${seed}.log" \
-                "$CHECKPOINT_ROOT/seed${seed}" >> "$MANIFEST"
-        done
+    for seed in "${GPU0_SEEDS[@]}"; do
+        printf "%s\t%s\t%s\t%s\t%s\n" \
+            "0" \
+            "$seed" \
+            "$CONFIG_PATH" \
+            "$LOG_DIR/seed${seed}.log" \
+            "$CHECKPOINT_ROOT/seed${seed}" >> "$MANIFEST"
+    done
+    for seed in "${GPU1_SEEDS[@]}"; do
+        printf "%s\t%s\t%s\t%s\t%s\n" \
+            "1" \
+            "$seed" \
+            "$CONFIG_PATH" \
+            "$LOG_DIR/seed${seed}.log" \
+            "$CHECKPOINT_ROOT/seed${seed}" >> "$MANIFEST"
     done
 }
 
@@ -216,10 +218,10 @@ run_gpu_queue() {
     done
 }
 
-write_manifest
-
 GPU0_SEEDS=(41 43 45 47 49)
 GPU1_SEEDS=(42 44 46 48 50)
+
+write_manifest
 
 echo "============================================================"
 echo "Episodic-z hard-suite rerun"
