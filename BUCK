@@ -994,6 +994,24 @@ python_binary(
 )
 
 python_binary(
+    name = "reevaluate_upi_baseline_interface",
+    srcs = [
+        "puzzle_dataset.py",
+        "scripts/reevaluate_upi_baseline_interface.py",
+    ],
+    base_module = "",
+    main_module = "scripts.reevaluate_upi_baseline_interface",
+    deps = [
+        ":eval_unroll_sensitivity_lib",
+        ":puzzle_dataset_lib",
+        ":rl",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
     name = "make_paper_figures_exp2_final",
     srcs = ["scripts/make_paper_figures_exp2_final.py"],
     base_module = "",
