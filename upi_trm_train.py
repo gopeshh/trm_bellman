@@ -451,6 +451,12 @@ def save_checkpoint(
         "model_state_dict": model.state_dict(),
     }
 
+    # Preserve the old/candidate policy pair for post-candidate diagnostics.
+    if hasattr(trainer, "policy_model_old") and trainer.policy_model_old is not None:
+        checkpoint["policy_model_old_state_dict"] = trainer.policy_model_old.state_dict()
+    if hasattr(trainer, "policy_model_candidate") and trainer.policy_model_candidate is not None:
+        checkpoint["policy_model_candidate_state_dict"] = trainer.policy_model_candidate.state_dict()
+
     # Save RL config for reproducibility and correct eval loading
     if rl_cfg is not None:
         checkpoint["rl_config"] = rl_cfg.model_dump() if hasattr(rl_cfg, "model_dump") else rl_cfg.dict()
@@ -504,6 +510,10 @@ def resume_from_checkpoint(
     checkpoint = torch.load(checkpoint_path, map_location=device)
     
     model.load_state_dict(checkpoint["model_state_dict"])
+    if "policy_model_old_state_dict" in checkpoint and hasattr(trainer, "policy_model_old"):
+        trainer.policy_model_old.load_state_dict(checkpoint["policy_model_old_state_dict"])
+    if "policy_model_candidate_state_dict" in checkpoint and hasattr(trainer, "policy_model_candidate"):
+        trainer.policy_model_candidate.load_state_dict(checkpoint["policy_model_candidate_state_dict"])
     trainer.value_opt.load_state_dict(checkpoint["value_optimizer_state_dict"])
     trainer.policy_opt.load_state_dict(checkpoint["policy_optimizer_state_dict"])
     

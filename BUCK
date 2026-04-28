@@ -246,6 +246,40 @@ python_binary(
 )
 
 python_binary(
+    name = "materialize_hard4x4_closure_batch",
+    srcs = ["scripts/materialize_hard4x4_closure_batch.py"],
+    base_module = "",
+    main_module = "scripts.materialize_hard4x4_closure_batch",
+    deps = [
+        ":models",
+        ":puzzle_dataset_lib",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_binary(
+    name = "episodic_z_hard_suite_diagnostics",
+    srcs = [
+        "scripts/episodic_z_hard_suite_diagnostics.py",
+        "scripts/eval_theorem_facing_ordinal_check.py",
+    ],
+    base_module = "",
+    main_module = "scripts.episodic_z_hard_suite_diagnostics",
+    deps = [
+        ":models",
+        ":utils",
+        ":rl",
+        ":puzzle_dataset_lib",
+        ":script_eval_unroll_sensitivity_lib",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_binary(
     name = "run_exp1_finite_r_primary",
     srcs = [
         "scripts/run_exp1_finite_r_primary.py",
