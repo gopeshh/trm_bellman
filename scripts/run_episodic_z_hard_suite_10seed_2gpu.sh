@@ -23,6 +23,7 @@ DIRECTIONS_PATH="$PAPER_ROOT/results/lv_directions_seed1729_eps1e-4.npz"
 
 RESULTS_ROOT="$PAPER_ROOT/results/episodic_z_hard_suite_20k_seed41_50"
 LOG_DIR="$RESULTS_ROOT/logs"
+DIAG_LOG_DIR="$RESULTS_ROOT/diagnostic_logs"
 CHECKPOINT_ROOT="$CODE_ROOT/checkpoints/episodic_z_hard_suite_20k_seed41_50"
 MANIFEST="$RESULTS_ROOT/job_manifest.tsv"
 FAILURES_FILE="$RESULTS_ROOT/failed_jobs.txt"
@@ -30,8 +31,9 @@ FAILURES_FILE="$RESULTS_ROOT/failed_jobs.txt"
 ENV_STEP_BUDGET=20000
 INTERVAL=5000
 SEEDS=(41 42 43 44 45 46 47 48 49 50)
+DIAG_STEPS=(5000 10000 15000 20000)
 
-mkdir -p "$LOG_DIR" "$CHECKPOINT_ROOT"
+mkdir -p "$LOG_DIR" "$DIAG_LOG_DIR" "$CHECKPOINT_ROOT"
 : > "$FAILURES_FILE"
 
 echo "Building upi_trm_train..."
@@ -55,7 +57,10 @@ RUNNER="$FBSOURCE_ROOT/$RUNNER_REL"
 echo "Using runner: $RUNNER"
 
 echo "Building episodic_z_hard_suite_diagnostics..."
-DIAG_OUTPUT=$(buck2 build fbcode//buiksat_trm:episodic_z_hard_suite_diagnostics --show-output 2>&1)
+DIAG_OUTPUT=$(buck2 build fbcode//buiksat_trm:episodic_z_hard_suite_diagnostics \
+    -c fbcode.nvcc_arch=a100 \
+    -c fbcode.enable_gpu_sections=true \
+    --show-output 2>&1)
 if ! echo "$DIAG_OUTPUT" | grep -q "BUILD SUCCEEDED"; then
     echo "ERROR: buck2 build failed for episodic_z_hard_suite_diagnostics"
     echo "$DIAG_OUTPUT"
@@ -77,6 +82,52 @@ is_complete() {
     [ -f "$logfile" ] && \
         rg -q "\\[step 20000\\]( \\[update [0-9]+\\])? eval_success_rate" "$logfile" && \
         [ -f "$checkpoint_dir/rl_checkpoint_step_20000.pt" ]
+}
+
+diagnostics_complete() {
+    local seed=$1
+    local step
+    for step in "${DIAG_STEPS[@]}"; do
+        [ -f "$RESULTS_ROOT/diagnostics/seed${seed}/step${step}.json" ] || return 1
+    done
+    return 0
+}
+
+run_seed_diagnostics() {
+    local gpu=$1
+    local seed=$2
+    local diag_log=$3
+    local checkpoint_dir="$CHECKPOINT_ROOT/seed${seed}"
+    local step
+
+    : > "$diag_log"
+    for step in "${DIAG_STEPS[@]}"; do
+        local checkpoint_path="$checkpoint_dir/rl_checkpoint_step_${step}.pt"
+        local output_json="$RESULTS_ROOT/diagnostics/seed${seed}/step${step}.json"
+
+        if [ -f "$output_json" ]; then
+            echo "[diagnostics] seed=${seed} step=${step} reuse ${output_json}" >> "$diag_log"
+            continue
+        fi
+        if [ ! -f "$checkpoint_path" ]; then
+            echo "[diagnostics] missing checkpoint ${checkpoint_path}" >> "$diag_log"
+            return 1
+        fi
+
+        echo "[diagnostics] seed=${seed} step=${step} checkpoint=${checkpoint_path}" >> "$diag_log"
+        if ! CUDA_VISIBLE_DEVICES=$gpu "$DIAG_RUNNER" checkpoint \
+            --checkpoint "$checkpoint_path" \
+            --config-yaml "$CONFIG_PATH" \
+            --closure-batch "$CLOSURE_BATCH_PATH" \
+            --directions-npz "$DIRECTIONS_PATH" \
+            --output-json "$output_json" \
+            --device auto \
+            --chunk-size 256 \
+            >> "$diag_log" 2>&1; then
+            return 1
+        fi
+    done
+    return 0
 }
 
 write_manifest() {
@@ -102,38 +153,56 @@ run_seed() {
     local gpu=$1
     local seed=$2
     local logfile="$LOG_DIR/seed${seed}.log"
+    local diag_log="$DIAG_LOG_DIR/seed${seed}.log"
     local checkpoint_dir="$CHECKPOINT_ROOT/seed${seed}"
 
     mkdir -p "$checkpoint_dir"
 
     if is_complete "$logfile" "$checkpoint_dir"; then
-        echo "[GPU $gpu] Skipping seed=$seed (already complete)"
+        echo "[GPU $gpu] Skipping training for seed=$seed (already complete)"
+    else
+        if [ -f "$logfile" ]; then
+            mv "$logfile" "${logfile}.partial.$(date +%Y%m%d_%H%M%S)"
+        fi
+
+        echo "[GPU $gpu] Starting seed=$seed"
+        echo "  Log: $logfile"
+        echo "  Checkpoints: $checkpoint_dir"
+
+        if CUDA_VISIBLE_DEVICES=$gpu "$RUNNER" \
+            --config "$CONFIG_PATH" \
+            --seed "$seed" \
+            --dataset-paths "$DATA_PATH" \
+            --checkpoint-dir "$checkpoint_dir" \
+            --env-step-budget "$ENV_STEP_BUDGET" \
+            --log-env-interval "$INTERVAL" \
+            --eval-env-interval "$INTERVAL" \
+            --save-env-interval "$INTERVAL" \
+            --no-wandb \
+            > "$logfile" 2>&1; then
+            echo "[GPU $gpu] Finished training seed=$seed"
+        else
+            echo "seed=${seed}\tgpu=${gpu}\tstage=train\tlog=${logfile}" >> "$FAILURES_FILE"
+            echo "[GPU $gpu] FAILED training seed=$seed (see $logfile)"
+            return 1
+        fi
+    fi
+
+    if diagnostics_complete "$seed"; then
+        echo "[GPU $gpu] Skipping diagnostics for seed=$seed (already complete)"
         return 0
     fi
 
-    if [ -f "$logfile" ]; then
-        mv "$logfile" "${logfile}.partial.$(date +%Y%m%d_%H%M%S)"
+    if [ -f "$diag_log" ]; then
+        mv "$diag_log" "${diag_log}.partial.$(date +%Y%m%d_%H%M%S)"
     fi
 
-    echo "[GPU $gpu] Starting seed=$seed"
-    echo "  Log: $logfile"
-    echo "  Checkpoints: $checkpoint_dir"
-
-    if CUDA_VISIBLE_DEVICES=$gpu "$RUNNER" \
-        --config "$CONFIG_PATH" \
-        --seed "$seed" \
-        --dataset-paths "$DATA_PATH" \
-        --checkpoint-dir "$checkpoint_dir" \
-        --env-step-budget "$ENV_STEP_BUDGET" \
-        --log-env-interval "$INTERVAL" \
-        --eval-env-interval "$INTERVAL" \
-        --save-env-interval "$INTERVAL" \
-        --no-wandb \
-        > "$logfile" 2>&1; then
-        echo "[GPU $gpu] Finished seed=$seed"
+    echo "[GPU $gpu] Starting diagnostics seed=$seed"
+    if run_seed_diagnostics "$gpu" "$seed" "$diag_log"; then
+        echo "[GPU $gpu] Finished diagnostics seed=$seed"
     else
-        echo "seed=${seed}\tgpu=${gpu}\tlog=${logfile}" >> "$FAILURES_FILE"
-        echo "[GPU $gpu] FAILED seed=$seed (see $logfile)"
+        echo "seed=${seed}\tgpu=${gpu}\tstage=diagnostics\tlog=${diag_log}" >> "$FAILURES_FILE"
+        echo "[GPU $gpu] FAILED diagnostics seed=$seed (see $diag_log)"
         return 1
     fi
 }
@@ -195,7 +264,8 @@ python3 "$CODE_ROOT/scripts/postprocess_episodic_z_hard_suite.py" \
     --directions-npz "$DIRECTIONS_PATH" \
     --diag-runner "$DIAG_RUNNER" \
     --device auto \
+    --chunk-size 256 \
     --seeds "${SEEDS[@]}" \
-    --checkpoint-steps 5000 10000 15000 20000
+    --checkpoint-steps "${DIAG_STEPS[@]}"
 
 echo "All episodic-z hard-suite jobs completed successfully."

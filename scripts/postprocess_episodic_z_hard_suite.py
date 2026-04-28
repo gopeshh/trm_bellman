@@ -49,6 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--directions-npz", type=Path, required=True)
     parser.add_argument("--diag-runner", type=Path, required=True)
     parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--chunk-size", type=int, default=256)
     parser.add_argument("--seeds", type=int, nargs="+", required=True)
     parser.add_argument("--checkpoint-steps", type=int, nargs="+", required=True)
     return parser.parse_args()
@@ -166,8 +167,14 @@ def run_checkpoint_diagnostics(
     directions_npz: Path,
     output_json: Path,
     device: str,
+    chunk_size: int,
 ) -> Dict[str, Any]:
     if not output_json.exists():
+        print(
+            f"[postprocess] running diagnostics checkpoint={checkpoint} "
+            f"-> {output_json}",
+            flush=True,
+        )
         command = [
             str(diag_runner),
             "checkpoint",
@@ -183,9 +190,26 @@ def run_checkpoint_diagnostics(
             str(output_json),
             "--device",
             device,
+            "--chunk-size",
+            str(chunk_size),
         ]
         subprocess.run(command, check=True)
+    else:
+        print(f"[postprocess] reusing diagnostics {output_json}", flush=True)
     return load_json(output_json)
+
+
+def resolve_checkpoint_path(checkpoint_root: Path, seed: int, step: int) -> Path:
+    candidates = [
+        checkpoint_root / f"seed{seed}" / f"rl_checkpoint_step_{step}.pt",
+        checkpoint_root / f"rl_checkpoint_step_{step}.pt",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "Missing checkpoint; tried: " + ", ".join(str(candidate) for candidate in candidates)
+    )
 
 
 def main() -> int:
@@ -213,6 +237,7 @@ def main() -> int:
 
     for seed in args.seeds:
         log_path = log_dir / f"seed{seed}.log"
+        print(f"[postprocess] parsing eval log seed={seed} path={log_path}", flush=True)
         seed_eval_rows = parse_eval_history(log_path)
         eval_by_step = {int(row["step"]): row for row in seed_eval_rows}
         missing_eval_steps = sorted(required_eval_steps.difference(eval_by_step))
@@ -226,9 +251,11 @@ def main() -> int:
             eval_entry["seed"] = int(seed)
             eval_rows.append(eval_entry)
 
-            checkpoint_path = checkpoint_root / f"seed{seed}" / f"rl_checkpoint_step_{step}.pt"
-            if not checkpoint_path.exists():
-                raise FileNotFoundError(f"Missing checkpoint: {checkpoint_path}")
+            checkpoint_path = resolve_checkpoint_path(checkpoint_root, int(seed), int(step))
+            print(
+                f"[postprocess] seed={seed} step={step} checkpoint={checkpoint_path}",
+                flush=True,
+            )
 
             diag_path = diagnostics_root / f"seed{seed}" / f"step{step}.json"
             payload = run_checkpoint_diagnostics(
@@ -239,6 +266,7 @@ def main() -> int:
                 directions_npz=directions_npz,
                 output_json=diag_path,
                 device=args.device,
+                chunk_size=int(args.chunk_size),
             )
             diagnostics = payload["diagnostics"]
             diag_entry = {
@@ -262,6 +290,8 @@ def main() -> int:
 
     jsonl_write(per_seed_eval_path, eval_rows)
     jsonl_write(per_seed_diag_path, diag_rows)
+    print(f"[postprocess] wrote {per_seed_eval_path}", flush=True)
+    print(f"[postprocess] wrote {per_seed_diag_path}", flush=True)
 
     final_step = max(checkpoint_steps)
     final_eval_rows = [row for row in eval_rows if int(row["step"]) == final_step]
@@ -286,6 +316,7 @@ def main() -> int:
         "per_seed_final_eval": final_eval_rows,
     }
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True, default=str) + "\n", encoding="ascii")
+    print(f"[postprocess] wrote {summary_path}", flush=True)
 
     scalar_metrics = [
         "eps_res_n",
@@ -352,6 +383,8 @@ def main() -> int:
         json.dumps(cpi_penalty_grid, indent=2, sort_keys=True, default=str) + "\n",
         encoding="ascii",
     )
+    print(f"[postprocess] wrote {diagnostics_summary_path}", flush=True)
+    print(f"[postprocess] wrote {cpi_penalty_grid_path}", flush=True)
 
     print(json.dumps({
         "summary_json": str(summary_path),
