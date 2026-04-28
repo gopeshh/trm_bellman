@@ -18,6 +18,8 @@ PAPER_ROOT="/home/buiksat/UPI_TRM/UPI_TRM_NIPS"
 
 DATA_PATH="$CODE_ROOT/data/sudoku-4x4-easy_6to8empties"
 CONFIG_PATH="$CODE_ROOT/configs/revision/upi_trm_feasibility_episodic_z_hard_suite_theory_exact.yaml"
+CLOSURE_BATCH_PATH="$PAPER_ROOT/results/closure_batch_seed1729.npz"
+DIRECTIONS_PATH="$PAPER_ROOT/results/lv_directions_seed1729_eps1e-4.npz"
 
 RESULTS_ROOT="$PAPER_ROOT/results/episodic_z_hard_suite_20k_seed41_50"
 LOG_DIR="$RESULTS_ROOT/logs"
@@ -51,13 +53,29 @@ if [ -z "$RUNNER_REL" ]; then
 fi
 RUNNER="$FBSOURCE_ROOT/$RUNNER_REL"
 echo "Using runner: $RUNNER"
+
+echo "Building episodic_z_hard_suite_diagnostics..."
+DIAG_OUTPUT=$(buck2 build fbcode//buiksat_trm:episodic_z_hard_suite_diagnostics --show-output 2>&1)
+if ! echo "$DIAG_OUTPUT" | grep -q "BUILD SUCCEEDED"; then
+    echo "ERROR: buck2 build failed for episodic_z_hard_suite_diagnostics"
+    echo "$DIAG_OUTPUT"
+    exit 1
+fi
+DIAG_REL=$(echo "$DIAG_OUTPUT" | awk '/episodic_z_hard_suite_diagnostics/ {print $2}' | tail -n1)
+if [ -z "$DIAG_REL" ]; then
+    echo "ERROR: could not resolve episodic_z_hard_suite_diagnostics output path"
+    echo "$DIAG_OUTPUT"
+    exit 1
+fi
+DIAG_RUNNER="$FBSOURCE_ROOT/$DIAG_REL"
+echo "Using diagnostic runner: $DIAG_RUNNER"
 cd "$CODE_ROOT" || exit 1
 
 is_complete() {
     local logfile=$1
     local checkpoint_dir=$2
     [ -f "$logfile" ] && \
-        rg -q "\\[step 20000\\] eval_success_rate" "$logfile" && \
+        rg -q "\\[step 20000\\]( \\[update [0-9]+\\])? eval_success_rate" "$logfile" && \
         [ -f "$checkpoint_dir/rl_checkpoint_step_20000.pt" ]
 }
 
@@ -143,6 +161,8 @@ echo "Env-step budget: $ENV_STEP_BUDGET"
 echo "Checkpoint/eval interval: $INTERVAL"
 echo "Logs: $LOG_DIR"
 echo "Checkpoints: $CHECKPOINT_ROOT"
+echo "Closure batch: $CLOSURE_BATCH_PATH"
+echo "Directions: $DIRECTIONS_PATH"
 echo "Manifest: $MANIFEST"
 echo "============================================================"
 
@@ -165,5 +185,17 @@ if [ -s "$FAILURES_FILE" ]; then
     echo "Failures recorded in $FAILURES_FILE"
     exit 1
 fi
+
+python3 "$CODE_ROOT/scripts/postprocess_episodic_z_hard_suite.py" \
+    --results-root "$RESULTS_ROOT" \
+    --log-dir "$LOG_DIR" \
+    --checkpoint-root "$CHECKPOINT_ROOT" \
+    --config-yaml "$CONFIG_PATH" \
+    --closure-batch "$CLOSURE_BATCH_PATH" \
+    --directions-npz "$DIRECTIONS_PATH" \
+    --diag-runner "$DIAG_RUNNER" \
+    --device auto \
+    --seeds "${SEEDS[@]}" \
+    --checkpoint-steps 5000 10000 15000 20000
 
 echo "All episodic-z hard-suite jobs completed successfully."
