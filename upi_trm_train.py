@@ -616,6 +616,30 @@ def parse_args():
         default=1000,
         help="Save checkpoint every N steps (0 to disable).",
     )
+    parser.add_argument(
+        "--env-step-budget",
+        type=int,
+        default=None,
+        help="Optional exact environment-step budget; when set, training stops at this env-step count.",
+    )
+    parser.add_argument(
+        "--log-env-interval",
+        type=int,
+        default=None,
+        help="Optional logging interval in environment steps when --env-step-budget is active.",
+    )
+    parser.add_argument(
+        "--eval-env-interval",
+        type=int,
+        default=None,
+        help="Optional evaluation interval in environment steps when --env-step-budget is active.",
+    )
+    parser.add_argument(
+        "--save-env-interval",
+        type=int,
+        default=None,
+        help="Optional checkpoint interval in environment steps when --env-step-budget is active.",
+    )
     # Model architecture arguments (to match pretrained model)
     parser.add_argument(
         "--hidden-size",
@@ -679,6 +703,215 @@ def parse_args():
         help="Number of imitation learning epochs (default: 50).",
     )
     return parser.parse_args()
+
+
+def _write_progress(step_iter: Any, message: str) -> None:
+    if step_iter is not None and hasattr(step_iter, "write"):
+        step_iter.write(message)
+    else:
+        print(message)
+
+
+def _step_prefix(progress_step: int, outer_step: int) -> str:
+    prefix = f"[step {progress_step:05d}]"
+    if progress_step != outer_step:
+        prefix += f" [update {outer_step:05d}]"
+    return prefix
+
+
+def _log_training_metrics(
+    *,
+    progress_step: int,
+    outer_step: int,
+    metrics: Dict[str, float],
+    selected_baseline: Optional[str],
+    trainer: Any,
+    step_iter: Any,
+    use_wandb: bool,
+) -> None:
+    loss_value = metrics.get("loss_value", metrics.get("loss_q", 0.0))
+    loss_policy = metrics.get("loss_policy", 0.0)
+    prefix = _step_prefix(progress_step, outer_step)
+
+    if selected_baseline in ("dqn", "ddqn"):
+        epsilon = metrics.get("epsilon", trainer._get_epsilon() if hasattr(trainer, "_get_epsilon") else 0)
+        mean_q = metrics.get("mean_q", 0.0)
+        msg = (
+            f"{prefix} q_loss={loss_value:.6f} "
+            f"mean_q={mean_q:.3f} epsilon={epsilon:.3f}"
+        )
+    else:
+        msg = (
+            f"{prefix} value_loss={loss_value:.6f} "
+            f"policy_loss={loss_policy:.6f}"
+        )
+    _write_progress(step_iter, msg)
+
+    if "target_mean" in metrics:
+        clip_str = f" clip={metrics['value_clip']:.1f}" if "value_clip" in metrics else ""
+        target_msg = (
+            f"{prefix} VALUE_DEBUG: "
+            f"target(mean={metrics['target_mean']:.2f} std={metrics['target_std']:.2f} "
+            f"min={metrics['target_min']:.2f} max={metrics['target_max']:.2f}) "
+            f"V(s)(mean={metrics['value_mean']:.2f} std={metrics['value_std']:.2f}) "
+            f"reward(mean={metrics['reward_mean']:.3f} std={metrics['reward_std']:.3f}){clip_str}"
+        )
+        _write_progress(step_iter, target_msg)
+
+    if use_wandb:
+        wandb_metrics = {
+            "train/loss_value": loss_value,
+            "train/loss_policy": loss_policy,
+            "train/term_stop": metrics.get("term_stop", 0),
+            "train/term_solved": metrics.get("term_solved", 0),
+            "train/term_budget": metrics.get("term_budget", 0),
+            "train/env_steps_total": metrics.get("env_steps_total", 0),
+            "train/env_steps_collected": metrics.get("env_steps_collected", 0),
+        }
+        if selected_baseline in ("dqn", "ddqn"):
+            wandb_metrics["train/mean_q"] = metrics.get("mean_q", 0.0)
+            wandb_metrics["train/epsilon"] = metrics.get("epsilon", 0.0)
+            wandb_metrics["train/buffer_size"] = metrics.get("buffer_size", 0)
+        if "value_lr" in metrics:
+            wandb_metrics["train/lr_value"] = metrics["value_lr"]
+        if "policy_lr" in metrics:
+            wandb_metrics["train/lr_policy"] = metrics["policy_lr"]
+        if "policy_kl" in metrics:
+            wandb_metrics["train/policy_kl"] = metrics["policy_kl"]
+        if "kl_coef" in metrics:
+            wandb_metrics["train/kl_coef"] = metrics["kl_coef"]
+        for key in [
+            "hat_Cz",
+            "hat_Lz",
+            "hat_Lv",
+            "unrolling_term",
+            "bellman_residual_mean",
+            "bellman_residual_max",
+            "drift_mean",
+            "drift_max",
+            "plan_change_mean",
+        ]:
+            if key in metrics:
+                wandb_metrics[f"theory/{key}"] = metrics[key]
+        for key in [
+            "value_mean",
+            "value_std",
+            "adv_mean",
+            "adv_std",
+            "target_mean",
+            "target_std",
+            "target_min",
+            "target_max",
+            "reward_mean",
+            "reward_std",
+        ]:
+            if key in metrics:
+                wandb_metrics[f"debug/{key}"] = metrics[key]
+        wandb.log(wandb_metrics, step=progress_step)
+
+
+def _run_eval_and_log(
+    *,
+    progress_step: int,
+    outer_step: int,
+    trainer: Any,
+    env_cfg: Any,
+    dataset: Any,
+    checker_fn: Any,
+    step_iter: Any,
+    use_wandb: bool,
+) -> None:
+    eval_metrics = None
+    try:
+        eval_metrics = trainer.evaluate_policy_metrics(
+            env_cfg=env_cfg,
+            dataset=dataset,
+            checker=checker_fn,
+        )
+    except AttributeError:
+        pass
+    except Exception as e:
+        print(f"[WARN] evaluate_policy_metrics error: {type(e).__name__}: {e}")
+
+    prefix = _step_prefix(progress_step, outer_step)
+    if eval_metrics is not None:
+        eval_policy_mode = eval_metrics.get("eval_policy_mode", "unknown")
+        solved_count = eval_metrics.get("solved_count", 0)
+        total_episodes = eval_metrics.get("total_episodes", 0)
+        score_min = eval_metrics.get("score_min", 0.0)
+        score_max = eval_metrics.get("score_max", 0.0)
+        max_possible = eval_metrics.get("max_possible_score")
+        initial_mean = eval_metrics.get("initial_score_mean", 0.0)
+        mean_return = eval_metrics.get("mean_return")
+        invalid_action_rate = eval_metrics.get("invalid_action_rate")
+        filled_mean = eval_metrics.get("final_filled_mean")
+        violations_mean = eval_metrics.get("final_violations_mean")
+        zero_cand_mean = eval_metrics.get("final_zero_cand_mean")
+
+        eval_msg = (
+            f"{prefix} "
+            f"eval_success_rate={eval_metrics['success_rate']:.3f} "
+            f"eval_mean_score={eval_metrics['mean_score']:.3f} "
+            f"eval_policy_mode={eval_policy_mode} "
+            f"[solved={solved_count}/{total_episodes}, "
+            f"score_range={score_min:.2f}-{score_max:.2f}"
+            f"{f'/{max_possible:.1f}' if max_possible else ''}, "
+            f"initial={initial_mean:.2f}]"
+        )
+        if mean_return is not None:
+            eval_msg += f" eval_mean_return={mean_return:.3f}"
+        if invalid_action_rate is not None:
+            eval_msg += f" eval_invalid_action_rate={invalid_action_rate:.3f}"
+        _write_progress(step_iter, eval_msg)
+
+        if filled_mean is not None:
+            progress_msg = (
+                f"{prefix} PROGRESS: "
+                f"filled={filled_mean:.2f} "
+                f"violations={violations_mean:.2f} "
+                f"zero_cand={zero_cand_mean:.2f}"
+            )
+            _write_progress(step_iter, progress_msg)
+
+        if use_wandb:
+            wandb_eval = {
+                "eval/success_rate": eval_metrics["success_rate"],
+                "eval/mean_score": eval_metrics["mean_score"],
+                "eval/solved_count": solved_count,
+                "eval/score_min": score_min,
+                "eval/score_max": score_max,
+                "eval/initial_score_mean": initial_mean,
+            }
+            if max_possible is not None:
+                wandb_eval["eval/max_possible_score"] = max_possible
+            if filled_mean is not None:
+                wandb_eval["eval/filled_mean"] = filled_mean
+                wandb_eval["eval/violations_mean"] = violations_mean
+                wandb_eval["eval/zero_cand_mean"] = zero_cand_mean
+            wandb.log(wandb_eval, step=progress_step)
+    else:
+        print(f"{prefix} (eval not available for baseline trainer)")
+
+    debug_stats = None
+    if hasattr(trainer, "get_debug_stats"):
+        debug_stats = trainer.get_debug_stats()
+    if debug_stats:
+        debug_msg = (
+            f"{prefix} DEBUG: "
+            f"ep_len={debug_stats.get('avg_episode_length', 0):.1f} "
+            f"ep_ret={debug_stats.get('avg_episode_return', 0):.3f} "
+            f"stop_prob={debug_stats.get('avg_stop_prob', 0):.3f} "
+            f"score_chg={debug_stats.get('avg_score_change', 0):.4f}"
+        )
+        _write_progress(step_iter, debug_msg)
+        if use_wandb:
+            wandb_debug = {}
+            for key, value in debug_stats.items():
+                wandb_debug[f"debug/{key}"] = value
+            wandb.log(wandb_debug, step=progress_step)
+
+    if hasattr(trainer, "clear_debug_stats"):
+        trainer.clear_debug_stats()
 
 
 def main():
@@ -804,9 +1037,17 @@ def main():
     
     env = PlanEditEnv(dataset=dataset, checker=checker_fn, config=env_cfg, task_config=task_config)
     
-    # Log resolved training parameters
-    print(f"[INFO] Training for {rl_cfg.num_train_steps} steps "
-          f"(gamma={rl_cfg.gamma:.3f}, K={rl_cfg.K}, inner_unroll_n={rl_cfg.inner_unroll_n})")
+    env_step_budget = args.env_step_budget
+    if env_step_budget is not None:
+        print(
+            f"[INFO] Training to env-step budget {env_step_budget} "
+            f"(gamma={rl_cfg.gamma:.3f}, K={rl_cfg.K}, inner_unroll_n={rl_cfg.inner_unroll_n})"
+        )
+    else:
+        print(
+            f"[INFO] Training for {rl_cfg.num_train_steps} steps "
+            f"(gamma={rl_cfg.gamma:.3f}, K={rl_cfg.K}, inner_unroll_n={rl_cfg.inner_unroll_n})"
+        )
     print(f"[INFO] Terminal rewards: solve={env_cfg.solve_terminal_reward:.3f}, "
           f"fail={env_cfg.fail_terminal_reward:.3f}")
 
@@ -1096,218 +1337,126 @@ def main():
             print()
 
     # === Training loop with puzzle embedding updates and checkpointing ===
-    total_steps = rl_cfg.num_train_steps
-    remaining_steps = total_steps - start_step
-    
-    if rl_cfg.use_tqdm and trange is not None:
-        step_iter = trange(remaining_steps, desc="UPI-TRM RL training", initial=start_step, total=total_steps)
-    else:
-        step_iter = range(remaining_steps)
+    last_saved_progress_step: Optional[int] = None
 
-    for local_step in step_iter:
-        step = start_step + local_step
-        metrics = trainer.train_step()
-        
-        # === Step puzzle embedding optimizer ===
-        if puzzle_emb_optimizer is not None:
-            puzzle_emb_optimizer.step()
-            puzzle_emb_optimizer.zero_grad()
-        
-        if (step + 1) % rl_cfg.log_interval == 0:
-            # Normalize loss names across algorithms (DQN uses loss_q, others use loss_value)
-            loss_value = metrics.get('loss_value', metrics.get('loss_q', 0.0))
-            loss_policy = metrics.get('loss_policy', 0.0)
+    if env_step_budget is None:
+        total_steps = rl_cfg.num_train_steps
+        remaining_steps = total_steps - start_step
 
-            # Build message based on algorithm type
-            if selected_baseline in ("dqn", "ddqn"):
-                epsilon = metrics.get('epsilon', trainer._get_epsilon() if hasattr(trainer, '_get_epsilon') else 0)
-                mean_q = metrics.get('mean_q', 0.0)
-                msg = (
-                    f"[step {step+1:05d}] q_loss={loss_value:.6f} "
-                    f"mean_q={mean_q:.3f} epsilon={epsilon:.3f}"
-                )
-            else:
-                msg = (
-                    f"[step {step+1:05d}] value_loss={loss_value:.6f} "
-                    f"policy_loss={loss_policy:.6f}"
-                )
-            if hasattr(step_iter, "write"):
-                step_iter.write(msg)
-            else:
-                print(msg)
-            
-            # Log value target stats for debugging scale issues
-            if "target_mean" in metrics:
-                clip_str = f" clip={metrics['value_clip']:.1f}" if "value_clip" in metrics else ""
-                target_msg = (
-                    f"[step {step+1:05d}] VALUE_DEBUG: "
-                    f"target(mean={metrics['target_mean']:.2f} std={metrics['target_std']:.2f} "
-                    f"min={metrics['target_min']:.2f} max={metrics['target_max']:.2f}) "
-                    f"V(s)(mean={metrics['value_mean']:.2f} std={metrics['value_std']:.2f}) "
-                    f"reward(mean={metrics['reward_mean']:.3f} std={metrics['reward_std']:.3f}){clip_str}"
-                )
-                if hasattr(step_iter, "write"):
-                    step_iter.write(target_msg)
-                else:
-                    print(target_msg)
-            
-            # === WandB: Log training metrics ===
-            if use_wandb:
-                wandb_metrics = {
-                    "train/loss_value": loss_value,
-                    "train/loss_policy": loss_policy,
-                    "train/term_stop": metrics.get("term_stop", 0),
-                    "train/term_solved": metrics.get("term_solved", 0),
-                    "train/term_budget": metrics.get("term_budget", 0),
-                }
-                # DQN-specific metrics
-                if selected_baseline in ("dqn", "ddqn"):
-                    wandb_metrics["train/mean_q"] = metrics.get("mean_q", 0.0)
-                    wandb_metrics["train/epsilon"] = metrics.get("epsilon", 0.0)
-                    wandb_metrics["train/buffer_size"] = metrics.get("buffer_size", 0)
-                # Add learning rates if available
-                if "value_lr" in metrics:
-                    wandb_metrics["train/lr_value"] = metrics["value_lr"]
-                if "policy_lr" in metrics:
-                    wandb_metrics["train/lr_policy"] = metrics["policy_lr"]
-                # Add KL metrics if using trust region
-                if "policy_kl" in metrics:
-                    wandb_metrics["train/policy_kl"] = metrics["policy_kl"]
-                if "kl_coef" in metrics:
-                    wandb_metrics["train/kl_coef"] = metrics["kl_coef"]
-                # Add theory metrics if tracked
-                for key in ["hat_Cz", "hat_Lz", "hat_Lv", "unrolling_term",
-                            "bellman_residual_mean", "bellman_residual_max",
-                            "drift_mean", "drift_max", "plan_change_mean"]:
-                    if key in metrics:
-                        wandb_metrics[f"theory/{key}"] = metrics[key]
-                # Add debug metrics if present (value target stats and advantage stats)
-                for key in ["value_mean", "value_std", "adv_mean", "adv_std",
-                            "target_mean", "target_std", "target_min", "target_max",
-                            "reward_mean", "reward_std"]:
-                    if key in metrics:
-                        wandb_metrics[f"debug/{key}"] = metrics[key]
-                wandb.log(wandb_metrics, step=step + 1)
+        if rl_cfg.use_tqdm and trange is not None:
+            step_iter = trange(remaining_steps, desc="UPI-TRM RL training", initial=start_step, total=total_steps)
+        else:
+            step_iter = range(remaining_steps)
 
-        if (step + 1) % rl_cfg.eval_interval == 0:
-            # All trainers (UPI-TRM, PPO, A2C) now have evaluate_policy_metrics
-            # Use try/except to handle old cached binaries that may not have the method
-            eval_metrics = None
-            try:
-                eval_metrics = trainer.evaluate_policy_metrics(
+        for local_step in step_iter:
+            step = start_step + local_step
+            outer_step = step + 1
+            metrics = trainer.train_step()
+
+            if puzzle_emb_optimizer is not None:
+                puzzle_emb_optimizer.step()
+                puzzle_emb_optimizer.zero_grad()
+
+            if outer_step % rl_cfg.log_interval == 0:
+                _log_training_metrics(
+                    progress_step=outer_step,
+                    outer_step=outer_step,
+                    metrics=metrics,
+                    selected_baseline=selected_baseline,
+                    trainer=trainer,
+                    step_iter=step_iter,
+                    use_wandb=use_wandb,
+                )
+
+            if outer_step % rl_cfg.eval_interval == 0:
+                _run_eval_and_log(
+                    progress_step=outer_step,
+                    outer_step=outer_step,
+                    trainer=trainer,
                     env_cfg=env_cfg,
                     dataset=dataset,
-                    checker=checker_fn,
+                    checker_fn=checker_fn,
+                    step_iter=step_iter,
+                    use_wandb=use_wandb,
                 )
-            except AttributeError:
-                pass  # Old cached binary without evaluate_policy_metrics
-            except Exception as e:
-                print(f"[WARN] evaluate_policy_metrics error: {type(e).__name__}: {e}")
-            if eval_metrics is not None:
-                eval_policy_mode = eval_metrics.get("eval_policy_mode", "unknown")
-                solved_count = eval_metrics.get("solved_count", 0)
-                total_episodes = eval_metrics.get("total_episodes", 0)
-                score_min = eval_metrics.get("score_min", 0.0)
-                score_max = eval_metrics.get("score_max", 0.0)
-                max_possible = eval_metrics.get("max_possible_score")
-                initial_mean = eval_metrics.get("initial_score_mean", 0.0)
-                mean_return = eval_metrics.get("mean_return")
-                invalid_action_rate = eval_metrics.get("invalid_action_rate")
-                # Sudoku-specific progress metrics
-                filled_mean = eval_metrics.get("final_filled_mean")
-                violations_mean = eval_metrics.get("final_violations_mean")
-                zero_cand_mean = eval_metrics.get("final_zero_cand_mean")
 
-                eval_msg = (
-                    f"[step {step+1:05d}] "
-                    f"eval_success_rate={eval_metrics['success_rate']:.3f} "
-                    f"eval_mean_score={eval_metrics['mean_score']:.3f} "
-                    f"eval_policy_mode={eval_policy_mode} "
-                    f"[solved={solved_count}/{total_episodes}, "
-                    f"score_range={score_min:.2f}-{score_max:.2f}"
-                    f"{f'/{max_possible:.1f}' if max_possible else ''}, "
-                    f"initial={initial_mean:.2f}]"
+            if args.save_interval > 0 and checkpoint_dir is not None and outer_step % args.save_interval == 0:
+                save_checkpoint(model, trainer, outer_step, checkpoint_dir, puzzle_emb_optimizer, rl_cfg)
+                last_saved_progress_step = outer_step
+
+        final_progress_step = total_steps
+    else:
+        if start_step != 0:
+            raise ValueError("--env-step-budget does not currently support resume-checkpoint mode.")
+
+        log_env_interval = args.log_env_interval
+        eval_env_interval = args.eval_env_interval
+        save_env_interval = args.save_env_interval
+        next_log_env = log_env_interval if log_env_interval and log_env_interval > 0 else None
+        next_eval_env = eval_env_interval if eval_env_interval and eval_env_interval > 0 else None
+        next_save_env = save_env_interval if save_env_interval and save_env_interval > 0 else None
+        outer_step = 0
+        step_iter = None
+
+        while trainer.get_env_step_count() < env_step_budget:
+            current_env_step = trainer.get_env_step_count()
+            targets = [env_step_budget]
+            for target in (next_log_env, next_eval_env, next_save_env):
+                if target is not None and target > current_env_step:
+                    targets.append(target)
+            next_target = min(targets)
+            collect_budget = next_target - current_env_step
+            if collect_budget <= 0:
+                collect_budget = 1
+
+            metrics = trainer.train_step(max_env_steps_to_collect=collect_budget)
+            outer_step += 1
+
+            if puzzle_emb_optimizer is not None:
+                puzzle_emb_optimizer.step()
+                puzzle_emb_optimizer.zero_grad()
+
+            current_env_step = trainer.get_env_step_count()
+            progress_step = current_env_step
+
+            if next_log_env is not None and current_env_step >= next_log_env:
+                _log_training_metrics(
+                    progress_step=progress_step,
+                    outer_step=outer_step,
+                    metrics=metrics,
+                    selected_baseline=selected_baseline,
+                    trainer=trainer,
+                    step_iter=step_iter,
+                    use_wandb=use_wandb,
                 )
-                if mean_return is not None:
-                    eval_msg += f" eval_mean_return={mean_return:.3f}"
-                if invalid_action_rate is not None:
-                    eval_msg += f" eval_invalid_action_rate={invalid_action_rate:.3f}"
-                # Add progress metrics if available (Sudoku tasks)
-                if filled_mean is not None:
-                    progress_msg = (
-                        f"[step {step+1:05d}] PROGRESS: "
-                        f"filled={filled_mean:.2f} "
-                        f"violations={violations_mean:.2f} "
-                        f"zero_cand={zero_cand_mean:.2f}"
-                    )
-                    if hasattr(step_iter, "write"):
-                        step_iter.write(eval_msg)
-                        step_iter.write(progress_msg)
-                    else:
-                        print(eval_msg)
-                        print(progress_msg)
-                else:
-                    if hasattr(step_iter, "write"):
-                        step_iter.write(eval_msg)
-                    else:
-                        print(eval_msg)
+                while next_log_env is not None and current_env_step >= next_log_env:
+                    next_log_env += log_env_interval
 
-                # === WandB: Log evaluation metrics ===
-                if use_wandb:
-                    wandb_eval = {
-                        "eval/success_rate": eval_metrics["success_rate"],
-                        "eval/mean_score": eval_metrics["mean_score"],
-                        "eval/solved_count": solved_count,
-                        "eval/score_min": score_min,
-                        "eval/score_max": score_max,
-                        "eval/initial_score_mean": initial_mean,
-                    }
-                    if max_possible is not None:
-                        wandb_eval["eval/max_possible_score"] = max_possible
-                    # Add progress metrics if available
-                    if filled_mean is not None:
-                        wandb_eval["eval/filled_mean"] = filled_mean
-                        wandb_eval["eval/violations_mean"] = violations_mean
-                        wandb_eval["eval/zero_cand_mean"] = zero_cand_mean
-                    wandb.log(wandb_eval, step=step + 1)
-            else:
-                # Baselines: just print a message that eval is not available
-                print(f"[step {step+1:05d}] (eval not available for baseline trainer)")
-
-            # Print debug stats every eval interval (if trainer supports it)
-            debug_stats = None
-            if hasattr(trainer, 'get_debug_stats'):
-                debug_stats = trainer.get_debug_stats()
-            if debug_stats:
-                debug_msg = (
-                    f"[step {step+1:05d}] DEBUG: "
-                    f"ep_len={debug_stats.get('avg_episode_length', 0):.1f} "
-                    f"ep_ret={debug_stats.get('avg_episode_return', 0):.3f} "
-                    f"stop_prob={debug_stats.get('avg_stop_prob', 0):.3f} "
-                    f"score_chg={debug_stats.get('avg_score_change', 0):.4f}"
+            if next_eval_env is not None and current_env_step >= next_eval_env:
+                _run_eval_and_log(
+                    progress_step=progress_step,
+                    outer_step=outer_step,
+                    trainer=trainer,
+                    env_cfg=env_cfg,
+                    dataset=dataset,
+                    checker_fn=checker_fn,
+                    step_iter=step_iter,
+                    use_wandb=use_wandb,
                 )
-                if hasattr(step_iter, "write"):
-                    step_iter.write(debug_msg)
-                else:
-                    print(debug_msg)
+                while next_eval_env is not None and current_env_step >= next_eval_env:
+                    next_eval_env += eval_env_interval
 
-                # === WandB: Log debug stats ===
-                if use_wandb:
-                    wandb_debug = {}
-                    for key, value in debug_stats.items():
-                        wandb_debug[f"debug/{key}"] = value
-                    wandb.log(wandb_debug, step=step + 1)
+            if next_save_env is not None and checkpoint_dir is not None and current_env_step >= next_save_env:
+                save_checkpoint(model, trainer, progress_step, checkpoint_dir, puzzle_emb_optimizer, rl_cfg)
+                last_saved_progress_step = progress_step
+                while next_save_env is not None and current_env_step >= next_save_env:
+                    next_save_env += save_env_interval
 
-            if hasattr(trainer, 'clear_debug_stats'):
-                trainer.clear_debug_stats()
-        
-        # === Save checkpoint periodically ===
-        if args.save_interval > 0 and checkpoint_dir is not None and (step + 1) % args.save_interval == 0:
-            save_checkpoint(model, trainer, step + 1, checkpoint_dir, puzzle_emb_optimizer, rl_cfg)
+        final_progress_step = trainer.get_env_step_count()
 
     # === Save final checkpoint ===
-    if args.save_interval > 0 and checkpoint_dir is not None:
-        save_checkpoint(model, trainer, total_steps, checkpoint_dir, puzzle_emb_optimizer, rl_cfg)
+    if args.save_interval > 0 and checkpoint_dir is not None and last_saved_progress_step != final_progress_step:
+        save_checkpoint(model, trainer, final_progress_step, checkpoint_dir, puzzle_emb_optimizer, rl_cfg)
     
     # === WandB: Finish logging ===
     if use_wandb:

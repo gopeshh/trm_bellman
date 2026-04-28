@@ -144,6 +144,7 @@ class UPITrmTrainer:
             self.old_policy_distill_opt = torch.optim.Adam(old_policy_params, lr=rl_cfg.policy_lr)
         self._next_episode_id: int = 0
         self._train_step_count: int = 0  # Track training steps for LR scheduling
+        self._env_step_count: int = 0
 
         # Learning rate schedulers
         self.value_scheduler: Optional[torch.optim.lr_scheduler.LambdaLR] = None
@@ -465,7 +466,7 @@ class UPITrmTrainer:
         except Exception as exc:
             print(f"[debug] local Lipschitz estimate failed: {exc}")
 
-    def collect_episode(self) -> None:
+    def collect_episode(self, max_env_steps: Optional[int] = None) -> int:
         """
         Run a single episode in the plan-space env using the current policy_dist,
         store transitions in replay buffer.
@@ -516,7 +517,13 @@ class UPITrmTrainer:
         _time_other = 0.0
         _profile_enabled = getattr(self, '_profile_rollout', False)
 
-        while not done and self.env.step_count < edit_budget:
+        remaining_env_steps = max_env_steps
+
+        while (
+            not done
+            and self.env.step_count < edit_budget
+            and (remaining_env_steps is None or remaining_env_steps > 0)
+        ):
             _t0 = time.perf_counter() if _profile_enabled else 0
 
             batched = self._state_is_batched(x)
@@ -582,6 +589,9 @@ class UPITrmTrainer:
                 _t4 = time.perf_counter()
                 _time_env_step += _t4 - _t3
             last_info = info
+            self._env_step_count += 1
+            if remaining_env_steps is not None:
+                remaining_env_steps -= 1
             
             # Track for debugging
             if t == 0 and info.get("phi_old") is not None:
@@ -648,6 +658,7 @@ class UPITrmTrainer:
             final_score = last_info.get("phi_new", initial_score)
             if initial_score is not None and final_score is not None:
                 self._debug_score_changes.append(final_score - initial_score)
+        return t
 
     def _prepare_batch_x(self, x: Dict[str, torch.Tensor], batched: bool) -> Dict[str, torch.Tensor]:
         """Delegate to shared batch_utils.prepare_batch_x."""
@@ -1283,7 +1294,7 @@ class UPITrmTrainer:
             result["kl_coef"] = self._kl_coef
         return result
 
-    def train_step(self) -> Dict[str, float]:
+    def train_step(self, max_env_steps_to_collect: Optional[int] = None) -> Dict[str, float]:
         """
         One outer training step: collect data, then run value and policy updates.
         
@@ -1307,8 +1318,16 @@ class UPITrmTrainer:
         if _should_log:
             print(f"[DEBUG] train_step {self._train_step_count}: starting episode collection", flush=True)
 
+        remaining_env_steps = max_env_steps_to_collect
+        episodes_collected = 0
+        env_steps_before = self._env_step_count
         for _ in range(self.rl_cfg.rollout_episodes_per_step):
-            self.collect_episode()
+            if remaining_env_steps is not None and remaining_env_steps <= 0:
+                break
+            episode_steps = self.collect_episode(max_env_steps=remaining_env_steps)
+            episodes_collected += 1
+            if remaining_env_steps is not None:
+                remaining_env_steps -= episode_steps
 
         if _should_log:
             print(f"[DEBUG] train_step {self._train_step_count}: episodes collected, starting value_update", flush=True)
@@ -1365,6 +1384,9 @@ class UPITrmTrainer:
             "term_stop": float(self.term_stats["stop"]),
             "term_solved": float(self.term_stats["solved"]),
             "term_budget": float(self.term_stats["budget"]),
+            "env_steps_collected": float(self._env_step_count - env_steps_before),
+            "env_steps_total": float(self._env_step_count),
+            "episodes_collected": float(episodes_collected),
         }
         metrics.update(debug_metrics)
         metrics.update(theory_metrics)
@@ -1412,6 +1434,9 @@ class UPITrmTrainer:
         self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}
         
         return metrics
+
+    def get_env_step_count(self) -> int:
+        return int(self._env_step_count)
 
     def get_debug_stats(self) -> Dict[str, float]:
         """
