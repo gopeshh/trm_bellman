@@ -31,16 +31,32 @@ TEXT_REPLACEMENTS = {
     "recommended per CLAUDE.md": "recommended for the locked protocol",
     "CLAUDE.md": "submission guidance",
     "ICML": "earlier",
+    str(REPO_ROOT): "",
     str(REPO_ROOT) + "/": "",
+    str(PAPER_ROOT): "paper",
+    str(PAPER_ROOT / "results" / "episodic_z_hard_suite_20k_seed41_50") + "/":
+        "results/reproduction_inputs/episodic_z_hard_suite_20k_seed41_50/",
+    str(PAPER_ROOT / "results" / "episodic_z_validation") + "/":
+        "results/reproduction_inputs/episodic_z_validation/",
+    str(PAPER_ROOT / "results" / "closure_batch_seed1729.npz"):
+        "results/reproduction_inputs/episodic_z_hard_suite_20k_seed41_50/closure_batch_seed1729.npz",
+    str(PAPER_ROOT / "results" / "lv_directions_seed1729_eps1e-4.npz"):
+        "results/reproduction_inputs/episodic_z_hard_suite_20k_seed41_50/lv_directions_seed1729_eps1e-4.npz",
     "/home/buiksat/fbsource/fbcode": "<internal_build_root>",
     "/home/buiksat/fbsource/fbcode/buiksat_trm/": "",
     str(PAPER_ROOT) + "/": "paper/",
     "/data/repos/fbsource/fbcode/": "<internal_build_root>/",
     "fbcode//buiksat_trm:run_baseline": "artifact_target:run_baseline",
+    "fbcode//buiksat_trm:": "artifact_target:",
     "//buiksat_trm:upi_trm_train": "artifact_target:upi_trm_train",
     "//buiksat_trm:eval_unroll_sensitivity": "artifact_target:eval_unroll_sensitivity",
     "//buiksat_trm:exp1_value_head_lipschitz": "artifact_target:exp1_value_head_lipschitz",
+    "//buiksat_trm:": "artifact_target:",
     "fbsource//third-party/pypi/": "third_party/",
+    "/home/buiksat": "<sanitized_user_home>",
+    "fbcode//buiksat_trm": "artifact_target",
+    "fbsource//": "<internal_source_tree>/",
+    "www.internalfb.com": "<internal_doc_host>",
     "_buiksat_cpu_one_hot_patch": "_artifact_cpu_one_hot_patch",
 }
 
@@ -131,12 +147,26 @@ def _copy_sanitized_json(src: Path, dst: Path) -> None:
     _write_text(dst, json.dumps(_sanitize_json_obj(payload), indent=2, sort_keys=True) + "\n")
 
 
+def _copy_sanitized_jsonl(src: Path, dst: Path) -> None:
+    lines = []
+    for line in src.read_text().splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        lines.append(json.dumps(_sanitize_json_obj(payload), sort_keys=True))
+    _write_text(dst, "\n".join(lines) + ("\n" if lines else ""))
+
+
 def _paper_asset_paths() -> list[Path]:
     main_tex = (PAPER_ROOT / "main.tex").read_text()
     asset_paths = {
         PAPER_ROOT / "main.tex",
         PAPER_ROOT / "neurips_2026.sty",
         PAPER_ROOT / "trm_rl.bib",
+        PAPER_ROOT / "EXPERIMENTS_PROTOCOL.md",
+        PAPER_ROOT / "REEVAL_LOG.md",
+        PAPER_ROOT / "EPISODIC_Z_RUN_LOG.md",
+        PAPER_ROOT / "TABLE1_PROVENANCE.md",
     }
 
     for rel_path in GRAPHICS_RE.findall(main_tex):
@@ -158,7 +188,7 @@ def _stage_paper() -> None:
     for src in _paper_asset_paths():
         rel_path = src.relative_to(PAPER_ROOT)
         dst = STAGE_ROOT / "paper" / rel_path
-        if src.suffix.lower() in {".tex", ".bib", ".sty"}:
+        if src.suffix.lower() in {".tex", ".bib", ".sty", ".md"}:
             _copy_sanitized_text(src, dst)
         else:
             _copy_binary(src, dst)
@@ -168,6 +198,13 @@ def _copy_tree(src: Path, dst: Path) -> None:
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
+
+
+def _first_existing_path(*candidates: Path) -> Path:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"No existing path among: {', '.join(str(candidate) for candidate in candidates)}")
 
 
 def _stage_datasets() -> None:
@@ -252,7 +289,7 @@ def _patch_exp1_value_head_lipschitz_script(text: str) -> str:
     )
     patched = patched.replace(
         'DEFAULT_BATCH_PATH = PROJECT_ROOT / "artifacts" / "eval_batches" / "exp1_v4_refreeze" / "b0.pt"',
-        'DEFAULT_BATCH_PATH = PROJECT_ROOT / "results" / "reproduction_inputs" / "exp1_v4_refreeze_batches" / "b0.pt"',
+        'DEFAULT_BATCH_PATH = PROJECT_ROOT / "omitted_from_artifact" / "exp1_v4_refreeze_batches" / "b0.pt"',
     )
     patched = patched.replace(
         'DEFAULT_OUT_DIR = PROJECT_ROOT / "results" / "paper_ready" / "exp1_value_head_lipschitz"',
@@ -289,6 +326,10 @@ def _stage_code() -> None:
         REPO_ROOT / "scripts" / "analyze_exp1_finite_r_sweep.py",
         STAGE_ROOT / "code" / "scripts" / "analyze_exp1_finite_r_sweep.py",
     )
+    _copy_sanitized_text(
+        REPO_ROOT / "scripts" / "build_neurips2026_anonymized_artifact.py",
+        STAGE_ROOT / "code" / "scripts" / "build_neurips2026_anonymized_artifact.py",
+    )
     _write_text(
         STAGE_ROOT / "code" / "scripts" / "exp1_value_head_lipschitz.py",
         _patch_exp1_value_head_lipschitz_script(
@@ -301,10 +342,20 @@ def _stage_code() -> None:
         STAGE_ROOT / "code" / "scripts" / "plot_table3_hard_controlled.py",
         _patch_controlled_2x2_plot_script(controlled_text),
     )
+    for script_name in (
+        "materialize_hard4x4_closure_batch.py",
+        "episodic_z_hard_suite_diagnostics.py",
+        "run_episodic_z_hard_suite_10seed_2gpu.sh",
+    ):
+        _copy_sanitized_text(
+            REPO_ROOT / "scripts" / script_name,
+            STAGE_ROOT / "code" / "scripts" / script_name,
+        )
 
     for config_dir in (
         REPO_ROOT / "configs" / "ablations",
         REPO_ROOT / "configs" / "baselines",
+        REPO_ROOT / "configs" / "revision",
         REPO_ROOT / "configs" / "table3_hard_controlled",
         REPO_ROOT / "configs" / "exp2_contraction_sweep",
         REPO_ROOT / "configs" / "exp3_projection_ablation",
@@ -412,8 +463,6 @@ def _stage_appendix_inputs() -> None:
 
     batch_src = REPO_ROOT / "artifacts" / "eval_batches" / "exp1_v4_refreeze"
     batch_dst = STAGE_ROOT / "results" / "reproduction_inputs" / "exp1_v4_refreeze_batches"
-    for filename in ("b0.pt", "b1.pt"):
-        _copy_binary(batch_src / filename, batch_dst / filename)
     for filename in ("b0_metadata.json", "b1_metadata.json"):
         _copy_sanitized_json(batch_src / filename, batch_dst / filename)
 
@@ -426,7 +475,10 @@ def _stage_appendix_inputs() -> None:
         "stage1_gate_report.json",
         "stage1_gate_report.md",
     ):
-        src = finite_r_src / filename
+        src = _first_existing_path(
+            finite_r_src / filename,
+            REPO_ROOT / "documents" / "results" / "plot_data" / "exp1_v4_refreeze_finite_r_residual_stage1_b0" / filename,
+        )
         dst = finite_r_dst / filename
         if src.suffix == ".json":
             _copy_sanitized_json(src, dst)
@@ -447,7 +499,10 @@ def _stage_appendix_inputs() -> None:
         "PROVENANCE.md",
         "table_exp1_value_head_lipschitz.tex",
     ):
-        src = lv_src / filename
+        src = _first_existing_path(
+            lv_src / filename,
+            REPO_ROOT / "documents" / "results" / "paper_ready" / "exp1_value_head_lipschitz" / filename,
+        )
         dst = lv_dst / filename
         if src.suffix == ".json":
             _copy_sanitized_json(src, dst)
@@ -455,12 +510,50 @@ def _stage_appendix_inputs() -> None:
             _copy_sanitized_text(src, dst)
 
 
+def _stage_episodic_z_theorem_contact() -> None:
+    src_root = PAPER_ROOT / "results" / "episodic_z_hard_suite_20k_seed41_50"
+    dst_root = STAGE_ROOT / "results" / "reproduction_inputs" / "episodic_z_hard_suite_20k_seed41_50"
+
+    for filename in (
+        "summary.json",
+        "diagnostics_summary.json",
+        "cpi_penalty_grid.json",
+    ):
+        _copy_sanitized_json(src_root / filename, dst_root / filename)
+
+    for filename in ("failed_jobs.txt", "job_manifest.tsv"):
+        _copy_sanitized_text(src_root / filename, dst_root / filename)
+
+    for filename in ("per_seed_eval.jsonl", "per_seed_diagnostics.jsonl"):
+        _copy_sanitized_jsonl(src_root / filename, dst_root / filename)
+
+    for src in sorted((src_root / "diagnostics").glob("seed*/step*.json")):
+        _copy_sanitized_json(src, dst_root / src.relative_to(src_root))
+
+    for subdir in ("logs", "diagnostic_logs"):
+        for src in sorted((src_root / subdir).glob("*.log")):
+            _copy_sanitized_text(src, dst_root / src.relative_to(src_root))
+
+    for filename in (
+        "closure_batch_seed1729.npz",
+        "lv_directions_seed1729_eps1e-4.npz",
+    ):
+        _copy_binary(PAPER_ROOT / "results" / filename, dst_root / filename)
+
+    validation_src = PAPER_ROOT / "results" / "episodic_z_validation"
+    validation_dst = STAGE_ROOT / "results" / "reproduction_inputs" / "episodic_z_validation"
+    _copy_sanitized_json(validation_src / "validation_summary.json", validation_dst / "validation_summary.json")
+
+
 def _stage_hard4x4_paper_ready_outputs() -> None:
     src_dir = REPO_ROOT / "results" / "paper_ready" / "hard4x4_trusted_baselines_20k"
     dst_dir = STAGE_ROOT / "results" / "paper_ready" / "hard4x4_trusted_baselines"
 
     for filename in ("SUMMARY.md", "summary.csv", "summary.json", "table_hard4x4_trusted_baselines.tex"):
-        src = src_dir / filename
+        src = _first_existing_path(
+            src_dir / filename,
+            REPO_ROOT / "documents" / "results" / "paper_ready" / "hard4x4_trusted_baselines_20k" / filename,
+        )
         if src.suffix == ".json":
             _copy_sanitized_json(src, dst_dir / filename)
         else:
@@ -515,6 +608,7 @@ def _write_readme() -> None:
         - `data/`: small synthetic 4x4 Sudoku datasets used by the paper
         - `results/reproduction_inputs/`: sanitized result snapshots and derived logs used for inspection
         - `results/reproduction_inputs/finite_r_stage1_b0/`: fixed-pair finite-R appendix summaries and plots
+        - `results/reproduction_inputs/episodic_z_hard_suite_20k_seed41_50/`: episodic-$z$ theorem-contact rerun bundle, including the frozen closure batch, aggregate diagnostics, per-seed JSONL summaries, and sanitized logs
         - `results/paper_ready/`: paper-facing hard-4x4 trusted-baseline aggregate outputs
         - `results/paper_ready/exp1_value_head_lipschitz/`: sanitized local `L_V` estimates used by Appendix Table 5
 
@@ -567,7 +661,8 @@ def _write_readme() -> None:
         - The dataset directory name `sudoku-4x4-easy_6to8empties` is historical. It is the paper's hard 4x4 no-mask suite.
         - The bundled baseline harness includes the exact PPO/A2C/DQN and DQN (n=5) hyperparameters used in the matched-budget 20k trusted-baseline sweep.
         - The finite-R appendix evidence is bundled as a small fixed-pair analysis package under `results/reproduction_inputs/finite_r_stage1_b0/` plus the source analysis script in `code/scripts/analyze_exp1_finite_r_sweep.py`.
-        - The appendix `L_V` diagnostic is bundled as sanitized summaries under `results/paper_ready/exp1_value_head_lipschitz/` plus the measurement script in `code/scripts/exp1_value_head_lipschitz.py`.
+        - The appendix `L_V` diagnostic is bundled as sanitized summaries under `results/paper_ready/exp1_value_head_lipschitz/`, with the associated batch metadata under `results/reproduction_inputs/exp1_v4_refreeze_batches/`. The heavyweight frozen batch tensors are omitted from this lightweight artifact, so the bundled measurement script is included for transparency rather than as a turnkey rerun input.
+        - The episodic-$z$ theorem-contact appendix evidence is bundled under `results/reproduction_inputs/episodic_z_hard_suite_20k_seed41_50/`, together with `paper/EPISODIC_Z_RUN_LOG.md`, `paper/EXPERIMENTS_PROTOCOL.md`, and the finite-MDP validation summary under `results/reproduction_inputs/episodic_z_validation/validation_summary.json`.
         - Recomputing the trusted-baseline aggregate does not require Stable-Baselines3; it reads the sanitized JSON histories already included here.
         - Running `code/run_baseline.py` for fresh PPO/A2C/DQN and DQN (n=5) training requires local installs of `torch`, `numpy`, `stable-baselines3`, and either `gym` or `gymnasium`. Those packages are not required to rebuild the paper PDF or the included aggregate outputs.
         """
@@ -592,7 +687,7 @@ def _assert_no_banned_strings() -> None:
     for path in sorted(STAGE_ROOT.rglob("*")):
         if path.is_dir():
             continue
-        if path.suffix.lower() in {".pdf", ".png", ".npy", ".pt"}:
+        if path.suffix.lower() in {".pdf", ".png", ".npy", ".npz", ".pt"}:
             continue
         text = path.read_text(errors="ignore")
         for banned in BANNED_STRINGS:
@@ -612,6 +707,7 @@ def main() -> None:
     _stage_controlled_2x2_logs()
     _stage_external_baseline_inputs()
     _stage_appendix_inputs()
+    _stage_episodic_z_theorem_contact()
     _stage_hard4x4_paper_ready_outputs()
     _write_readme()
     _assert_no_banned_strings()
