@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
+import os
 import re
 import shutil
 import textwrap
@@ -13,9 +15,15 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PAPER_ROOT = Path("/home/buiksat/UPI_TRM/UPI_TRM_NIPS")
-STAGE_ROOT = REPO_ROOT / "build" / "neurips2026_anonymized"
-ZIP_PATH = REPO_ROOT / "artifact" / "neurips2026_anonymized.zip"
+PAPER_ROOT = Path(
+    os.environ.get("UPI_TRM_PAPER_ROOT", Path.home() / "UPI_TRM" / "UPI_TRM_NIPS")
+).expanduser()
+FULL_STAGE_ROOT = REPO_ROOT / "build" / "neurips2026_anonymized"
+FULL_ZIP_PATH = REPO_ROOT / "artifact" / "neurips2026_anonymized.zip"
+SUPPLEMENTARY_STAGE_ROOT = REPO_ROOT / "build" / "neurips2026_supplementary"
+SUPPLEMENTARY_ZIP_PATH = REPO_ROOT / "artifact" / "neurips2026_supplementary.zip"
+STAGE_ROOT = FULL_STAGE_ROOT
+ZIP_PATH = FULL_ZIP_PATH
 
 SUCCESS_RE = re.compile(r"\[step\s+(\d+)\] eval_success_rate=(\d+\.\d+)")
 GRAPHICS_RE = re.compile(r"\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}")
@@ -31,8 +39,14 @@ TEXT_REPLACEMENTS = {
     "recommended per CLAUDE.md": "recommended for the locked protocol",
     "CLAUDE.md": "submission guidance",
     "ICML": "earlier",
-    str(REPO_ROOT): "",
-    str(REPO_ROOT) + "/": "",
+    str(REPO_ROOT) + "/": "project_repo/",
+    str(REPO_ROOT): "project_repo",
+    "/home/buiksat/trm_bellman/": "project_repo/",
+    "/home/buiksat/trm_bellman": "project_repo",
+    "<sanitized_user_home>/trm_bellman/": "project_repo/",
+    "<sanitized_user_home>/trm_bellman": "project_repo",
+    "<sanitized_user_home>/UPI_TRM/UPI_TRM_NIPS/": "paper/",
+    "<sanitized_user_home>/UPI_TRM/UPI_TRM_NIPS": "paper",
     str(PAPER_ROOT): "paper",
     str(PAPER_ROOT / "results" / "episodic_z_hard_suite_20k_seed41_50") + "/":
         "results/reproduction_inputs/episodic_z_hard_suite_20k_seed41_50/",
@@ -44,8 +58,13 @@ TEXT_REPLACEMENTS = {
         "results/reproduction_inputs/episodic_z_hard_suite_20k_seed41_50/lv_directions_seed1729_eps1e-4.npz",
     "/home/buiksat/fbsource/fbcode": "<internal_build_root>",
     "/home/buiksat/fbsource/fbcode/buiksat_trm/": "",
+    "/data/users/buiksat/fbsource/fbcode": "<internal_build_root>",
+    "/data/users/buiksat/fbsource": "<internal_source_tree>",
     str(PAPER_ROOT) + "/": "paper/",
     "/data/repos/fbsource/fbcode/": "<internal_build_root>/",
+    "/data/repos/fbsource/fbcode": "<internal_build_root>",
+    "/data/repos/fbsource/": "<internal_source_tree>/",
+    "/data/repos/fbsource": "<internal_source_tree>",
     "fbcode//buiksat_trm:run_baseline": "artifact_target:run_baseline",
     "fbcode//buiksat_trm:": "artifact_target:",
     "//buiksat_trm:upi_trm_train": "artifact_target:upi_trm_train",
@@ -58,14 +77,28 @@ TEXT_REPLACEMENTS = {
     "fbsource//": "<internal_source_tree>/",
     "www.internalfb.com": "<internal_doc_host>",
     "_buiksat_cpu_one_hot_patch": "_artifact_cpu_one_hot_patch",
+    str(Path.home()): "<sanitized_user_home>",
+    "buiksat_trm": "artifact_project",
+    "trm_bellman": "project_repo",
+    "fbsource": "<internal_source_tree>",
+    "fbcode": "<internal_build_root>",
+    "CLAUDE": "submission_notes",
+    "buiksat": "anonymous",
 }
 
 BANNED_STRINGS = (
     "/home/buiksat",
+    str(Path.home()),
+    "buiksat",
+    "trm_bellman",
     "fbcode//buiksat_trm",
+    "buiksat_trm",
+    "fbsource",
+    "fbcode",
     "fbsource//",
     "www.internalfb.com",
     "_buiksat_cpu_one_hot_patch",
+    "CLAUDE",
 )
 
 
@@ -213,7 +246,10 @@ def _stage_datasets() -> None:
         "sudoku-4x4-trivial",
         "sudoku-4x4-ultra-easy",
     ):
-        _copy_tree(REPO_ROOT / "data" / dataset_name, STAGE_ROOT / "data" / dataset_name)
+        src = REPO_ROOT / "data" / dataset_name
+        if not src.exists() and dataset_name == "sudoku-4x4-easy_6to8empties":
+            src = REPO_ROOT / "data" / "sudoku-4x4"
+        _copy_tree(src, STAGE_ROOT / "data" / dataset_name)
 
 
 def _patch_hard4x4_aggregate_script(text: str) -> str:
@@ -670,6 +706,87 @@ def _write_readme() -> None:
     _write_text(STAGE_ROOT / "README.md", readme)
 
 
+def _write_supplementary_readme() -> None:
+    readme = textwrap.dedent(
+        """\
+        # NeurIPS 2026 Supplementary Material
+
+        This zip is the anonymized supplementary-material bundle for the submission. It intentionally
+        excludes the manuscript source, bibliography, style files, and written appendices; those belong
+        only in the submitted paper PDF. The bundle contains code, small synthetic Sudoku datasets, and
+        sanitized result snapshots needed to inspect the reported empirical claims.
+
+        Large training checkpoints, internal build logs, git history, and machine-local paths are omitted.
+
+        ## Layout
+
+        - `code/`: trusted-baseline harness, aggregation scripts, diagnostics scripts, and experiment configs
+        - `data/`: small synthetic 4x4 Sudoku datasets used by the paper
+        - `results/reproduction_inputs/`: sanitized result snapshots, derived logs, and frozen diagnostic inputs
+        - `results/reproduction_inputs/finite_r_stage1_b0/`: fixed-pair finite-R diagnostic summaries and plots
+        - `results/reproduction_inputs/episodic_z_hard_suite_20k_seed41_50/`: episodic-$z$ theorem-contact rerun summaries, closure batch, per-seed JSONL files, and sanitized logs
+        - `results/paper_ready/`: paper-facing aggregate CSV/JSON/Markdown outputs
+
+        ## Reproduce The Trusted-Baseline Aggregate
+
+        The trusted external baseline table can be regenerated from the sanitized per-seed inputs bundled here.
+
+        ```bash
+        python3 code/scripts/aggregate_hard4x4_trusted_baselines.py
+        ```
+
+        This writes regenerated files to:
+
+        ```text
+        results/reproduced/hard4x4_trusted_baselines/
+        ```
+
+        ## Optional: Regenerate The Controlled 2x2 Plots
+
+        If `numpy` and `matplotlib` are available, the controlled hard-4x4 projection x contraction plots can be
+        rebuilt from the sanitized log snapshots:
+
+        ```bash
+        python3 code/scripts/plot_table3_hard_controlled.py
+        ```
+
+        This writes regenerated files to:
+
+        ```text
+        results/reproduced/hard4x4_controlled_2x2/
+        ```
+
+        ## Notes
+
+        - The dataset directory name `sudoku-4x4-easy_6to8empties` is historical. It is the paper's hard 4x4 no-mask suite.
+        - The bundled baseline harness includes the PPO/A2C/DQN and DQN (n=5) hyperparameters used in the matched-budget 20k trusted-baseline sweep.
+        - Recomputing the trusted-baseline aggregate does not require Stable-Baselines3; it reads the sanitized JSON histories already included here.
+        - Running `code/run_baseline.py` for fresh PPO/A2C/DQN and DQN (n=5) training requires local installs of `torch`, `numpy`, `stable-baselines3`, and either `gym` or `gymnasium`.
+        """
+    )
+    _write_text(STAGE_ROOT / "README.md", readme)
+
+
+def _prune_supplementary_written_material() -> None:
+    paper_dir = STAGE_ROOT / "paper"
+    if paper_dir.exists():
+        shutil.rmtree(paper_dir)
+    for path in sorted(STAGE_ROOT.rglob("*")):
+        if path.is_file() and path.suffix.lower() in {".tex", ".bib", ".sty"}:
+            path.unlink()
+
+
+def _assert_supplementary_only() -> None:
+    for path in sorted(STAGE_ROOT.rglob("*")):
+        if path.is_dir():
+            continue
+        rel_path = path.relative_to(STAGE_ROOT)
+        if rel_path.parts and rel_path.parts[0] == "paper":
+            raise RuntimeError(f"Supplementary bundle still contains paper source: {path}")
+        if path.suffix.lower() in {".tex", ".bib", ".sty"}:
+            raise RuntimeError(f"Supplementary bundle still contains LaTeX source: {path}")
+
+
 def _zip_stage_dir() -> None:
     _ensure_parent(ZIP_PATH)
     if ZIP_PATH.exists():
@@ -695,12 +812,32 @@ def _assert_no_banned_strings() -> None:
                 raise RuntimeError(f"Found banned string {banned!r} in {path}")
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--supplementary-only",
+        action="store_true",
+        help="Build the NeurIPS supplementary-material zip without paper sources or written appendices.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = _parse_args()
+    global STAGE_ROOT, ZIP_PATH
+    if args.supplementary_only:
+        STAGE_ROOT = SUPPLEMENTARY_STAGE_ROOT
+        ZIP_PATH = SUPPLEMENTARY_ZIP_PATH
+    else:
+        STAGE_ROOT = FULL_STAGE_ROOT
+        ZIP_PATH = FULL_ZIP_PATH
+
     if not PAPER_ROOT.exists():
         raise FileNotFoundError(f"Missing paper repo: {PAPER_ROOT}")
 
     _reset_dir(STAGE_ROOT)
-    _stage_paper()
+    if not args.supplementary_only:
+        _stage_paper()
     _stage_code()
     _stage_datasets()
     _stage_upi_logs()
@@ -709,7 +846,12 @@ def main() -> None:
     _stage_appendix_inputs()
     _stage_episodic_z_theorem_contact()
     _stage_hard4x4_paper_ready_outputs()
-    _write_readme()
+    if args.supplementary_only:
+        _prune_supplementary_written_material()
+        _write_supplementary_readme()
+        _assert_supplementary_only()
+    else:
+        _write_readme()
     _assert_no_banned_strings()
     _zip_stage_dir()
 
