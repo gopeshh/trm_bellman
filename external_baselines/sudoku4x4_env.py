@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from .npy_reader import load_npy
 
@@ -12,21 +12,29 @@ try:  # Optional: only needed when an actual Gym/SB3 backend is installed.
 except ImportError:  # pragma: no cover - exercised only when packages are absent
     np = None
 
-try:  # SB3 in Buck is pinned to a Gym-era release, so prefer gym when available.
+if TYPE_CHECKING:
+    # The Buck/SB3 build uses Gym. Runtime fallback remains available for
+    # standalone installs that provide only Gymnasium.
     import gym as gym_api
     from gym import spaces
 
     GYM_BACKEND = "gym"
-except ImportError:  # pragma: no cover - exercised only when gym is absent
-    try:
-        import gymnasium as gym_api
-        from gymnasium import spaces
+else:
+    try:  # SB3 in Buck is pinned to a Gym-era release, so prefer gym when available.
+        import gym as gym_api
+        from gym import spaces
 
-        GYM_BACKEND = "gymnasium"
-    except ImportError:  # pragma: no cover - exercised only when packages are absent
-        gym_api = None
-        spaces = None
-        GYM_BACKEND = None
+        GYM_BACKEND = "gym"
+    except ImportError:  # pragma: no cover - exercised only when gym is absent
+        try:
+            import gymnasium as gym_api
+            from gymnasium import spaces
+
+            GYM_BACKEND = "gymnasium"
+        except ImportError:  # pragma: no cover - exercised only when packages are absent
+            gym_api = None
+            spaces = None
+            GYM_BACKEND = None
 
 
 def _default_dataset_dir() -> Path:
@@ -199,6 +207,11 @@ class Sudoku4x4ExternalEnv:
         return {
             "inputs": {"shape": (self.seq_len,), "dtype": "int", "semantics": "original puzzle"},
             "plan": {"shape": (self.seq_len,), "dtype": "int", "semantics": "current editable plan"},
+            "remaining_edits": {
+                "shape": (1,),
+                "dtype": "int",
+                "semantics": "remaining finite-horizon edit budget",
+            },
             "action_mask": {
                 "shape": (self.action_space_n,),
                 "dtype": "bool",
@@ -232,6 +245,7 @@ class Sudoku4x4ExternalEnv:
         return {
             "inputs": list(self.inputs),
             "plan": list(self.plan),
+            "remaining_edits": [max(self.max_edits - self._steps, 0)],
             "action_mask": self.get_action_mask(),
         }
 
@@ -287,15 +301,22 @@ class Sudoku4x4ExternalEnv:
         solved = sudoku_is_solved_4x4(self.plan)
         reached_budget = self._steps >= self.max_edits
 
-        terminated = solved
-        truncated = (not solved) and reached_budget
+        # The edit budget is part of the MDP state, so budget exhaustion is a
+        # true terminal state. It is not an external time-limit truncation.
+        terminated = solved or reached_budget
+        truncated = False
         terminal_bonus = 0.0
-        if terminated:
+        if solved:
             terminal_bonus = self.solve_terminal_reward
-        elif truncated:
+        elif reached_budget:
             terminal_bonus = self.fail_terminal_reward
 
-        reward = terminal_bonus + self.gamma * phi_new - phi_old + stop_penalty
+        if terminated:
+            # Match PlanEditEnv: fold the absorbing-state tail into the
+            # terminal transition instead of bootstrapping after episode end.
+            reward = terminal_bonus - phi_old + stop_penalty
+        else:
+            reward = terminal_bonus + self.gamma * phi_new - phi_old + stop_penalty
         self._episode_return += reward
 
         info = {
@@ -309,7 +330,7 @@ class Sudoku4x4ExternalEnv:
             },
             "solved": solved,
             "invalid_action": invalid_action,
-            "done_reason": "solved" if solved else ("budget" if truncated else None),
+            "done_reason": "solved" if solved else ("budget" if reached_budget else None),
             "episode_return": self._episode_return,
         }
         return self._make_observation(), reward, terminated, truncated, info
@@ -328,6 +349,7 @@ if gym_api is not None and spaces is not None and np is not None:  # pragma: no 
                 {
                     "inputs": spaces.MultiDiscrete([self.core.vocab_size] * self.core.seq_len),
                     "plan": spaces.MultiDiscrete([self.core.vocab_size] * self.core.seq_len),
+                    "remaining_edits": spaces.MultiDiscrete([self.core.max_edits + 1]),
                     "action_mask": spaces.MultiBinary(self.core.action_space_n),
                 }
             )
@@ -336,6 +358,7 @@ if gym_api is not None and spaces is not None and np is not None:  # pragma: no 
             return {
                 "inputs": np.asarray(obs["inputs"], dtype=np.int64),
                 "plan": np.asarray(obs["plan"], dtype=np.int64),
+                "remaining_edits": np.asarray(obs["remaining_edits"], dtype=np.int64),
                 "action_mask": np.asarray(obs["action_mask"], dtype=np.int8),
             }
 
@@ -350,9 +373,6 @@ if gym_api is not None and spaces is not None and np is not None:  # pragma: no 
             obs, reward, terminated, truncated, info = self.core.step(int(action))
             if GYM_BACKEND == "gym":
                 done = bool(terminated or truncated)
-                if truncated and not terminated:
-                    info = dict(info)
-                    info["TimeLimit.truncated"] = True
                 return self._convert_obs(obs), float(reward), done, info
             return self._convert_obs(obs), float(reward), terminated, truncated, info
 

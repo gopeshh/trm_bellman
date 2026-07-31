@@ -423,7 +423,7 @@ class A2CTrainer:
         dataset: Any,
         checker: Any,
         num_episodes: Optional[int] = None,
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any]:
         """
         Evaluate the policy using greedy rollouts, returning success rate and mean score.
 

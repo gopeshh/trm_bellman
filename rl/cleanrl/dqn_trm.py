@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from importlib import import_module
 import json
 import random
 import time
@@ -58,9 +59,9 @@ from rl.cleanrl.ppo_trm import (
 )
 
 try:
-    import gym as gym_api
+    gym_api = import_module("gym")
 except ImportError:  # pragma: no cover
-    import gymnasium as gym_api
+    gym_api = import_module("gymnasium")
 
 
 class Transition(NamedTuple):
@@ -169,7 +170,7 @@ def _evaluate_cartpole_dqn(
             obs_tensor = torch.as_tensor(np.array(obs), device=device, dtype=torch.float32).unsqueeze(0)
             with torch.no_grad():
                 q_values = q_network(obs_tensor)
-            action = q_values.argmax(dim=-1).item()
+            action = int(q_values.argmax(dim=-1).item())
             obs, reward, done, truncated, _info = _compat_step(env, action)
             episode_return += float(reward)
         episode_returns.append(episode_return)
@@ -186,7 +187,7 @@ def _evaluate_cartpole_dqn(
 
 
 def _evaluate_sudoku_dqn(
-    q_network: nn.Module, bundle: Any, config: Mapping[str, Any], device: torch.device,
+    q_network: Any, bundle: Any, config: Mapping[str, Any], device: torch.device,
 ) -> Dict[str, Any]:
     from rl.evaluator import evaluate_plan_policy_with_scores
     from rl.cleanrl.trm_adapter import _QNetworkEvalAdapter
@@ -197,7 +198,7 @@ def _evaluate_sudoku_dqn(
 
     mean_score, success_rate, stats = evaluate_plan_policy_with_scores(
         model=eval_model,
-        dataset=bundle.dataset,
+        dataset=bundle.eval_dataset,
         checker=bundle.checker_fn,
         env_cfg=bundle.env_cfg,
         task_config=bundle.task_config,
@@ -218,6 +219,8 @@ def _evaluate_sudoku_dqn(
         "initial_score_mean": stats.get("initial_score_mean", 0.0),
         "invalid_action_rate": stats.get("invalid_action_rate", 0.0),
         "eval_policy_mode": "greedy",
+        "eval_split": bundle.eval_split,
+        "eval_pool_sha256": bundle.eval_pool_sha256,
     }
 
 
@@ -238,6 +241,27 @@ def _print_eval_dqn(step: int, metrics: Mapping[str, Any]) -> None:
 
 def _linear_schedule(start: float, end: float, fraction: float) -> float:
     return start + fraction * (end - start)
+
+
+def _sample_random_action(
+    num_actions: int,
+    action_mask: Optional[torch.Tensor] = None,
+) -> int:
+    """Sample uniformly from the valid actions in ``action_mask``."""
+    if num_actions <= 0:
+        raise ValueError("num_actions must be positive")
+    if action_mask is None:
+        return random.randrange(num_actions)
+
+    flat_mask = action_mask.detach().to(device="cpu", dtype=torch.bool).reshape(-1)
+    if flat_mask.numel() != num_actions:
+        raise ValueError(
+            f"action mask has {flat_mask.numel()} entries, expected {num_actions}"
+        )
+    valid_actions = torch.nonzero(flat_mask, as_tuple=False).reshape(-1).tolist()
+    if not valid_actions:
+        raise RuntimeError("Cannot sample an action because the action mask is empty")
+    return int(random.choice(valid_actions))
 
 
 def _obs_to_buffer(obs: Any, env_kind: str) -> Any:
@@ -330,6 +354,16 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
     run_config = dict(config)
     run_config.pop("_bundle", None)
     run_config.update({"backend": "cleanrl", "algo": "dqn", "mode": "train", "device": str(device), "n_step": n_step})
+    if bundle is not None:
+        run_config.update(
+            {
+                "train_split": bundle.train_split,
+                "eval_split": bundle.eval_split,
+                "train_pool_sha256": bundle.train_pool_sha256,
+                "eval_pool_sha256": bundle.eval_pool_sha256,
+                "eval_puzzle_id_offset": bundle.eval_puzzle_id_offset,
+            }
+        )
     (output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2, sort_keys=True, default=str) + "\n")
 
     if env_kind == "cartpole":
@@ -342,13 +376,22 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
     episode_return = 0.0
     episode_count = 0
     num_actions = env.action_space.n if hasattr(env, "action_space") and hasattr(env.action_space, "n") else (bundle.num_actions if bundle else 2)
+    loss_val = 0.0
+    q_mean = 0.0
+    td_mean = 0.0
 
     for global_step in range(1, total_timesteps + 1):
         fraction = min(1.0, float(global_step) / max(1, int(total_timesteps * exploration_fraction)))
         epsilon = _linear_schedule(epsilon_start, epsilon_end, fraction)
 
         if random.random() < epsilon:
-            action = random.randrange(num_actions)
+            if env_kind == "cartpole":
+                action = _sample_random_action(num_actions)
+            else:
+                if not isinstance(obs, dict):
+                    raise TypeError("Sudoku DQN observations must be dictionaries.")
+                action_mask = torch.as_tensor(obs["action_mask"], dtype=torch.bool)
+                action = _sample_random_action(num_actions, action_mask)
         else:
             if env_kind == "cartpole":
                 obs_tensor = torch.as_tensor(np.array(obs), device=device, dtype=torch.float32).unsqueeze(0)
@@ -356,10 +399,12 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
                     q_values = q_network(obs_tensor)
             else:
                 obs_t = obs_to_device(obs, device)
+                if not isinstance(obs_t, dict):
+                    raise TypeError("Sudoku DQN observations must be dictionaries.")
                 obs_t = {k: (v.unsqueeze(0) if torch.is_tensor(v) and v.ndim == 1 else v) for k, v in obs_t.items()}
                 with torch.no_grad():
                     q_values = q_network(obs_t, action_mask=action_mask_from_obs(obs_t))
-            action = q_values.argmax(dim=-1).item()
+            action = int(q_values.argmax(dim=-1).item())
 
         if env_kind == "cartpole":
             next_obs, reward, terminated, truncated, info = _compat_step(env, action)
@@ -413,6 +458,9 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
             else:
                 current_q = q_network(b_obs, action_mask=action_mask_from_obs(b_obs)).gather(1, b_actions.unsqueeze(1)).squeeze(1)
             loss = nn.functional.smooth_l1_loss(current_q, td_target)
+            loss_val = float(loss.item())
+            q_mean = float(current_q.mean().item())
+            td_mean = float(td_target.mean().item())
 
             if not torch.isfinite(loss):
                 raise RuntimeError(
@@ -430,9 +478,6 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
 
         if global_step % log_interval == 0 and global_step >= learning_starts:
             sps = int(global_step / max(time.time() - start_time, 1e-6))
-            loss_val = loss.item() if "loss" in dir() else 0.0
-            q_mean = current_q.mean().item() if "current_q" in dir() else 0.0
-            td_mean = td_target.mean().item() if "td_target" in dir() else 0.0
             print(
                 f"[step {global_step:05d}] td_loss={loss_val:.6f} "
                 f"mean_q={q_mean:.3f} td_target={td_mean:.3f} "
@@ -473,6 +518,11 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
         "algo_variant": config.get("algo_variant", "cleanrl_dqn"),
         "seed": seed,
         "dataset_dir": str(config.get("dataset_path", "")),
+        "train_split": bundle.train_split if bundle else None,
+        "eval_split": bundle.eval_split if bundle else None,
+        "train_pool_sha256": bundle.train_pool_sha256 if bundle else None,
+        "eval_pool_sha256": bundle.eval_pool_sha256 if bundle else None,
+        "eval_puzzle_id_offset": bundle.eval_puzzle_id_offset if bundle else None,
         "action_space_n": bundle.num_actions if bundle else _config_int(config, "action_dim", 2),
         "train_steps": total_timesteps,
         "eval_freq": eval_interval,

@@ -99,11 +99,21 @@ class TestPlanEditEnv(unittest.TestCase):
         self.assertTrue(torch.equal(y_next, x["solution"]))
 
         phi_old = solved_checker(x, y)
-        phi_new = solved_checker(x, y_next)
-        gamma = cfg.gamma
-        # Paper Eq. 4: r = r_0 + γ·Φ(s') - Φ(s)
-        expected_reward = gamma * phi_new - phi_old
+        expected_reward = -phi_old
         self.assertLess(abs(reward - expected_reward), 1e-6, f"Expected {expected_reward}, got {reward}")
+
+    def test_remaining_edit_clock_is_part_of_returned_state(self):
+        dataset = DummyDataset()
+        cfg = PlanEditEnvConfig(max_edits=2, gamma=0.99, vocab_size=4)
+        env = PlanEditEnv(dataset, dummy_checker, cfg)
+        env.set_stop_action_id(dataset.data[0]["inputs"].numel() * cfg.vocab_size)
+
+        x0, _ = env.reset(idx=0)
+        self.assertEqual(x0["remaining_edits"].item(), 2)
+        (x1, _), _, done, _ = env.step(0)
+        self.assertFalse(done)
+        self.assertEqual(x1["remaining_edits"].item(), 1)
+        self.assertEqual(x0["remaining_edits"].item(), 2)
 
     def test_plan_edit_env_threshold_works_without_reward_shaping(self):
         """Test that solved threshold works without reward shaping."""

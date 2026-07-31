@@ -19,6 +19,7 @@ import glob
 from pathlib import Path
 from collections import defaultdict
 import csv
+from typing import Any
 
 
 def find_logs_for_seed(algo_path: Path, seed: int, all_matching: bool = False) -> list:
@@ -57,6 +58,8 @@ def find_logs_for_seed(algo_path: Path, seed: int, all_matching: bool = False) -
         run_id = Path(log_path).stem  # e.g., "seed_42_20260108_223720"
         logs.append((Path(log_path), run_id))
 
+    logs.sort(key=lambda item: item[0].stat().st_mtime, reverse=True)
+
     if not all_matching and len(logs) > 0:
         # Return only the newest (first in sorted list by mtime)
         return [logs[0]]
@@ -64,9 +67,9 @@ def find_logs_for_seed(algo_path: Path, seed: int, all_matching: bool = False) -
     return logs
 
 
-def parse_log_file(log_path: Path) -> dict:
+def parse_log_file(log_path: Path) -> dict[str, Any]:
     """Parse a single log file and extract metrics."""
-    results = {
+    results: dict[str, Any] = {
         "steps": [],
         "success_rates": [],
         "mean_scores": [],

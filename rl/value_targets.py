@@ -28,13 +28,9 @@ def compute_k_step_bootstrapped_target(
     Implements the K-step value operator T_K^π from Section 5:
         G^(K)(s_0) = Σ_{k=0}^{K-1} γ^k r_k + γ^K V(s_K)
 
-    PAPER ALIGNMENT (lines 677-678):
-        V̄(s) = V_ψ(z^(n)(s), x)  if s ∈ S_plan
-        V̄(s) = -C_max            if s = s_abs (absorbing state)
-
-    When C_max is provided and the trajectory terminates (done=True),
-    we bootstrap with -C_max instead of 0, matching the paper's
-    absorbing state convention.
+    Terminal rewards produced by PlanEditEnv already fold in the absorbing
+    tail, so terminal samples do not bootstrap. ``C_max`` is retained only for
+    backward-compatible callers and has no effect.
 
     Args:
         rewards_K: [batch_size, K] rewards for each step
@@ -45,9 +41,8 @@ def compute_k_step_bootstrapped_target(
         K: Maximum horizon
         exact_k_step_targets: If True, use γ^K (theory-exact).
                               If False, use γ^steps_taken (practical).
-        C_max: Maximum checker score. If provided, terminal states bootstrap
-               with -C_max instead of 0 (paper Eq. 12, lines 677-678).
-               For Sudoku: C_max = 10.0.
+        C_max: Deprecated compatibility argument. Terminal rewards already
+               include the return-equivalent absorbing-tail correction.
 
     Returns:
         [batch_size] K-step bootstrapped targets
@@ -62,34 +57,19 @@ def compute_k_step_bootstrapped_target(
     gammas = rewards_K.new_tensor([gamma**k for k in range(K)])
     reward_returns = (rewards_K * gammas).sum(dim=1)
 
-    if exact_k_step_targets:
-        # Theory-exact: fixed-horizon γ^K bootstrap
-        bootstrap_factor = gamma**K
-    else:
-        # Practical: γ^steps_taken adapts to actual trajectory length
-        bootstrap_factor = gamma ** steps_taken.float()
-
     final_idx = (steps_taken - 1).clamp(min=0)
     batch_indices = torch.arange(batch_size, device=rewards_K.device)
     done_final = dones_K[batch_indices, final_idx]
 
-    # Paper Section 3.1 (lines 653-656, 677-678):
-    # For terminal states, bootstrap with V(s_abs) = -C_max instead of 0.
-    # This aligns with the absorbing state convention where:
-    #   r(s_abs, a, s_abs) = (γ - 1) * C_max  (self-loop reward)
-    #   V^π(s_abs) = -C_max                  (fixed boundary value)
+    if exact_k_step_targets:
+        incomplete = (steps_taken < K) & (~done_final)
+        if bool(incomplete.any().item()):
+            raise ValueError(
+                "A fixed-K target requires K transitions unless the segment terminates."
+            )
 
-    not_done_final = (~done_final).to(v_K.dtype)
-
-    if C_max is not None:
-        # Paper-aligned mode: terminal states bootstrap with -C_max
-        # V_bootstrap = V(s_K) if not done, else -C_max
-        terminal_bootstrap = v_K.new_full((batch_size,), -C_max)
-        v_bootstrap = torch.where(done_final, terminal_bootstrap, v_K)
-    else:
-        # Standard RL mode (V_terminal = 0):
-        v_bootstrap = v_K * not_done_final
-
+    bootstrap_factor = gamma ** steps_taken.to(v_K.dtype)
+    v_bootstrap = v_K * (~done_final).to(v_K.dtype)
     return reward_returns + bootstrap_factor * v_bootstrap
 
 
@@ -246,4 +226,3 @@ def compute_td_advantage(
         adv = adv - adv.mean()
     
     return adv
-

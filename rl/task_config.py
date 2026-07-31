@@ -194,7 +194,11 @@ class SudokuConstraintTracker:
         tracker.patch_mask(mask, affected_positions, vocab_size)
     """
 
-    def __init__(self, grid_size: int, device: torch.device = None):
+    def __init__(
+        self,
+        grid_size: int,
+        device: Optional[torch.device] = None,
+    ):
         """
         Initialize the constraint tracker.
 
@@ -290,13 +294,13 @@ class SudokuConstraintTracker:
 
         # Count digits in each constraint group
         for pos in range(self.num_positions):
-            val = state[pos].item()
+            val = int(state[pos].item())
             if val >= 2:  # Valid digit (tokens 2-10 = digits 1-9)
                 digit_idx = val - 2  # Convert token to 0-indexed digit
                 if digit_idx < self.num_digits:
-                    row = self._pos_to_row[pos].item()
-                    col = self._pos_to_col[pos].item()
-                    box = self._pos_to_box[pos].item()
+                    row = int(self._pos_to_row[pos].item())
+                    col = int(self._pos_to_col[pos].item())
+                    box = int(self._pos_to_box[pos].item())
 
                     self.row_counts[row, digit_idx] += 1
                     self.col_counts[col, digit_idx] += 1
@@ -327,9 +331,9 @@ class SudokuConstraintTracker:
         if old_digit == new_digit:
             return []
 
-        row = self._pos_to_row[position].item()
-        col = self._pos_to_col[position].item()
-        box = self._pos_to_box[position].item()
+        row = int(self._pos_to_row[position].item())
+        col = int(self._pos_to_col[position].item())
+        box = int(self._pos_to_box[position].item())
 
         # Decrement count for old digit
         if old_digit >= 2:
@@ -361,9 +365,9 @@ class SudokuConstraintTracker:
         Returns:
             Boolean tensor [num_digits] where True = digit is valid
         """
-        row = self._pos_to_row[position].item()
-        col = self._pos_to_col[position].item()
-        box = self._pos_to_box[position].item()
+        row = int(self._pos_to_row[position].item())
+        col = int(self._pos_to_col[position].item())
+        box = int(self._pos_to_box[position].item())
 
         # Digit is valid if count == 0 in row AND col AND box
         row_available = self.row_counts[row] == 0
@@ -489,7 +493,7 @@ class SudokuConstraintTracker:
         old_digit: int,
         new_digit: int,
         vocab_size: int,
-    ) -> torch.Tensor:
+    ) -> Optional[torch.Tensor]:
         """
         Combined update and patch operation for efficiency.
 
@@ -500,7 +504,7 @@ class SudokuConstraintTracker:
             vocab_size: Number of tokens
 
         Returns:
-            The updated cached mask
+            The updated cached mask, or ``None`` if no mask has been initialized.
         """
         affected = self.update(position, old_digit, new_digit)
 
@@ -565,7 +569,7 @@ class SudokuTaskConfig(TaskConfig):
         inputs: torch.Tensor,
         vocab_size: int,
         stop_action_id: int,
-        current_state: torch.Tensor = None,
+        current_state: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Compute action mask for Sudoku with constraint-aware masking.

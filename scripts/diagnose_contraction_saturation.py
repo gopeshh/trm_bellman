@@ -118,7 +118,9 @@ def find_checkpoint(target_lz: float, seed: int) -> Optional[Path]:
     return None
 
 
-def load_model(checkpoint_path: Path, device: str = "cpu") -> Tuple[nn.Module, Dict]:
+def load_model(
+    checkpoint_path: Path, device: str = "cpu"
+) -> Tuple[TinyRecursiveReasoningModel_ACTV1, Dict]:
     """Load model from checkpoint."""
     from scripts.eval_unroll_sensitivity import load_model_for_eval
     model, config = load_model_for_eval(str(checkpoint_path), device)
@@ -160,7 +162,7 @@ def compute_norm_per_sample(z: torch.Tensor) -> torch.Tensor:
 # =============================================================================
 
 def apply_latent_step_with_projection_control(
-    model: nn.Module,
+    model: TinyRecursiveReasoningModel_ACTV1,
     z: TinyRecursiveReasoningModel_ACTV1InnerCarry,
     x: Dict[str, torch.Tensor],
     y: torch.Tensor,
@@ -178,7 +180,7 @@ def apply_latent_step_with_projection_control(
     # Build context
     batch = model._standardize_latent_batch(x, y)
     context = model._resolve_latent_context(batch)
-    input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+    input_embeds = context["input_embeddings_with_plan"]
     seq_info = context["seq_info"]
 
     # Get the inner model
@@ -214,7 +216,7 @@ def apply_latent_step_with_projection_control(
 
 
 def estimate_lipschitz_with_projection_control(
-    model: nn.Module,
+    model: TinyRecursiveReasoningModel_ACTV1,
     states: List[Any],
     n_train: int,
     device: str,

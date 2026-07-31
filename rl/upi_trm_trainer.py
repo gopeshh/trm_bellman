@@ -13,15 +13,71 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils as nn_utils
 
+
+def _clip_and_recenter_advantages(
+    advantages: torch.Tensor,
+    policy_probs: torch.Tensor,
+    action_mask: torch.Tensor,
+    clip_value: float,
+) -> torch.Tensor:
+    """Clip per-action advantages without losing statewise centering."""
+
+    clipped = torch.where(
+        action_mask,
+        advantages.clamp(-clip_value, clip_value),
+        torch.zeros_like(advantages),
+    )
+    clipped_mean = (policy_probs * clipped).sum(dim=-1, keepdim=True)
+    return torch.where(
+        action_mask,
+        clipped - clipped_mean,
+        torch.zeros_like(clipped),
+    )
+
+
+def _mean_categorical_kl(
+    reference_probs: torch.Tensor,
+    reference_log_probs: torch.Tensor,
+    candidate_log_probs: torch.Tensor,
+) -> torch.Tensor:
+    """Compute KL(reference || candidate) without multiplying zero by infinity.
+
+    A categorical action mask represents excluded actions with zero reference
+    probability and ``-inf`` candidate log probability. Mask both log tensors
+    before subtraction so excluded actions contribute exactly zero and have no
+    gradient, instead of forming ``0 * inf``.
+    """
+
+    reference_support = reference_probs > 0
+    safe_reference_log_probs = reference_log_probs.masked_fill(
+        ~reference_support,
+        0.0,
+    )
+    safe_candidate_log_probs = candidate_log_probs.masked_fill(
+        ~reference_support,
+        0.0,
+    )
+    per_action_kl = reference_probs * (
+        safe_reference_log_probs - safe_candidate_log_probs
+    )
+    mean_kl = per_action_kl.sum(dim=-1).mean()
+    if torch.isnan(mean_kl):
+        raise FloatingPointError("Categorical KL produced NaN on reference support")
+    return mean_kl
+
+
 # Lazy import to break circular dependency with evaluators
 if TYPE_CHECKING:
     from rl.evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
 
-from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+from models.recursive_reasoning.trm import (
+    TinyRecursiveReasoningModel_ACTV1,
+    TinyRecursiveReasoningModel_ACTV1InnerCarry,
+)
 from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan, normalize_puzzle_id
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
-from rl.replay import ReplayBuffer, Transition
+from rl.replay import ReplayBuffer, ReplayLatent, Transition
 from rl.value_targets import (
     compute_k_step_bootstrapped_target,
     compute_gae,
@@ -102,7 +158,16 @@ class UPITrmTrainer:
         # Policy models:
         # - policy_model_old: deployed policy (data collection)
         # - policy_model_candidate: receives policy-gradient updates
-        self.policy_model_old = self.model
+        if getattr(self.rl_cfg, "theory_exact_mixture", False):
+            # The critic is updated before each candidate step. Keep the base
+            # actor in a separate frozen module so that those value updates do
+            # not silently change the policy or recurrent transition map.
+            self.policy_model_old = TinyRecursiveReasoningModel_ACTV1(
+                self._config_to_dict(self.model.config)
+            ).to(device)
+            self.policy_model_old.load_state_dict(self.model.state_dict())
+        else:
+            self.policy_model_old = self.model
         self.policy_model_candidate = TinyRecursiveReasoningModel_ACTV1(
             self._config_to_dict(self.model.config)
         ).to(device)
@@ -145,6 +210,7 @@ class UPITrmTrainer:
         self._next_episode_id: int = 0
         self._train_step_count: int = 0  # Track training steps for LR scheduling
         self._env_step_count: int = 0
+        self.puzzle_emb_optimizer: Optional[torch.optim.Optimizer] = None
 
         # Learning rate schedulers
         self.value_scheduler: Optional[torch.optim.lr_scheduler.LambdaLR] = None
@@ -226,6 +292,63 @@ class UPITrmTrainer:
         with torch.no_grad():
             for p, p_targ in zip(self.model.parameters(), self.target_model.parameters()):
                 p_targ.data.mul_(tau).add_(p.data, alpha=1 - tau)
+            parameter_names = {name for name, _ in self.model.named_parameters()}
+            source_state = self.model.state_dict()
+            target_state = self.target_model.state_dict()
+            for name, source_value in source_state.items():
+                if name in parameter_names or name not in target_state:
+                    continue
+                # Persistent buffers, including sparse puzzle embeddings, are
+                # part of the evaluator state. Copy them exactly.
+                target_state[name].copy_(source_value)
+
+    def _maybe_apply_scheduled_opnorm_clamp(
+        self,
+        train_step_number: Optional[int],
+    ) -> None:
+        """Apply scheduled clamping inside the evaluator-update phase."""
+
+        if train_step_number is None:
+            return
+        clamp_interval = getattr(self.rl_cfg, "opnorm_clamp_interval", 0)
+        if (
+            not getattr(self.rl_cfg, "enable_contraction", False)
+            or clamp_interval <= 0
+            or train_step_number % clamp_interval != 0
+        ):
+            return
+
+        try:
+            max_norm = getattr(self.rl_cfg, "opnorm_clamp_max_norm", 1.0)
+            num_iters = getattr(self.rl_cfg, "opnorm_clamp_num_power_iters", 10)
+            log_sigma = getattr(self.rl_cfg, "opnorm_log_max_sigma", False)
+            with torch.no_grad():
+                sigma_dict = apply_opnorm_clamp_periodically(
+                    self.model.inner,
+                    per_layer_max=max_norm,
+                    num_power_iters=num_iters,
+                    restrict_to_reasoning_layers=True,
+                )
+            if log_sigma and sigma_dict:
+                max_sigma = max(sigma_dict.values())
+                logger.info(
+                    "[step %05d] opnorm clamp applied (max_sigma=%.2f)",
+                    train_step_number,
+                    max_sigma,
+                )
+            else:
+                logger.info(
+                    "[step %05d] opnorm clamp applied",
+                    train_step_number,
+                )
+        except Exception as exc:
+            if not self._opnorm_clamp_warned:
+                logger.warning(
+                    "Periodic opnorm clamp failed (step %d): %s",
+                    train_step_number,
+                    exc,
+                )
+                self._opnorm_clamp_warned = True
 
     def _mixed_policy_dist(self, x_batch, y_batch, n: int, action_mask: Optional[torch.Tensor] = None, z=None):
         """
@@ -376,9 +499,14 @@ class UPITrmTrainer:
 
         # Old/deployed policy model
         if self.policy_model_old.edit_policy is not None:
+            exact_fixed_base = bool(
+                getattr(self.rl_cfg, "theory_exact_mixture", False)
+            )
             for name, param in self.policy_model_old.named_parameters():
                 is_policy_head = name.startswith("edit_policy")
-                if self.policy_model_old is self.model:
+                if exact_fixed_base:
+                    param.requires_grad_(False)
+                elif self.policy_model_old is self.model:
                     # CRITICAL: self.model is shared between value function and deployed policy.
                     # Do NOT freeze backbone params - they're needed for value function training.
                     # Only ensure edit_policy head is trainable for policy distillation.
@@ -401,16 +529,47 @@ class UPITrmTrainer:
         if self.policy_model_candidate is None:
             return
 
+        source_model = (
+            self.policy_model_old
+            if getattr(self.rl_cfg, "theory_exact_mixture", False)
+            else self.model
+        )
+        self._copy_nonpolicy_state(source_model, self.policy_model_candidate)
+
+    def _copy_nonpolicy_state(
+        self,
+        source_model: TinyRecursiveReasoningModel_ACTV1,
+        target_model: TinyRecursiveReasoningModel_ACTV1,
+    ) -> None:
+        """Copy recurrent/evaluator state while preserving the target policy head."""
+
         with torch.no_grad():
-            src_params = dict(self.model.named_parameters())
-            for name, param in self.policy_model_candidate.named_parameters():
-                # Only sync non-policy parameters, i.e., everything except edit_policy.*
-                if name.startswith("edit_policy"):
+            source_state = source_model.state_dict()
+            target_state = target_model.state_dict()
+            for name, source_value in source_state.items():
+                if name.startswith("edit_policy") or name not in target_state:
                     continue
-                src_param = src_params.get(name)
-                if src_param is None:
-                    continue
-                param.data.copy_(src_param.data)
+                target_state[name].copy_(source_value)
+
+    def _sync_exact_policy_snapshot_from_model(self) -> None:
+        """Freeze the post-value evaluator into both exact-mixture actors."""
+
+        if not getattr(self.rl_cfg, "theory_exact_mixture", False):
+            return
+        self._copy_nonpolicy_state(self.model, self.policy_model_old)
+        self._copy_nonpolicy_state(self.model, self.policy_model_candidate)
+
+    def _sync_candidate_policy_from_old(self) -> None:
+        """Start the next candidate search from the newly deployed policy head."""
+
+        if (
+            self.policy_model_old.edit_policy is None
+            or self.policy_model_candidate.edit_policy is None
+        ):
+            return
+        self.policy_model_candidate.edit_policy.load_state_dict(
+            self.policy_model_old.edit_policy.state_dict()
+        )
 
     def _maybe_run_value_debug_checks(self, x_batch: Dict[str, torch.Tensor], y_batch: torch.Tensor) -> None:
         if not self.debug_checks or self.model.value_head is None:
@@ -443,9 +602,14 @@ class UPITrmTrainer:
                 carry = self.model.eval_latent(x_single, y_single, n=self.rl_cfg.inner_unroll_n)
                 latent_batch = self.model._standardize_latent_batch(x_single, y_single)
                 context = self.model._build_latent_context_with_plan(latent_batch)
-                est, samples = estimate_local_Lz(
+                local_lz_result = estimate_local_Lz(
                     self.model.inner, carry, context, num_samples=2, return_samples=True
                 )
+                if not isinstance(local_lz_result, tuple):
+                    raise RuntimeError(
+                        "estimate_local_Lz(return_samples=True) did not return samples."
+                    )
+                est, samples = local_lz_result
             if samples.numel() > 0:
                 mean_Lz = float(samples.mean().item())
                 median_Lz = float(samples.median().item())
@@ -477,6 +641,7 @@ class UPITrmTrainer:
         """
 
         self.model.eval()
+        self.policy_model_old.eval()
         self.policy_model_candidate.eval()
         episode_id = self._next_episode_id
         t = 0
@@ -516,6 +681,8 @@ class UPITrmTrainer:
         _time_prep = 0.0
         _time_other = 0.0
         _profile_enabled = getattr(self, '_profile_rollout', False)
+        _t1 = 0.0
+        _t3 = 0.0
 
         remaining_env_steps = max_env_steps
 
@@ -543,6 +710,7 @@ class UPITrmTrainer:
             # This avoids massive graph growth and potential stalls when mixing two policy forwards.
             if self.debug_checks and self._next_episode_id < 5 and (t < 5 or t % 20 == 0):
                 print(f"[DEBUG] Episode {self._next_episode_id}, Step {t}: calling _mixed_policy_dist", flush=True)
+            latent_before = z
             with torch.no_grad():
                 dist, z_new = self._mixed_policy_dist(
                     batch_x,
@@ -561,6 +729,7 @@ class UPITrmTrainer:
             if not episodic_latent:
                 z = z_new
             action = dist.sample().squeeze()  # Ensure scalar (0-D) tensor for single-state sampling
+            behavior_log_prob = dist.log_prob(action).detach().cpu().reshape(())
 
             # Track STOP probability for debugging
             if t == 0 and stop_action_id is not None:
@@ -626,6 +795,9 @@ class UPITrmTrainer:
                 done=torch.tensor([done], dtype=torch.bool),
                 episode_id=episode_id,
                 timestep=t,
+                latent=self._clone_latent(latent_before),
+                next_latent=self._clone_latent(z_new) if not episodic_latent else None,
+                behavior_log_prob=behavior_log_prob,
             )
             self.replay.add(transition)
 
@@ -656,8 +828,13 @@ class UPITrmTrainer:
             if reason in self.term_stats:
                 self.term_stats[reason] += 1
             final_score = last_info.get("phi_new", initial_score)
-            if initial_score is not None and final_score is not None:
-                self._debug_score_changes.append(final_score - initial_score)
+            if (
+                isinstance(initial_score, (int, float))
+                and not isinstance(initial_score, bool)
+                and isinstance(final_score, (int, float))
+                and not isinstance(final_score, bool)
+            ):
+                self._debug_score_changes.append(float(final_score) - float(initial_score))
         return t
 
     def _prepare_batch_x(self, x: Dict[str, torch.Tensor], batched: bool) -> Dict[str, torch.Tensor]:
@@ -676,22 +853,8 @@ class UPITrmTrainer:
         Assumes x and x_next are dicts with at least "inputs" and "puzzle_identifiers".
         """
 
-        inputs = torch.stack([t.x["inputs"] for t in transitions], dim=0).to(self.device)
-        # Ensure puzzle_ids is 1D [batch_size] for CastedSparseEmbedding
-        puzzle_ids = torch.stack(
-            [normalize_puzzle_id(t.x["puzzle_identifiers"]) for t in transitions], dim=0
-        ).to(self.device)
-        if puzzle_ids.dim() > 1:
-            puzzle_ids = puzzle_ids.squeeze(-1)
-        x_batch = {"inputs": inputs, "puzzle_identifiers": puzzle_ids}
-
-        inputs_next = torch.stack([t.x_next["inputs"] for t in transitions], dim=0).to(self.device)
-        puzzle_ids_next = torch.stack(
-            [normalize_puzzle_id(t.x_next["puzzle_identifiers"]) for t in transitions], dim=0
-        ).to(self.device)
-        if puzzle_ids_next.dim() > 1:
-            puzzle_ids_next = puzzle_ids_next.squeeze(-1)
-        x_next_batch = {"inputs": inputs_next, "puzzle_identifiers": puzzle_ids_next}
+        x_batch = self._stack_state_dicts([t.x for t in transitions])
+        x_next_batch = self._stack_state_dicts([t.x_next for t in transitions])
 
         y_batch = torch.stack([self._plan_tensor(t.y) for t in transitions], dim=0).to(self.device)
         y_next_batch = torch.stack([self._plan_tensor(t.y_next) for t in transitions], dim=0).to(self.device)
@@ -703,6 +866,38 @@ class UPITrmTrainer:
         dones = torch.stack([t.done for t in transitions], dim=0).to(self.device).squeeze(-1)
 
         return x_batch, y_batch, x_next_batch, y_next_batch, actions, rewards, dones
+
+    def _stack_state_dicts(
+        self,
+        states: List[Dict[str, torch.Tensor]],
+    ) -> Dict[str, torch.Tensor]:
+        """Stack every tensor field common to a replay-state batch."""
+
+        if not states:
+            raise ValueError("Cannot stack an empty state batch.")
+        required = {"inputs", "puzzle_identifiers"}
+        missing = required - set.intersection(*(set(state) for state in states))
+        if missing:
+            raise KeyError(f"Replay states are missing required fields: {sorted(missing)}")
+
+        common_keys = set.intersection(*(set(state) for state in states))
+        batch: Dict[str, torch.Tensor] = {}
+        for key in sorted(common_keys):
+            values = [state[key] for state in states]
+            if not all(torch.is_tensor(value) for value in values):
+                continue
+            if key == "puzzle_identifiers":
+                stacked = torch.stack(
+                    [normalize_puzzle_id(value) for value in values], dim=0
+                )
+                if stacked.dim() > 1:
+                    stacked = stacked.squeeze(-1)
+            elif key == "remaining_edits":
+                stacked = torch.stack([value.reshape(()) for value in values], dim=0)
+            else:
+                stacked = torch.stack(values, dim=0)
+            batch[key] = stacked.to(self.device)
+        return batch
 
     def _plan_tensor(self, plan: Any) -> torch.Tensor:
         if isinstance(plan, dict):
@@ -722,6 +917,72 @@ class UPITrmTrainer:
             return state.clone()
         return state
 
+    def _clone_latent(
+        self,
+        latent: Optional[TinyRecursiveReasoningModel_ACTV1InnerCarry],
+    ) -> Optional[ReplayLatent]:
+        if latent is None:
+            return None
+        return ReplayLatent(
+            z_H=latent.z_H.detach().cpu().clone(),
+            z_L=latent.z_L.detach().cpu().clone(),
+        )
+
+    def _stack_latents(
+        self,
+        transitions: List[Transition],
+        attribute: str,
+    ) -> Optional[TinyRecursiveReasoningModel_ACTV1InnerCarry]:
+        latents = [getattr(transition, attribute) for transition in transitions]
+        return self._stack_optional_latent_list(latents, attribute)
+
+    def _stack_optional_latent_list(
+        self,
+        latents: List[Optional[ReplayLatent]],
+        label: str,
+    ) -> Optional[TinyRecursiveReasoningModel_ACTV1InnerCarry]:
+        if not latents or all(latent is None for latent in latents):
+            return None
+        concrete_latents: List[ReplayLatent] = []
+        for latent in latents:
+            if latent is None:
+                raise RuntimeError(
+                    f"Replay batch mixes transitions with and without `{label}` latent state."
+                )
+            concrete_latents.append(latent)
+        return TinyRecursiveReasoningModel_ACTV1InnerCarry(
+            z_H=torch.cat([latent.z_H for latent in concrete_latents], dim=0).to(self.device),
+            z_L=torch.cat([latent.z_L for latent in concrete_latents], dim=0).to(self.device),
+        )
+
+    def _compute_training_action_mask(
+        self,
+        x_batch: Dict[str, torch.Tensor],
+        y_batch: torch.Tensor,
+    ) -> Optional[torch.Tensor]:
+        if self.env.vocab_size is None or self.env.stop_action_id is None:
+            return None
+        if self.env.task_config is not None:
+            mask = self.env.task_config.compute_batch_action_mask(
+                x_batch["inputs"],
+                self.env.vocab_size,
+                self.env.stop_action_id,
+                current_state=y_batch,
+            )
+        else:
+            mask = PlanEditEnv.compute_batch_action_mask(
+                x_batch["inputs"],
+                self.env.vocab_size,
+                self.env.stop_action_id,
+                stop_mode=self.env._stop_mode,
+            )
+
+        # TaskConfig predates STOP modes and marks STOP valid unconditionally.
+        # Enforce the environment contract after task-specific masking.
+        mask = mask.clone()
+        mask[..., self.env.stop_action_id] = self.env._stop_mode != "disabled"
+        return mask
+
     def _state_is_batched(self, x: Dict[str, torch.Tensor]) -> bool:
         """Delegate to shared batch_utils.state_is_batched."""
         return state_is_batched(x)
@@ -736,6 +997,8 @@ class UPITrmTrainer:
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
+        Optional[TinyRecursiveReasoningModel_ACTV1InnerCarry],
+        Optional[TinyRecursiveReasoningModel_ACTV1InnerCarry],
     ]:
         """
         Sample a batch of K-step segments from replay, collecting up to K rewards per start state.
@@ -754,16 +1017,32 @@ class UPITrmTrainer:
         storage = self.replay.storage
         assert len(storage) >= batch_size, "Not enough transitions in replay buffer"
 
-        indices = torch.randint(low=0, high=len(storage), size=(batch_size,)).tolist()
         horizon = self.rl_cfg.K
+        candidate_indices = list(range(len(storage)))
+        if getattr(self.rl_cfg, "exact_k_step_targets", False):
+            candidate_indices = [
+                start_idx
+                for start_idx in candidate_indices
+                if self._has_complete_k_step_segment(start_idx, horizon)
+            ]
+            if not candidate_indices:
+                raise RuntimeError(
+                    "No replay segment contains K transitions or an earlier terminal state."
+                )
+        sampled_offsets = torch.randint(
+            low=0,
+            high=len(candidate_indices),
+            size=(batch_size,),
+        ).tolist()
+        indices = [candidate_indices[offset] for offset in sampled_offsets]
 
-        start_inputs: List[torch.Tensor] = []
-        start_puzzle_ids: List[torch.Tensor] = []
+        start_states: List[Dict[str, torch.Tensor]] = []
         start_plans: List[torch.Tensor] = []
+        start_latents: List[Optional[ReplayLatent]] = []
 
-        end_inputs: List[torch.Tensor] = []
-        end_puzzle_ids: List[torch.Tensor] = []
+        end_states: List[Dict[str, torch.Tensor]] = []
         end_plans: List[torch.Tensor] = []
+        end_latents: List[Optional[ReplayLatent]] = []
 
         rewards_K = torch.zeros(batch_size, horizon, dtype=torch.float32, device=self.device)
         dones_K = torch.zeros(batch_size, horizon, dtype=torch.bool, device=self.device)
@@ -771,9 +1050,9 @@ class UPITrmTrainer:
 
         for batch_idx, start_idx in enumerate(indices):
             transition = storage[start_idx]
-            start_inputs.append(transition.x["inputs"])
-            start_puzzle_ids.append(normalize_puzzle_id(transition.x["puzzle_identifiers"]))
+            start_states.append(transition.x)
             start_plans.append(self._plan_tensor(transition.y))
+            start_latents.append(transition.latent)
 
             last_transition = transition
             current_idx = start_idx
@@ -795,26 +1074,51 @@ class UPITrmTrainer:
                     break
                 current_idx += 1
 
-            end_inputs.append(last_transition.x_next["inputs"])
-            end_puzzle_ids.append(normalize_puzzle_id(last_transition.x_next["puzzle_identifiers"]))
+            end_states.append(last_transition.x_next)
             end_plans.append(self._plan_tensor(last_transition.y_next))
+            end_latents.append(last_transition.next_latent)
             steps_taken[batch_idx] = steps
 
-        x_batch = {
-            "inputs": torch.stack(start_inputs, dim=0).to(self.device),
-            "puzzle_identifiers": torch.stack(start_puzzle_ids, dim=0).to(self.device),
-        }
+        x_batch = self._stack_state_dicts(start_states)
         y_batch = torch.stack(start_plans, dim=0).to(self.device)
 
-        xK_batch = {
-            "inputs": torch.stack(end_inputs, dim=0).to(self.device),
-            "puzzle_identifiers": torch.stack(end_puzzle_ids, dim=0).to(self.device),
-        }
+        xK_batch = self._stack_state_dicts(end_states)
         yK_batch = torch.stack(end_plans, dim=0).to(self.device)
 
-        return x_batch, y_batch, xK_batch, yK_batch, rewards_K, dones_K, steps_taken
+        z_batch = self._stack_optional_latent_list(start_latents, "latent")
+        zK_batch = self._stack_optional_latent_list(end_latents, "next_latent")
+        return (
+            x_batch,
+            y_batch,
+            xK_batch,
+            yK_batch,
+            rewards_K,
+            dones_K,
+            steps_taken,
+            z_batch,
+            zK_batch,
+        )
 
-    def value_update(self) -> Dict[str, float]:
+    def _has_complete_k_step_segment(self, start_idx: int, horizon: int) -> bool:
+        """Whether a replay start reaches K steps or a terminal transition."""
+
+        storage = self.replay.storage
+        start_episode = storage[start_idx].episode_id
+        for offset in range(horizon):
+            idx = start_idx + offset
+            if idx >= len(storage):
+                return False
+            transition = storage[idx]
+            if transition.episode_id != start_episode:
+                return False
+            if bool(transition.done.view(-1)[0].item()):
+                return True
+        return True
+
+    def value_update(
+        self,
+        scheduled_train_step: Optional[int] = None,
+    ) -> Dict[str, float]:
         """
         Perform one value-function update using either 1-step or K-step bootstrapped targets.
         
@@ -834,17 +1138,29 @@ class UPITrmTrainer:
         if self.rl_cfg.K == 1:
             transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
             x_batch, y_batch, x_next_batch, y_next_batch, _, rewards, dones = self._stack_batch(transitions)
+            z_batch = self._stack_latents(transitions, "latent")
+            z_next_batch = self._stack_latents(transitions, "next_latent")
             debug_batch = (x_batch, y_batch)
 
             self.model.train()
             self.value_opt.zero_grad()
 
             with torch.no_grad():
-                v_next, _ = self.target_model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
+                v_next, _ = self.target_model.used_value(
+                    x_next_batch,
+                    y_next_batch,
+                    n=self.rl_cfg.inner_unroll_n,
+                    z=z_next_batch,
+                )
                 mask = (~dones).float()
                 v_next = v_next * mask
 
-            v_s, _ = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+            v_s, _ = self.model.used_value(
+                x_batch,
+                y_batch,
+                n=self.rl_cfg.inner_unroll_n,
+                z=z_batch,
+            )
             td_target = rewards + self.rl_cfg.gamma * v_next
             
             # Apply clipping BEFORE capturing stats (so stats show what's actually used)
@@ -876,6 +1192,8 @@ class UPITrmTrainer:
                 rewards_K,
                 dones_K,
                 steps_taken,
+                z_batch,
+                zK_batch,
             ) = self._sample_k_step_batch(self.rl_cfg.batch_size)
             debug_batch = (x_batch, y_batch)
 
@@ -886,7 +1204,12 @@ class UPITrmTrainer:
                 gamma = self.rl_cfg.gamma
                 K = self.rl_cfg.K
 
-                v_K, _ = self.target_model.used_value(xK_batch, yK_batch, n=self.rl_cfg.inner_unroll_n)
+                v_K, _ = self.target_model.used_value(
+                    xK_batch,
+                    yK_batch,
+                    n=self.rl_cfg.inner_unroll_n,
+                    z=zK_batch,
+                )
                 G_K = compute_k_step_bootstrapped_target(
                     rewards_K=rewards_K,
                     dones_K=dones_K,
@@ -898,7 +1221,12 @@ class UPITrmTrainer:
                     C_max=getattr(self.rl_cfg, "C_max", None),  # Paper Eq. 12: V(s_abs) = -C_max
                 )
 
-            v_s, _ = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
+            v_s, _ = self.model.used_value(
+                x_batch,
+                y_batch,
+                n=self.rl_cfg.inner_unroll_n,
+                z=z_batch,
+            )
             
             # Apply clipping BEFORE capturing stats (so stats show what's actually used)
             value_clip = getattr(self.rl_cfg, "value_target_clip", None)
@@ -926,7 +1254,20 @@ class UPITrmTrainer:
         if value_grad_clip is not None and value_grad_clip > 0 and self._value_params:
             nn_utils.clip_grad_norm_(self._value_params, value_grad_clip)
         self.value_opt.step()
+        if self.puzzle_emb_optimizer is not None:
+            # CastedSparseEmbedding stores the active IDs in mutable buffers.
+            # Step before any later forward can overwrite those IDs.
+            self.puzzle_emb_optimizer.step()
+            self.puzzle_emb_optimizer.zero_grad()
+        # Clamping is part of the evaluator update. It must precede target and
+        # actor snapshot synchronization so Q, pi, and pi_cand share one map.
+        self._maybe_apply_scheduled_opnorm_clamp(scheduled_train_step)
         self._soft_update_target()
+        # The frozen CPI snapshot begins after the value update. Keep the base
+        # actor insulated during the optimizer step, then give both action
+        # kernels the same post-update recurrent map while preserving their
+        # respective policy heads.
+        self._sync_exact_policy_snapshot_from_model()
 
         if debug_batch is not None:
             self._maybe_run_value_debug_checks(*debug_batch)
@@ -963,30 +1304,9 @@ class UPITrmTrainer:
 
         transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
         x_batch, y_batch, x_next_batch, y_next_batch, actions, rewards, dones = self._stack_batch(transitions)
-
-        # Reconstruct action mask to prevent policy from training on invalid actions
-        action_mask = None
-        if self.env.vocab_size is not None and self.env.stop_action_id is not None:
-            y_inputs = None
-            if isinstance(y_batch, dict):
-                y_inputs = y_batch.get("inputs", y_batch.get("labels"))
-            else:
-                y_inputs = y_batch
-
-            if self.env.task_config is not None:
-                action_mask = self.env.task_config.compute_batch_action_mask(
-                    x_batch["inputs"],
-                    self.env.vocab_size,
-                    self.env.stop_action_id,
-                    current_state=y_inputs,
-                )
-            else:
-                action_mask = PlanEditEnv.compute_batch_action_mask(
-                    x_batch["inputs"],
-                    self.env.vocab_size,
-                    self.env.stop_action_id,
-                    stop_mode=self.env._stop_mode,
-                )
+        z_batch = self._stack_latents(transitions, "latent")
+        z_next_batch = self._stack_latents(transitions, "next_latent")
+        action_mask = self._compute_training_action_mask(x_batch, y_batch)
 
         self.model.train()
         self.policy_model_candidate.train()
@@ -994,6 +1314,14 @@ class UPITrmTrainer:
 
         with torch.no_grad():
             gamma = self.rl_cfg.gamma
+            old_dist, _ = self.policy_model_old.policy_dist(
+                x_batch,
+                y_batch,
+                n=self.rl_cfg.inner_unroll_n,
+                action_mask=action_mask,
+                z=z_batch,
+            )
+            old_probs = old_dist.probs
             
             # === Exact baseline computation (Theorem 5.9) ===
             # When exact_baseline_summation=True, compute E_{a ~ π}[Q̂(s,a)] via exact
@@ -1004,12 +1332,6 @@ class UPITrmTrainer:
             # raise an error instead of silently falling back. This prevents accidental
             # misinterpretation of experimental runs as "theory-compatible".
             use_exact_baseline = getattr(self.rl_cfg, "exact_baseline_summation", False)
-            
-            theory_exact_mode = (
-                use_exact_baseline
-                and hasattr(self.rl_cfg, "is_theory_exact")
-                and self.rl_cfg.is_theory_exact()
-            )
             
             if use_exact_baseline and not getattr(self.rl_cfg, "episodic_latent", True):
                 raise RuntimeError(
@@ -1044,10 +1366,16 @@ class UPITrmTrainer:
                 
                 # Ensure action_mask is computed to enable the O(A_valid) loop optimization
                 if action_mask is None:
+                    vocab_size = self.env.vocab_size
+                    stop_action_id = self.env.stop_action_id
+                    if vocab_size is None or stop_action_id is None:
+                        raise RuntimeError(
+                            "Exact baseline summation requires configured vocabulary and STOP action IDs."
+                        )
                     action_mask = self.env.compute_batch_action_mask(
                         inputs=x_batch["inputs"],
-                        vocab_size=self.env.vocab_size,
-                        stop_action_id=self.env.stop_action_id,
+                        vocab_size=vocab_size,
+                        stop_action_id=stop_action_id,
                         stop_mode=self.env._stop_mode,
                     )
 
@@ -1060,12 +1388,37 @@ class UPITrmTrainer:
                     gamma=gamma,
                     checker_fn=self._checker_fn,
                     action_mask=action_mask,
+                    policy_probs=old_probs,
                 )
-                adv = compute_exact_advantage(q_all, exact_baseline, actions)
+                advantages_all = torch.where(
+                    action_mask,
+                    q_all - exact_baseline.unsqueeze(-1),
+                    torch.zeros_like(q_all),
+                )
+                adv_clip = getattr(self.rl_cfg, "advantage_clip", None)
+                if adv_clip is not None and adv_clip > 0:
+                    advantages_all = _clip_and_recenter_advantages(
+                        advantages_all,
+                        old_probs,
+                        action_mask,
+                        adv_clip,
+                    )
+                batch_indices = torch.arange(actions.shape[0], device=actions.device)
+                adv = advantages_all[batch_indices, actions]
             else:
                 # Standard learned-baseline advantage (falls back to naive O(ε_A) bound)
-                v_s, _ = self.model.used_value(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n)
-                v_next, _ = self.model.used_value(x_next_batch, y_next_batch, n=self.rl_cfg.inner_unroll_n)
+                v_s, _ = self.model.used_value(
+                    x_batch,
+                    y_batch,
+                    n=self.rl_cfg.inner_unroll_n,
+                    z=z_batch,
+                )
+                v_next, _ = self.model.used_value(
+                    x_next_batch,
+                    y_next_batch,
+                    n=self.rl_cfg.inner_unroll_n,
+                    z=z_next_batch,
+                )
                 mask = (~dones).float()
                 v_next_masked = v_next * mask
 
@@ -1084,74 +1437,48 @@ class UPITrmTrainer:
                     td_target = rewards + gamma * v_next_masked
                     adv = td_target - v_s
 
-            if getattr(self.rl_cfg, "batch_centered_advantage", False):
-                if theory_exact_mode:
-                    # Do NOT re-center in theory-exact mode; it would break the per-state centering
-                    # property needed for the O(alpha * eps_A) bound.
-                    pass
-                else:
-                    # Batch-level centering: subtract mean across batch (HEURISTIC for variance reduction)
-                    # NOTE: This does NOT enable the O(α·ε_A) bound from Theorem 5.9.
-                    # For theory-exact centering, use exact_baseline_summation=True instead.
-                    adv = adv - adv.mean()
+            if (
+                not use_exact_baseline
+                and getattr(self.rl_cfg, "batch_centered_advantage", False)
+            ):
+                # Batch-level centering is a variance-reduction heuristic, not
+                # the exact per-state centering used by the CPI theorem.
+                adv = adv - adv.mean()
 
             adv_clip = getattr(self.rl_cfg, "advantage_clip", None)
-            if adv_clip is not None and adv_clip > 0:
-                if theory_exact_mode:
-                    # Either disable clipping in theory-exact mode or emit a warning.
-                    # For now, just warn and still apply the clip to avoid exploding gradients.
-                    import warnings
-                    warnings.warn(
-                        "[UPI-TRM Theory] advantage_clip>0 while is_theory_exact() is True. "
-                        "This technically perturbs the exact advantages used in Theorem 5.9.",
-                        UserWarning,
-                    )
+            if not use_exact_baseline and adv_clip is not None and adv_clip > 0:
                 adv = adv.clamp(-adv_clip, adv_clip)
 
         # Get old policy distribution for KL computation and Importance Sampling
         kl_div = None
         enable_kl_trust_region = getattr(self.rl_cfg, "enable_kl_trust_region", False)
         use_importance_sampling = getattr(self.rl_cfg, "use_importance_sampling", True)
+        log_prob_behavior: Optional[torch.Tensor] = None
+        old_log_probs: Optional[torch.Tensor] = None
 
         with torch.no_grad():
-            old_dist, _ = self.policy_model_old.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask)
-            old_probs = old_dist.probs
-            
-            # Compute mixture probability (behavior policy)
-            alpha = self.rl_cfg.mixture_alpha
-            
-            # We need candidate probs as well to compute the mixture
-            cand_dist_nograd, _ = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask)
-            cand_probs_nograd = cand_dist_nograd.probs
-            
-            # Mixture probability: pi_mix = (1-alpha) * pi_old + alpha * pi_cand
-            mix_probs = (1.0 - alpha) * old_probs + alpha * cand_probs_nograd
-            
-            # Apply epsilon-greedy mixture if configured
-            eps = getattr(self.rl_cfg, "policy_epsilon", 0.0)
-            if eps > 0.0:
-                num_actions = mix_probs.shape[-1]
-                if action_mask is not None:
-                    # Uniform over valid actions only
-                    valid_count = action_mask.float().sum(dim=-1, keepdim=True).clamp(min=1)
-                    uniform = action_mask.float() / valid_count
-                else:
-                    uniform = torch.full_like(mix_probs, 1.0 / num_actions)
-                mix_probs = (1.0 - eps) * mix_probs + eps * uniform
-            
-            # Get behavior log probability for the actions actually taken
-            if actions.dim() == 1:
-                actions_unsqueezed = actions.unsqueeze(-1)
-            else:
-                actions_unsqueezed = actions
-                
-            prob_behavior = mix_probs.gather(dim=-1, index=actions_unsqueezed).squeeze(-1)
-            log_prob_behavior = prob_behavior.clamp(min=1e-8).log()
+            if use_importance_sampling:
+                behavior_log_probs: List[torch.Tensor] = []
+                for transition in transitions:
+                    behavior_log_prob = transition.behavior_log_prob
+                    if behavior_log_prob is None:
+                        raise RuntimeError(
+                            "Importance sampling requires collection-time behavior_log_prob "
+                            "on every replay transition."
+                        )
+                    behavior_log_probs.append(behavior_log_prob.reshape(()))
+                log_prob_behavior = torch.stack(behavior_log_probs).to(self.device)
 
             if enable_kl_trust_region:
                 old_log_probs = old_probs.clamp(min=1e-8).log()
 
-        dist, _ = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=self.rl_cfg.inner_unroll_n, action_mask=action_mask)
+        dist, _ = self.policy_model_candidate.policy_dist(
+            x_batch,
+            y_batch,
+            n=self.rl_cfg.inner_unroll_n,
+            action_mask=action_mask,
+            z=z_batch,
+        )
         log_prob = dist.log_prob(actions)
         
         # Numerical stability: clamp log_prob to prevent -inf when action prob is 0
@@ -1160,6 +1487,8 @@ class UPITrmTrainer:
         
         # Importance Sampling Weight: rho = pi_cand(a|s) / pi_behavior(a|s)
         if use_importance_sampling:
+            if log_prob_behavior is None:
+                raise RuntimeError("Importance-sampling log probabilities were not initialized.")
             log_rho = log_prob - log_prob_behavior
             rho = log_rho.exp()
             rho = rho.detach()
@@ -1190,9 +1519,15 @@ class UPITrmTrainer:
 
         # Add adaptive KL penalty if trust-region is enabled (PPO/TRPO-style)
         if enable_kl_trust_region:
+            if old_log_probs is None:
+                raise RuntimeError("Trust-region reference probabilities were not initialized.")
             new_log_probs = dist.logits.log_softmax(dim=-1)
             # KL(old || new) = sum(old_probs * (log_old - log_new))
-            kl_div = (old_probs * (old_log_probs - new_log_probs)).sum(dim=-1).mean()
+            kl_div = _mean_categorical_kl(
+                old_probs,
+                old_log_probs,
+                new_log_probs,
+            )
             
             # Add adaptive KL penalty to policy loss
             loss_policy = loss_policy + self._kl_coef * kl_div
@@ -1226,10 +1561,11 @@ class UPITrmTrainer:
         # The CPI bound requires a POLICY-SPACE mixture π_new = (1-α)π_old + α·π_candidate.
         # The code supports three modes with different theory compatibility:
         #
-        # 1. theory_exact_mixture=True (THEORY-COMPATIBLE):
+        # 1. theory_exact_mixture=True (ONE FIXED-BASE CPI PROPOSAL):
         #    - Do NOT update policy_model_old at all
         #    - The behavior policy is always the explicit mixture from _mixed_policy_dist()
-        #    - Matches CPI theory exactly but requires evaluating two networks
+        #    - Matches the paper's one-step frozen-snapshot mixture
+        #    - Does not recursively promote the mixture across outer updates
         #
         # 2. distill_mixture_policy=True (HEURISTIC - Section 6.5):
         #    - Distill the mixture into policy_model_old via KL minimization
@@ -1244,8 +1580,10 @@ class UPITrmTrainer:
         distill_enabled = getattr(self.rl_cfg, "distill_mixture_policy", False)
         
         if theory_exact_mixture:
-            # Mode 1: Do NOT update policy_model_old - use explicit mixture for data collection
-            # This is the only mode where CPI bound strictly applies
+            # Keep the frozen base policy and optimize one candidate proposal.
+            # Exact recursive CPI would require retaining a growing mixture of
+            # policy components; a two-network parameterization cannot represent
+            # that distribution in general.
             pass
         elif distill_enabled and self.old_policy_distill_opt is not None:
             # Mode 2: Distill mixture into policy_model_old (heuristic, not theory-exact)
@@ -1253,40 +1591,47 @@ class UPITrmTrainer:
             if num_distill > 0:
                 transitions = self.replay.sample_batch(num_distill)
                 x_d, y_d, _, _, _, _, _ = self._stack_batch(transitions)
-                
-                # Reconstruct action mask for distillation batch
-                mask_d = None
-                if self.env.vocab_size is not None and self.env.stop_action_id is not None:
-                    mask_d = PlanEditEnv.compute_batch_action_mask(
-                        x_d["inputs"],
-                        self.env.vocab_size,
-                        self.env.stop_action_id,
-                        stop_mode=self.env._stop_mode,
-                    )
+                z_d = self._stack_latents(transitions, "latent")
+                mask_d = self._compute_training_action_mask(x_d, y_d)
 
                 with torch.no_grad():
-                    mixed_dist, _ = self._mixed_policy_dist(x_d, y_d, n=self.rl_cfg.inner_unroll_n, action_mask=mask_d)
+                    mixed_dist, _ = self._mixed_policy_dist(
+                        x_d,
+                        y_d,
+                        n=self.rl_cfg.inner_unroll_n,
+                        action_mask=mask_d,
+                        z=z_d,
+                    )
                     target_probs = mixed_dist.probs.detach()
 
                 self.policy_model_old.train()
                 self.old_policy_distill_opt.zero_grad()
-                old_dist, _ = self.policy_model_old.policy_dist(x_d, y_d, n=self.rl_cfg.inner_unroll_n, action_mask=mask_d)
+                old_dist, _ = self.policy_model_old.policy_dist(
+                    x_d,
+                    y_d,
+                    n=self.rl_cfg.inner_unroll_n,
+                    action_mask=mask_d,
+                    z=z_d,
+                )
                 log_probs_old = old_dist.logits.log_softmax(dim=-1)
-                kl = (
-                    target_probs
-                    * (target_probs.clamp_min(1e-8).log() - log_probs_old)
-                ).sum(dim=-1).mean()
+                kl = _mean_categorical_kl(
+                    target_probs,
+                    target_probs.clamp_min(1e-8).log(),
+                    log_probs_old,
+                )
                 kl.backward()
 
                 policy_grad_clip = getattr(self.rl_cfg, "policy_grad_clip", None)
                 if policy_grad_clip is not None and policy_grad_clip > 0 and self._old_policy_params:
                     nn_utils.clip_grad_norm_(self._old_policy_params, policy_grad_clip)
                 self.old_policy_distill_opt.step()
+                self._sync_candidate_policy_from_old()
         else:
             # Mode 3: Parameter-space interpolation (heuristic, not theory-exact)
             # NOTE: This does NOT satisfy the CPI improvement guarantee because
             # interpolating logits is not equivalent to mixing probabilities.
             self._sync_policy_old_towards_candidate()
+            self._sync_candidate_policy_from_old()
 
         result = {"loss_policy": float(loss_policy.item())}
         if kl_div is not None:
@@ -1332,7 +1677,9 @@ class UPITrmTrainer:
         if _should_log:
             print(f"[DEBUG] train_step {self._train_step_count}: episodes collected, starting value_update", flush=True)
 
-        value_result = self.value_update()
+        value_result = self.value_update(
+            scheduled_train_step=self._train_step_count + 1,
+        )
 
         if _should_log:
             print(f"[DEBUG] train_step {self._train_step_count}: value_update done, starting policy_update", flush=True)
@@ -1363,8 +1710,17 @@ class UPITrmTrainer:
             with torch.no_grad():
                 transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
                 x_b, y_b, x_next_b, y_next_b, _, rewards_b, dones_b = self._stack_batch(transitions)
-                v_s, _ = self.model.used_value(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
-                v_next, _ = self.model.used_value(x_next_b, y_next_b, n=self.rl_cfg.inner_unroll_n)
+                z_b = self._stack_latents(transitions, "latent")
+                z_next_b = self._stack_latents(transitions, "next_latent")
+                v_s, _ = self.model.used_value(
+                    x_b, y_b, n=self.rl_cfg.inner_unroll_n, z=z_b
+                )
+                v_next, _ = self.model.used_value(
+                    x_next_b,
+                    y_next_b,
+                    n=self.rl_cfg.inner_unroll_n,
+                    z=z_next_b,
+                )
                 mask = (~dones_b).float()
                 td_target = rewards_b + self.rl_cfg.gamma * v_next * mask
                 adv = td_target - v_s
@@ -1402,34 +1758,6 @@ class UPITrmTrainer:
             self._step_lr_schedulers()
         metrics.update(self.get_current_lr())
 
-        # Periodic operator-norm clamping to maintain contraction during training
-        clamp_interval = getattr(self.rl_cfg, "opnorm_clamp_interval", 0)
-        if (
-            getattr(self.rl_cfg, "enable_contraction", False)
-            and clamp_interval > 0
-            and self._train_step_count % clamp_interval == 0
-        ):
-            try:
-                max_norm = getattr(self.rl_cfg, "opnorm_clamp_max_norm", 1.0)
-                num_iters = getattr(self.rl_cfg, "opnorm_clamp_num_power_iters", 10)
-                log_sigma = getattr(self.rl_cfg, "opnorm_log_max_sigma", False)
-                with torch.no_grad():
-                    sigma_dict = apply_opnorm_clamp_periodically(
-                        self.model.inner,
-                        per_layer_max=max_norm,
-                        num_power_iters=num_iters,
-                        restrict_to_reasoning_layers=True,
-                    )
-                if log_sigma and sigma_dict:
-                    max_sigma = max(sigma_dict.values())
-                    logger.info(f"[step {self._train_step_count:05d}] opnorm clamp applied (max_sigma={max_sigma:.2f})")
-                else:
-                    logger.info(f"[step {self._train_step_count:05d}] opnorm clamp applied")
-            except Exception as e:
-                if not self._opnorm_clamp_warned:
-                    logger.warning(f"Periodic opnorm clamp failed (step {self._train_step_count}): {e}")
-                    self._opnorm_clamp_warned = True
-        
         # Reset termination stats for the next logging window
         self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}
         
@@ -1491,6 +1819,15 @@ class UPITrmTrainer:
             checker_fn: Function (x, y) -> float returning checker score
         """
         self._checker_fn = checker_fn
+
+    def set_puzzle_embedding_optimizer(
+        self,
+        optimizer: torch.optim.Optimizer,
+    ) -> None:
+        """Attach the sparse embedding optimizer at the value-update boundary."""
+
+        self.puzzle_emb_optimizer = optimizer
+        self.puzzle_emb_optimizer.zero_grad()
     
     def get_theory_stats(self) -> Dict[str, float]:
         """
@@ -1576,6 +1913,8 @@ class UPITrmTrainer:
             with torch.no_grad():
                 transitions = self.replay.sample_batch(min(self.rl_cfg.batch_size, len(self.replay)))
                 x_b, y_b, x_next_b, y_next_b, _, rewards_b, dones_b = self._stack_batch(transitions)
+                z_b = self._stack_latents(transitions, "latent")
+                z_next_b = self._stack_latents(transitions, "next_latent")
                 
                 # === Section 4: Contraction metrics ===
                 # Estimate C_z (Eq. 9)
@@ -1586,7 +1925,14 @@ class UPITrmTrainer:
                 z_n = self.model.eval_latent(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
                 batch = self.model._standardize_latent_batch(x_b, y_b)
                 context = self.model._build_latent_context_with_plan(batch)
-                hat_Lz = estimate_local_Lz(self.model.inner, z_n, context, num_samples=4)
+                hat_Lz_result = estimate_local_Lz(
+                    self.model.inner, z_n, context, num_samples=4
+                )
+                hat_Lz = (
+                    hat_Lz_result[0]
+                    if isinstance(hat_Lz_result, tuple)
+                    else hat_Lz_result
+                )
                 metrics["hat_Lz"] = hat_Lz
                 
                 # Estimate L_v if value head exists
@@ -1609,8 +1955,15 @@ class UPITrmTrainer:
                     metrics["unrolling_term"] = unrolling_term
                 
                 # === Section 5: Bellman residual ===
-                v_s, _ = self.model.used_value(x_b, y_b, n=self.rl_cfg.inner_unroll_n)
-                v_next, _ = self.model.used_value(x_next_b, y_next_b, n=self.rl_cfg.inner_unroll_n)
+                v_s, _ = self.model.used_value(
+                    x_b, y_b, n=self.rl_cfg.inner_unroll_n, z=z_b
+                )
+                v_next, _ = self.model.used_value(
+                    x_next_b,
+                    y_next_b,
+                    n=self.rl_cfg.inner_unroll_n,
+                    z=z_next_b,
+                )
                 residual_metrics = compute_empirical_bellman_residual(
                     v_s, rewards_b, v_next, dones_b, self.rl_cfg.gamma
                 )
@@ -1633,7 +1986,7 @@ class UPITrmTrainer:
                         model=self.model,
                         x_batch=x_b,
                         y_batch=y_b,
-                        z_batch=None,  # Use fresh init for memoryless comparison
+                        z_batch=z_b,
                         n=self.rl_cfg.inner_unroll_n,
                         rewards=rewards_b,
                         next_values=v_next,
@@ -1648,17 +2001,26 @@ class UPITrmTrainer:
         
         return metrics
 
-    def evaluate_policy_metrics(self, env_cfg: PlanEditEnvConfig, dataset: Any, checker: Any) -> Dict[str, float]:
+    def evaluate_policy_metrics(
+        self,
+        env_cfg: PlanEditEnvConfig,
+        dataset: Any,
+        checker: Any,
+    ) -> Dict[str, Any]:
         """
         Evaluate the deployed policy, returning both strict success rate and mean checker score.
 
-        Note: Uses the same episodic_latent setting as training to ensure consistency.
-        Evaluation always uses greedy (argmax) action selection for deterministic results.
+        Uses the same episodic_latent setting as training. Ordinary policies
+        use greedy evaluation. An exact probability-space mixture is sampled,
+        because taking the argmax of the mixed distribution is a different
+        deployment rule. Evaluation runs on a private deterministic RNG stream
+        and restores the training RNG state before returning.
 
         Returns dict with:
             - mean_score: Average final checker score
             - success_rate: Fraction of episodes that reached max score (solved)
-            - eval_policy_mode: "greedy"
+            - eval_policy_mode: "greedy" or "stochastic_exact_mixture"
+            - eval_seed: Seed used by the isolated evaluation RNG stream
             - solved_count: Number of solved episodes
             - total_episodes: Total evaluation episodes
             - score_min: Minimum final score across episodes
@@ -1670,23 +2032,45 @@ class UPITrmTrainer:
         from rl.evaluator import evaluate_plan_policy_with_scores
 
         episodic_latent = getattr(self.rl_cfg, "episodic_latent", True)
+        exact_mixture = bool(getattr(self.rl_cfg, "theory_exact_mixture", False))
+        policy_dist_fn = None
+        eval_policy_mode = "greedy"
+        greedy_eval = True
+        if exact_mixture:
+            self.policy_model_candidate.eval()
+            policy_dist_fn = self._mixed_policy_dist
+            eval_policy_mode = "stochastic_exact_mixture"
+            greedy_eval = False
 
-        mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
-            model=self.policy_model_old,
-            dataset=dataset,
-            checker=checker,
-            env_cfg=env_cfg,
-            task_config=getattr(self.env, "task_config", None),
-            num_episodes=self.rl_cfg.eval_num_episodes,
-            inner_unroll_n=self.rl_cfg.inner_unroll_n,
-            episodic_latent=episodic_latent,
-            greedy=True,  # Always use greedy for eval to get deterministic success rate
-        )
+        eval_seed = int(self.rl_cfg.eval_seed)
+        cpu_rng_state = torch.random.get_rng_state()
+        cuda_rng_states = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+        try:
+            torch.manual_seed(eval_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(eval_seed)
+            mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
+                model=self.policy_model_old,
+                dataset=dataset,
+                checker=checker,
+                env_cfg=env_cfg,
+                task_config=getattr(self.env, "task_config", None),
+                num_episodes=self.rl_cfg.eval_num_episodes,
+                inner_unroll_n=self.rl_cfg.inner_unroll_n,
+                episodic_latent=episodic_latent,
+                greedy=greedy_eval,
+                policy_dist_fn=policy_dist_fn,
+            )
+        finally:
+            torch.random.set_rng_state(cpu_rng_state)
+            if cuda_rng_states is not None:
+                torch.cuda.set_rng_state_all(cuda_rng_states)
 
         result = {
             "mean_score": mean_score,
             "success_rate": success_rate,
-            "eval_policy_mode": "greedy",
+            "eval_policy_mode": eval_policy_mode,
+            "eval_seed": eval_seed,
         }
         result.update(detailed_stats)
         return result
@@ -1728,7 +2112,7 @@ class UPITrmTrainer:
         self.policy_model_candidate.train()
         opt.zero_grad()
         
-        total_loss = 0.0
+        losses: List[torch.Tensor] = []
         total_correct = 0
         total_count = 0
         
@@ -1757,7 +2141,7 @@ class UPITrmTrainer:
             logits = dist.logits if hasattr(dist, 'logits') else torch.log(dist.probs + 1e-10)
             loss = F.cross_entropy(logits, target)
             
-            total_loss += loss
+            losses.append(loss)
             total_count += 1
             
             # Check accuracy
@@ -1766,11 +2150,12 @@ class UPITrmTrainer:
                 total_correct += 1
         
         # Average loss and backprop
-        avg_loss = total_loss / total_count
+        avg_loss = torch.stack(losses).mean()
         avg_loss.backward()
         
-        if self.rl_cfg.policy_grad_clip > 0:
-            nn_utils.clip_grad_norm_(self._policy_params, self.rl_cfg.policy_grad_clip)
+        policy_grad_clip = self.rl_cfg.policy_grad_clip
+        if policy_grad_clip is not None and policy_grad_clip > 0:
+            nn_utils.clip_grad_norm_(self._policy_params, policy_grad_clip)
         
         opt.step()
         
@@ -1804,6 +2189,8 @@ class UPITrmTrainer:
         """
         demonstrations = []
         vocab_size = self.env.vocab_size
+        if vocab_size is None:
+            raise RuntimeError("Oracle demonstrations require a configured vocabulary size.")
         num_samples = min(num_episodes, len(dataset) if hasattr(dataset, '__len__') else num_episodes)
         
         for ep_idx in range(num_samples):

@@ -1,22 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions import Categorical
 
 try:
-    import numpy as np
-except ImportError:  # pragma: no cover
-    np = None
-
-try:
-    import gym as gym_api
+    gym_api = import_module("gym")
 except ImportError:  # pragma: no cover
     try:
-        import gymnasium as gym_api
+        gym_api = import_module("gymnasium")
     except ImportError:  # pragma: no cover
         gym_api = None
 
@@ -76,21 +73,32 @@ def flatten_time_env_obs(observations: Sequence[ObsType]) -> ObsType:
         raise ValueError("Expected at least one observation")
     first = observations[0]
     if isinstance(first, dict):
+        dict_observations: list[Dict[str, torch.Tensor]] = []
+        for observation in observations:
+            if not isinstance(observation, dict):
+                raise TypeError("Cannot combine dictionary and tensor observations.")
+            dict_observations.append(observation)
         stacked = {
-            key: torch.stack([obs[key] for obs in observations], dim=0)  # type: ignore[index]
+            key: torch.stack([obs[key] for obs in dict_observations], dim=0)
             for key in first.keys()
         }
         return {
             key: value.reshape(-1, *value.shape[2:])
             for key, value in stacked.items()
         }
-    stacked_tensor = torch.stack(list(observations), dim=0)
+    tensor_observations: list[torch.Tensor] = []
+    for observation in observations:
+        if not isinstance(observation, torch.Tensor):
+            raise TypeError("Cannot combine tensor and dictionary observations.")
+        tensor_observations.append(observation)
+    stacked_tensor = torch.stack(tensor_observations, dim=0)
     return stacked_tensor.reshape(-1, *stacked_tensor.shape[2:])
 
 
 @dataclass(frozen=True)
 class SudokuBundle:
     dataset: Any
+    eval_dataset: Any
     checker_fn: Any
     env_cfg: Any
     task_config: Any
@@ -100,12 +108,25 @@ class SudokuBundle:
     num_actions: int
     checker_kind: str
     rl_cfg: Any
+    train_split: str
+    eval_split: str
+    train_pool_sha256: Optional[str]
+    eval_pool_sha256: Optional[str]
+    eval_puzzle_id_offset: int
 
 
 def build_sudoku_bundle(config: Mapping[str, Any]) -> SudokuBundle:
     from rl.config import RLConfig
     from rl.envs.plan_edit_env import PlanEditEnvConfig
-    from rl.training_setup import build_dataset_from_paths, resolve_checker_from_dataset
+    from rl.training_setup import (
+        build_dataset_from_paths,
+        offset_puzzle_identifiers,
+        resolve_checker_from_dataset,
+    )
+    from utils.dataset_provenance import (
+        dataset_input_sha256s,
+        dataset_pool_sha256,
+    )
 
     dataset_paths = config.get("dataset_paths")
     if dataset_paths is None:
@@ -130,10 +151,74 @@ def build_sudoku_bundle(config: Mapping[str, Any]) -> SudokuBundle:
 
     batch_size = int(config.get("batch_size", 1))
     pool_size = int(config.get("pool_size", max(batch_size, 8)))
+    train_split = str(config.get("train_split", "train"))
+    eval_split = str(config.get("eval_split", "test"))
+    eval_episodes = int(config.get("eval_episodes", 50))
+    if eval_episodes < 1:
+        raise ValueError("eval_episodes must be positive")
+    if dataset_paths and train_split == eval_split:
+        raise ValueError(
+            "CleanRL Sudoku training and evaluation must use different splits; "
+            f"got {train_split!r} for both."
+        )
     dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
         dataset_paths=dataset_paths,
         pool_size=pool_size,
+        split=train_split,
     )
+
+    train_pool_sha256: Optional[str] = None
+    eval_pool_sha256: Optional[str] = None
+    eval_puzzle_id_offset = 0
+    if dataset_paths:
+        eval_pool_size = max(
+            int(config.get("eval_pool_size", eval_episodes)),
+            eval_episodes,
+        )
+        eval_dataset, eval_seq_len, eval_vocab_size, eval_num_identifiers = (
+            build_dataset_from_paths(
+                dataset_paths=dataset_paths,
+                pool_size=eval_pool_size,
+                split=eval_split,
+            )
+        )
+        if (eval_seq_len, eval_vocab_size) != (seq_len, vocab_size):
+            raise RuntimeError(
+                "CleanRL Sudoku train/eval splits have incompatible shapes: "
+                f"train={(seq_len, vocab_size)}, "
+                f"eval={(eval_seq_len, eval_vocab_size)}."
+            )
+        if len(eval_dataset) < eval_episodes:
+            raise RuntimeError(
+                "CleanRL Sudoku evaluation split is smaller than eval_episodes; "
+                f"refusing to repeat instances ({len(eval_dataset)} < {eval_episodes})."
+            )
+        overlap = set(dataset_input_sha256s(dataset)).intersection(
+            dataset_input_sha256s(eval_dataset)
+        )
+        if overlap:
+            raise RuntimeError(
+                "CleanRL Sudoku train/eval pools overlap; refusing an in-sample "
+                f"evaluation ({len(overlap)} duplicate inputs)."
+            )
+        eval_puzzle_id_offset = num_identifiers
+        offset_puzzle_identifiers(eval_dataset, eval_puzzle_id_offset)
+        num_identifiers = eval_puzzle_id_offset + eval_num_identifiers
+        train_pool_sha256 = dataset_pool_sha256(dataset, len(dataset))
+        eval_pool_sha256 = dataset_pool_sha256(eval_dataset, eval_episodes)
+        print(
+            f"[DATASET] train_split={train_split} train_samples={len(dataset)} "
+            f"train_pool_sha256={train_pool_sha256}"
+        )
+        print(
+            f"[DATASET] eval_split={eval_split} eval_samples={eval_episodes} "
+            f"eval_pool_sha256={eval_pool_sha256} "
+            f"eval_puzzle_id_offset={eval_puzzle_id_offset}"
+        )
+    else:
+        eval_dataset = dataset
+        train_split = "dummy"
+        eval_split = "dummy"
 
     checker_resolution = resolve_checker_from_dataset(rl_cfg=rl_cfg, dataset=dataset, seq_len=seq_len)
     checker_fn = checker_resolution.checker_fn
@@ -170,6 +255,7 @@ def build_sudoku_bundle(config: Mapping[str, Any]) -> SudokuBundle:
 
     return SudokuBundle(
         dataset=dataset,
+        eval_dataset=eval_dataset,
         checker_fn=checker_fn,
         env_cfg=env_cfg,
         task_config=task_config,
@@ -179,6 +265,11 @@ def build_sudoku_bundle(config: Mapping[str, Any]) -> SudokuBundle:
         num_actions=num_actions,
         checker_kind=checker_kind,
         rl_cfg=rl_cfg,
+        train_split=train_split,
+        eval_split=eval_split,
+        train_pool_sha256=train_pool_sha256,
+        eval_pool_sha256=eval_pool_sha256,
+        eval_puzzle_id_offset=eval_puzzle_id_offset,
     )
 
 
@@ -220,9 +311,17 @@ class GymPlanEditEnv:
                 pid = pid.detach().cpu().numpy().astype(np.float32).flatten()
             else:
                 pid = np.zeros(1, dtype=np.float32)
+            remaining_edits = x.get("remaining_edits")
+            if remaining_edits is not None:
+                remaining_edits = (
+                    remaining_edits.detach().cpu().numpy().astype(np.float32).reshape(-1)
+                )
+            else:
+                remaining_edits = np.zeros(1, dtype=np.float32)
         else:
             inputs = x.detach().cpu().numpy().astype(np.float32).flatten()
             pid = np.zeros(1, dtype=np.float32)
+            remaining_edits = np.zeros(1, dtype=np.float32)
 
         plan = y.detach().cpu().numpy().astype(np.float32).flatten()
 
@@ -236,6 +335,7 @@ class GymPlanEditEnv:
             "inputs": inputs,
             "plan": plan,
             "puzzle_identifiers": pid,
+            "remaining_edits": remaining_edits,
             "action_mask": action_mask,
         }
 
@@ -250,10 +350,7 @@ class GymPlanEditEnv:
         (x, y), reward, done, info = self.inner.step(action)
         obs = self._obs_from_state(x, y)
         info = dict(info)
-        budget_exhausted = info.get("terminated_by_budget", False)
-        terminated = done and not budget_exhausted
-        truncated = done and budget_exhausted
-        return obs, float(reward), terminated, truncated, info
+        return obs, float(reward), bool(done), False, info
 
 
 def _build_trm_cfg(config: Mapping[str, Any], bundle: Any, enable_value_head: bool = True) -> dict:
@@ -331,6 +428,8 @@ class TRMActorCritic(nn.Module):
         self.model = TinyRecursiveReasoningModel_ACTV1(trm_cfg)
 
     def _parse_obs(self, obs: ObsType) -> tuple:
+        if not isinstance(obs, dict):
+            raise TypeError("TRM actor-critic observations must be dictionaries.")
         inputs = obs["inputs"]
         plan = obs["plan"]
         pid = obs["puzzle_identifiers"]
@@ -339,6 +438,8 @@ class TRMActorCritic(nn.Module):
             plan = plan.unsqueeze(0)
             pid = pid.unsqueeze(0)
         x = {"inputs": inputs.long(), "puzzle_identifiers": pid.long().squeeze(-1)}
+        if "remaining_edits" in obs:
+            x["remaining_edits"] = obs["remaining_edits"].long().reshape(-1)
         y = plan.long()
         return x, y
 
@@ -406,6 +507,8 @@ class TRMQNetwork(nn.Module):
         self.model = base_model
 
     def _parse_obs(self, obs: ObsType) -> tuple:
+        if not isinstance(obs, dict):
+            raise TypeError("TRM Q-network observations must be dictionaries.")
         inputs = obs["inputs"]
         plan = obs["plan"]
         pid = obs["puzzle_identifiers"]
@@ -414,6 +517,8 @@ class TRMQNetwork(nn.Module):
             plan = plan.unsqueeze(0)
             pid = pid.unsqueeze(0)
         x = {"inputs": inputs.long(), "puzzle_identifiers": pid.long().squeeze(-1)}
+        if "remaining_edits" in obs:
+            x["remaining_edits"] = obs["remaining_edits"].long().reshape(-1)
         y = plan.long()
         return x, y
 
@@ -435,7 +540,7 @@ class _QNetworkEvalAdapter(nn.Module):
     learned Q-values, not the untrained policy head.
     """
 
-    def __init__(self, q_network: "TRMQNetwork") -> None:
+    def __init__(self, q_network: Any) -> None:
         super().__init__()
         self.q_network = q_network
         self.model = q_network.model
@@ -449,6 +554,11 @@ class _QNetworkEvalAdapter(nn.Module):
         action_mask: Optional[torch.Tensor] = None,
         z: Optional[Any] = None,
     ) -> tuple:
+        if z is not None:
+            raise ValueError(
+                "Q-network evaluation supports episodic latent state only; "
+                "persistent latent state would otherwise be silently discarded."
+            )
         obs = {
             "inputs": x["inputs"].float(),
             "plan": y.float(),
@@ -514,5 +624,3 @@ class CartPoleQNetwork(nn.Module):
 
     def forward(self, obs: torch.Tensor, action_mask: Optional[Any] = None) -> torch.Tensor:
         return apply_action_mask(self.network(obs), action_mask)
-
-

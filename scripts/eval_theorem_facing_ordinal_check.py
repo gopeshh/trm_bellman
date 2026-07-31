@@ -23,11 +23,13 @@ import random
 import statistics
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Protocol, Sequence
 
 import numpy as np
 import torch
 import yaml
+
+from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
@@ -138,6 +140,14 @@ class FrozenBatchDataset:
         }
 
 
+class BatchDataset(Protocol):
+    seq_len: int
+
+    def __len__(self) -> int: ...
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]: ...
+
+
 def parse_csv_ints(raw: str) -> List[int]:
     return [int(x.strip()) for x in raw.split(",") if x.strip()]
 
@@ -205,7 +215,7 @@ def load_theory_exact_rl_config(
 
 
 def build_env(
-    dataset: FrozenBatchDataset,
+    dataset: BatchDataset,
     checker,
     rl_cfg: RLConfig,
     *,
@@ -269,9 +279,9 @@ def collect_fixed_batch_episodes(trainer: UPITrmTrainer, num_episodes: int) -> i
 
 
 def compute_heldout_theory_metrics(
-    model: torch.nn.Module,
+    model: TinyRecursiveReasoningModel_ACTV1,
     rl_cfg: RLConfig,
-    dataset: FrozenBatchDataset,
+    dataset: BatchDataset,
     checker,
     *,
     vocab_size: int,
@@ -292,7 +302,7 @@ def compute_heldout_theory_metrics(
 
 def rollout_policy(
     trainer: UPITrmTrainer,
-    dataset: FrozenBatchDataset,
+    dataset: BatchDataset,
     checker,
     env_cfg: PlanEditEnvConfig,
     *,
@@ -320,7 +330,10 @@ def rollout_policy(
             disable_constraint_masking=bool(getattr(trainer.rl_cfg, "disable_constraint_masking", False)),
         )
         eval_env = PlanEditEnv(dataset=dataset, checker=checker, config=env_cfg, task_config=task_config)
-        eval_env.set_stop_action_id(stop_id=dataset.seq_len * int(eval_env.vocab_size))
+        eval_vocab_size = eval_env.vocab_size
+        if eval_vocab_size is None:
+            raise RuntimeError("Evaluation environment has no vocabulary size.")
+        eval_env.set_stop_action_id(stop_id=dataset.seq_len * int(eval_vocab_size))
 
         for state_idx in range(len(dataset)):
             x, y = eval_env.reset(idx=state_idx)

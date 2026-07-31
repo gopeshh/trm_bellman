@@ -20,7 +20,9 @@ def state_is_batched(x: Dict[str, torch.Tensor]) -> bool:
         return False
     inputs = x.get("inputs")
     puzzle_ids = x.get("puzzle_identifiers")
-    if not (torch.is_tensor(inputs) and torch.is_tensor(puzzle_ids)):
+    if not isinstance(inputs, torch.Tensor) or not isinstance(
+        puzzle_ids, torch.Tensor
+    ):
         return False
     if inputs.ndim not in (1, 2) or puzzle_ids.ndim not in (1, 2):
         raise ValueError(
@@ -79,6 +81,18 @@ def prepare_batch_x(
         
         tensor = tensor.to(device).to(torch.long)
         batch[key] = tensor
+
+    # The edit clock is part of the MDP state. The current TRM may choose to
+    # ignore it, but retaining it keeps transition and diagnostic code Markov.
+    if "remaining_edits" in x:
+        remaining = x["remaining_edits"]
+        if not torch.is_tensor(remaining):
+            remaining = torch.as_tensor(remaining)
+        if remaining.ndim == 0:
+            remaining = remaining.unsqueeze(0)
+        elif not batched:
+            remaining = remaining.reshape(-1)[:1]
+        batch["remaining_edits"] = remaining.to(device=device, dtype=torch.long)
     return batch
 
 
@@ -126,4 +140,3 @@ def prepare_plan(
     if not batched:
         plan = plan.unsqueeze(0)
     return plan.to(device).to(torch.long)
-

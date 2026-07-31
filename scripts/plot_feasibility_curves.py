@@ -148,6 +148,7 @@ def compute_mean_curve(seed_data: dict, metric_key: str = "success_rates") -> tu
         return [], []
 
     # For each step, compute mean across seeds that have that step
+    valid_steps = []
     mean_values = []
     for step in steps:
         values = []
@@ -159,17 +160,10 @@ def compute_mean_curve(seed_data: dict, metric_key: str = "success_rates") -> tu
                     if val is not None:
                         values.append(val)
         if values:
+            valid_steps.append(step)
             mean_values.append(sum(values) / len(values))
-        else:
-            mean_values.append(None)
 
-    # Filter out None values
-    valid = [(s, r) for s, r in zip(steps, mean_values) if r is not None]
-    if not valid:
-        return [], []
-    steps, mean_values = zip(*valid)
-
-    return list(steps), list(mean_values)
+    return valid_steps, mean_values
 
 
 def plot_success_vs_steps(data: dict, output_dir: Path, title_suffix: str = "Feasibility Checker, trivial dataset"):

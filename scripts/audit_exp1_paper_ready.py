@@ -31,10 +31,10 @@ from typing import Dict, List, Optional, Tuple
 # Configuration
 # =============================================================================
 
-BASE_DIR = Path("/home/buiksat/trm_bellman")
+BASE_DIR = Path(__file__).resolve().parent.parent
 OUT_DIR = BASE_DIR / "results/paper_ready/exp1"
 TABLES_DIR = BASE_DIR / "results/tables"
-PAPER_TABLE_DIR = Path("/home/buiksat/UPI_TRM/UPI_TRM_NIPS/tables")
+PAPER_TABLE_DIR = BASE_DIR.parent / "UPI_TRM" / "UPI_TRM_ICLR" / "tables"
 
 TOLERANCE = 0.01  # Tolerance for numeric comparison
 

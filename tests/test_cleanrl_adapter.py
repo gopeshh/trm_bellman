@@ -16,7 +16,7 @@ def test_gym_plan_edit_env_step_returns_five_tuple():
     )
     obs, info = env.reset()
     assert isinstance(obs, dict)
-    assert "inputs" in obs and "plan" in obs and "action_mask" in obs
+    assert {"inputs", "plan", "remaining_edits", "action_mask"} <= set(obs)
 
     result = env.step(0)
     assert len(result) == 5, f"step() must return 5-tuple, got {len(result)}"
@@ -26,8 +26,8 @@ def test_gym_plan_edit_env_step_returns_five_tuple():
     assert isinstance(truncated, bool)
 
 
-def test_gym_plan_edit_env_budget_is_truncation():
-    """Budget exhaustion must set truncated=True, terminated=False."""
+def test_gym_plan_edit_env_budget_is_terminal():
+    """Budget exhaustion is an MDP terminal, not a time-limit truncation."""
     from rl.cleanrl.trm_adapter import GymPlanEditEnv, build_sudoku_bundle
 
     config = {"dataset_path": "data/sudoku-4x4-trivial", "max_edits": 2, "batch_size": 4}
@@ -37,13 +37,16 @@ def test_gym_plan_edit_env_budget_is_truncation():
         env_cfg=bundle.env_cfg, task_config=bundle.task_config, seed=0,
     )
     obs, _ = env.reset()
+    assert obs["remaining_edits"].tolist() == [2.0]
     for _ in range(10):
         obs, reward, terminated, truncated, info = env.step(0)
         if terminated or truncated:
             break
-    assert truncated or terminated, "Episode should have ended"
+    assert terminated, "Episode should have ended"
+    assert not truncated
     if info.get("terminated_by_budget"):
-        assert truncated and not terminated, "Budget exhaustion must be truncated, not terminated"
+        assert terminated and not truncated
+        assert obs["remaining_edits"].tolist() == [0.0]
 
 
 def test_build_sudoku_bundle_checker_fields():
@@ -100,6 +103,61 @@ def test_pool_size_matches_in_house():
         assert len(bundle.dataset) <= expected_pool, (
             f"batch_size={bs}: dataset has {len(bundle.dataset)} samples, "
             f"expected at most {expected_pool}"
+        )
+
+
+def test_sudoku_bundle_uses_disjoint_held_out_evaluation_pool():
+    """CleanRL must not evaluate on the records used for training."""
+    from rl.cleanrl.trm_adapter import build_sudoku_bundle
+    from utils.dataset_provenance import dataset_input_sha256s
+
+    bundle = build_sudoku_bundle(
+        {
+            "dataset_path": "data/sudoku-4x4-trivial",
+            "batch_size": 8,
+            "eval_episodes": 10,
+        }
+    )
+
+    assert bundle.train_split == "train"
+    assert bundle.eval_split == "test"
+    assert bundle.dataset is not bundle.eval_dataset
+    assert bundle.train_pool_sha256
+    assert bundle.eval_pool_sha256
+    assert not set(dataset_input_sha256s(bundle.dataset)).intersection(
+        dataset_input_sha256s(bundle.eval_dataset)
+    )
+    train_ids = {
+        int(bundle.dataset[index]["puzzle_identifiers"].item())
+        for index in range(len(bundle.dataset))
+    }
+    eval_ids = {
+        int(bundle.eval_dataset[index]["puzzle_identifiers"].item())
+        for index in range(len(bundle.eval_dataset))
+    }
+    assert not train_ids.intersection(eval_ids)
+    assert min(eval_ids) >= bundle.eval_puzzle_id_offset
+
+
+def test_sudoku_bundle_rejects_same_split_and_undersized_eval_pool():
+    from rl.cleanrl.trm_adapter import build_sudoku_bundle
+
+    with pytest.raises(ValueError, match="different splits"):
+        build_sudoku_bundle(
+            {
+                "dataset_path": "data/sudoku-4x4-trivial",
+                "train_split": "train",
+                "eval_split": "train",
+            }
+        )
+
+    with pytest.raises(RuntimeError, match="smaller than eval_episodes"):
+        build_sudoku_bundle(
+            {
+                "dataset_path": "data/sudoku-4x4-trivial",
+                "batch_size": 8,
+                "eval_episodes": 51,
+            }
         )
 
 
@@ -162,3 +220,18 @@ def test_action_mask_prevents_sampling():
     samples = dist.sample((1000,)).squeeze()
     unique = set(samples.tolist())
     assert unique.issubset({0, 1}), f"Sampled masked actions: {unique - {0, 1}}"
+
+
+def test_q_eval_adapter_rejects_persistent_latent_state():
+    """The episodic DQN adapter must not silently discard a carried latent."""
+    import torch.nn as nn
+    from rl.cleanrl.trm_adapter import _QNetworkEvalAdapter
+
+    class DummyQNetwork(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model = nn.Linear(1, 1)
+
+    adapter = _QNetworkEvalAdapter(DummyQNetwork())
+    with pytest.raises(ValueError, match="episodic latent state only"):
+        adapter.policy_dist({}, torch.zeros(1), z=object())

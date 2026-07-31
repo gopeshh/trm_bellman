@@ -25,9 +25,9 @@ def _iter_rl_config_paths(root: Path) -> list[Path]:
 class TestConfigIntegrity(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        self.root_dir = PROJECT_ROOT
-        self.config_dir = self.root_dir / "configs"
-        self.rl_config_paths = _iter_rl_config_paths(self.config_dir)
+        cls.root_dir = PROJECT_ROOT
+        cls.config_dir = cls.root_dir / "configs"
+        cls.rl_config_paths = _iter_rl_config_paths(cls.config_dir)
 
     def test_project_root_is_repo_relative(self):
         self.assertTrue((self.root_dir / "README.md").exists())

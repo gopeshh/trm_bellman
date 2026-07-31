@@ -92,3 +92,19 @@ def test_k_step_targets_do_not_bootstrap_past_terminal():
     expected_tensor = torch.tensor([expected_return], dtype=targets.dtype)
     assert torch.allclose(targets, expected_tensor, atol=1e-6)
 
+
+def test_exact_target_rejects_incomplete_nonterminal_segment():
+    try:
+        compute_k_step_bootstrapped_target(
+            rewards_K=torch.tensor([[1.0, 0.0, 0.0]]),
+            dones_K=torch.tensor([[False, False, False]]),
+            steps_taken=torch.tensor([1]),
+            v_K=torch.tensor([2.0]),
+            gamma=0.9,
+            K=3,
+            exact_k_step_targets=True,
+        )
+    except ValueError as exc:
+        assert "requires K transitions" in str(exc)
+    else:
+        raise AssertionError("Expected incomplete fixed-K segment to fail")

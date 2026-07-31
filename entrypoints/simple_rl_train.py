@@ -309,20 +309,20 @@ def train_simple_reinforce(
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # Policy gradient loss with advantage
-        policy_loss = 0
+        policy_loss = torch.zeros((), dtype=returns.dtype, device=returns.device)
         for log_p, adv in zip(log_probs, advantages):
-            policy_loss -= log_p * adv.detach()
+            policy_loss = policy_loss - log_p * adv.detach()
 
         # Add entropy bonus for exploration
-        entropy = 0
+        entropy = torch.zeros((), dtype=returns.dtype, device=returns.device)
         for state_s in states:
             state_t = torch.tensor(state_s, dtype=torch.long).unsqueeze(0)
             env.current_state = state_s.copy()  # restore state for mask
             action_mask = env.create_action_mask(MAX_ACTIONS).unsqueeze(0)
             dist = policy(state_t, action_mask)
-            entropy += dist.entropy().mean()
+            entropy = entropy + dist.entropy().mean()
         entropy_coef = 0.01
-        policy_loss -= entropy_coef * entropy
+        policy_loss = policy_loss - entropy_coef * entropy
 
         policy_optimizer.zero_grad()
         policy_loss.backward()

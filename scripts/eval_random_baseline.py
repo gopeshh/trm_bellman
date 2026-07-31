@@ -67,7 +67,7 @@ def compute_sudoku_stats(plan: torch.Tensor) -> Tuple[int, int, int, int]:
     grid = plan.view(n, n)
 
     # Count filled cells
-    filled = (grid != 0).sum().item()
+    filled = int((grid != 0).sum().item())
 
     # Count violations
     violations = 0

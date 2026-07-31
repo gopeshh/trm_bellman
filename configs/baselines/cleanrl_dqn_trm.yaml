@@ -7,6 +7,9 @@ backend: "inhouse_dqn_wrapper"
 env_kind: "sudoku"
 
 dataset_path: "data/sudoku-4x4-easy_6to8empties"
+train_split: "train"
+eval_split: "test"
+eval_pool_size: 50
 seed: 0
 device: "cuda"
 

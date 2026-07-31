@@ -2,8 +2,10 @@
 import argparse
 import logging
 import os
+import random
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -47,10 +49,12 @@ from rl.training_setup import (
     DummyPuzzleDataset,
     OfflinePuzzleDataset,
     build_dataset_from_paths,
+    offset_puzzle_identifiers,
     resolve_checker_from_dataset,
 )
 from rl.sudoku_utils import sudoku_is_solved, sudoku_get_stats
 from utils.seeding import set_global_seed
+from utils.dataset_provenance import dataset_input_sha256s, dataset_pool_sha256
 
 __all__ = [
     "BaselineSelection",
@@ -429,6 +433,7 @@ def save_checkpoint(
     checkpoint_dir: str,
     puzzle_emb_optimizer: Optional[torch.optim.Optimizer] = None,
     rl_cfg: Optional["RLConfig"] = None,
+    dataset_provenance: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Save full training state for resumable RL training.
@@ -440,6 +445,7 @@ def save_checkpoint(
         checkpoint_dir: Directory to save checkpoints
         puzzle_emb_optimizer: Optional optimizer for puzzle embeddings
         rl_cfg: Optional RLConfig used for training (saved for reproducibility)
+        dataset_provenance: Content-based train/eval dataset identity
 
     Returns:
         Path to saved checkpoint
@@ -447,15 +453,41 @@ def save_checkpoint(
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     checkpoint = {
+        "checkpoint_schema_version": 2,
         "step": step,
         "model_state_dict": model.state_dict(),
+        "rng_state": {
+            "python": random.getstate(),
+            "numpy": np.random.get_state(),
+            "torch_cpu": torch.random.get_rng_state(),
+            "torch_cuda": (
+                torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+            ),
+        },
     }
+    if dataset_provenance is not None:
+        checkpoint["dataset_provenance"] = dict(dataset_provenance)
+    model_config = getattr(model, "config", None)
+    if model_config is not None:
+        if hasattr(model_config, "model_dump"):
+            checkpoint["model_config"] = model_config.model_dump()
+        elif hasattr(model_config, "dict"):
+            checkpoint["model_config"] = model_config.dict()
+        elif isinstance(model_config, dict):
+            checkpoint["model_config"] = dict(model_config)
+        else:
+            raise TypeError(
+                "Model config must be a Pydantic model or dictionary to save a "
+                "reconstructable checkpoint."
+            )
 
     # Preserve the old/candidate policy pair for post-candidate diagnostics.
     if hasattr(trainer, "policy_model_old") and trainer.policy_model_old is not None:
         checkpoint["policy_model_old_state_dict"] = trainer.policy_model_old.state_dict()
     if hasattr(trainer, "policy_model_candidate") and trainer.policy_model_candidate is not None:
         checkpoint["policy_model_candidate_state_dict"] = trainer.policy_model_candidate.state_dict()
+    if hasattr(trainer, "target_model") and trainer.target_model is not None:
+        checkpoint["target_model_state_dict"] = trainer.target_model.state_dict()
 
     # Save RL config for reproducibility and correct eval loading
     if rl_cfg is not None:
@@ -466,6 +498,10 @@ def save_checkpoint(
         # UPITrmTrainer has separate value and policy optimizers
         checkpoint["value_optimizer_state_dict"] = trainer.value_opt.state_dict()
         checkpoint["policy_optimizer_state_dict"] = trainer.policy_opt.state_dict()
+        if getattr(trainer, "old_policy_distill_opt", None) is not None:
+            checkpoint["old_policy_distill_optimizer_state_dict"] = (
+                trainer.old_policy_distill_opt.state_dict()
+            )
     elif hasattr(trainer, 'optimizer'):
         # PPO/A2C have a single combined optimizer
         checkpoint["optimizer_state_dict"] = trainer.optimizer.state_dict()
@@ -473,9 +509,24 @@ def save_checkpoint(
     if puzzle_emb_optimizer is not None:
         checkpoint["puzzle_emb_optimizer_state_dict"] = puzzle_emb_optimizer.state_dict()
 
-    # Save replay buffer size (not contents, too large) if trainer has replay buffer
+    if getattr(trainer, "value_scheduler", None) is not None:
+        checkpoint["value_scheduler_state_dict"] = trainer.value_scheduler.state_dict()
+    if getattr(trainer, "policy_scheduler", None) is not None:
+        checkpoint["policy_scheduler_state_dict"] = trainer.policy_scheduler.state_dict()
+
+    checkpoint["trainer_state"] = {
+        "next_episode_id": int(getattr(trainer, "_next_episode_id", 0)),
+        "train_step_count": int(getattr(trainer, "_train_step_count", 0)),
+        "env_step_count": int(getattr(trainer, "_env_step_count", 0)),
+        "kl_coef": float(getattr(trainer, "_kl_coef", 1.0)),
+        "term_stats": dict(getattr(trainer, "term_stats", {})),
+    }
+
+    # Replay is required for a semantic resume. It can make checkpoints large,
+    # but storing only its length caused resumed runs to start from empty data.
     if hasattr(trainer, 'replay'):
         checkpoint["replay_buffer_size"] = len(trainer.replay)
+        checkpoint["replay_transitions"] = list(trainer.replay.storage)
     
     path = os.path.join(checkpoint_dir, f"rl_checkpoint_step_{step}.pt")
     try:
@@ -499,6 +550,8 @@ def resume_from_checkpoint(
     trainer: "UPITrmTrainer",
     device: str,
     puzzle_emb_optimizer: Optional[torch.optim.Optimizer] = None,
+    expected_dataset_provenance: Optional[Dict[str, Any]] = None,
+    allow_legacy_warm_start: bool = False,
 ) -> int:
     """
     Resume RL training from a saved checkpoint.
@@ -507,18 +560,113 @@ def resume_from_checkpoint(
         Starting step number
     """
     print(f"[Checkpoint] Resuming from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    # Resume checkpoints contain replay Transition dataclasses, so this is a
+    # trusted local artifact rather than a weights-only file.
+    checkpoint = torch.load(
+        checkpoint_path,
+        # Replay transitions are intentionally CPU-resident. Loading a large
+        # replay directly onto CUDA can exhaust accelerator memory before the
+        # model state is restored.
+        map_location="cpu",
+        weights_only=False,
+    )
     
+    schema_version = int(checkpoint.get("checkpoint_schema_version", 0))
+    rng_state = checkpoint.get("rng_state")
+    if (schema_version < 2 or rng_state is None) and not allow_legacy_warm_start:
+        raise RuntimeError(
+            "Checkpoint predates exact-resume RNG/provenance support. Pass "
+            "allow_legacy_warm_start=True only to perform a non-exact warm start."
+        )
+    cuda_rng_state = rng_state.get("torch_cuda") if rng_state is not None else None
+    if cuda_rng_state is not None:
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "Checkpoint contains CUDA RNG state, but CUDA is unavailable; "
+                "exact continuation is impossible."
+            )
+        if len(cuda_rng_state) != torch.cuda.device_count():
+            raise RuntimeError(
+                "CUDA device topology differs from the saved checkpoint; exact "
+                "continuation is impossible."
+            )
+
+    checkpoint_provenance = checkpoint.get("dataset_provenance")
+    if expected_dataset_provenance is not None:
+        if checkpoint_provenance is None:
+            if not allow_legacy_warm_start:
+                raise RuntimeError(
+                    "Checkpoint has no dataset provenance; refusing to mix restored "
+                    "replay with an unverified dataset."
+                )
+        else:
+            mismatches = {
+                key: (checkpoint_provenance.get(key), expected_value)
+                for key, expected_value in expected_dataset_provenance.items()
+                if checkpoint_provenance.get(key) != expected_value
+            }
+            if mismatches:
+                mismatch_text = ", ".join(
+                    f"{key}: checkpoint={old!r}, current={new!r}"
+                    for key, (old, new) in sorted(mismatches.items())
+                )
+                raise RuntimeError(
+                    "Checkpoint dataset provenance mismatch; state was not restored: "
+                    + mismatch_text
+                )
+
     model.load_state_dict(checkpoint["model_state_dict"])
     if "policy_model_old_state_dict" in checkpoint and hasattr(trainer, "policy_model_old"):
         trainer.policy_model_old.load_state_dict(checkpoint["policy_model_old_state_dict"])
     if "policy_model_candidate_state_dict" in checkpoint and hasattr(trainer, "policy_model_candidate"):
         trainer.policy_model_candidate.load_state_dict(checkpoint["policy_model_candidate_state_dict"])
+    if "target_model_state_dict" in checkpoint and hasattr(trainer, "target_model"):
+        trainer.target_model.load_state_dict(checkpoint["target_model_state_dict"])
+    elif hasattr(trainer, "_hard_update_target"):
+        trainer._hard_update_target()
     trainer.value_opt.load_state_dict(checkpoint["value_optimizer_state_dict"])
     trainer.policy_opt.load_state_dict(checkpoint["policy_optimizer_state_dict"])
+    if (
+        "old_policy_distill_optimizer_state_dict" in checkpoint
+        and getattr(trainer, "old_policy_distill_opt", None) is not None
+    ):
+        trainer.old_policy_distill_opt.load_state_dict(
+            checkpoint["old_policy_distill_optimizer_state_dict"]
+        )
+    if (
+        "value_scheduler_state_dict" in checkpoint
+        and getattr(trainer, "value_scheduler", None) is not None
+    ):
+        trainer.value_scheduler.load_state_dict(checkpoint["value_scheduler_state_dict"])
+    if (
+        "policy_scheduler_state_dict" in checkpoint
+        and getattr(trainer, "policy_scheduler", None) is not None
+    ):
+        trainer.policy_scheduler.load_state_dict(checkpoint["policy_scheduler_state_dict"])
     
     if puzzle_emb_optimizer is not None and "puzzle_emb_optimizer_state_dict" in checkpoint:
         puzzle_emb_optimizer.load_state_dict(checkpoint["puzzle_emb_optimizer_state_dict"])
+
+    trainer_state = checkpoint.get("trainer_state", {})
+    trainer._next_episode_id = int(trainer_state.get("next_episode_id", 0))
+    trainer._train_step_count = int(trainer_state.get("train_step_count", 0))
+    trainer._env_step_count = int(trainer_state.get("env_step_count", 0))
+    trainer._kl_coef = float(trainer_state.get("kl_coef", 1.0))
+    if trainer_state.get("term_stats") is not None:
+        trainer.term_stats = dict(trainer_state["term_stats"])
+    if "replay_transitions" in checkpoint and hasattr(trainer, "replay"):
+        trainer.replay.clear()
+        for transition in checkpoint["replay_transitions"]:
+            trainer.replay.add(transition)
+
+    # Restore generators last so model/optimizer/replay reconstruction cannot
+    # perturb the next random draw relative to an uninterrupted run.
+    if rng_state is not None:
+        random.setstate(rng_state["python"])
+        np.random.set_state(rng_state["numpy"])
+        torch.random.set_rng_state(rng_state["torch_cpu"])
+        if cuda_rng_state is not None:
+            torch.cuda.set_rng_state_all(cuda_rng_state)
     
     start_step = checkpoint["step"]
     print(f"[Checkpoint] Resumed from step {start_step}")
@@ -529,6 +677,19 @@ def resume_from_checkpoint(
 def parse_args():
     parser = argparse.ArgumentParser(description="Train TinyRecursiveReasoningModel with plan-space RL.")
     parser.add_argument("--dataset-paths", nargs="+", default=None, help="Optional list of supervised dataset directories.")
+    parser.add_argument("--train-split", default="train", help="Dataset split used for training.")
+    parser.add_argument("--eval-split", default="test", help="Disjoint dataset split used for evaluation.")
+    parser.add_argument(
+        "--allow-legacy-resume",
+        action="store_true",
+        help="Warm-start from an old checkpoint lacking RNG or dataset provenance.",
+    )
+    parser.add_argument(
+        "--eval-pool-size",
+        type=int,
+        default=None,
+        help="Number of fixed evaluation instances to materialize (default: eval episode count).",
+    )
     parser.add_argument("--train-steps", type=int, default=200, help="Number of outer RL steps.")
     parser.add_argument("--batch-size", type=int, default=32, help="Mini-batch size for TD updates.")
     parser.add_argument("--rollouts-per-step", type=int, default=1, help="Episodes collected before each optimization step.")
@@ -536,6 +697,12 @@ def parse_args():
     parser.add_argument("--log-interval", type=int, default=10, help="Logging interval in train steps.")
     parser.add_argument("--eval-interval", type=int, default=50, help="Evaluation interval in train steps.")
     parser.add_argument("--eval-episodes", type=int, default=50, help="Number of episodes per evaluation call.")
+    parser.add_argument(
+        "--eval-seed",
+        type=int,
+        default=1729,
+        help="Private deterministic seed for evaluation (default: 1729).",
+    )
     parser.add_argument("--tqdm", action="store_true", help="Enable tqdm progress bar (disabled by default).")
     parser.add_argument("--seed", type=int, default=None, help="Optional global random seed.")
     parser.add_argument("--debug-checks", action="store_true", help="Enable additional debug assertions/prints.")
@@ -836,6 +1003,7 @@ def _run_eval_and_log(
     prefix = _step_prefix(progress_step, outer_step)
     if eval_metrics is not None:
         eval_policy_mode = eval_metrics.get("eval_policy_mode", "unknown")
+        eval_seed = eval_metrics.get("eval_seed")
         solved_count = eval_metrics.get("solved_count", 0)
         total_episodes = eval_metrics.get("total_episodes", 0)
         score_min = eval_metrics.get("score_min", 0.0)
@@ -853,6 +1021,7 @@ def _run_eval_and_log(
             f"eval_success_rate={eval_metrics['success_rate']:.3f} "
             f"eval_mean_score={eval_metrics['mean_score']:.3f} "
             f"eval_policy_mode={eval_policy_mode} "
+            f"{f'eval_seed={eval_seed} ' if eval_seed is not None else ''}"
             f"[solved={solved_count}/{total_episodes}, "
             f"score_range={score_min:.2f}-{score_max:.2f}"
             f"{f'/{max_possible:.1f}' if max_possible else ''}, "
@@ -882,6 +1051,8 @@ def _run_eval_and_log(
                 "eval/score_max": score_max,
                 "eval/initial_score_mean": initial_mean,
             }
+            if eval_seed is not None:
+                wandb_eval["eval/seed"] = eval_seed
             if max_possible is not None:
                 wandb_eval["eval/max_possible_score"] = max_possible
             if filled_mean is not None:
@@ -928,6 +1099,7 @@ def main():
         log_interval=args.log_interval,
         eval_interval=args.eval_interval,
         eval_num_episodes=args.eval_episodes,
+        eval_seed=args.eval_seed,
         use_tqdm=args.tqdm,
         debug_checks=args.debug_checks,
     )
@@ -979,10 +1151,48 @@ def main():
         # Baseline was auto-selected from YAML
         print(f"[INFO] Baseline algorithm '{selected_baseline}' auto-selected from YAML config")
 
+    if args.dataset_paths and args.train_split == args.eval_split:
+        raise RuntimeError(
+            "Training and evaluation must use different dataset splits; got "
+            f"{args.train_split!r} for both."
+        )
+
     dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
         dataset_paths=args.dataset_paths,
         pool_size=max(rl_cfg.batch_size, 8),
+        split=args.train_split,
     )
+    train_identifier_count = num_identifiers
+    if args.dataset_paths:
+        eval_pool_size = args.eval_pool_size or rl_cfg.eval_num_episodes
+        eval_dataset, eval_seq_len, eval_vocab_size, eval_num_identifiers = build_dataset_from_paths(
+            dataset_paths=args.dataset_paths,
+            pool_size=max(eval_pool_size, rl_cfg.eval_num_episodes),
+            split=args.eval_split,
+        )
+        if (eval_seq_len, eval_vocab_size) != (seq_len, vocab_size):
+            raise RuntimeError(
+                "Training and evaluation splits have incompatible shapes: "
+                f"train={(seq_len, vocab_size)}, eval={(eval_seq_len, eval_vocab_size)}."
+            )
+        if len(eval_dataset) < rl_cfg.eval_num_episodes:
+            raise RuntimeError(
+                "Evaluation split is smaller than eval_num_episodes; refusing to "
+                f"repeat instances ({len(eval_dataset)} < {rl_cfg.eval_num_episodes})."
+            )
+        offset_puzzle_identifiers(eval_dataset, train_identifier_count)
+        eval_num_identifiers = train_identifier_count + eval_num_identifiers
+        overlap = set(dataset_input_sha256s(dataset)).intersection(
+            dataset_input_sha256s(eval_dataset)
+        )
+        if overlap:
+            raise RuntimeError(
+                "Training and evaluation pools overlap; refusing an in-sample "
+                f"evaluation ({len(overlap)} duplicate records)."
+            )
+        num_identifiers = eval_num_identifiers
+    else:
+        eval_dataset = dataset
 
     # === DATASET PROVENANCE LOGGING (for audit/reproducibility) ===
     # These lines are grep-friendly for verifying which dataset was used
@@ -991,11 +1201,48 @@ def main():
         dataset_name = os.path.basename(args.dataset_paths[0])
         print(f"[DATASET] dataset_paths={args.dataset_paths}")
         print(f"[DATASET] resolved_dataset_name={dataset_name}")
-        print(f"[DATASET] num_samples={len(dataset)}")
+        train_pool_hash = dataset_pool_sha256(dataset, len(dataset))
+        eval_pool_hash = dataset_pool_sha256(
+            eval_dataset, rl_cfg.eval_num_episodes
+        )
+        print(
+            f"[DATASET] train_split={args.train_split} train_samples={len(dataset)} "
+            f"train_pool_sha256={train_pool_hash}"
+        )
+        print(
+            f"[DATASET] eval_split={args.eval_split} "
+            f"eval_samples={rl_cfg.eval_num_episodes} "
+            f"eval_pool_sha256={eval_pool_hash} "
+            f"eval_puzzle_id_offset={train_identifier_count}"
+        )
+        dataset_provenance = {
+            "train_split": args.train_split,
+            "eval_split": args.eval_split,
+            "train_pool_sha256": train_pool_hash,
+            "eval_pool_sha256": eval_pool_hash,
+            "train_count": len(dataset),
+            "eval_count": rl_cfg.eval_num_episodes,
+            "seq_len": seq_len,
+            "vocab_size": vocab_size,
+            "num_identifiers": num_identifiers,
+            "eval_puzzle_id_offset": train_identifier_count,
+        }
     else:
         print(f"[DATASET] dataset_paths=None (using dummy dataset)")
         print(f"[DATASET] resolved_dataset_name=dummy")
         print(f"[DATASET] num_samples={len(dataset)}")
+        dataset_provenance = {
+            "train_split": "dummy",
+            "eval_split": "dummy",
+            "train_pool_sha256": dataset_pool_sha256(dataset, len(dataset)),
+            "eval_pool_sha256": dataset_pool_sha256(eval_dataset, len(eval_dataset)),
+            "train_count": len(dataset),
+            "eval_count": len(eval_dataset),
+            "seq_len": seq_len,
+            "vocab_size": vocab_size,
+            "num_identifiers": num_identifiers,
+            "eval_puzzle_id_offset": 0,
+        }
 
     checker_resolution = resolve_checker_from_dataset(rl_cfg=rl_cfg, dataset=dataset, seq_len=seq_len)
     checker_fn = checker_resolution.checker_fn
@@ -1150,6 +1397,7 @@ def main():
     
     # === Setup puzzle embedding optimizer (separate from main optimizer) ===
     puzzle_emb_optimizer = None
+    puzzle_emb_optimizer_managed_by_trainer = False
     if puzzle_emb_ndim > 0 and hasattr(model, "inner") and hasattr(model.inner, "puzzle_emb"):
         # Use SignSGD for sparse puzzle embeddings (same as pretrain.py)
         puzzle_emb_optimizer = CastedSparseEmbeddingSignSGD_Distributed(
@@ -1159,12 +1407,21 @@ def main():
             world_size=1,  # Single GPU for now
         )
         print(f"[INFO] Puzzle embedding optimizer: SignSGD (lr={args.puzzle_emb_lr})")
+        if hasattr(trainer, "set_puzzle_embedding_optimizer"):
+            trainer.set_puzzle_embedding_optimizer(puzzle_emb_optimizer)
+            puzzle_emb_optimizer_managed_by_trainer = True
     
     # === Resume from RL checkpoint if provided ===
     start_step = 0
     if args.resume_checkpoint is not None:
         start_step = resume_from_checkpoint(
-            args.resume_checkpoint, model, trainer, str(device), puzzle_emb_optimizer
+            args.resume_checkpoint,
+            model,
+            trainer,
+            str(device),
+            puzzle_emb_optimizer,
+            expected_dataset_provenance=dataset_provenance,
+            allow_legacy_warm_start=args.allow_legacy_resume,
         )
     
     # === Setup checkpoint directory ===
@@ -1198,7 +1455,8 @@ def main():
 
         print(f"\nTheory status:")
         print(f"  Forward-invariant projection: {'✓' if validation['forward_invariant'] else '✗'}")
-        print(f"  Contraction enforced (L_z < 1): {'✓' if validation['contraction_enforced'] else '✗'}")
+        print(f"  Clamping intervention enabled: {'✓' if rl_cfg.enable_contraction else '✗'}")
+        print("  Global contraction certified: ✗ (local proxies are not a certificate)")
         print(f"  Exact baseline (Thm 5.9): {'✓' if validation['exact_baseline'] else '✗'}")
         print(f"  Distillation (not in theory): {'✗ ENABLED' if validation['distillation_used'] else '✓ disabled'}")
         print(f"\nIs theory-exact: {rl_cfg.is_theory_exact()}")
@@ -1320,7 +1578,7 @@ def main():
             print("Evaluating policy after imitation pre-training...")
             eval_metrics = trainer.evaluate_policy_metrics(
                 env_cfg=env_cfg,
-                dataset=dataset,
+                dataset=eval_dataset,
                 checker=checker_fn,
             )
             post_imitation_msg = (
@@ -1353,7 +1611,10 @@ def main():
             outer_step = step + 1
             metrics = trainer.train_step()
 
-            if puzzle_emb_optimizer is not None:
+            if (
+                puzzle_emb_optimizer is not None
+                and not puzzle_emb_optimizer_managed_by_trainer
+            ):
                 puzzle_emb_optimizer.step()
                 puzzle_emb_optimizer.zero_grad()
 
@@ -1374,14 +1635,22 @@ def main():
                     outer_step=outer_step,
                     trainer=trainer,
                     env_cfg=env_cfg,
-                    dataset=dataset,
+                    dataset=eval_dataset,
                     checker_fn=checker_fn,
                     step_iter=step_iter,
                     use_wandb=use_wandb,
                 )
 
             if args.save_interval > 0 and checkpoint_dir is not None and outer_step % args.save_interval == 0:
-                save_checkpoint(model, trainer, outer_step, checkpoint_dir, puzzle_emb_optimizer, rl_cfg)
+                save_checkpoint(
+                    model,
+                    trainer,
+                    outer_step,
+                    checkpoint_dir,
+                    puzzle_emb_optimizer,
+                    rl_cfg,
+                    dataset_provenance,
+                )
                 last_saved_progress_step = outer_step
 
         final_progress_step = total_steps
@@ -1412,7 +1681,10 @@ def main():
             metrics = trainer.train_step(max_env_steps_to_collect=collect_budget)
             outer_step += 1
 
-            if puzzle_emb_optimizer is not None:
+            if (
+                puzzle_emb_optimizer is not None
+                and not puzzle_emb_optimizer_managed_by_trainer
+            ):
                 puzzle_emb_optimizer.step()
                 puzzle_emb_optimizer.zero_grad()
 
@@ -1438,7 +1710,7 @@ def main():
                     outer_step=outer_step,
                     trainer=trainer,
                     env_cfg=env_cfg,
-                    dataset=dataset,
+                    dataset=eval_dataset,
                     checker_fn=checker_fn,
                     step_iter=step_iter,
                     use_wandb=use_wandb,
@@ -1447,7 +1719,15 @@ def main():
                     next_eval_env += eval_env_interval
 
             if next_save_env is not None and checkpoint_dir is not None and current_env_step >= next_save_env:
-                save_checkpoint(model, trainer, progress_step, checkpoint_dir, puzzle_emb_optimizer, rl_cfg)
+                save_checkpoint(
+                    model,
+                    trainer,
+                    progress_step,
+                    checkpoint_dir,
+                    puzzle_emb_optimizer,
+                    rl_cfg,
+                    dataset_provenance,
+                )
                 last_saved_progress_step = progress_step
                 while next_save_env is not None and current_env_step >= next_save_env:
                     next_save_env += save_env_interval
@@ -1456,7 +1736,15 @@ def main():
 
     # === Save final checkpoint ===
     if args.save_interval > 0 and checkpoint_dir is not None and last_saved_progress_step != final_progress_step:
-        save_checkpoint(model, trainer, final_progress_step, checkpoint_dir, puzzle_emb_optimizer, rl_cfg)
+        save_checkpoint(
+            model,
+            trainer,
+            final_progress_step,
+            checkpoint_dir,
+            puzzle_emb_optimizer,
+            rl_cfg,
+            dataset_provenance,
+        )
     
     # === WandB: Finish logging ===
     if use_wandb:

@@ -48,18 +48,21 @@ def wilson_ci(successes: int, n: int, z: float = 1.96) -> Tuple[float, float]:
 # Data Loading
 # =============================================================================
 
-def load_per_state_csv(csv_path: str) -> List[Dict]:
+def load_per_state_csv(csv_path: str) -> List[Dict[str, float | str]]:
     """Load per-state CSV."""
-    rows = []
+    rows: List[Dict[str, float | str]] = []
     with open(csv_path, "r") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            parsed = {}
+            parsed: Dict[str, float | str] = {}
             for k, v in row.items():
+                if k is None or v is None:
+                    continue
+                key = str(k)
                 try:
-                    parsed[k] = float(v)
+                    parsed[key] = float(v)
                 except ValueError:
-                    parsed[k] = v
+                    parsed[key] = v
             rows.append(parsed)
     return rows
 

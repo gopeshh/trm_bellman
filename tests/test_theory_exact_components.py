@@ -120,9 +120,11 @@ class TestForwardInvariantProjection:
         # Check norm bounds
         z_H_norm = z.z_H.norm(p=2, dim=(1, 2))  # [B]
         z_L_norm = z.z_L.norm(p=2, dim=(1, 2))  # [B]
+        joint_norm = torch.sqrt(z_H_norm.square() + z_L_norm.square())
         
         assert (z_H_norm <= R + 1e-5).all(), f"z_H norm {z_H_norm.max()} exceeds R={R}"
         assert (z_L_norm <= R + 1e-5).all(), f"z_L norm {z_L_norm.max()} exceeds R={R}"
+        assert (joint_norm <= R + 1e-5).all(), f"joint norm {joint_norm.max()} exceeds R={R}"
     
     def test_projection_is_1_lipschitz(self, model_with_projection, sample_batch, sample_plan):
         """Test that projection doesn't increase distance between latents."""
@@ -467,4 +469,3 @@ class TestTrainerTheoryIntegration:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

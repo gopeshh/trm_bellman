@@ -8,6 +8,9 @@ device: "cpu"
 torch_deterministic: true
 
 dataset_path: "data/sudoku-4x4-easy_6to8empties"
+train_split: "train"
+eval_split: "test"
+eval_pool_size: 10
 max_edits: 16
 gamma: 0.99
 reward_shaping: true

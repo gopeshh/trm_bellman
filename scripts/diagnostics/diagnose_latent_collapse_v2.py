@@ -174,7 +174,7 @@ def unroll_latent_with_pre_post(
     # Unroll n steps
     for _ in range(n):
         context = model._resolve_latent_context(batch_internal)
-        input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+        input_embeds = context["input_embeddings_with_plan"]
         # This runs without projection since radius=0
         z = model.inner.latent_step(z, input_embeds, context["seq_info"])
 
@@ -269,7 +269,10 @@ def compute_value_stats(
         combined_embed = torch.cat([x_embed, y_embed], dim=-1)
 
         # Compute value
-        value = model.value_head(z_vec, combined_embed)
+        value_head = model.value_head
+        if value_head is None:
+            raise RuntimeError("Value-head diagnostics require rl_enable_value_head=True")
+        value = value_head(z_vec, combined_embed)
 
     return {
         "V_mean": value.mean().item(),

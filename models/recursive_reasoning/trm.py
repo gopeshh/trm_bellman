@@ -290,30 +290,24 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
         # This ensures z ∈ Z_inv = {z : ||z|| ≤ R} for contraction guarantees
         R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
         if R > 0.0:
-            z_H = self._project_to_ball(z_H, R)
-            z_L = self._project_to_ball(z_L, R)
+            z_H, z_L = self._project_carry_to_ball(z_H, z_L, R)
         
         return TinyRecursiveReasoningModel_ACTV1InnerCarry(z_H=z_H, z_L=z_L)
     
-    def _project_to_ball(self, z: torch.Tensor, radius: float) -> torch.Tensor:
-        """
-        Project tensor z to ball of given radius (per-sample).
-        
-        Implements Eq. 14 from paper: z ← z · min(1, R/||z||)
-        This projection is 1-Lipschitz and preserves contraction properties.
-        
-        Args:
-            z: Tensor of shape [B, seq_len, hidden_size]
-            radius: Ball radius R > 0
-            
-        Returns:
-            Projected tensor with ||z||_2 ≤ radius for each sample
-        """
-        # Compute per-sample norm: [B, 1, 1] for broadcasting
-        z_norm = z.norm(p=2, dim=(1, 2), keepdim=True).clamp(min=1e-8)
-        # Scale factor: min(1, R/||z||)
-        scale = torch.clamp(radius / z_norm, max=1.0)
-        return z * scale
+    def _project_carry_to_ball(
+        self,
+        z_H: torch.Tensor,
+        z_L: torch.Tensor,
+        radius: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Project the joint recurrent carry under its Euclidean product norm."""
+
+        joint_norm = torch.sqrt(
+            z_H.pow(2).sum(dim=(1, 2), keepdim=True)
+            + z_L.pow(2).sum(dim=(1, 2), keepdim=True)
+        ).clamp(min=1e-8)
+        scale = torch.clamp(radius / joint_norm, max=1.0)
+        return z_H * scale, z_L * scale
 
     def forward(self, carry: TinyRecursiveReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         latent_context = self.build_latent_context(batch)
@@ -413,6 +407,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         self.plan_embed_dim = hidden_size
         self.xy_embed_dim = self.x_embed_dim + self.plan_embed_dim
 
+        self.value_head: Optional[LatentValueHead]
         if self.config.rl_enable_value_head:
             self.value_head = LatentValueHead(
                 z_dim=self.z_dim_flat,  # Use flattened z
@@ -422,6 +417,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         else:
             self.value_head = None
 
+        self.edit_policy: Optional[EditPolicyHead]
         if self.config.rl_enable_policy_head:
             if self.config.rl_num_actions <= 0:
                 raise ValueError("rl_num_actions must be > 0 when rl_enable_policy_head=True")
@@ -436,6 +432,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             self.edit_policy = None
 
         # Optional (x,y)-dependent initialization encoder
+        self.z_init_encoder: Optional[ZInitEncoder]
         if getattr(self.config, "rl_enable_z_init_encoder", False):
             puzzle_emb_len = self.inner.puzzle_emb_len
             total_seq_len = self.config.seq_len + puzzle_emb_len
@@ -448,13 +445,13 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         else:
             self.z_init_encoder = None
 
-        # === Contraction Enforcement (Assumption 3.2) ===
+        # === Contraction-oriented intervention (Assumption 3.2) ===
         #
         # WARNING: Enabling rl_enable_contraction is NOT compatible with loading
         # vanilla pretrained TRM weights without fine-tuning!
         #
         # When enabled, this applies operator-norm clamping and output scaling
-        # to enforce L_z < 1 (contraction). This modifies the network's behavior:
+        # intended to reduce the recurrent modulus. This modifies network behavior:
         # - opnorm clamp: Rescales each layer to ||W|| <= 1 (1-Lipschitz per layer)
         # - Output scaling: Compounds to achieve global contraction L_z ≈ target_Lz
         #
@@ -467,16 +464,18 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         # - The original supervised performance will NOT be preserved
         # - You must fine-tune the model with the new constraints
         #
-        # For theory alignment (Assumption 3.2), you MUST enable contraction.
+        # This intervention is not a certificate of the uniform global modulus
+        # in Assumption 3.2. It only supplies a controlled architectural factor.
         # For practical RL that builds on pretrained TRM, consider:
         # - Training with contraction from scratch, OR
         # - Disabling contraction (loses theory guarantees but preserves pretrained behavior)
         if self.config.rl_enable_contraction:
             import warnings
             warnings.warn(
-                "rl_enable_contraction=True: Applying operator-norm clamping and "
-                "contraction scaling to z->z path layers. This is REQUIRED for "
-                "Assumption 3.2 (L_z < 1) but will modify network behavior. "
+                "rl_enable_contraction=True: Applying contraction-oriented "
+                "operator-norm clamping and scaling to z->z path layers. This "
+                "does not certify the uniform modulus in Assumption 3.2 and "
+                "will modify network behavior. "
                 "Pretrained weights from vanilla TRM may require fine-tuning.",
                 UserWarning,
                 stacklevel=2,
@@ -518,7 +517,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             current_data={k: torch.empty_like(v) for k, v in batch.items()}
         )
 
-    def _coerce_plan_tensor(self, y: Any, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def _coerce_plan_tensor(self, y: Any, batch: Dict[str, Any]) -> torch.Tensor:
         inputs = batch["inputs"]
         device = inputs.device
         if isinstance(y, dict):
@@ -541,7 +540,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             plan_tensor = plan_tensor.view_as(inputs)
         return plan_tensor.to(dtype=inputs.dtype)
 
-    def encode_plan(self, y: torch.Tensor, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def encode_plan(self, y: torch.Tensor, batch: Dict[str, Any]) -> torch.Tensor:
         """
         Encode the current plan y using the same embedding path as inputs.
         """
@@ -550,7 +549,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             plan_tensor = self._coerce_plan_tensor(y, batch)
         return self.inner._input_embeddings(plan_tensor, batch["puzzle_identifiers"])
 
-    def _build_latent_context_with_plan(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+    def _build_latent_context_with_plan(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         context = self.inner.build_latent_context(batch)
         plan_embeddings = self.encode_plan(batch["plan"], batch)
         if plan_embeddings.shape != context["input_embeddings"].shape:
@@ -568,7 +567,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             return embeddings.mean(dim=1)
         return embeddings.view(embeddings.shape[0], -1)
 
-    def _standardize_latent_batch(self, x: Any, y: Any) -> Dict[str, torch.Tensor]:
+    def _standardize_latent_batch(self, x: Any, y: Any) -> Dict[str, Any]:
         """
         Normalize the latent helper inputs to the batch dict format expected by the inner model.
         """
@@ -581,7 +580,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         batch["plan"] = self._coerce_plan_tensor(y, batch)
         return batch
 
-    def _resolve_latent_context(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+    def _resolve_latent_context(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """
         Returns cached (or freshly computed) latent context for update_latent-style calls.
         """
@@ -639,8 +638,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             # Paper requires z^(0) ∈ Z_inv for contraction guarantees to hold
             R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
             if R > 0.0:
-                z_H = self.inner._project_to_ball(z_H, R)
-                z_L = self.inner._project_to_ball(z_L, R)
+                z_H, z_L = self.inner._project_carry_to_ball(z_H, z_L, R)
 
             return TinyRecursiveReasoningModel_ACTV1InnerCarry(
                 z_H=z_H,
@@ -656,9 +654,10 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             # Paper requires z^(0) ∈ Z_inv for contraction guarantees to hold
             R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
             if R > 0.0:
+                z_H, z_L = self.inner._project_carry_to_ball(z.z_H, z.z_L, R)
                 z = TinyRecursiveReasoningModel_ACTV1InnerCarry(
-                    z_H=self.inner._project_to_ball(z.z_H, R),
-                    z_L=self.inner._project_to_ball(z.z_L, R),
+                    z_H=z_H,
+                    z_L=z_L,
                 )
             return z
 
@@ -673,7 +672,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         """
         batch = self._standardize_latent_batch(x, y)
         context = self._resolve_latent_context(batch)
-        input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+        input_embeds = context["input_embeddings_with_plan"]
         return self.inner.latent_step(z, input_embeds, context["seq_info"])
 
     def unroll_latent(
@@ -697,7 +696,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             # Pass pre-standardized batch directly to inner latent step to avoid
             # redundant standardization while preserving cached context
             context = self._resolve_latent_context(batch)
-            input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+            input_embeds = context["input_embeddings_with_plan"]
             z = self.inner.latent_step(z, input_embeds, context["seq_info"])
             zs.append(z)
         return z, zs
@@ -724,7 +723,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         zs = []
         for _ in range(n):
             context = self._resolve_latent_context(batch)
-            input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+            input_embeds = context["input_embeddings_with_plan"]
             z = self.inner.latent_step(z, input_embeds, context["seq_info"])
             zs.append(z)
         return z, zs

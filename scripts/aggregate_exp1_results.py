@@ -66,6 +66,7 @@ def aggregate_unroll_sensitivity(
     seeds: List[int],
     out_dir: str,
     batch: str = "b0",
+    n_train: int = 2,
 ) -> Dict:
     """
     Aggregate unroll sensitivity results across seeds.
@@ -86,8 +87,9 @@ def aggregate_unroll_sensitivity(
 
             rows = load_per_state_csv(str(csv_path))
             for row in rows:
+                n1 = int(row.get("n1", 0))
                 n2 = int(row.get("n2", 0))
-                if n2 == 0:
+                if n1 != n_train or n2 == 0:
                     continue
 
                 if n2 not in data[model]:
@@ -139,6 +141,7 @@ def aggregate_unroll_sensitivity(
     with open(md_path, "w") as f:
         f.write(f"# Unroll Sensitivity Summary ({batch.upper()})\n\n")
         f.write(f"**Seeds**: {seeds}\n\n")
+        f.write(f"**Fixed training depth**: {n_train}\n\n")
 
         # Get common n2 values
         n2_values = sorted(set(summary["model_a"].keys()) & set(summary["model_b"].keys()))
@@ -166,6 +169,8 @@ def aggregate_radius_sweep(
     radii: List[float],
     out_dir: str,
     batch: str = "b0",
+    n_train: int = 2,
+    n_eval: int = 8,
 ) -> Dict:
     """
     Aggregate radius sweep results across seeds.
@@ -204,6 +209,11 @@ def aggregate_radius_sweep(
 
                 rows = load_per_state_csv(str(csv_path))
                 for row in rows:
+                    if (
+                        int(row.get("n1", 0)) != n_train
+                        or int(row.get("n2", 0)) != n_eval
+                    ):
+                        continue
                     for metric in data[model][R]:
                         val = get_metric_value(row, metric)
                         if val is None:
@@ -247,6 +257,8 @@ def aggregate_radius_sweep(
         f.write(f"# Radius Sweep Summary ({batch.upper()})\n\n")
         f.write(f"**Seeds**: {seeds}\n\n")
         f.write(f"**Radii**: {radii}\n\n")
+        f.write(f"**Fixed training depth**: {n_train}\n\n")
+        f.write(f"**Fixed evaluation depth**: {n_eval}\n\n")
 
         for metric, label in [
             ("delta_V", "delta_V"),
@@ -289,6 +301,10 @@ def main():
                         help="Output directory")
     parser.add_argument("--batch", type=str, default="b0",
                         help="Batch to aggregate (b0 or b1)")
+    parser.add_argument("--n-train", type=int, default=2,
+                        help="Fixed n1 depth to aggregate (default: 2)")
+    parser.add_argument("--radius-n-eval", type=int, default=8,
+                        help="Fixed n2 depth for radius aggregation (default: 8)")
 
     args = parser.parse_args()
 
@@ -300,10 +316,20 @@ def main():
     print(f"[Aggregate] Output dir: {args.out_dir}")
 
     if args.mode in ["unroll", "both"]:
-        aggregate_unroll_sensitivity(args.results_dir, seeds, args.out_dir, args.batch)
+        aggregate_unroll_sensitivity(
+            args.results_dir, seeds, args.out_dir, args.batch, args.n_train
+        )
 
     if args.mode in ["radius", "both"]:
-        aggregate_radius_sweep(args.results_dir, seeds, radii, args.out_dir, args.batch)
+        aggregate_radius_sweep(
+            args.results_dir,
+            seeds,
+            radii,
+            args.out_dir,
+            args.batch,
+            args.n_train,
+            args.radius_n_eval,
+        )
 
     print("\n[Aggregate] Done")
     return 0

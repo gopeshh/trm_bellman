@@ -90,19 +90,12 @@ class PlanEditEnv:
         Near high-scoring states (large Φ), STOP is strongly penalized.
         This is intentional: it discourages stopping when progress is possible.
 
-    DEVIATION FROM PAPER (Issue 6 - Absorbing State):
-        The ICML paper defines an explicit absorbing state s_abs with potential
-        Φ(s_abs) = C_max. Terminal transitions get:
-            r = r_term(x, y) + γ * C_max - c(x, y)
-
-        This implementation does NOT model an explicit s_abs node. Instead:
-        - Episodes halt directly at the final plan (x, y_final)
-        - phi_new = checker(x, y_final) as usual (no separate C_max)
-        - Terminal rewards are controlled by fail_terminal_reward and
-          solve_terminal_reward in PlanEditEnvConfig
-
-        This is behaviorally equivalent for most experiments, but readers
-        comparing code to paper notation should note the difference.
+    ABSORBING-STATE NORMALIZATION:
+        The paper assigns V(s_abs) = -C_max. This episodic environment folds
+        the discounted absorbing tail into the terminal transition, so a
+        terminal shaped reward is r_0 - Phi(s). This is return-equivalent to
+        emitting r_0 + gamma*C_max - Phi(s), transitioning to s_abs, and then
+        receiving the absorbing self-loop rewards forever.
     """
 
     def __init__(
@@ -176,7 +169,7 @@ class PlanEditEnv:
 
         assert hasattr(self.dataset, "__len__"), "Dataset must implement __len__"
         if idx is None:
-            idx = torch.randint(low=0, high=len(self.dataset), size=(1,)).item()
+            idx = int(torch.randint(low=0, high=len(self.dataset), size=(1,)).item())
         sample = self.dataset[idx]
 
         # Expect the dataset sample to provide x and an initial plan y_0.
@@ -200,6 +193,7 @@ class PlanEditEnv:
 
         self.step_count = 0
         self.done = False
+        self._set_remaining_edits()
 
         # Cache phi value to avoid redundant checker calls
         # phi_new at step t becomes phi_old at step t+1
@@ -221,6 +215,21 @@ class PlanEditEnv:
         self._compute_action_mask()
 
         return self.x, self.y
+
+    def _set_remaining_edits(self) -> None:
+        """Expose the transition-relevant edit clock in the returned state."""
+
+        if not isinstance(self.x, dict):
+            return
+        state = dict(self.x)
+        inputs = state.get("inputs")
+        device = inputs.device if isinstance(inputs, torch.Tensor) else None
+        state["remaining_edits"] = torch.tensor(
+            max(self.config.max_edits - self.step_count, 0),
+            dtype=torch.long,
+            device=device,
+        )
+        self.x = state
 
     def _init_constraint_tracker(self) -> None:
         """
@@ -654,8 +663,12 @@ class PlanEditEnv:
                 r_0 = getattr(self.config, "fail_terminal_reward", 0.0)
         
         if self.config.reward_shaping:
-            # Potential-based shaping: r = r_0 + γ·Φ(s') - Φ(s)
-            r = r_0 + gamma * phi_new - phi_old + stop_penalty
+            if is_terminal:
+                # Fold gamma*V(s_abs) into the terminal reward. Since the
+                # paper uses V(s_abs)=-C_max, the C_max terms cancel.
+                r = r_0 - phi_old + stop_penalty
+            else:
+                r = r_0 + gamma * phi_new - phi_old + stop_penalty
         else:
             # Sparse reward: only terminal states get checker score + terminal bonus
             if is_terminal:
@@ -673,6 +686,24 @@ class PlanEditEnv:
         bootstrap from V(s') or treat STOP as absorbing.
         """
         return self._stop_mode == "terminal"
+
+    def is_plan_solved(
+        self,
+        plan: torch.Tensor,
+        checker_score: Optional[float] = None,
+    ) -> bool:
+        """Apply the same solved-state predicate used by ``step``."""
+        threshold_solved = (
+            self.config.solved_threshold is not None
+            and checker_score is not None
+            and checker_score >= self.config.solved_threshold
+        )
+        sudoku_solved = (
+            self.config.task_type == "sudoku"
+            and plan.numel() in (16, 81)
+            and sudoku_is_solved(plan)
+        )
+        return bool(threshold_solved or sudoku_solved)
 
     def apply_edit(self, y: Any, action: int, x: Any) -> Any:
         """
@@ -879,34 +910,12 @@ class PlanEditEnv:
             if self.config.reward_shaping and not done:
                 self._cached_phi = phi_new
 
-        solved = (
-            self.config.solved_threshold is not None
-            and phi_new is not None
-            and phi_new >= self.config.solved_threshold
-        )
-        if solved:
+        plan_tensor = self._standardize_plan(y_next)
+        if self.is_plan_solved(plan_tensor, checker_score=phi_new):
             done = True
             if done_reason is None:
                 done_reason = "solved"
             terminated_by_solved = True
-
-        # Solution-independent termination for Sudoku tasks (Fix for feasibility checker)
-        # When solved_threshold is None, we use sudoku_is_solved() to detect completion.
-        # This ensures episodes terminate immediately when the puzzle is solved,
-        # preventing "solved then unsolved" scenarios that inflate success metrics.
-        #
-        # IMPORTANT: Only apply this check when task_type == "sudoku" to prevent
-        # accidental termination for non-Sudoku tasks that happen to use 16/81-length plans.
-        if not terminated_by_solved:
-            is_sudoku_task = (self.config.task_type == "sudoku")
-            plan_tensor = y_next if torch.is_tensor(y_next) else None
-            if is_sudoku_task and plan_tensor is not None and plan_tensor.numel() in (16, 81):
-                # This is a Sudoku task (4x4 or 9x9)
-                if sudoku_is_solved(plan_tensor):
-                    done = True
-                    if done_reason is None:
-                        done_reason = "solved"
-                    terminated_by_solved = True
 
         if done_reason is None and pending_budget_termination:
             done_reason = "budget"
@@ -946,6 +955,7 @@ class PlanEditEnv:
 
         self.y = y_next
         self.done = done
+        self._set_remaining_edits()
 
         # Update action mask after state change for constraint-aware masking
         # Pass edit info for incremental updates when available

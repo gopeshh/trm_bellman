@@ -63,7 +63,7 @@ def generate_tradeoff_plot(summary: Dict[str, Any], out_path: Path) -> None:
     scales = sorted(set(r["scale"] for r in all_results), reverse=True)
 
     # Colors for scale means (viridis palette)
-    colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(scales)))
+    colors = plt.get_cmap("viridis")(np.linspace(0.2, 0.9, len(scales)))
     scale_to_color = {s: c for s, c in zip(scales, colors)}
     markers = ['o', 's', '^', 'D']
     scale_to_marker = {s: m for s, m in zip(scales, markers)}

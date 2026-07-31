@@ -46,7 +46,7 @@ def _tiny_trm_cfg(seq_len: int, vocab_size: int, num_identifiers: int, batch_siz
 def test_evaluate_plan_policy_smoke():
     torch.manual_seed(0)
 
-    dataset = DummyPuzzleDataset(num_instances=8, seq_len=12, vocab_size=16)
+    dataset = DummyPuzzleDataset(num_instances=10, seq_len=12, vocab_size=16)
     env_cfg = PlanEditEnvConfig(max_edits=4, gamma=0.99, reward_shaping=True, vocab_size=dataset.vocab_size)
 
     batch_size = 4
@@ -74,7 +74,7 @@ def test_evaluate_plan_policy_smoke():
 def test_evaluate_plan_policy_with_scores_smoke():
     torch.manual_seed(1)
 
-    dataset = DummyPuzzleDataset(num_instances=6, seq_len=10, vocab_size=8)
+    dataset = DummyPuzzleDataset(num_instances=12, seq_len=10, vocab_size=8)
     env_cfg = PlanEditEnvConfig(max_edits=3, gamma=0.95, reward_shaping=True, vocab_size=dataset.vocab_size)
 
     batch_size = 4

@@ -1,5 +1,5 @@
 import warnings
-from typing import Dict, Tuple, Type
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -9,17 +9,16 @@ import torch.nn.utils as nn_utils
 # With ~1000 actions and batch size 128, this is O(128K) forward passes per policy update
 EXACT_BASELINE_ACTION_THRESHOLD = 1000
 
-try:
-    from models.layers import CastedLinear
-except ImportError:  # pragma: no cover - fallback during partial imports
-    CastedLinear = tuple()  # type: ignore
+def _is_linear_module(module: nn.Module) -> bool:
+    """Return whether a module is one of the supported linear layers."""
+    return isinstance(module, nn.Linear) or type(module).__name__ == "CastedLinear"
 
 
-def _linear_module_types() -> Tuple[Type[nn.Module], ...]:
-    base_types: Tuple[Type[nn.Module], ...] = (nn.Linear,)
-    if isinstance(CastedLinear, type):
-        return base_types + (CastedLinear,)
-    return base_types
+def _require_method(obj: object, name: str) -> Callable[..., Any]:
+    method = getattr(obj, name, None)
+    if not callable(method):
+        raise TypeError(f"{type(obj).__name__} must provide callable `{name}()`.")
+    return method
 
 
 def apply_spectral_norm_to_trm(inner_model: nn.Module) -> None:
@@ -30,7 +29,7 @@ def apply_spectral_norm_to_trm(inner_model: nn.Module) -> None:
     per-layer output scaling to dial in stricter global contraction.
     """
     for module in inner_model.modules():
-        if isinstance(module, _linear_module_types()):
+        if _is_linear_module(module):
             nn_utils.spectral_norm(module)
 
 
@@ -42,7 +41,7 @@ def apply_spectral_norm_to_value_head(value_head: nn.Module) -> None:
     global contraction scalars.
     """
     for module in value_head.modules():
-        if isinstance(module, _linear_module_types()):
+        if _is_linear_module(module):
             nn_utils.spectral_norm(module)
 
 
@@ -85,6 +84,7 @@ def _power_iteration(weight: torch.Tensor, num_iters: int = 10) -> float:
     # Initialize random vector
     v = torch.randn(in_features, device=W.device, dtype=W.dtype)
     v = v / v.norm().clamp(min=1e-12)
+    u = torch.zeros(out_features, device=W.device, dtype=W.dtype)
 
     for _ in range(num_iters):
         # u = W @ v / ||W @ v||
@@ -121,16 +121,16 @@ def clamp_linear_operator_norm(
     Returns:
         The estimated spectral norm AFTER clamping
     """
-    if not hasattr(module, 'weight') or module.weight is None:
+    weight = getattr(module, "weight", None)
+    if not isinstance(weight, torch.Tensor):
         return 0.0
 
-    weight = module.weight
     sigma = _power_iteration(weight, num_power_iters)
 
     if sigma > max_norm and sigma > 1e-8:
         scale = max_norm / sigma
         with torch.no_grad():
-            weight.data.mul_(scale)
+            weight.mul_(scale)
         # Recompute sigma after scaling
         sigma = _power_iteration(weight, num_power_iters)
 
@@ -162,7 +162,7 @@ def apply_opnorm_clamp_to_trm(
     sigma_dict = {}
 
     for name, module in inner_model.named_modules():
-        if not isinstance(module, _linear_module_types()):
+        if not _is_linear_module(module):
             continue
 
         # Optionally restrict to reasoning (z->z) layers only
@@ -227,10 +227,10 @@ def enforce_global_contraction(
     if restrict_to_reasoning_layers:
         linear_modules = []
         for name, m in inner_model.named_modules():
-            if isinstance(m, _linear_module_types()) and name.startswith("L_level"):
+            if _is_linear_module(m) and name.startswith("L_level"):
                 linear_modules.append(m)
     else:
-        linear_modules = [m for m in inner_model.modules() if isinstance(m, _linear_module_types())]
+        linear_modules = [m for m in inner_model.modules() if _is_linear_module(m)]
 
     if not linear_modules:
         return
@@ -249,7 +249,7 @@ def enforce_global_contraction_on_value_head(value_head: nn.Module, target_Lv: f
     if target_Lv <= 0.0:
         return
 
-    linear_modules = [m for m in value_head.modules() if isinstance(m, _linear_module_types())]
+    linear_modules = [m for m in value_head.modules() if _is_linear_module(m)]
     if not linear_modules:
         return
 
@@ -268,6 +268,8 @@ def _scale_linear_output(module: nn.Module, alpha: float, scale_attr: str) -> No
     # If already has a scale, just compound it
     if hasattr(module, scale_attr):
         current = getattr(module, scale_attr)
+        if not isinstance(current, torch.Tensor):
+            raise TypeError(f"{scale_attr} must be a tensor buffer.")
         with torch.no_grad():
             current.mul_(alpha)
         return
@@ -275,9 +277,10 @@ def _scale_linear_output(module: nn.Module, alpha: float, scale_attr: str) -> No
     # First-time setup
     device = None
     dtype = torch.float32
-    if hasattr(module, "weight") and torch.is_tensor(module.weight):
-        device = module.weight.device
-        dtype = module.weight.dtype
+    weight = getattr(module, "weight", None)
+    if isinstance(weight, torch.Tensor):
+        device = weight.device
+        dtype = weight.dtype
     scale_tensor = torch.tensor(alpha, dtype=dtype, device=device)
     module.register_buffer(scale_attr, scale_tensor)
 
@@ -318,8 +321,9 @@ def estimate_local_Lz(
         raise KeyError("context must include `input_embeddings`/`input_embeddings_with_plan` and `seq_info`.")
 
     norms = []
+    latent_step = _require_method(inner_model, "latent_step")
     with torch.no_grad():
-        baseline = inner_model.latent_step(carry, input_embeddings, seq_info)
+        baseline = latent_step(carry, input_embeddings, seq_info)
         for _ in range(max(num_samples, 1)):
             noise_h = torch.randn_like(carry.z_H)
             noise_l = torch.randn_like(carry.z_L)
@@ -331,7 +335,7 @@ def estimate_local_Lz(
                 z_H=carry.z_H + noise_h * scale,
                 z_L=carry.z_L + noise_l * scale,
             )
-            out = inner_model.latent_step(perturbed, input_embeddings, seq_info)
+            out = latent_step(perturbed, input_embeddings, seq_info)
             diff = torch.sqrt(
                 (out.z_H - baseline.z_H).pow(2).sum() + (out.z_L - baseline.z_L).pow(2).sum()
             )
@@ -367,9 +371,11 @@ def estimate_Cz(
     Returns:
         Maximum ||z^(1) - z^(0)|| over the batch (scalar float)
     """
+    init_latent = _require_method(model, "init_latent")
+    update_latent = _require_method(model, "update_latent")
     with torch.no_grad():
-        z0 = model.init_latent(x_batch, y_batch)
-        z1 = model.update_latent(z0, y_batch, x_batch)
+        z0 = init_latent(x_batch, y_batch)
+        z1 = update_latent(z0, y_batch, x_batch)
 
         # Compute ||z^(1) - z^(0)|| for each sample in batch
         diff_H = (z1.z_H - z0.z_H).pow(2).sum(dim=(1, 2))  # [B]
@@ -478,14 +484,14 @@ def estimate_Cdrift(
     Returns:
         Maximum ||z^(n)_current - z^(n)_fresh|| over the batch (scalar float)
     """
+    unroll_latent = _require_method(model, "unroll_latent")
+    continue_latent = _require_method(model, "continue_latent")
     with torch.no_grad():
-        # Fresh initialization
-        z_fresh = model.init_latent(x_batch, y_batch)
         # Unroll n steps from fresh init
-        z_fresh_n, _ = model.unroll_latent(x_batch, y_batch, n)
+        z_fresh_n, _ = unroll_latent(x_batch, y_batch, n)
         
         # Unroll n steps from current (persistent) state
-        z_current_n, _ = model.continue_latent(z_current, x_batch, y_batch, n)
+        z_current_n, _ = continue_latent(z_current, x_batch, y_batch, n)
         
         # Compute drift: ||z^(n)_current - z^(n)_fresh||
         diff_H = (z_current_n.z_H - z_fresh_n.z_H).pow(2).sum(dim=(1, 2))
@@ -606,13 +612,14 @@ def compute_value_of_memory_residual(
         - value_of_memory: ||V_persistent - V_memoryless|| (the "cost of amnesia")
         - bellman_residual_memoryless: ||V_memless - T V_memless||
     """
+    used_value = _require_method(model, "used_value")
     with torch.no_grad():
         # V_memoryless: always reinitialize z from (x, y) - ignores history
-        v_memoryless, _ = model.used_value(x_batch, y_batch, n=n, z=None)
+        v_memoryless, _ = used_value(x_batch, y_batch, n=n, z=None)
         
         # V_persistent: use the carried latent z - includes history
         if z_batch is not None:
-            v_persistent, _ = model.used_value(x_batch, y_batch, n=n, z=z_batch)
+            v_persistent, _ = used_value(x_batch, y_batch, n=n, z=z_batch)
         else:
             v_persistent = v_memoryless  # Same if no persistent state
         
@@ -646,7 +653,8 @@ def compute_exact_baseline_summation(
     n: int,
     gamma: float,
     checker_fn,
-    action_mask: torch.Tensor = None,
+    action_mask: Optional[torch.Tensor] = None,
+    policy_probs: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Compute exact baseline E_{a ~ π}[Q̂(s,a)] via summation over ALL discrete actions.
@@ -693,6 +701,9 @@ def compute_exact_baseline_summation(
         gamma: Discount factor
         checker_fn: Checker function for reward computation
         action_mask: Optional [num_actions] or [B, num_actions] mask
+        policy_probs: Optional fixed current-policy probabilities [B, A].
+            Supplying these keeps the policy fixed when Q is evaluated at a
+            different recurrent reference depth.
         
     Returns:
         Tuple of:
@@ -705,15 +716,29 @@ def compute_exact_baseline_summation(
         "exact_baseline_summation currently requires reward_shaping=True. "
         "With sparse rewards, most Q-values would be zero until terminal."
     )
+    if getattr(env, "_enable_undo", False):
+        raise NotImplementedError(
+            "Exact baseline enumeration does not reconstruct history-dependent UNDO actions."
+        )
     
+    policy_dist = _require_method(model, "policy_dist")
+    used_value = _require_method(model, "used_value")
     with torch.no_grad():
         batch_size = y_batch.shape[0]
         device = y_batch.device
         
-        # Get policy distribution (always using reset-latent evaluator)
-        # NOTE: In persistent-latent mode, this is the "memoryless" approximation
-        dist, _ = model.policy_dist(x_batch, y_batch, n=n, action_mask=action_mask)
-        probs = dist.probs  # [B, num_actions]
+        if policy_probs is None:
+            # Get policy distribution (always using reset-latent evaluator).
+            # In persistent mode this is the memoryless approximation.
+            dist, _ = policy_dist(x_batch, y_batch, n=n, action_mask=action_mask)
+            probs = dist.probs
+        else:
+            probs = policy_probs.to(device=device)
+            if probs.ndim != 2 or probs.shape[0] != batch_size:
+                raise ValueError(
+                    "policy_probs must have shape [batch_size, num_actions], "
+                    f"got {tuple(probs.shape)}."
+                )
         num_actions = probs.shape[-1]
         
         # Warn about expensive computation for large action spaces
@@ -763,7 +788,23 @@ def compute_exact_baseline_summation(
                 y_new=y_next,
                 checker_fn=checker_fn,
                 solved_threshold=solved_threshold,
+                task_type=getattr(env.config, "task_type", None),
+                is_solved_fn=getattr(env, "is_plan_solved", None),
             )
+
+            if "remaining_edits" in x_batch:
+                budget_terminal = x_batch["remaining_edits"].reshape(-1) <= 1
+            else:
+                budget_terminal = torch.zeros(
+                    batch_size, dtype=torch.bool, device=device
+                )
+            stop_terminal = torch.full(
+                (batch_size,),
+                bool(is_stop and stop_is_terminal),
+                dtype=torch.bool,
+                device=device,
+            )
+            terminal_batch = is_solved_batch | budget_terminal | stop_terminal
             
             # Compute rewards using the env's canonical reward helper
             # This ensures EXACT consistency with step()
@@ -773,19 +814,21 @@ def compute_exact_baseline_summation(
                 phi_new_batch=phi_new_batch,
                 is_stop_action=is_stop,
                 is_solved_batch=is_solved_batch,
+                is_terminal_batch=terminal_batch,
             )
             
             # Determine if this action is terminal
             # STOP is terminal only if stop_action_mode == "terminal"
             # Otherwise STOP is a no-op and we bootstrap from V(s')
-            if is_stop and stop_is_terminal:
-                # Terminal STOP: Q = r (no bootstrap)
-                q_values[:, a] = rewards
-            else:
-                # Non-terminal: Q = r + γV(s')
-                # NOTE: We always use reset-latent critic here (no persistent z passed)
-                v_next, _ = model.used_value(x_batch, y_next, n=n)
-                q_values[:, a] = rewards + gamma * v_next
+            # NOTE: We always use a reset-latent critic here. Terminal rewards
+            # already fold in the absorbing tail and therefore do not bootstrap.
+            x_next_batch = dict(x_batch)
+            if "remaining_edits" in x_batch:
+                x_next_batch["remaining_edits"] = (
+                    x_batch["remaining_edits"] - 1
+                ).clamp_min(0)
+            v_next, _ = used_value(x_next_batch, y_next, n=n)
+            q_values[:, a] = rewards + gamma * v_next * (~terminal_batch).to(v_next.dtype)
         
         # Apply action mask if provided (invalid actions get -inf Q-value)
         if action_mask is not None:
@@ -810,6 +853,8 @@ def _compute_phi_batch(
     y_new: torch.Tensor,
     checker_fn,
     solved_threshold,
+    task_type: Optional[str] = None,
+    is_solved_fn=None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute checker scores (potentials) for a batch of transitions.
@@ -831,8 +876,16 @@ def _compute_phi_batch(
         phi_old_batch[i] = checker_fn(x_i, y_old[i])
         phi_new_batch[i] = checker_fn(x_i, y_new[i])
         
-        if solved_threshold is not None:
+        if is_solved_fn is not None:
+            is_solved_batch[i] = is_solved_fn(
+                y_new[i], checker_score=float(phi_new_batch[i].item())
+            )
+        elif solved_threshold is not None:
             is_solved_batch[i] = phi_new_batch[i] >= solved_threshold
+        elif task_type == "sudoku":
+            raise RuntimeError(
+                "Sudoku exact-baseline enumeration requires env.is_plan_solved()."
+            )
     
     return phi_old_batch, phi_new_batch, is_solved_batch
 
@@ -843,6 +896,7 @@ def _compute_batch_reward_via_env(
     phi_new_batch: torch.Tensor,
     is_stop_action: bool,
     is_solved_batch: torch.Tensor,
+    is_terminal_batch: torch.Tensor,
 ) -> torch.Tensor:
     """
     Compute rewards using the env's compute_transition_reward() helper.
@@ -853,17 +907,9 @@ def _compute_batch_reward_via_env(
     device = phi_old_batch.device
     rewards = torch.zeros(batch_size, device=device)
     
-    # Determine terminal status for each sample
-    # For non-STOP actions: terminal if solved
-    # For STOP with mode="terminal": always terminal
-    # For STOP with mode="noop"/"disabled": never terminal (continues)
-    stop_is_terminal = env.is_stop_terminal()
-    
     for i in range(batch_size):
-        is_solved = is_solved_batch[i].item()
-        
-        # Terminal if solved, OR if STOP action with terminal mode
-        is_terminal = is_solved or (is_stop_action and stop_is_terminal)
+        is_solved = bool(is_solved_batch[i].item())
+        is_terminal = bool(is_terminal_batch[i].item())
         
         rewards[i] = env.compute_transition_reward(
             phi_old=phi_old_batch[i].item(),

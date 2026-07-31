@@ -5,6 +5,8 @@ import torch.nn as nn
 from unittest.mock import MagicMock, patch
 
 from utils.lipschitz import compute_exact_baseline_summation
+from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from rl.sudoku_checkers import sudoku_solution_checker
 
 class MockDist:
     def __init__(self, probs):
@@ -22,6 +24,7 @@ class TestOptimizedExactBaseline(unittest.TestCase):
         self.env.vocab_size = self.vocab_size
         self.env.stop_action_id = self.stop_action_id
         self.env.is_stop_terminal.return_value = False
+        self.env._enable_undo = False
         self.env.config.solved_threshold = None
         self.env._stop_mode = "noop"
         
@@ -121,6 +124,157 @@ class TestOptimizedExactBaseline(unittest.TestCase):
         # Should run for all 10 actions
         self.assertEqual(self.model.used_value.call_count, 10)
 
+    def test_fixed_policy_probabilities_are_reused_at_reference_depth(self):
+        action_mask = torch.zeros(self.batch_size, self.num_actions, dtype=torch.bool)
+        action_mask[:, :2] = True
+        fixed_probs = torch.zeros(self.batch_size, self.num_actions)
+        fixed_probs[:, 0] = 0.75
+        fixed_probs[:, 1] = 0.25
+
+        _, q_all = compute_exact_baseline_summation(
+            model=self.model,
+            x_batch=self.x_batch,
+            y_batch=self.y_batch,
+            env=self.env,
+            n=8,
+            gamma=self.gamma,
+            checker_fn=self.checker_fn,
+            action_mask=action_mask,
+            policy_probs=fixed_probs,
+        )
+        baseline, _ = compute_exact_baseline_summation(
+            model=self.model,
+            x_batch=self.x_batch,
+            y_batch=self.y_batch,
+            env=self.env,
+            n=8,
+            gamma=self.gamma,
+            checker_fn=self.checker_fn,
+            action_mask=action_mask,
+            policy_probs=fixed_probs,
+        )
+
+        expected = 0.75 * q_all[:, 0] + 0.25 * q_all[:, 1]
+        torch.testing.assert_close(baseline, expected)
+        self.model.policy_dist.assert_not_called()
+
+    def test_budget_terminal_action_does_not_bootstrap(self):
+        x_batch = dict(self.x_batch)
+        x_batch["remaining_edits"] = torch.ones(self.batch_size, dtype=torch.long)
+        action_mask = torch.zeros(self.batch_size, self.num_actions, dtype=torch.bool)
+        action_mask[:, 0] = True
+        self.model.used_value.return_value = (
+            torch.full((self.batch_size,), 100.0),
+            None,
+        )
+
+        _, q_all = compute_exact_baseline_summation(
+            model=self.model,
+            x_batch=x_batch,
+            y_batch=self.y_batch,
+            env=self.env,
+            n=1,
+            gamma=self.gamma,
+            checker_fn=self.checker_fn,
+            action_mask=action_mask,
+        )
+
+        torch.testing.assert_close(q_all[:, 0], torch.ones(self.batch_size))
+
+    def test_nonterminal_successor_value_receives_decremented_clock(self):
+        x_batch = dict(self.x_batch)
+        x_batch["remaining_edits"] = torch.full(
+            (self.batch_size,), 2, dtype=torch.long
+        )
+        action_mask = torch.zeros(self.batch_size, self.num_actions, dtype=torch.bool)
+        action_mask[:, 0] = True
+        self.model.used_value.reset_mock()
+
+        compute_exact_baseline_summation(
+            model=self.model,
+            x_batch=x_batch,
+            y_batch=self.y_batch,
+            env=self.env,
+            n=1,
+            gamma=self.gamma,
+            checker_fn=self.checker_fn,
+            action_mask=action_mask,
+        )
+
+        successor_x = self.model.used_value.call_args.args[0]
+        torch.testing.assert_close(
+            successor_x["remaining_edits"],
+            torch.ones(self.batch_size, dtype=torch.long),
+        )
+
+
+class TestExactBaselineEnvironmentParity(unittest.TestCase):
+    def test_solution_reward_matches_environment_transition(self):
+        class Dataset:
+            seq_len = 2
+            vocab_size = 4
+            num_identifiers = 1
+
+            def __len__(self):
+                return 1
+
+            def __getitem__(self, _index):
+                return {
+                    "inputs": torch.tensor([2, 1]),
+                    "puzzle_identifiers": torch.tensor(0),
+                    "initial_plan": torch.tensor([2, 1]),
+                    "solution": torch.tensor([2, 3]),
+                }
+
+        class ZeroValueModel:
+            @staticmethod
+            def policy_dist(x, y, n, action_mask=None):
+                probs = action_mask.to(torch.float32)
+                probs = probs / probs.sum(dim=-1, keepdim=True)
+                return torch.distributions.Categorical(probs=probs), None
+
+            @staticmethod
+            def used_value(x, y, n):
+                return torch.zeros(y.shape[0]), None
+
+        env = PlanEditEnv(
+            Dataset(),
+            sudoku_solution_checker,
+            PlanEditEnvConfig(
+                max_edits=2,
+                gamma=0.99,
+                reward_shaping=True,
+                solved_threshold=10.0,
+                vocab_size=4,
+                stop_action_mode="disabled",
+            ),
+        )
+        env.set_stop_action_id(8)
+        x, y = env.reset(idx=0)
+        x_batch = {
+            key: value.reshape(1) if value.ndim == 0 else value.unsqueeze(0)
+            for key, value in x.items()
+            if torch.is_tensor(value)
+        }
+        action = 7
+        action_mask = torch.zeros(1, 9, dtype=torch.bool)
+        action_mask[:, action] = True
+
+        _, q_all = compute_exact_baseline_summation(
+            model=ZeroValueModel(),
+            x_batch=x_batch,
+            y_batch=y.unsqueeze(0),
+            env=env,
+            n=1,
+            gamma=0.99,
+            checker_fn=sudoku_solution_checker,
+            action_mask=action_mask,
+        )
+        (_, _), reward, done, _ = env.step(action)
+
+        self.assertTrue(done)
+        self.assertAlmostEqual(q_all[0, action].item(), reward, places=6)
+        self.assertAlmostEqual(reward, -5.0, places=6)
+
 if __name__ == '__main__':
     unittest.main()
-

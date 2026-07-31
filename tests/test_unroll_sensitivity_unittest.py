@@ -4,9 +4,11 @@ Tests for Unroll Sensitivity Evaluation (ICML Phase 1).
 unittest-compatible version for Buck2.
 """
 
-import unittest
 import sys
+import tempfile
+import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 import numpy as np
@@ -307,6 +309,153 @@ class TestBatchBuilding(unittest.TestCase):
         self.assertEqual(list(hard_range), [6, 7, 8])
 
 
+class TestProjectionInstrumentation(unittest.TestCase):
+    def test_wrapper_records_joint_projection(self):
+        from scripts.eval.unroll_sensitivity import ProjectionStatsWrapper
+
+        class Inner:
+            @staticmethod
+            def _project_carry_to_ball(z_h, z_l, radius):
+                norm = torch.sqrt(
+                    z_h.pow(2).sum(dim=(1, 2), keepdim=True)
+                    + z_l.pow(2).sum(dim=(1, 2), keepdim=True)
+                )
+                scale = torch.clamp(radius / norm, max=1.0)
+                return z_h * scale, z_l * scale
+
+        class Model:
+            inner = Inner()
+
+        model = Model()
+        z_h = torch.ones(1, 1, 1)
+        z_l = torch.ones(1, 1, 1)
+        with ProjectionStatsWrapper(model, radius=1.0) as stats:
+            z_h_post, z_l_post = model.inner._project_carry_to_ball(z_h, z_l, 1.0)
+
+        pre, post, saturated = stats.get_stats()
+        self.assertAlmostEqual(pre, 2**0.5, places=6)
+        self.assertAlmostEqual(post, 1.0, places=6)
+        self.assertTrue(saturated)
+        self.assertAlmostEqual(
+            torch.sqrt(z_h_post.square() + z_l_post.square()).item(),
+            1.0,
+            places=6,
+        )
+
+    def test_joint_delta_detects_l_component_only_change(self):
+        from scripts.eval.unroll_sensitivity import joint_latent_delta
+
+        z_h = torch.zeros(1, 2, 2)
+        z_l_a = torch.zeros(1, 2, 2)
+        z_l_b = torch.ones(1, 2, 2)
+        delta = joint_latent_delta(z_h, z_l_a, z_h, z_l_b)
+        self.assertAlmostEqual(delta.item(), 2.0, places=6)
+
+
+class TestModelLoading(unittest.TestCase):
+    @staticmethod
+    def _model_config(**overrides):
+        config = {
+            "batch_size": 2,
+            "seq_len": 8,
+            "puzzle_emb_ndim": 0,
+            "num_puzzle_identifiers": 8,
+            "vocab_size": 10,
+            "H_cycles": 1,
+            "L_cycles": 3,
+            "H_layers": 0,
+            "L_layers": 2,
+            "hidden_size": 32,
+            "expansion": 2.0,
+            "num_heads": 4,
+            "pos_encodings": "rope",
+            "halt_max_steps": 2,
+            "halt_exploration_prob": 0.0,
+            "forward_dtype": "float32",
+            "mlp_t": False,
+            "puzzle_emb_len": 0,
+            "no_ACT_continue": True,
+            "rl_enable_value_head": True,
+            "rl_enable_policy_head": True,
+            "rl_num_actions": 81,
+            "rl_enable_contraction": False,
+        }
+        config.update(overrides)
+        return config
+
+    def test_checkpoint_model_config_reconstructs_nondefault_architecture(self):
+        from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+        from scripts.eval.unroll_sensitivity import load_model_for_eval
+
+        source = TinyRecursiveReasoningModel_ACTV1(self._model_config())
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "checkpoint.pt"
+            torch.save(
+                {
+                    "model_state_dict": source.state_dict(),
+                    "model_config": source.config.model_dump(),
+                    "rl_config": {
+                        "inner_unroll_n": 5,
+                        "episodic_latent": True,
+                    },
+                },
+                checkpoint,
+            )
+            with patch(
+                "scripts.eval.unroll_sensitivity.torch.load",
+                wraps=torch.load,
+            ) as checkpoint_load:
+                loaded, config = load_model_for_eval(str(checkpoint), device="cpu")
+
+        self.assertEqual(config["config_source"], "checkpoint_model_config")
+        self.assertFalse(checkpoint_load.call_args.kwargs["weights_only"])
+        self.assertEqual(config["hidden_size"], 32)
+        self.assertEqual(config["vocab_size"], 10)
+        self.assertEqual(config["seq_len"], 8)
+        self.assertEqual(config["H_cycles"], 1)
+        self.assertEqual(config["L_cycles"], 3)
+        self.assertEqual(config["L_layers"], 2)
+        self.assertEqual(config["inner_unroll_n"], 5)
+        for key, expected in source.state_dict().items():
+            torch.testing.assert_close(loaded.state_dict()[key], expected)
+
+    def test_legacy_loader_uses_current_token_embedding_key(self):
+        from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+        from scripts.eval.unroll_sensitivity import load_model_for_eval
+
+        source = TinyRecursiveReasoningModel_ACTV1(
+            self._model_config(H_cycles=2, L_cycles=2, L_layers=1)
+        )
+        self.assertIn("inner.embed_tokens.embedding_weight", source.state_dict())
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "legacy.pt"
+            torch.save(source.state_dict(), checkpoint)
+            _loaded, config = load_model_for_eval(str(checkpoint), device="cpu")
+
+        self.assertEqual(config["config_source"], "legacy_inferred")
+        self.assertEqual(config["hidden_size"], 32)
+        self.assertEqual(config["vocab_size"], 10)
+        self.assertEqual(config["seq_len"], 8)
+
+    def test_legacy_puzzle_embedding_checkpoint_fails_closed(self):
+        from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+        from scripts.eval.unroll_sensitivity import load_model_for_eval
+
+        source = TinyRecursiveReasoningModel_ACTV1(
+            self._model_config(
+                puzzle_emb_ndim=32,
+                puzzle_emb_len=1,
+                L_layers=1,
+                rl_num_actions=81,
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "legacy_puzzle_emb.pt"
+            torch.save(source.state_dict(), checkpoint)
+            with self.assertRaisesRegex(RuntimeError, "per-puzzle embeddings"):
+                load_model_for_eval(str(checkpoint), device="cpu")
+
+
 class TestIntegration(unittest.TestCase):
     """Integration tests that require model imports."""
 
@@ -319,14 +468,31 @@ class TestIntegration(unittest.TestCase):
             )
 
             config = TinyRecursiveReasoningModel_ACTV1Config(
+                batch_size=1,
+                seq_len=16,
+                puzzle_emb_ndim=0,
+                num_puzzle_identifiers=1,
+                H_cycles=1,
+                L_cycles=1,
+                H_layers=0,
+                L_layers=1,
                 hidden_size=32,
                 vocab_size=6,
+                expansion=2.0,
+                num_heads=4,
+                pos_encodings="rope",
+                halt_max_steps=2,
+                halt_exploration_prob=0.0,
+                forward_dtype="float32",
+                mlp_t=False,
+                puzzle_emb_len=0,
+                no_ACT_continue=True,
                 rl_enable_value_head=True,
                 rl_enable_policy_head=True,
                 rl_num_actions=97,
             )
 
-            model = TinyRecursiveReasoningModel_ACTV1(config)
+            model = TinyRecursiveReasoningModel_ACTV1(config.model_dump())
             model.eval()
             return model
         except ImportError:

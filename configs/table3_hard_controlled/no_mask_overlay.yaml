@@ -5,3 +5,4 @@
 # and projection settings unchanged.
 
 disable_constraint_masking: true
+disable_value_head_norm: true

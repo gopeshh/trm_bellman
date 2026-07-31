@@ -121,12 +121,24 @@ def test_plan_edit_env_terminates_when_solved_threshold_met():
     assert torch.equal(y_next, x["inputs"])
 
     phi_old = solved_checker(x, y)
-    phi_new = solved_checker(x, y_next)
-    gamma = cfg.gamma
-    # Paper Eq. 4: r = r_0 + γ·Φ(s') - Φ(s)
-    # For terminal transitions, r_0 = 0 (no extra terminal bonus in this test)
-    expected_reward = gamma * phi_new - phi_old
+    # The episodic implementation folds the absorbing-state tail into the
+    # terminal transition, giving r_0 - Phi(s).
+    expected_reward = -phi_old
     assert abs(reward - expected_reward) < 1e-6, f"Expected {expected_reward}, got {reward}"
+
+
+def test_remaining_edit_clock_is_part_of_returned_state():
+    dataset = DummyDataset()
+    cfg = PlanEditEnvConfig(max_edits=2, gamma=0.99, vocab_size=4)
+    env = PlanEditEnv(dataset, dummy_checker, cfg)
+    env.set_stop_action_id(dataset.data[0]["inputs"].numel() * cfg.vocab_size)
+
+    x0, _ = env.reset(idx=0)
+    assert x0["remaining_edits"].item() == 2
+    (x1, _), _, done, _ = env.step(0)
+    assert not done
+    assert x1["remaining_edits"].item() == 1
+    assert x0["remaining_edits"].item() == 2
 
 
 def test_plan_edit_env_threshold_works_without_reward_shaping():

@@ -209,9 +209,11 @@ class TestForwardInvariantProjection(unittest.TestCase):
 
         z_H_norm = z.z_H.norm(p=2, dim=(1, 2))
         z_L_norm = z.z_L.norm(p=2, dim=(1, 2))
+        joint_norm = torch.sqrt(z_H_norm.square() + z_L_norm.square())
 
         self.assertTrue((z_H_norm <= R + 1e-5).all())
         self.assertTrue((z_L_norm <= R + 1e-5).all())
+        self.assertTrue((joint_norm <= R + 1e-5).all())
 
     def test_no_projection_when_disabled(self):
         """Test that latent can grow when projection is disabled."""

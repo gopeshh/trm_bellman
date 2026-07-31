@@ -10,6 +10,7 @@ import torch
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from rl.replay import Transition
 from rl.sudoku_checkers import dummy_checker
 from rl.training_setup import DummyPuzzleDataset
 from rl.upi_trm_trainer import UPITrmTrainer
@@ -86,6 +87,51 @@ class TestRLKStepValueUpdateTrainer(unittest.TestCase):
         self.assertIsInstance(loss_result, dict)
         self.assertIn("loss_value", loss_result)
         self.assertTrue(math.isfinite(loss_result["loss_value"]))
+
+    def test_exact_k_step_sampler_rejects_truncated_nonterminal_segment(self):
+        dataset = DummyPuzzleDataset(num_instances=2, seq_len=8, vocab_size=16)
+        env_cfg = PlanEditEnvConfig(
+            max_edits=4,
+            gamma=0.9,
+            reward_shaping=True,
+            vocab_size=dataset.vocab_size,
+        )
+        env = PlanEditEnv(dataset=dataset, checker=dummy_checker, config=env_cfg)
+        env.set_stop_action_id(_num_actions(dataset.seq_len, dataset.vocab_size) - 1)
+        rl_cfg = RLConfig(batch_size=1, K=3, gamma=env_cfg.gamma, exact_k_step_targets=True)
+        model = TinyRecursiveReasoningModel_ACTV1(
+            _tiny_trm_cfg(
+                dataset.seq_len,
+                dataset.vocab_size,
+                dataset.num_identifiers,
+                rl_cfg.batch_size,
+            )
+        )
+        trainer = UPITrmTrainer(model, env, rl_cfg, torch.device("cpu"))
+
+        x = {
+            "inputs": torch.zeros(dataset.seq_len, dtype=torch.long),
+            "puzzle_identifiers": torch.tensor(0),
+        }
+        y = torch.zeros(dataset.seq_len, dtype=torch.long)
+        for timestep in range(2):
+            trainer.replay.add(
+                Transition(
+                    x=x,
+                    y=y,
+                    action=torch.tensor(0),
+                    reward=torch.tensor([0.0]),
+                    x_next=x,
+                    y_next=y,
+                    done=torch.tensor([False]),
+                    episode_id=0,
+                    timestep=timestep,
+                )
+            )
+
+        self.assertFalse(trainer._has_complete_k_step_segment(0, 3))
+        with self.assertRaisesRegex(RuntimeError, "No replay segment"):
+            trainer._sample_k_step_batch(1)
 
 
 if __name__ == "__main__":

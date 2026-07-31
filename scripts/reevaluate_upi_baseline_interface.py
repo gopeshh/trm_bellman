@@ -65,6 +65,7 @@ from rl.sudoku_checkers import (
 )
 from rl.task_config import get_task_config
 from scripts.eval.unroll_sensitivity import load_model_for_eval
+from utils.dataset_provenance import dataset_pool_sha256
 
 
 class OfflinePuzzleDataset:
@@ -136,6 +137,22 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Optional override for evaluation episode count.",
     )
+    parser.add_argument("--eval-split", default="test", help="Dataset split to evaluate.")
+    parser.add_argument(
+        "--eval-pool-size",
+        type=int,
+        default=None,
+        help="Fixed evaluation-pool size (default: number of evaluation episodes).",
+    )
+    parser.add_argument(
+        "--eval-puzzle-id-offset",
+        type=int,
+        default=None,
+        help=(
+            "Required for checkpoints with per-puzzle embeddings. Maps held-out "
+            "identifiers into a disjoint range allocated by the checkpoint."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -203,8 +220,11 @@ def _resolve_checkpoints(
 def _build_eval_bundle(
     rl_cfg: RLConfig,
     dataset_paths: list[str],
+    *,
+    split: str,
+    pool_size: int,
+    puzzle_id_offset: int | None,
 ) -> tuple[Any, Any, PlanEditEnvConfig, Any, dict[str, Any]]:
-    pool_size = max(rl_cfg.batch_size, 8)
     ds_cfg = PuzzleDatasetConfig(
         seed=0,
         dataset_paths=dataset_paths,
@@ -214,13 +234,13 @@ def _build_eval_bundle(
         rank=0,
         num_replicas=1,
     )
-    iterable = PuzzleDataset(ds_cfg, split="train")
+    iterable = PuzzleDataset(ds_cfg, split=split)
     samples: list[dict[str, Any]] = []
-    for _set_name, batch, _batch_idx in iterable:
+    for _set_name, batch, valid_count in iterable:
         batch_inputs = batch["inputs"]
         batch_ids = batch["puzzle_identifiers"]
         batch_labels = batch.get("labels")
-        batch_size = batch_inputs.shape[0]
+        batch_size = min(batch_inputs.shape[0], int(valid_count))
         for idx in range(batch_size):
             sample: dict[str, Any] = {
                 "inputs": batch_inputs[idx].clone(),
@@ -238,6 +258,14 @@ def _build_eval_bundle(
     if not samples:
         raise RuntimeError(f"Failed to materialize evaluation pool from dataset_paths={dataset_paths}")
 
+    if puzzle_id_offset is not None:
+        if puzzle_id_offset < 0:
+            raise ValueError("eval_puzzle_id_offset must be non-negative.")
+        for sample in samples:
+            sample["puzzle_identifiers"] = (
+                sample["puzzle_identifiers"].to(torch.long) + puzzle_id_offset
+            )
+
     num_identifiers = int(
         torch.stack([sample["puzzle_identifiers"] for sample in samples]).max().item() + 1
     )
@@ -247,7 +275,6 @@ def _build_eval_bundle(
         vocab_size=iterable.metadata.vocab_size,
         num_identifiers=max(num_identifiers, iterable.metadata.num_puzzle_identifiers),
     )
-
     seq_len = dataset.seq_len
     vocab_size = dataset.vocab_size
 
@@ -301,6 +328,9 @@ def _build_eval_bundle(
         "num_identifiers": dataset.num_identifiers,
         "checker_kind": checker_kind,
         "pool_size": pool_size,
+        "split": split,
+        "materialized_pool_sha256": dataset_pool_sha256(dataset, len(dataset)),
+        "eval_puzzle_id_offset": puzzle_id_offset,
         "task_name": task_name,
     }
     return dataset, checker_fn, env_cfg, task_config, metadata
@@ -320,13 +350,31 @@ def _evaluate_checkpoint(
     inner_unroll_n: int,
     episodic_latent: bool,
     checker_kind: str,
+    puzzle_ids_disjoint: bool,
 ) -> dict[str, Any]:
     started_at = time.time()
-    model, _model_cfg = load_model_for_eval(
+    model, model_cfg = load_model_for_eval(
         checkpoint_path=str(checkpoint_path),
         device=device,
         config_yaml_path=config_yaml,
     )
+    puzzle_emb_ndim = int(model_cfg.get("puzzle_emb_ndim", 0))
+    if puzzle_emb_ndim > 0:
+        if not puzzle_ids_disjoint:
+            raise RuntimeError(
+                "Per-puzzle embedding checkpoints require --eval-puzzle-id-offset; "
+                "reusing training identifiers for held-out puzzles is invalid."
+            )
+        max_identifier = max(
+            int(dataset[index]["puzzle_identifiers"].max().item())
+            for index in range(len(dataset))
+        )
+        identifier_capacity = int(model_cfg.get("num_puzzle_identifiers", 0))
+        if max_identifier >= identifier_capacity:
+            raise RuntimeError(
+                "Remapped evaluation puzzle identifier exceeds checkpoint capacity: "
+                f"{max_identifier} >= {identifier_capacity}."
+            )
 
     mean_score, success_rate, details = evaluate_plan_policy_with_scores(
         model=model,
@@ -338,6 +386,9 @@ def _evaluate_checkpoint(
         inner_unroll_n=inner_unroll_n,
         episodic_latent=episodic_latent,
         greedy=True,
+        # This script reproduces the historical 50-on-32 protocol. Current
+        # training/evaluation entry points reject pool cycling.
+        allow_cycle=True,
     )
     elapsed_sec = time.time() - started_at
 
@@ -422,6 +473,8 @@ def main() -> int:
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     rl_cfg = _load_rl_config(args.config_yaml)
+    num_episodes = args.num_episodes or rl_cfg.eval_num_episodes
+    eval_pool_size = args.eval_pool_size or num_episodes
     checkpoints = _resolve_checkpoints(
         checkpoint_glob=args.checkpoint_glob,
         seed_regex=args.seed_regex,
@@ -430,9 +483,20 @@ def main() -> int:
     dataset, checker_fn, env_cfg, task_config, bundle_meta = _build_eval_bundle(
         rl_cfg=rl_cfg,
         dataset_paths=args.dataset_paths,
+        split=args.eval_split,
+        pool_size=max(eval_pool_size, num_episodes),
+        puzzle_id_offset=args.eval_puzzle_id_offset,
+    )
+    if len(dataset) < num_episodes:
+        raise RuntimeError(
+            "Evaluation split is smaller than num_episodes; refusing to repeat "
+            f"instances ({len(dataset)} < {num_episodes})."
+        )
+    bundle_meta["evaluated_pool_size"] = num_episodes
+    bundle_meta["evaluated_pool_sha256"] = dataset_pool_sha256(
+        dataset, num_episodes
     )
 
-    num_episodes = args.num_episodes or rl_cfg.eval_num_episodes
     rows = []
     run_started_at = time.time()
     for seed, checkpoint_path in checkpoints:
@@ -449,6 +513,7 @@ def main() -> int:
             inner_unroll_n=rl_cfg.inner_unroll_n,
             episodic_latent=rl_cfg.episodic_latent,
             checker_kind=bundle_meta["checker_kind"],
+            puzzle_ids_disjoint=args.eval_puzzle_id_offset is not None,
         )
         rows.append(row)
         print(
@@ -466,6 +531,8 @@ def main() -> int:
         "expected_seeds": args.expected_seeds,
         "config_yaml": args.config_yaml,
         "dataset_paths": args.dataset_paths,
+        "eval_split": args.eval_split,
+        "eval_pool_size": eval_pool_size,
         "device": device,
         "num_episodes": num_episodes,
         "rl_cfg": {

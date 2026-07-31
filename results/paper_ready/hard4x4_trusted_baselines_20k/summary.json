@@ -1,5 +1,9 @@
 {
+  "comparison_valid": false,
+  "provenance_warning": "Historical records use incompatible evaluation pools. UPI-TRM is in-sample; do not interpret gap_analysis as a method comparison.",
   "gap_analysis": {
+    "valid": false,
+    "invalid_reason": "Incompatible evaluation provenance",
     "best_external_methods": [
       "SB3 PPO",
       "SB3 A2C",

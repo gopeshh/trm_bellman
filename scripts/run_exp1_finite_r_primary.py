@@ -15,9 +15,11 @@ import argparse
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import torch
+
+from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 
 from rl.envs.plan_edit_env import PlanEditEnv
 from scripts.eval_theorem_facing_ordinal_check import (
@@ -31,6 +33,7 @@ from scripts.eval.unroll_sensitivity import (
     check_model_compatibility,
     compute_kl_divergence,
     get_git_sha,
+    joint_latent_delta,
     load_batch,
     load_model_for_eval,
     write_per_state_csv,
@@ -39,7 +42,7 @@ from scripts.eval.unroll_sensitivity import (
 
 
 class BatchedProjectionStats:
-    def __init__(self, model: torch.nn.Module):
+    def __init__(self, model: TinyRecursiveReasoningModel_ACTV1):
         self.model = model
         self._original_project = None
         self._hooked = False
@@ -47,24 +50,34 @@ class BatchedProjectionStats:
         self.post_norms: List[torch.Tensor] = []
 
     def __enter__(self):
-        if hasattr(self.model, "inner") and hasattr(self.model.inner, "_project_to_ball"):
-            self._original_project = self.model.inner._project_to_ball
+        if hasattr(self.model, "inner") and hasattr(self.model.inner, "_project_carry_to_ball"):
+            self._original_project = self.model.inner._project_carry_to_ball
 
-            def instrumented_project(z: torch.Tensor, radius: float) -> torch.Tensor:
-                pre = z.norm(p=2, dim=(1, 2)).detach().cpu()
-                z_proj = self._original_project(z, radius)
-                post = z_proj.norm(p=2, dim=(1, 2)).detach().cpu()
+            def instrumented_project(
+                z_h: torch.Tensor,
+                z_l: torch.Tensor,
+                radius: float,
+            ) -> Tuple[torch.Tensor, torch.Tensor]:
+                pre = torch.sqrt(
+                    z_h.pow(2).sum(dim=(1, 2))
+                    + z_l.pow(2).sum(dim=(1, 2))
+                ).detach().cpu()
+                z_h_proj, z_l_proj = self._original_project(z_h, z_l, radius)
+                post = torch.sqrt(
+                    z_h_proj.pow(2).sum(dim=(1, 2))
+                    + z_l_proj.pow(2).sum(dim=(1, 2))
+                ).detach().cpu()
                 self.pre_norms.append(pre)
                 self.post_norms.append(post)
-                return z_proj
+                return z_h_proj, z_l_proj
 
-            self.model.inner._project_to_ball = instrumented_project
+            self.model.inner._project_carry_to_ball = instrumented_project
             self._hooked = True
         return self
 
     def __exit__(self, *args):
         if self._hooked and self._original_project is not None:
-            self.model.inner._project_to_ball = self._original_project
+            self.model.inner._project_carry_to_ball = self._original_project
 
     def mean_norms(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
         if not self.pre_norms:
@@ -97,10 +110,10 @@ def batch_from_states(states, device: str) -> Tuple[Dict[str, torch.Tensor], tor
 
 
 def evaluate_model_batched(
-    model: torch.nn.Module,
+    model: TinyRecursiveReasoningModel_ACTV1,
     states,
     n_values: Sequence[int],
-    config: Dict[str, object],
+    config: Dict[str, Any],
     device: str,
     eval_batch_size: int,
 ) -> List[EvalMetrics]:
@@ -123,7 +136,7 @@ def evaluate_model_batched(
 
         values: Dict[int, torch.Tensor] = {}
         policies: Dict[int, torch.Tensor] = {}
-        latents: Dict[int, torch.Tensor] = {}
+        latents: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
         pre_norms: Dict[int, torch.Tensor] = {}
         post_norms: Dict[int, torch.Tensor] = {}
 
@@ -135,7 +148,10 @@ def evaluate_model_batched(
                     dist, _ = model.policy_dist(x, y, n, action_mask=action_mask)
                     values[n] = value.reshape(-1).detach().cpu()
                     policies[n] = dist.probs.detach().cpu()
-                    latents[n] = z_n.z_H.detach().cpu()
+                    latents[n] = (
+                        z_n.z_H.detach().cpu(),
+                        z_n.z_L.detach().cpu(),
+                    )
                     pre, post = stats.mean_norms(batch_size)
                     pre_norms[n] = pre
                     post_norms[n] = post
@@ -146,7 +162,16 @@ def evaluate_model_batched(
                     p = policies[n1][idx]
                     q = policies[n2][idx]
                     delta_pi = compute_kl_divergence(p, q)
-                    delta_z = float(torch.norm((latents[n1][idx] - latents[n2][idx]).reshape(-1), p=2).item())
+                    z_h_1, z_l_1 = latents[n1]
+                    z_h_2, z_l_2 = latents[n2]
+                    delta_z = float(
+                        joint_latent_delta(
+                            z_h_1[idx : idx + 1],
+                            z_l_1[idx : idx + 1],
+                            z_h_2[idx : idx + 1],
+                            z_l_2[idx : idx + 1],
+                        )[0].item()
+                    )
                     argmax_agree = int(p.argmax().item() == q.argmax().item())
                     z_pre = float(pre_norms[n1][idx].item())
                     z_post = float(post_norms[n1][idx].item())
@@ -171,9 +196,9 @@ def evaluate_model_batched(
 
 def compute_model_theory_summary(
     *,
-    model: torch.nn.Module,
+    model: TinyRecursiveReasoningModel_ACTV1,
     config_yaml_path: str,
-    model_cfg: Dict[str, object],
+    model_cfg: Dict[str, Any],
     states,
     theory_unroll_n: int,
     collection_passes: int,
@@ -183,7 +208,7 @@ def compute_model_theory_summary(
     batch_label: str,
     model_key: str,
     checkpoint_path: str,
-) -> Dict[str, object]:
+) -> Dict[str, Any]:
     dataset = FrozenBatchDataset(states)
     rl_cfg = load_theory_exact_rl_config(
         config_yaml_path,

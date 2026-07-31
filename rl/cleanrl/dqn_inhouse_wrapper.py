@@ -106,6 +106,11 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
         "t0_3_ready": True,
         "device": str(device),
         "total_env_steps_budget": total_env_steps,
+        "train_split": bundle.train_split,
+        "eval_split": bundle.eval_split,
+        "train_pool_sha256": bundle.train_pool_sha256,
+        "eval_pool_sha256": bundle.eval_pool_sha256,
+        "eval_puzzle_id_offset": bundle.eval_puzzle_id_offset,
     })
     (output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2, sort_keys=True, default=str) + "\n")
 
@@ -133,7 +138,7 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
             last_eval_env_step = env_steps
             eval_metrics = trainer.evaluate_policy_metrics(
                 env_cfg=bundle.env_cfg,
-                dataset=bundle.dataset,
+                dataset=bundle.eval_dataset,
                 checker=bundle.checker_fn,
             )
             eval_entry = {
@@ -145,6 +150,8 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
                 "score_min": eval_metrics.get("score_min", 0.0),
                 "score_max": eval_metrics.get("score_max", 0.0),
                 "eval_policy_mode": "greedy_q",
+                "eval_split": bundle.eval_split,
+                "eval_pool_sha256": bundle.eval_pool_sha256,
             }
             eval_history.append(eval_entry)
             _write_jsonl(eval_history_path, eval_entry)
@@ -168,6 +175,11 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
         "algo_variant": config.get("algo_variant", "inhouse_dqn"),
         "seed": seed,
         "dataset_dir": str(config.get("dataset_path", "")),
+        "train_split": bundle.train_split,
+        "eval_split": bundle.eval_split,
+        "train_pool_sha256": bundle.train_pool_sha256,
+        "eval_pool_sha256": bundle.eval_pool_sha256,
+        "eval_puzzle_id_offset": bundle.eval_puzzle_id_offset,
         "action_space_n": num_actions,
         "train_steps": total_env_steps,
         "actual_env_steps": trainer._env_step_count,

@@ -18,6 +18,14 @@ PlanType = Union[torch.Tensor, Dict[str, torch.Tensor]]
 
 
 @dataclass
+class ReplayLatent:
+    """Detached recurrent state retained with a persistent-latent transition."""
+
+    z_H: torch.Tensor
+    z_L: torch.Tensor
+
+
+@dataclass
 class Transition:
     """
     A single transition (s, a, r, s', done) in the plan-space MDP.
@@ -32,6 +40,9 @@ class Transition:
         done: Whether episode terminated
         episode_id: ID of the episode this transition belongs to
         timestep: Step within the episode
+        latent: Recurrent state before evaluating this state, in persistent mode
+        next_latent: Recurrent state carried to the successor, in persistent mode
+        behavior_log_prob: Log probability of the sampled action at collection time
     """
     x: StateDict
     y: PlanType
@@ -42,6 +53,9 @@ class Transition:
     done: torch.Tensor
     episode_id: int
     timestep: int
+    latent: Optional[ReplayLatent] = None
+    next_latent: Optional[ReplayLatent] = None
+    behavior_log_prob: Optional[torch.Tensor] = None
 
 
 class ReplayBuffer:
@@ -250,4 +264,3 @@ class ReplayBuffer:
             episodes.append(episode)
 
         return episodes
-

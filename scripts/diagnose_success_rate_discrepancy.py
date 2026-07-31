@@ -33,6 +33,10 @@ import torch
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from models.recursive_reasoning.trm import (
+    TinyRecursiveReasoningModel_ACTV1,
+    TinyRecursiveReasoningModel_ACTV1Config,
+)
 from rl.evaluator import evaluate_plan_policy_with_scores
 from rl.envs.plan_edit_env import PlanEditEnvConfig
 
@@ -42,13 +46,8 @@ def load_model(
     device: str = "cuda",
     enable_contraction: bool = False,
     latent_ball_radius: float = 10.0,
-) -> Tuple[torch.nn.Module, Dict[str, Any]]:
+) -> Tuple[TinyRecursiveReasoningModel_ACTV1, Dict[str, Any]]:
     """Load model with explicit settings."""
-    from models.recursive_reasoning.trm import (
-        TinyRecursiveReasoningModel_ACTV1,
-        TinyRecursiveReasoningModel_ACTV1Config,
-    )
-
     state_dict = torch.load(checkpoint_path, map_location=device)
     if isinstance(state_dict, dict) and "model_state_dict" in state_dict:
         model_state = state_dict["model_state_dict"]
@@ -218,14 +217,14 @@ def run_diagnostic(
         ("n=8, R=10", 8, 10.0, "Deep unroll with projection"),
     ]
 
-    results = []
+    results: List[Dict[str, Any]] = []
 
     for ckpt_path in checkpoint_paths:
         print(f"{'='*60}")
         print(f"Checkpoint: {Path(ckpt_path).name}")
         print(f"{'='*60}")
 
-        ckpt_results = {"checkpoint": ckpt_path}
+        ckpt_results: Dict[str, Any] = {"checkpoint": ckpt_path}
 
         for label, n_eval, R, desc in configs:
             print(f"\n[{label}] {desc}")

@@ -25,7 +25,9 @@ from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from utils.lipschitz import estimate_local_Lz
 
 
-def load_batch(dataset_path: str, batch_size: int = 4) -> Tuple[Dict, torch.Tensor]:
+def load_batch(
+    dataset_path: str, batch_size: int = 4
+) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, int, int]:
     """Load a small batch of puzzles from the dataset."""
     split_path = Path(dataset_path) / "train"
     inputs = np.load(split_path / "all__inputs.npy")

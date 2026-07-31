@@ -46,6 +46,11 @@ import torch
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
+from models.recursive_reasoning.trm import (
+    TinyRecursiveReasoningModel_ACTV1,
+    TinyRecursiveReasoningModel_ACTV1Config,
+)
+
 # Add project root to path.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -180,7 +185,7 @@ def aggregate_metrics(values: List[float]) -> Dict[str, float]:
 
 
 def estimate_hat_Lz_batch(
-    model: torch.nn.Module,
+    model: TinyRecursiveReasoningModel_ACTV1,
     states: List["PuzzleState"],
     n_train: int,
     config: Dict[str, Any],
@@ -264,7 +269,7 @@ def load_model_for_eval(
     device: str = "cpu",
     config_yaml_path: Optional[str] = None,
     latent_ball_radius_override: Optional[float] = None,
-) -> Tuple[torch.nn.Module, Dict[str, Any]]:
+) -> Tuple[TinyRecursiveReasoningModel_ACTV1, Dict[str, Any]]:
     """
     Load a model checkpoint and extract its config.
 
@@ -280,10 +285,6 @@ def load_model_for_eval(
     Returns:
         (model, config_dict) where config_dict contains key settings.
     """
-    from models.recursive_reasoning.trm import (
-        TinyRecursiveReasoningModel_ACTV1,
-        TinyRecursiveReasoningModel_ACTV1Config,
-    )
     from rl.config import RLConfig
     import yaml
 
@@ -298,16 +299,23 @@ def load_model_for_eval(
             yaml_config = yaml.safe_load(f) or {}
         print(f"[Load] Loaded YAML config with keys: {list(yaml_config.keys())[:10]}")
 
-    # Load state dict
-    state_dict = torch.load(checkpoint_path, map_location=device)
+    # Full RL checkpoints contain replay Transition objects. These are trusted
+    # local artifacts, not arbitrary downloaded pickle files.
+    state_dict = torch.load(
+        checkpoint_path,
+        map_location=device,
+        weights_only=False,
+    )
 
     # Handle nested checkpoint structure (RL checkpoints have "model_state_dict")
     if isinstance(state_dict, dict) and "model_state_dict" in state_dict:
         model_state = state_dict["model_state_dict"]
         rl_config_dict = state_dict.get("rl_config", {})
+        persisted_model_config = state_dict.get("model_config")
     else:
         model_state = state_dict
         rl_config_dict = {}
+        persisted_model_config = None
 
     # Clean state dict keys (remove _orig_mod. prefix from torch.compile)
     cleaned_state = {}
@@ -317,28 +325,9 @@ def load_model_for_eval(
             clean_key = clean_key[6:]
         cleaned_state[clean_key] = value
 
-    # Infer model config from state dict
-    # Look for hidden_size from inner.embed_inputs.weight shape
-    hidden_size = 64  # default
-    if "inner.embed_inputs.weight" in cleaned_state:
-        hidden_size = cleaned_state["inner.embed_inputs.weight"].shape[1]
-
-    # Infer vocab_size
-    vocab_size = 6  # default for 4x4 Sudoku
-    if "inner.embed_inputs.weight" in cleaned_state:
-        vocab_size = cleaned_state["inner.embed_inputs.weight"].shape[0]
-
-    # Infer seq_len from puzzle_emb if present
-    seq_len = 16  # default for 4x4 Sudoku
-
     # Check for value head to determine if RL model
     has_value_head = any("value_head" in k for k in cleaned_state.keys())
     has_policy_head = any("edit_policy" in k for k in cleaned_state.keys())
-
-    # Infer num_actions from policy head if present
-    num_actions = seq_len * vocab_size + 1  # default
-    if has_policy_head and "edit_policy.mlp.2.weight" in cleaned_state:
-        num_actions = cleaned_state["edit_policy.mlp.2.weight"].shape[0]
 
     # === CRITICAL FIX: Detect contraction from checkpoint ===
     # Model B (trained with contraction) has _lip_scale keys from opnorm_clamp
@@ -346,31 +335,7 @@ def load_model_for_eval(
     has_contraction_keys = len(lip_scale_keys) > 0
     print(f"[Load] Detected {len(lip_scale_keys)} Lipschitz scale keys -> contraction={'ENABLED' if has_contraction_keys else 'DISABLED'}")
 
-    # === Priority: YAML config > checkpoint rl_config > detection > RLConfig defaults ===
     rl_cfg = RLConfig()
-
-    # Get enable_contraction
-    if "enable_contraction" in yaml_config:
-        enable_contraction = yaml_config["enable_contraction"]
-        print(f"[Load] enable_contraction from YAML: {enable_contraction}")
-    elif "enable_contraction" in rl_config_dict:
-        enable_contraction = rl_config_dict["enable_contraction"]
-        print(f"[Load] enable_contraction from checkpoint: {enable_contraction}")
-    else:
-        # Infer from _lip_scale keys
-        enable_contraction = has_contraction_keys
-        print(f"[Load] enable_contraction inferred from weights: {enable_contraction}")
-
-    # Get latent_ball_radius
-    if latent_ball_radius_override is not None:
-        latent_ball_radius = float(latent_ball_radius_override)
-        print(f"[Load] Using latent_ball_radius OVERRIDE: {latent_ball_radius}")
-    elif "latent_ball_radius" in yaml_config:
-        latent_ball_radius = float(yaml_config["latent_ball_radius"])
-    elif "latent_ball_radius" in rl_config_dict:
-        latent_ball_radius = float(rl_config_dict["latent_ball_radius"])
-    else:
-        latent_ball_radius = float(rl_cfg.latent_ball_radius)  # Default 10.0
 
     # Get inner_unroll_n (CRITICAL for correct depth labels)
     if "inner_unroll_n" in yaml_config:
@@ -380,50 +345,159 @@ def load_model_for_eval(
     else:
         inner_unroll_n = int(rl_cfg.inner_unroll_n)
 
-    # Get other config values
-    target_Lz = yaml_config.get("target_Lz", rl_config_dict.get("target_Lz", rl_cfg.target_Lz))
-    disable_value_head_norm = yaml_config.get("disable_value_head_norm", rl_config_dict.get("disable_value_head_norm", rl_cfg.disable_value_head_norm))
     episodic_latent = yaml_config.get("episodic_latent", rl_config_dict.get("episodic_latent", rl_cfg.episodic_latent))
     use_feasibility_checker = yaml_config.get("use_feasibility_checker", rl_config_dict.get("use_feasibility_checker", rl_cfg.use_feasibility_checker))
 
-    # Build model config WITH correct RL settings
-    model_config = TinyRecursiveReasoningModel_ACTV1Config(
-        # Core dimensions
-        batch_size=1,  # Will be ignored during eval
-        seq_len=seq_len,
-        hidden_size=hidden_size,
-        vocab_size=vocab_size,
-        num_puzzle_identifiers=500,  # Sudoku puzzle IDs
-        puzzle_emb_ndim=0,  # Disabled (default training setup)
-        puzzle_emb_len=0,   # Must be 0 when puzzle_emb_ndim=0
-        # Architecture params (defaults for 4x4 Sudoku TRM)
-        H_cycles=2,
-        L_cycles=2,
-        H_layers=0,  # Training uses 0
-        L_layers=1,  # Training default
-        expansion=2.0,  # Training default
-        num_heads=max(4, hidden_size // 16),  # Scale with hidden size
-        pos_encodings="rope",  # Training default
-        halt_max_steps=2,  # Training default
-        halt_exploration_prob=0.0,  # Training default
-        forward_dtype="float32",  # Training default
-        mlp_t=False,
-        no_ACT_continue=True,
-        # RL extensions - NOW SET CORRECTLY
-        rl_enable_value_head=has_value_head,
-        rl_enable_policy_head=has_policy_head,
-        rl_num_actions=num_actions if has_policy_head else 0,
-        rl_enable_contraction=enable_contraction,
-        rl_target_Lz=float(target_Lz),
-        rl_disable_value_head_norm=bool(disable_value_head_norm),
-        rl_latent_ball_radius=float(latent_ball_radius),  # CRITICAL: Enable projection
-    )
+    if persisted_model_config is not None:
+        if hasattr(persisted_model_config, "model_dump"):
+            persisted_model_config = persisted_model_config.model_dump()
+        elif hasattr(persisted_model_config, "dict"):
+            persisted_model_config = persisted_model_config.dict()
+        if not isinstance(persisted_model_config, dict):
+            raise TypeError("Checkpoint model_config must be a dictionary.")
+        construction_config = dict(persisted_model_config)
+        # Sparse-embedding scratch buffers are non-persistent. Evaluation uses
+        # one state at a time, so they can be rebuilt for batch size one.
+        construction_config["batch_size"] = 1
+        if latent_ball_radius_override is not None:
+            construction_config["rl_latent_ball_radius"] = float(
+                latent_ball_radius_override
+            )
+            print(
+                "[Load] Using latent_ball_radius OVERRIDE: "
+                f"{latent_ball_radius_override}"
+            )
+        model_config = TinyRecursiveReasoningModel_ACTV1Config(**construction_config)
+        config_source = "checkpoint_model_config"
+    else:
+        embedding_key = None
+        for candidate in (
+            "inner.embed_tokens.embedding_weight",
+            "inner.embed_inputs.weight",
+        ):
+            if candidate in cleaned_state:
+                embedding_key = candidate
+                break
+        if embedding_key is None:
+            raise RuntimeError(
+                "Cannot infer the legacy TRM architecture: token embedding "
+                "weights are missing from the checkpoint."
+            )
+        if "inner.puzzle_emb.weights" in cleaned_state:
+            raise RuntimeError(
+                "Legacy checkpoint contains per-puzzle embeddings but no "
+                "model_config. Their sequence length and held-out identifier "
+                "mapping cannot be reconstructed safely."
+            )
+
+        token_weights = cleaned_state[embedding_key]
+        vocab_size = int(token_weights.shape[0])
+        hidden_size = int(token_weights.shape[1])
+        num_actions = 0
+        seq_len = 0
+        policy_output_key = "edit_policy.mlp.2.weight"
+        if has_policy_head and policy_output_key in cleaned_state:
+            num_actions = int(cleaned_state[policy_output_key].shape[0])
+            flat_edit_actions = num_actions - 1
+            if flat_edit_actions <= 0 or flat_edit_actions % vocab_size != 0:
+                raise RuntimeError(
+                    "Cannot infer sequence length from the legacy policy head: "
+                    f"num_actions={num_actions}, vocab_size={vocab_size}."
+                )
+            seq_len = flat_edit_actions // vocab_size
+        elif has_value_head and "value_head.linear1.weight" in cleaned_state:
+            input_width = int(cleaned_state["value_head.linear1.weight"].shape[1])
+            if input_width % (3 * hidden_size) != 0:
+                raise RuntimeError(
+                    "Cannot infer sequence length from the legacy value head: "
+                    f"input_width={input_width}, hidden_size={hidden_size}."
+                )
+            seq_len = input_width // (3 * hidden_size)
+        else:
+            raise RuntimeError(
+                "Legacy checkpoint lacks a policy or value head from which to "
+                "infer sequence length."
+            )
+
+        if "enable_contraction" in yaml_config:
+            enable_contraction = bool(yaml_config["enable_contraction"])
+        elif "enable_contraction" in rl_config_dict:
+            enable_contraction = bool(rl_config_dict["enable_contraction"])
+        else:
+            enable_contraction = has_contraction_keys
+        if latent_ball_radius_override is not None:
+            latent_ball_radius = float(latent_ball_radius_override)
+        elif "latent_ball_radius" in yaml_config:
+            latent_ball_radius = float(yaml_config["latent_ball_radius"])
+        elif "latent_ball_radius" in rl_config_dict:
+            latent_ball_radius = float(rl_config_dict["latent_ball_radius"])
+        else:
+            latent_ball_radius = float(rl_cfg.latent_ball_radius)
+        target_lz_value = yaml_config.get(
+            "target_Lz",
+            rl_config_dict.get("target_Lz", rl_cfg.target_Lz),
+        )
+        if target_lz_value is None:
+            target_lz_value = rl_cfg.target_Lz
+        target_lz = float(target_lz_value)
+        disable_value_head_norm = bool(
+            yaml_config.get(
+                "disable_value_head_norm",
+                rl_config_dict.get(
+                    "disable_value_head_norm",
+                    rl_cfg.disable_value_head_norm,
+                ),
+            )
+        )
+        model_config = TinyRecursiveReasoningModel_ACTV1Config(
+            batch_size=1,
+            seq_len=seq_len,
+            hidden_size=hidden_size,
+            vocab_size=vocab_size,
+            num_puzzle_identifiers=1,
+            puzzle_emb_ndim=0,
+            puzzle_emb_len=0,
+            H_cycles=2,
+            L_cycles=2,
+            H_layers=0,
+            L_layers=1,
+            expansion=2.0,
+            num_heads=max(4, hidden_size // 16),
+            pos_encodings="rope",
+            halt_max_steps=2,
+            halt_exploration_prob=0.0,
+            forward_dtype="float32",
+            mlp_t=False,
+            no_ACT_continue=True,
+            rl_enable_value_head=has_value_head,
+            rl_enable_policy_head=has_policy_head,
+            rl_num_actions=num_actions if has_policy_head else 0,
+            rl_enable_contraction=enable_contraction,
+            rl_target_Lz=target_lz,
+            rl_disable_value_head_norm=disable_value_head_norm,
+            rl_latent_ball_radius=latent_ball_radius,
+        )
+        config_source = "legacy_inferred"
+
+    hidden_size = int(model_config.hidden_size)
+    vocab_size = int(model_config.vocab_size)
+    seq_len = int(model_config.seq_len)
+    num_actions = int(model_config.rl_num_actions)
+    enable_contraction = bool(model_config.rl_enable_contraction)
+    target_Lz = float(model_config.rl_target_Lz)
+    disable_value_head_norm = bool(model_config.rl_disable_value_head_norm)
+    latent_ball_radius = float(model_config.rl_latent_ball_radius)
 
     # Create model (expects dict, not config object)
     model = TinyRecursiveReasoningModel_ACTV1(model_config.model_dump())
 
-    # Load weights (non-strict to handle missing/extra keys)
-    result = model.load_state_dict(cleaned_state, strict=False)
+    # New checkpoints carry their exact construction config and must load
+    # without structural drift. Legacy checkpoints retain the permissive path
+    # because older operator-norm wrappers used slightly different buffers.
+    result = model.load_state_dict(
+        cleaned_state,
+        strict=persisted_model_config is not None,
+    )
     if result.missing_keys:
         print(f"[Load] Missing keys: {result.missing_keys[:5]}...")
     if result.unexpected_keys:
@@ -445,7 +519,14 @@ def load_model_for_eval(
         "episodic_latent": episodic_latent,
         "latent_ball_radius": latent_ball_radius,
         "use_feasibility_checker": use_feasibility_checker,
-        "config_source": "yaml" if yaml_config else ("checkpoint" if rl_config_dict else "inferred"),
+        "puzzle_emb_ndim": int(model_config.puzzle_emb_ndim),
+        "puzzle_emb_len": int(model_config.puzzle_emb_len),
+        "num_puzzle_identifiers": int(model_config.num_puzzle_identifiers),
+        "H_cycles": int(model_config.H_cycles),
+        "L_cycles": int(model_config.L_cycles),
+        "L_layers": int(model_config.L_layers),
+        "model_config": model_config.model_dump(),
+        "config_source": config_source,
     }
 
     print(f"[Load] Model loaded. Config: {config_dict}")
@@ -645,8 +726,8 @@ def build_b0_batch(
 
 def build_b1_batch(
     b0_states: List[PuzzleState],
-    model_a: torch.nn.Module,
-    model_b: Optional[torch.nn.Module],
+    model_a: TinyRecursiveReasoningModel_ACTV1,
+    model_b: Optional[TinyRecursiveReasoningModel_ACTV1],
     config_a: Dict[str, Any],
     config_b: Optional[Dict[str, Any]],
     n_train: int,
@@ -868,7 +949,7 @@ class ProjectionStatsWrapper:
     This is a non-invasive approach that hooks into the model temporarily.
     """
 
-    def __init__(self, model: torch.nn.Module, radius: float):
+    def __init__(self, model: TinyRecursiveReasoningModel_ACTV1, radius: float):
         self.model = model
         self.radius = radius
         self.z_pre_norms: List[float] = []
@@ -877,25 +958,27 @@ class ProjectionStatsWrapper:
         self._hooked = False
 
     def __enter__(self):
-        # Hook into _project_to_ball if it exists
-        if hasattr(self.model, "inner") and hasattr(self.model.inner, "_project_to_ball"):
-            self._original_project = self.model.inner._project_to_ball
+        if hasattr(self.model, "inner") and hasattr(self.model.inner, "_project_carry_to_ball"):
+            self._original_project = self.model.inner._project_carry_to_ball
 
-            def instrumented_project(z, radius):
-                # Compute pre-norm
-                z_norm = z.norm(p=2, dim=(1, 2))
+            def instrumented_project(z_h, z_l, radius):
+                z_norm = torch.sqrt(
+                    z_h.pow(2).sum(dim=(1, 2))
+                    + z_l.pow(2).sum(dim=(1, 2))
+                )
                 self.z_pre_norms.append(float(z_norm.mean().item()))
 
-                # Call original projection
-                z_proj = self._original_project(z, radius)
+                z_h_proj, z_l_proj = self._original_project(z_h, z_l, radius)
 
-                # Compute post-norm
-                z_proj_norm = z_proj.norm(p=2, dim=(1, 2))
+                z_proj_norm = torch.sqrt(
+                    z_h_proj.pow(2).sum(dim=(1, 2))
+                    + z_l_proj.pow(2).sum(dim=(1, 2))
+                )
                 self.z_post_norms.append(float(z_proj_norm.mean().item()))
 
-                return z_proj
+                return z_h_proj, z_l_proj
 
-            self.model.inner._project_to_ball = instrumented_project
+            self.model.inner._project_carry_to_ball = instrumented_project
             self._hooked = True
 
         return self
@@ -903,7 +986,7 @@ class ProjectionStatsWrapper:
     def __exit__(self, *args):
         # Restore original function
         if self._hooked and self._original_project is not None:
-            self.model.inner._project_to_ball = self._original_project
+            self.model.inner._project_carry_to_ball = self._original_project
 
     def get_stats(self) -> Tuple[float, float, bool]:
         """
@@ -922,12 +1005,25 @@ class ProjectionStatsWrapper:
         return pre, post, saturated
 
 
+def joint_latent_delta(
+    z_h_a: torch.Tensor,
+    z_l_a: torch.Tensor,
+    z_h_b: torch.Tensor,
+    z_l_b: torch.Tensor,
+) -> torch.Tensor:
+    """Euclidean product-norm distance between two recurrent carries."""
+
+    delta_h = (z_h_a - z_h_b).reshape(z_h_a.shape[0], -1)
+    delta_l = (z_l_a - z_l_b).reshape(z_l_a.shape[0], -1)
+    return torch.sqrt(delta_h.square().sum(dim=1) + delta_l.square().sum(dim=1))
+
+
 # =============================================================================
 # Evaluation Logic
 # =============================================================================
 
 def evaluate_state_at_depths(
-    model: torch.nn.Module,
+    model: TinyRecursiveReasoningModel_ACTV1,
     state: PuzzleState,
     n_values: List[int],
     config: Dict[str, Any],
@@ -978,8 +1074,10 @@ def evaluate_state_at_depths(
                 dist, _ = model.policy_dist(x, y, n, action_mask=action_mask)
                 policies[n] = dist.probs.squeeze().cpu()
 
-                # Get latent (z_H component)
-                latents[n] = z_n.z_H.squeeze().cpu()
+                latents[n] = (
+                    z_n.z_H.detach().cpu(),
+                    z_n.z_L.detach().cpu(),
+                )
 
                 # Get projection stats
                 pre, post, _ = psw.get_stats()
@@ -997,7 +1095,11 @@ def evaluate_state_at_depths(
             delta_pi = compute_kl_divergence(policies[n1], policies[n2])
 
             # Delta_z (L2 norm)
-            delta_z = float(torch.norm(latents[n1] - latents[n2], p=2).item())
+            z_h_1, z_l_1 = latents[n1]
+            z_h_2, z_l_2 = latents[n2]
+            delta_z = float(
+                joint_latent_delta(z_h_1, z_l_1, z_h_2, z_l_2)[0].item()
+            )
 
             # Argmax agreement
             argmax1 = policies[n1].argmax().item()
@@ -1031,7 +1133,7 @@ def evaluate_state_at_depths(
 
 
 def evaluate_batch(
-    model: torch.nn.Module,
+    model: TinyRecursiveReasoningModel_ACTV1,
     states: List[PuzzleState],
     n_train: int,
     n_mults: List[int],

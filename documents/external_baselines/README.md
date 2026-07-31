@@ -1,7 +1,9 @@
 # External Baseline Harness
 
-This directory is the `T0.2` setup path for trusted external baselines on hard 4x4 Sudoku.
-The dataset directory name `sudoku-4x4-easy_6to8empties` is historical; this harness is the paper's hard 4x4 no-mask suite.
+This directory contains the external baseline harness for hard 4x4 Sudoku.
+The dataset directory name `sudoku-4x4-easy_6to8empties` is historical. That
+dataset is not retained in this checkout, so the old runs cannot be reproduced
+until a checksum-identified train/test dataset is restored.
 
 ## What exists now
 
@@ -11,7 +13,7 @@ The dataset directory name `sudoku-4x4-easy_6to8empties` is historical; this har
 
 ## Observation and action contract
 
-- Observation keys: `inputs`, `plan`, `action_mask`
+- Observation keys: `inputs`, `plan`, `remaining_edits`, `action_mask`
 - Action space: `97` discrete actions
 - Layout: `16 positions * 6 tokens + 1 STOP`
 - Protocol: hard 4x4, no-mask, feasibility reward, `max_edits=16`
@@ -35,7 +37,8 @@ The supported path is Buck: `fbcode//buiksat_trm:run_baseline` pulls the third-p
 ## Masking semantics
 
 The environment exposes `action_mask` in the observation, but vanilla SB3 PPO/A2C/DQN does not use that mask for logit masking.
-That is intentional here: the paper's locked hard-4x4 capability anchor is the no-mask protocol, so the external policy should face the same unmasked action space and let the environment penalize invalid edits.
+That is intentional for the historical no-mask protocol: the external policy
+faces the unmasked action space and the environment penalizes invalid edits.
 
 For internal fairness, compare against the repo's no-mask A2C baseline config:
 
@@ -49,7 +52,7 @@ That is also the regime used by the paper-side hard-4x4 anchor figure path in:
 scripts/plot_table3_hard.py
 ```
 
-## Acceptance command
+## Fresh-run command
 
 On this host, `python3` is available and `python` is not. The smoke-only command is:
 
@@ -57,7 +60,7 @@ On this host, `python3` is available and `python` is not. The smoke-only command
 python3 run_baseline.py --algo ppo --env sudoku4x4
 ```
 
-The Buck-backed `T0.2` acceptance checks are:
+After restoring a disjoint train/test dataset, the Buck-backed commands are:
 
 ```bash
 cd /data/repos/fbsource/fbcode

@@ -217,25 +217,17 @@ class TestKStepTargets:
         # Second sample should bootstrap
         assert targets[0] < targets[1]
     
-    def test_k_step_exact_vs_practical(self):
-        """Test difference between exact and practical K-step targets."""
-        batch_size, K = 2, 5
-        rewards_K = torch.ones(batch_size, K)
-        dones_K = torch.zeros(batch_size, K, dtype=torch.bool)
-        steps_taken = torch.tensor([3, 5])  # Different steps taken
-        v_K = torch.ones(batch_size)
-        
-        exact = compute_k_step_bootstrapped_target(
-            rewards_K, dones_K, steps_taken, v_K, gamma=0.99, K=K,
-            exact_k_step_targets=True
-        )
-        practical = compute_k_step_bootstrapped_target(
-            rewards_K, dones_K, steps_taken, v_K, gamma=0.99, K=K,
-            exact_k_step_targets=False
-        )
-        
-        # When steps_taken < K, practical uses γ^steps_taken (larger bootstrap)
-        assert not torch.allclose(exact[0], practical[0])
+    def test_exact_k_step_rejects_incomplete_nonterminal_data(self):
+        with pytest.raises(ValueError):
+            compute_k_step_bootstrapped_target(
+                torch.ones(1, 5),
+                torch.zeros(1, 5, dtype=torch.bool),
+                torch.tensor([3]),
+                torch.ones(1),
+                gamma=0.99,
+                K=5,
+                exact_k_step_targets=True,
+            )
 
 
 class TestGAE:

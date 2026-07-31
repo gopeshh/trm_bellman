@@ -89,11 +89,29 @@ def parse_eval_history(log_path: Path) -> List[Dict[str, Any]]:
     return entries
 
 
+def json_safe(value: Any) -> Any:
+    """Encode extended-real diagnostics without non-standard JSON numbers."""
+
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "nan"
+        if value == math.inf:
+            return "inf"
+        if value == -math.inf:
+            return "-inf"
+        return value
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    return value
+
+
 def jsonl_write(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="ascii") as handle:
         for row in rows:
-            handle.write(json.dumps(row, sort_keys=True, default=str))
+            handle.write(json.dumps(json_safe(row), sort_keys=True, allow_nan=False))
             handle.write("\n")
 
 
@@ -124,26 +142,29 @@ def summarize_values(values: Sequence[Any]) -> Dict[str, Any]:
     neg_inf_count = sum(1 for value in scalars if value == -math.inf)
     nan_count = sum(1 for value in scalars if math.isnan(value))
 
-    if finite:
-        mean_value: Any = statistics.fmean(finite)
-        sample_std: Any = statistics.stdev(finite) if len(finite) > 1 else 0.0
-        min_value: Any = min(finite)
-        max_value: Any = max(finite)
-    elif pos_inf_count > 0 and neg_inf_count == 0 and nan_count == 0:
+    finite_mean: Any = statistics.fmean(finite) if finite else math.nan
+    finite_sample_std: Any = (
+        statistics.stdev(finite) if len(finite) > 1 else (0.0 if finite else math.nan)
+    )
+
+    if nan_count > 0 or (pos_inf_count > 0 and neg_inf_count > 0):
+        mean_value = math.nan
+        sample_std = math.nan
+    elif pos_inf_count > 0:
         mean_value = math.inf
-        sample_std = 0.0
-        min_value = math.inf
-        max_value = math.inf
-    elif neg_inf_count > 0 and pos_inf_count == 0 and nan_count == 0:
+        sample_std = math.nan
+    elif neg_inf_count > 0:
         mean_value = -math.inf
-        sample_std = 0.0
-        min_value = -math.inf
-        max_value = -math.inf
+        sample_std = math.nan
+    elif finite:
+        mean_value = finite_mean
+        sample_std = finite_sample_std
     else:
         mean_value = math.nan
         sample_std = math.nan
-        min_value = math.nan
-        max_value = math.nan
+
+    min_value = min(scalars) if scalars and nan_count == 0 else math.nan
+    max_value = max(scalars) if scalars and nan_count == 0 else math.nan
 
     return {
         "count": len(scalars),
@@ -155,6 +176,8 @@ def summarize_values(values: Sequence[Any]) -> Dict[str, Any]:
         "sample_std": sample_std,
         "min": min_value,
         "max": max_value,
+        "finite_subset_mean": finite_mean,
+        "finite_subset_sample_std": finite_sample_std,
     }
 
 
@@ -284,6 +307,8 @@ def main() -> int:
                 "projection_active_rate": diagnostics["projection_active_rate"],
                 "eta_old_proxy": diagnostics["eta_old_proxy"],
                 "eta_old_proxy_std": diagnostics["eta_old_proxy_std"],
+                "state_weighting": diagnostics["state_weighting"],
+                "is_discounted_occupancy": diagnostics["is_discounted_occupancy"],
                 "alpha_grid": diagnostics["alpha_grid"],
             }
             diag_rows.append(diag_entry)
@@ -315,7 +340,10 @@ def main() -> int:
         },
         "per_seed_final_eval": final_eval_rows,
     }
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True, default=str) + "\n", encoding="ascii")
+    summary_path.write_text(
+        json.dumps(json_safe(summary), indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="ascii",
+    )
     print(f"[postprocess] wrote {summary_path}", flush=True)
 
     scalar_metrics = [
@@ -362,37 +390,45 @@ def main() -> int:
         for alpha_key in alpha_keys:
             alpha_rows = [row["alpha_grid"][alpha_key] for row in rows_for_step]
             cpi_penalty_grid["by_step"][str(step)][alpha_key] = {
-                "surrogate_true_gap": summarize_values(
-                    [row["surrogate_true_gap"] for row in alpha_rows]
-                ),
-                "predicted_penalty": summarize_values(
-                    [row["predicted_penalty"] for row in alpha_rows]
+                "finite_batch_penalty_proxy": summarize_values(
+                    [row["finite_batch_penalty_proxy"] for row in alpha_rows]
                 ),
                 "eta_proxy": summarize_values([row["eta_proxy"] for row in alpha_rows]),
-                "lhat_alpha": summarize_values([row["lhat_alpha"] for row in alpha_rows]),
-                "expected_adv_mean": summarize_values(
-                    [row["expected_adv_mean"] for row in alpha_rows]
+                "uniform_batch_advantage_mean": summarize_values(
+                    [row["uniform_batch_advantage_mean"] for row in alpha_rows]
                 ),
+                "state_weighting": "uniform_materialized_batch",
+                "is_discounted_occupancy": False,
             }
 
     diagnostics_summary_path.write_text(
-        json.dumps(diagnostics_summary, indent=2, sort_keys=True, default=str) + "\n",
+        json.dumps(
+            json_safe(diagnostics_summary),
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        ) + "\n",
         encoding="ascii",
     )
     cpi_penalty_grid_path.write_text(
-        json.dumps(cpi_penalty_grid, indent=2, sort_keys=True, default=str) + "\n",
+        json.dumps(
+            json_safe(cpi_penalty_grid),
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        ) + "\n",
         encoding="ascii",
     )
     print(f"[postprocess] wrote {diagnostics_summary_path}", flush=True)
     print(f"[postprocess] wrote {cpi_penalty_grid_path}", flush=True)
 
-    print(json.dumps({
+    print(json.dumps(json_safe({
         "summary_json": str(summary_path),
         "diagnostics_summary_json": str(diagnostics_summary_path),
         "cpi_penalty_grid_json": str(cpi_penalty_grid_path),
         "per_seed_eval_jsonl": str(per_seed_eval_path),
         "per_seed_diagnostics_jsonl": str(per_seed_diag_path),
-    }, sort_keys=True))
+    }), sort_keys=True, allow_nan=False))
     return 0
 
 

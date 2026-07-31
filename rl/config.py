@@ -147,9 +147,11 @@ class RLConfig(BaseModel):
     # Theory-exact mode (theory_exact_mixture=True):
     #     - Data collection uses policy-space mixture in _mixed_policy_dist()
     #     - Does NOT update policy_model_old after policy update
-    #     - The deployed "policy" is always the explicit mixture π_new
-    #     - This matches the CPI theory but requires evaluating TWO networks
-    #       during data collection (slightly more expensive)
+    #     - The deployed policy is the explicit mixture π_new for one fixed-base
+    #       CPI proposal. Multiple candidate-gradient steps do not recursively
+    #       promote π_new to become the next old policy.
+    #     - This matches the paper's one-step frozen-snapshot statement, not a
+    #       repeated exact CPI training theorem, and evaluates two networks.
     # 
     # When distill_mixture_policy=True (Section 6.5):
     #     - The mixture is distilled into policy_model_old via KL minimization
@@ -236,6 +238,9 @@ class RLConfig(BaseModel):
     log_interval: int = 10
     eval_interval: int = 50
     eval_num_episodes: int = 50
+    # Evaluation uses a private RNG stream so changing eval cadence cannot
+    # change subsequent training samples.
+    eval_seed: int = 1729
     use_tqdm: bool = True
     debug_checks: bool = False
     track_theory_metrics: bool = False  # If True, compute and log C_z, L_z, L_v estimates
@@ -253,11 +258,10 @@ class RLConfig(BaseModel):
         
         Returns a dict with validation results and optionally emits warnings.
         
-        Paper References:
-        - Assumption 4.1: Forward-invariant region (latent_ball_radius)
-        - Assumption 4.2: Contraction (enable_contraction, target_Lz)
-        - Theorem 5.9: Exact baseline for O(α·ε_A) bound
-        - Section 6.5: Distillation not covered by theory
+        Projection and clamping are optional geometric specializations. The
+        fixed-snapshot finite-reference result does not require either one.
+        Exact centering and exact probability-space mixture deployment remain
+        required for the CPI specialization; distillation is not covered.
         """
         issues = []
         
@@ -268,24 +272,13 @@ class RLConfig(BaseModel):
                 "assume a strictly discounted MDP. Set 0 < gamma < 1."
             )
         
-        # Check forward-invariant projection (Assumption 4.1)
+        specialization_notes = []
         if self.latent_ball_radius <= 0:
-            issues.append(
-                "latent_ball_radius=0 disables forward-invariant projection (Assumption 4.1). "
-                "Contraction guarantees may not hold. Set latent_ball_radius > 0."
-            )
-        
-        # Check contraction (Assumption 4.2)
+            specialization_notes.append("forward-invariant projection disabled")
         if not self.enable_contraction:
-            issues.append(
-                "enable_contraction=False disables spectral normalization (Assumption 4.2). "
-                "L_z < 1 contraction not enforced."
-            )
+            specialization_notes.append("clamping intervention disabled")
         elif self.target_Lz >= 1.0:
-            issues.append(
-                f"target_Lz={self.target_Lz} >= 1.0 violates contraction requirement "
-                "(Assumption 4.2). Set target_Lz < 1.0 for convergence guarantees."
-            )
+            specialization_notes.append("configured target_Lz is not below 1")
         
         # Check exact baseline (Theorem 5.9) - THE KEY THEORETICAL CONTRIBUTION
         if not self.exact_baseline_summation:
@@ -299,6 +292,17 @@ class RLConfig(BaseModel):
                 "exact_baseline_summation=True but reward_shaping=False. "
                 "The exact baseline implementation assumes shaped rewards and will "
                 "assert at runtime. Set reward_shaping=True."
+            )
+
+        if not self.exact_k_step_targets:
+            issues.append("exact_k_step_targets=False: fixed-K target protocol is disabled.")
+        if not self.episodic_latent and self.exact_baseline_summation:
+            issues.append(
+                "Exact centering is not implemented on the persistent augmented state."
+            )
+        if self.policy_epsilon != 0.0:
+            issues.append(
+                "policy_epsilon must be 0 for direct deployment of the stated CPI mixture."
             )
         
         # Check distillation (Section 6.5)
@@ -336,19 +340,21 @@ class RLConfig(BaseModel):
             "theory_aligned": len(issues) == 0,
             "issues": issues,
             "forward_invariant": self.latent_ball_radius > 0,
-            "contraction_enforced": self.enable_contraction and self.target_Lz < 1.0,
+            "clamping_enabled": self.enable_contraction,
+            "global_contraction_certified": False,
             "exact_baseline": self.exact_baseline_summation,
             "distillation_used": self.distill_mixture_policy,
             "theory_exact_mixture": self.theory_exact_mixture,
+            "specialization_notes": specialization_notes,
         }
     
     def is_theory_exact(self) -> bool:
         """
-        Check if configuration enables the paper's theoretical guarantees.
+        Check if configuration matches the paper's frozen one-step protocol.
         
-        Returns True if configuration matches the paper's Theorem 5.9 requirements:
-        - Forward-invariant projection (Assumption 4.1)
-        - Contraction L_z < 1 (Assumption 4.2)
+        Returns True if configuration matches the exact episodic CPI snapshot.
+        Projection and contraction are optional specializations of the finite-reference
+        result, not prerequisites for exact centering or mixture deployment:
         - Exact K-step targets (Section 5.1)
         - Exact baseline summation (Theorem 5.9) - THE KEY REQUIREMENT
         - Theory-exact CPI mixture (Issue 4) - policy-space not parameter-space
@@ -358,11 +364,12 @@ class RLConfig(BaseModel):
         The theory requires exact_baseline_summation for true centering.
         """
         return (
-            self.latent_ball_radius > 0 and
-            self.enable_contraction and
-            self.target_Lz < 1.0 and
+            0.0 < self.gamma < 1.0 and
+            self.episodic_latent and
+            self.reward_shaping and
             self.exact_k_step_targets and
             self.exact_baseline_summation and  # THE KEY REQUIREMENT for O(α·ε_A)
             self.theory_exact_mixture and  # Policy-space mixture for CPI guarantee
-            not self.distill_mixture_policy
+            not self.distill_mixture_policy and
+            self.policy_epsilon == 0.0
         )

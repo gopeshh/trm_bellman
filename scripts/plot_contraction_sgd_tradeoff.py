@@ -18,16 +18,16 @@ import os
 import re
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 
 
-def parse_log_file(log_path: str) -> Dict:
+def parse_log_file(log_path: str) -> Dict[str, Any]:
     """Parse a training log file and extract metrics."""
-    results = {
+    results: Dict[str, Any] = {
         "final_success_rate": None,
         "final_mean_score": None,
         "final_step": None,

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Any, Callable, List, Optional, Tuple
 
 import torch
 
-from puzzle_dataset import PuzzleDataset, PuzzleDatasetConfig
 from rl.sudoku_checkers import (
     dummy_checker,
     make_sudoku_feasibility_checker,
@@ -16,6 +16,11 @@ from rl.sudoku_checkers import (
     sudoku_constraint_checker,
     sudoku_progress_checker,
 )
+
+
+_puzzle_dataset = import_module("puzzle_dataset")
+PuzzleDataset = _puzzle_dataset.PuzzleDataset
+PuzzleDatasetConfig = _puzzle_dataset.PuzzleDatasetConfig
 
 
 class DummyPuzzleDataset:
@@ -65,9 +70,32 @@ class OfflinePuzzleDataset:
         return self.samples[idx]
 
 
+def offset_puzzle_identifiers(dataset: Any, offset: int) -> int:
+    """Move a materialized pool into a disjoint puzzle-identifier range."""
+
+    if offset < 0:
+        raise ValueError("Puzzle-identifier offset must be non-negative.")
+    samples = getattr(dataset, "samples", None)
+    if samples is None:
+        raise TypeError("Identifier remapping requires a materialized dataset.")
+    max_identifier = -1
+    for sample in samples:
+        identifier = sample["puzzle_identifiers"]
+        if not torch.is_tensor(identifier):
+            identifier = torch.as_tensor(identifier, dtype=torch.long)
+        remapped = identifier.to(torch.long) + offset
+        sample["puzzle_identifiers"] = remapped
+        max_identifier = max(max_identifier, int(remapped.max().item()))
+    dataset.num_identifiers = max_identifier + 1
+    return dataset.num_identifiers
+
+
 def build_dataset_from_paths(
     dataset_paths: Optional[List[str]],
     pool_size: int,
+    *,
+    split: str = "train",
+    allow_dummy_fallback: bool = False,
 ) -> Tuple[object, int, int, int]:
     """
     Attempt to load supervised samples for RL bootstrap, then fall back to dummy data.
@@ -84,13 +112,13 @@ def build_dataset_from_paths(
                 rank=0,
                 num_replicas=1,
             )
-            iterable = PuzzleDataset(ds_cfg, split="train")
+            iterable = PuzzleDataset(ds_cfg, split=split)
             samples: List[dict] = []
-            for _set_name, batch, _ in iterable:
+            for _set_name, batch, valid_count in iterable:
                 batch_inputs = batch["inputs"]
                 batch_ids = batch["puzzle_identifiers"]
                 batch_labels = batch.get("labels")
-                batch_size = batch_inputs.shape[0]
+                batch_size = min(batch_inputs.shape[0], int(valid_count))
                 for i in range(batch_size):
                     inputs = batch_inputs[i].clone()
                     puzzle_id = batch_ids[i].clone()
@@ -108,24 +136,30 @@ def build_dataset_from_paths(
                         break
                 if len(samples) >= pool_size:
                     break
-            if samples:
-                num_identifiers = int(
-                    torch.stack([sample["puzzle_identifiers"] for sample in samples]).max().item() + 1
+            if not samples:
+                raise RuntimeError(
+                    f"No samples were loaded from split={split!r} for {dataset_paths}."
                 )
-                dataset = OfflinePuzzleDataset(
-                    samples=samples,
-                    seq_len=samples[0]["inputs"].shape[-1],
-                    vocab_size=iterable.metadata.vocab_size,
-                    num_identifiers=max(num_identifiers, iterable.metadata.num_puzzle_identifiers),
-                )
-                return dataset, dataset.seq_len, dataset.vocab_size, dataset.num_identifiers
-        except Exception as exc:  # pragma: no cover - bootstrap stays permissive by design
-            message = (
-                "[upi_trm_train] Falling back to dummy dataset after supervised bootstrap "
-                f"failed ({type(exc).__name__}: {exc})"
+            num_identifiers = int(
+                torch.stack([sample["puzzle_identifiers"] for sample in samples]).max().item() + 1
             )
-            warnings.warn(message, RuntimeWarning)
-            print(message)
+            dataset = OfflinePuzzleDataset(
+                samples=samples,
+                seq_len=samples[0]["inputs"].shape[-1],
+                vocab_size=iterable.metadata.vocab_size,
+                num_identifiers=max(num_identifiers, iterable.metadata.num_puzzle_identifiers),
+            )
+            return dataset, dataset.seq_len, dataset.vocab_size, dataset.num_identifiers
+        except Exception as exc:
+            message = (
+                "[upi_trm_train] Failed to load the requested dataset "
+                f"split={split!r} ({type(exc).__name__}: {exc})"
+            )
+            if not allow_dummy_fallback:
+                raise RuntimeError(message) from exc
+            fallback_message = f"{message}; falling back to dummy dataset"
+            warnings.warn(fallback_message, RuntimeWarning)
+            print(fallback_message)
 
     dummy = DummyPuzzleDataset()
     return dummy, dummy.seq_len, dummy.vocab_size, dummy.num_identifiers

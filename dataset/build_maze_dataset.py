@@ -1,3 +1,4 @@
+import argparse
 from typing import Optional
 import math
 import os
@@ -5,7 +6,6 @@ import csv
 import json
 import numpy as np
 
-from argdantic import ArgParser
 from pydantic import BaseModel
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
@@ -16,25 +16,33 @@ from dataset.common import PuzzleDatasetMetadata, dihedral_transform
 CHARSET = "# SGo"
 
 
-cli = ArgParser()
-
-
 class DataProcessConfig(BaseModel):
     source_repo: str = "sapientinc/maze-30x30-hard-1k"
+    source_revision: Optional[str] = None
     output_dir: str = "data/maze-30x30-hard-1k"
+    seed: int = 42
 
     subsample_size: Optional[int] = None
     aug: bool = False
 
 
 def convert_subset(set_name: str, config: DataProcessConfig):
+    rng = np.random.default_rng(config.seed + (0 if set_name == "train" else 1))
     # Read CSV
     all_chars = set()
     grid_size = None
     inputs = []
     labels = []
     
-    with open(hf_hub_download(config.source_repo, f"{set_name}.csv", repo_type="dataset"), newline="") as csvfile:  # type: ignore
+    with open(
+        hf_hub_download(
+            config.source_repo,
+            f"{set_name}.csv",
+            repo_type="dataset",
+            revision=config.source_revision,
+        ),
+        newline="",
+    ) as csvfile:  # type: ignore
         reader = csv.reader(csvfile)
         next(reader)  # Skip header
         for source, q, a, rating in reader:
@@ -53,31 +61,36 @@ def convert_subset(set_name: str, config: DataProcessConfig):
     if set_name == "train" and config.subsample_size is not None:
         total_samples = len(inputs)
         if config.subsample_size < total_samples:
-            indices = np.random.choice(total_samples, size=config.subsample_size, replace=False)
+            indices = rng.choice(
+                total_samples,
+                size=config.subsample_size,
+                replace=False,
+            )
             inputs = [inputs[i] for i in indices]
             labels = [labels[i] for i in indices]
 
     # Generate dataset
-    results = {k: [] for k in ["inputs", "labels", "puzzle_identifiers", "puzzle_indices", "group_indices"]}
+    result_inputs = []
+    result_labels = []
+    puzzle_identifiers = []
+    puzzle_indices = [0]
+    group_indices = [0]
     puzzle_id = 0
     example_id = 0
-    
-    results["puzzle_indices"].append(0)
-    results["group_indices"].append(0)
     
     for inp, out in zip(tqdm(inputs), labels):
         # Dihedral transformations for augmentation
         for aug_idx in range(8 if (set_name == "train" and config.aug) else 1):
-            results["inputs"].append(dihedral_transform(inp, aug_idx))
-            results["labels"].append(dihedral_transform(out, aug_idx))
+            result_inputs.append(dihedral_transform(inp, aug_idx))
+            result_labels.append(dihedral_transform(out, aug_idx))
             example_id += 1
             puzzle_id += 1
             
-            results["puzzle_indices"].append(example_id)
-            results["puzzle_identifiers"].append(0)
+            puzzle_indices.append(example_id)
+            puzzle_identifiers.append(0)
             
         # Push group
-        results["group_indices"].append(puzzle_id)
+        group_indices.append(puzzle_id)
             
     # Char mappings
     assert len(all_chars - set(CHARSET)) == 0
@@ -92,12 +105,12 @@ def convert_subset(set_name: str, config: DataProcessConfig):
         return arr
     
     results = {
-        "inputs": _seq_to_numpy(results["inputs"]),
-        "labels": _seq_to_numpy(results["labels"]),
+        "inputs": _seq_to_numpy(result_inputs),
+        "labels": _seq_to_numpy(result_labels),
         
-        "group_indices": np.array(results["group_indices"], dtype=np.int32),
-        "puzzle_indices": np.array(results["puzzle_indices"], dtype=np.int32),
-        "puzzle_identifiers": np.array(results["puzzle_identifiers"], dtype=np.int32),
+        "group_indices": np.array(group_indices, dtype=np.int32),
+        "puzzle_indices": np.array(puzzle_indices, dtype=np.int32),
+        "puzzle_identifiers": np.array(puzzle_identifiers, dtype=np.int32),
     }
 
     # Metadata
@@ -130,11 +143,23 @@ def convert_subset(set_name: str, config: DataProcessConfig):
         json.dump(["<blank>"], f)
 
 
-@cli.command(singleton=True)
 def preprocess_data(config: DataProcessConfig):
+    os.makedirs(config.output_dir, exist_ok=True)
+    with open(os.path.join(config.output_dir, "build_config.json"), "w") as f:
+        payload = config.model_dump(exclude={"output_dir"})
+        json.dump(payload, f, sort_keys=True)
     convert_subset("train", config)
     convert_subset("test", config)
 
 
 if __name__ == "__main__":
-    cli()
+    parser = argparse.ArgumentParser(description="Build a maze puzzle dataset.")
+    parser.add_argument(
+        "--source-repo", default="sapientinc/maze-30x30-hard-1k"
+    )
+    parser.add_argument("--source-revision")
+    parser.add_argument("--output-dir", default="data/maze-30x30-hard-1k")
+    parser.add_argument("--subsample-size", type=int)
+    parser.add_argument("--aug", action="store_true")
+    parser.add_argument("--seed", type=int, default=42)
+    preprocess_data(DataProcessConfig(**vars(parser.parse_args())))

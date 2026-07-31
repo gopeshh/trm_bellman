@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from external_baselines import GymSudoku4x4Env, Sudoku4x4ExternalEnv
+from utils.dataset_provenance import ordered_pool_sha256, sequence_input_sha256s
 
 DEFAULT_SB3_HPARAMS = {
     "ppo": {
@@ -51,7 +52,7 @@ _DQN_WITH_NSTEP_CLS = None
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Entrypoint for trusted external baseline integration."
+        description="Entrypoint for provenance-checked external baseline integration."
     )
     parser.add_argument("--algo", choices=("ppo", "a2c", "dqn"), required=True)
     parser.add_argument("--env", choices=("sudoku4x4",), required=True)
@@ -501,6 +502,16 @@ def _evaluate_model(args: argparse.Namespace, model: Any) -> dict[str, Any]:
         max_edits=args.max_edits,
     )
     dataset_size = len(eval_env.core.inputs_data)
+    if dataset_size < args.eval_episodes:
+        raise RuntimeError(
+            "Evaluation split is smaller than eval_episodes; refusing to repeat "
+            f"instances ({dataset_size} < {args.eval_episodes})."
+        )
+    pool_sha256 = ordered_pool_sha256(
+        eval_env.core.inputs_data,
+        eval_env.core.labels_data,
+        args.eval_episodes,
+    )
     episodes = []
     for episode_idx in range(args.eval_episodes):
         episodes.append(
@@ -524,6 +535,7 @@ def _evaluate_model(args: argparse.Namespace, model: Any) -> dict[str, Any]:
     return {
         "episodes": len(episodes),
         "split": args.eval_split,
+        "pool_sha256": pool_sha256,
         "success_rate": success_rate,
         "mean_return": mean_return,
         "mean_steps": mean_steps,
@@ -644,6 +656,11 @@ def _run_sb3_episode(args: argparse.Namespace, algo_cls) -> dict[str, Any]:
 def _run_sb3_training(args: argparse.Namespace, algo_cls) -> dict[str, Any]:
     if GymSudoku4x4Env is None:
         raise RuntimeError("GymSudoku4x4Env is unavailable because gym/gymnasium/numpy are missing")
+    if args.split == args.eval_split:
+        raise RuntimeError(
+            "Training and evaluation must use different dataset splits; got "
+            f"{args.split!r} for both."
+        )
 
     from stable_baselines3.common.callbacks import BaseCallback
 
@@ -657,6 +674,19 @@ def _run_sb3_training(args: argparse.Namespace, algo_cls) -> dict[str, Any]:
         split=args.split,
         max_edits=args.max_edits,
     )
+    eval_probe = GymSudoku4x4Env(
+        dataset_dir=args.dataset_dir,
+        split=args.eval_split,
+        max_edits=args.max_edits,
+    )
+    overlap = set(sequence_input_sha256s(train_env.core.inputs_data)).intersection(
+        sequence_input_sha256s(eval_probe.core.inputs_data)
+    )
+    if overlap:
+        raise RuntimeError(
+            "Training and evaluation pools overlap; refusing an in-sample "
+            f"evaluation ({len(overlap)} duplicate inputs)."
+        )
     model = algo_cls(
         "MultiInputPolicy",
         train_env,

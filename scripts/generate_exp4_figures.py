@@ -54,8 +54,22 @@ def generate_scatter_plot(summary: Dict[str, Any], out_path: Path) -> None:
 
     # Color by seed
     unique_seeds = sorted(set(seeds))
-    colors = plt.cm.tab10(np.linspace(0, 1, len(unique_seeds)))
-    seed_to_color = {s: c for s, c in zip(unique_seeds, colors)}
+    seed_colors = [
+        "tab:blue",
+        "tab:orange",
+        "tab:green",
+        "tab:red",
+        "tab:purple",
+        "tab:brown",
+        "tab:pink",
+        "tab:gray",
+        "tab:olive",
+        "tab:cyan",
+    ]
+    seed_to_color = {
+        seed: seed_colors[index % len(seed_colors)]
+        for index, seed in enumerate(unique_seeds)
+    }
 
     # Marker by scale
     unique_scales = sorted(set(scales), reverse=True)
@@ -162,6 +176,13 @@ def generate_latex_table(summary: Dict[str, Any], out_path: Path) -> None:
     # Extract bootstrap results (new format) or fall back to old format
     boot_b0 = mono.get("boot_aa_b0", {})
     boot_b1 = mono.get("boot_aa_b1", {})
+
+    ci_lo_b0 = 0.0
+    ci_hi_b0 = 0.0
+    ci_lo_b1 = 0.0
+    ci_hi_b1 = 0.0
+    p_b0 = 1.0
+    p_b1 = 1.0
 
     # Check which format we have
     if boot_b0:

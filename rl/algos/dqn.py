@@ -261,7 +261,7 @@ class QNetwork(nn.Module):
 
     def __init__(self, base_model: nn.Module, num_actions: int, hidden_dim: int = 64):
         super().__init__()
-        self.base_model = base_model
+        self.base_model: Any = base_model
         self.num_actions = num_actions
         self._uses_trm_latent = (
             hasattr(base_model, "unroll_latent")
@@ -273,11 +273,12 @@ class QNetwork(nn.Module):
         # Compute input dimension for Q-head.
         # - TRM exposes the flattened latent state z_H with length seq_len + puzzle_emb_len.
         # - NoRec encoders already collapse to a single hidden vector.
-        if hasattr(base_model, 'config'):
-            if hasattr(base_model.config, 'hidden_size'):
-                hidden_size = base_model.config.hidden_size
-            elif hasattr(base_model.config, 'hidden_dim'):
-                hidden_size = base_model.config.hidden_dim
+        model_config: Any = getattr(base_model, "config", None)
+        if model_config is not None:
+            if hasattr(model_config, 'hidden_size'):
+                hidden_size = int(model_config.hidden_size)
+            elif hasattr(model_config, 'hidden_dim'):
+                hidden_size = int(model_config.hidden_dim)
             else:
                 hidden_size = hidden_dim
 
@@ -286,7 +287,7 @@ class QNetwork(nn.Module):
                 inner = getattr(base_model, 'inner', None)
                 if inner is not None:
                     puzzle_emb_len = int(getattr(inner, 'puzzle_emb_len', 0) or 0)
-                input_dim = (base_model.config.seq_len + puzzle_emb_len) * hidden_size
+                input_dim = (int(model_config.seq_len) + puzzle_emb_len) * hidden_size
             elif hasattr(base_model, 'encode'):
                 input_dim = hidden_size
             else:
@@ -525,7 +526,7 @@ class DQNTrainer:
                 n=self.config.inner_unroll_n,
                 action_mask=action_mask.to(self.device) if action_mask is not None else None,
             )
-            return q_values.argmax(dim=-1).item()
+            return int(q_values.argmax(dim=-1).item())
 
     def collect_step(self) -> bool:
         """
@@ -543,6 +544,8 @@ class DQNTrainer:
         x = self._current_x
         y = self._current_y
         action_mask = self._current_action_mask
+        if x is None or y is None:
+            raise RuntimeError("DQN episode state was not initialized.")
 
         # Select action
         action = self.select_action(x, y, action_mask)
@@ -741,11 +744,11 @@ class DQNTrainer:
             self.collect_step()
 
         # Train on replay buffer
-        train_stats = {}
+        train_stats: Dict[str, float] = {}
         for _ in range(self.config.gradient_steps):
             stats = self.train_batch()
             for k, v in stats.items():
-                train_stats[k] = train_stats.get(k, 0) + v / self.config.gradient_steps
+                train_stats[k] = train_stats.get(k, 0.0) + v / self.config.gradient_steps
 
         self._train_step_count += 1
 
@@ -762,9 +765,9 @@ class DQNTrainer:
     def get_metrics(self) -> Dict[str, float]:
         """Get current training metrics."""
         return {
-            "train_step": self._train_step_count,
-            "env_steps": self._env_step_count,
-            "episodes": self._episode_count,
+            "train_step": float(self._train_step_count),
+            "env_steps": float(self._env_step_count),
+            "episodes": float(self._episode_count),
             "epsilon": self._get_epsilon(),
             "buffer_size": len(self.replay_buffer),
             "term_stop": self.term_stats["stop"],
@@ -778,7 +781,7 @@ class DQNTrainer:
         dataset: Any,
         checker: Any,
         num_episodes: Optional[int] = None,
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any]:
         """
         Evaluate the DQN policy using epsilon=0 greedy Q-network rollouts.
         
@@ -930,7 +933,7 @@ class DQNTrainer:
         mean_score = total_score / float(max(episodes_ran, 1))
         success_rate = num_solved / float(max(episodes_ran, 1))
         
-        result = {
+        result: Dict[str, Any] = {
             "mean_score": mean_score,
             "success_rate": success_rate,
             "eval_policy_mode": "q_greedy",  # Indicates Q-network greedy, not policy_dist

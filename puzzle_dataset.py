@@ -10,12 +10,6 @@ from torch.utils.data import IterableDataset, get_worker_info
 from models.losses import IGNORE_LABEL_ID
 from dataset.common import PuzzleDatasetMetadata
 
-try:
-    from argdantic import ArgParser
-except ImportError:
-    ArgParser = None  # Make argdantic optional for Buck builds
-from pydantic import BaseModel
-
 def _sample_batch(rng: np.random.Generator, group_order: np.ndarray, puzzle_indices: np.ndarray, group_indices: np.ndarray, start_index: int, global_batch_size: int):
     # Pack examples into a full batch
     batch = []
@@ -65,13 +59,14 @@ class PuzzleDataset(IterableDataset):
         prev_ignore_label_id = None
         prev_blank_identifier_id = None
         prev_sets = None
-        prev_num_identifiers = None
         mean_puzzle_examples = 0
         total_puzzles = 0
         total_groups = 0
         num_identifiers = 0
+        self._identifier_offsets = []
         for dataset_path in config.dataset_paths:
             current_metadata = self._load_metadata(dataset_path)
+            self._identifier_offsets.append(num_identifiers)
             if prev_seq_len is None:
                 prev_seq_len = current_metadata.seq_len
                 prev_vocab_size = current_metadata.vocab_size
@@ -79,7 +74,6 @@ class PuzzleDataset(IterableDataset):
                 prev_ignore_label_id = current_metadata.ignore_label_id
                 prev_blank_identifier_id = current_metadata.blank_identifier_id
                 prev_sets = current_metadata.sets
-                prev_num_identifiers = current_metadata.num_puzzle_identifiers
             else:
                 assert prev_seq_len == current_metadata.seq_len
                 assert prev_vocab_size == current_metadata.vocab_size
@@ -87,11 +81,17 @@ class PuzzleDataset(IterableDataset):
                 assert prev_ignore_label_id == current_metadata.ignore_label_id
                 assert prev_blank_identifier_id == current_metadata.blank_identifier_id
                 assert prev_sets == current_metadata.sets
-                assert prev_num_identifiers == current_metadata.num_puzzle_identifiers
             mean_puzzle_examples += current_metadata.mean_puzzle_examples*current_metadata.total_puzzles
             total_puzzles += current_metadata.total_puzzles
             total_groups += current_metadata.total_groups
             num_identifiers += current_metadata.num_puzzle_identifiers
+        if total_puzzles <= 0:
+            raise ValueError("At least one non-empty dataset path is required.")
+        assert prev_seq_len is not None
+        assert prev_vocab_size is not None
+        assert prev_pad_id is not None
+        assert prev_blank_identifier_id is not None
+        assert prev_sets is not None
         mean_puzzle_examples = mean_puzzle_examples / total_puzzles
 
         self.metadata = PuzzleDatasetMetadata(
@@ -145,6 +145,14 @@ class PuzzleDataset(IterableDataset):
                     field_name: np.load(os.path.join(dataset_path, self.split, f"{set_name}__{field_name}.npy"), mmap_mode=mmap_mode)
                     for field_name, mmap_mode in field_mmap_modes.items()
                 }
+                identifier_offset = self._identifier_offsets[i]
+                if identifier_offset:
+                    self._data[set_name_]["puzzle_identifiers"] = (
+                        self._data[set_name_]["puzzle_identifiers"].astype(
+                            np.int64, copy=True
+                        )
+                        + identifier_offset
+                    )
 
 
     def _collate_batch(self, batch):

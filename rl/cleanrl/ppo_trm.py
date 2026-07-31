@@ -23,6 +23,7 @@ Modifications from upstream CleanRL ppo.py:
 from __future__ import annotations
 
 import argparse
+from importlib import import_module
 import json
 import random
 import time
@@ -46,9 +47,9 @@ from rl.cleanrl.trm_adapter import (
 )
 
 try:
-    import gym as gym_api
+    gym_api = import_module("gym")
 except ImportError:  # pragma: no cover
-    import gymnasium as gym_api
+    gym_api = import_module("gymnasium")
 
 
 ObsType = Union[torch.Tensor, Dict[str, torch.Tensor]]
@@ -177,6 +178,49 @@ def _config_float(config: Mapping[str, Any], key: str, default: float) -> float:
     return float(config.get(key, default))
 
 
+def _episode_done_flags(
+    terminated: np.ndarray,
+    truncated: np.ndarray,
+) -> np.ndarray:
+    """Return episode-boundary flags for rollout and GAE bookkeeping."""
+    if terminated.shape != truncated.shape:
+        raise ValueError("terminated and truncated flags must have matching shapes")
+    return np.logical_or(terminated, truncated)
+
+
+def _compute_gae(
+    rewards: torch.Tensor,
+    values: torch.Tensor,
+    dones: torch.Tensor,
+    next_done: torch.Tensor,
+    next_value: torch.Tensor,
+    *,
+    gamma: float,
+    gae_lambda: float,
+) -> torch.Tensor:
+    """Compute GAE without carrying traces across episode boundaries."""
+    advantages = torch.zeros_like(rewards)
+    lastgaelam = torch.zeros_like(next_value)
+    for timestep in reversed(range(rewards.shape[0])):
+        if timestep == rewards.shape[0] - 1:
+            nextnonterminal = 1.0 - next_done
+            nextvalues = next_value
+        else:
+            nextnonterminal = 1.0 - dones[timestep + 1]
+            nextvalues = values[timestep + 1]
+        delta = (
+            rewards[timestep]
+            + gamma * nextvalues * nextnonterminal
+            - values[timestep]
+        )
+        lastgaelam = (
+            delta
+            + gamma * gae_lambda * nextnonterminal * lastgaelam
+        )
+        advantages[timestep] = lastgaelam
+    return advantages
+
+
 def _index_obs(obs: ObsType, indices: torch.Tensor) -> ObsType:
     if isinstance(obs, dict):
         return {key: value[indices] for key, value in obs.items()}
@@ -216,7 +260,7 @@ def _build_envs(config: Mapping[str, Any]) -> Tuple[BasicVectorEnv, Optional[Any
     return BasicVectorEnv([make_sudoku_env(i) for i in range(num_envs)]), bundle, env_kind
 
 
-def _build_agent(config: Mapping[str, Any], bundle: Optional[Any], device: torch.device) -> nn.Module:
+def _build_agent(config: Mapping[str, Any], bundle: Optional[Any], device: torch.device) -> Any:
     env_kind = str(config.get("env_kind", "cartpole")).lower()
     if env_kind == "cartpole":
         agent = CartPoleActorCritic(
@@ -246,7 +290,7 @@ def _evaluate_cartpole(agent: CartPoleActorCritic, config: Mapping[str, Any], de
         while not (done or truncated):
             obs_tensor = torch.as_tensor(obs, device=device, dtype=torch.float32).unsqueeze(0)
             logits = agent.get_policy_logits(obs_tensor)
-            action = logits.argmax(dim=-1).item()
+            action = int(logits.argmax(dim=-1).item())
             obs, reward, done, truncated, _info = _compat_step(env, action)
             episode_return += float(reward)
         episode_returns.append(episode_return)
@@ -279,7 +323,7 @@ def _evaluate_sudoku(
 
     mean_score, success_rate, stats = evaluate_plan_policy_with_scores(
         model=trm_model,
-        dataset=bundle.dataset,
+        dataset=bundle.eval_dataset,
         checker=bundle.checker_fn,
         env_cfg=bundle.env_cfg,
         task_config=bundle.task_config,
@@ -299,6 +343,8 @@ def _evaluate_sudoku(
         "initial_score_mean": stats.get("initial_score_mean", 0.0),
         "invalid_action_rate": stats.get("invalid_action_rate", 0.0),
         "eval_policy_mode": "greedy",
+        "eval_split": bundle.eval_split,
+        "eval_pool_sha256": bundle.eval_pool_sha256,
         "final_filled_mean": stats.get("final_filled_mean"),
         "final_violations_mean": stats.get("final_violations_mean"),
         "final_zero_cand_mean": stats.get("final_zero_cand_mean"),
@@ -370,9 +416,19 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
             "num_steps": num_steps,
             "total_timesteps": total_timesteps,
             "device": str(device),
-            "policy_consumes_action_mask": False,
+            "policy_consumes_action_mask": env_kind != "cartpole",
         }
     )
+    if bundle is not None:
+        run_config.update(
+            {
+                "train_split": bundle.train_split,
+                "eval_split": bundle.eval_split,
+                "train_pool_sha256": bundle.train_pool_sha256,
+                "eval_pool_sha256": bundle.eval_pool_sha256,
+                "eval_puzzle_id_offset": bundle.eval_puzzle_id_offset,
+            }
+        )
     (output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2, sort_keys=True) + "\n")
 
     next_obs_env, _infos = envs.reset(seed=seed)
@@ -433,7 +489,11 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
                         reward_t[idx] += gamma * terminal_value.item()
 
             reward_storage.append(reward_t)
-            next_done = torch.as_tensor(terminated, device=device, dtype=torch.float32)
+            next_done = torch.as_tensor(
+                _episode_done_flags(terminated, truncated),
+                device=device,
+                dtype=torch.float32,
+            )
             next_obs = obs_to_device(next_obs_env, device)
 
             if eval_interval > 0 and global_step % eval_interval == 0:
@@ -450,18 +510,15 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
         rewards = torch.stack(reward_storage)
         dones = torch.stack(done_storage)
         values = torch.stack(value_storage)
-        advantages = torch.zeros_like(rewards, device=device)
-        lastgaelam = torch.zeros(num_envs, device=device)
-        for t in reversed(range(num_steps)):
-            if t == num_steps - 1:
-                nextnonterminal = 1.0 - next_done
-                nextvalues = next_value
-            else:
-                nextnonterminal = 1.0 - dones[t + 1]
-                nextvalues = values[t + 1]
-            delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
-            lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
-            advantages[t] = lastgaelam
+        advantages = _compute_gae(
+            rewards,
+            values,
+            dones,
+            next_done,
+            next_value,
+            gamma=gamma,
+            gae_lambda=gae_lambda,
+        )
         returns = advantages + values
 
         b_obs = flatten_time_env_obs(obs_storage)
@@ -550,6 +607,11 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
         "algo_variant": config.get("algo_variant", config.get("algo", "ppo")),
         "seed": seed,
         "dataset_dir": str(config.get("dataset_path", "")),
+        "train_split": bundle.train_split if bundle else None,
+        "eval_split": bundle.eval_split if bundle else None,
+        "train_pool_sha256": bundle.train_pool_sha256 if bundle else None,
+        "eval_pool_sha256": bundle.eval_pool_sha256 if bundle else None,
+        "eval_puzzle_id_offset": bundle.eval_puzzle_id_offset if bundle else None,
         "action_space_n": bundle.num_actions if bundle else _config_int(config, "action_dim", 2),
         "train_steps": total_timesteps,
         "eval_freq": eval_interval,

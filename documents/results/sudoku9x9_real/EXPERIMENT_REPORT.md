@@ -145,8 +145,8 @@ track_theory_metrics: true
 
 **Why these settings:**
 - **Persistent z (`episodic_latent: false`)**: Maintains latent state across episode for long-term reasoning
-- **Contraction OFF**: Per `documents/CLAUDE.md` guidance for this experiment phase
-- **Value norm OFF**: Prevents target saturation (see `documents/CLAUDE.md` ablation notes)
+- **Contraction OFF**: Locked setting for this historical experiment phase
+- **Value norm OFF**: Historical ablation setting intended to prevent target saturation
 - **Projection R=10**: Constrains latent space for stability
 - **Small batch (64)**: Transformer + 81 tokens requires more memory than MLP
 

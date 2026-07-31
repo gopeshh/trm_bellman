@@ -35,7 +35,7 @@ from utils.lipschitz import compute_exact_baseline_summation
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_PAPER_ROOT = PROJECT_ROOT.parent / "UPI_TRM" / "UPI_TRM_NIPS"
+DEFAULT_PAPER_ROOT = PROJECT_ROOT.parent / "UPI_TRM" / "UPI_TRM_ICLR"
 DEFAULT_ALPHA_GRID = (0.05, 0.1, 0.2, 0.4)
 
 
@@ -266,26 +266,37 @@ def parse_checkpoint_step(checkpoint_path: Path) -> Optional[int]:
 
 def compute_action_mask(env: Any, x_batch: Dict[str, torch.Tensor], y_batch: torch.Tensor) -> torch.Tensor:
     if env.task_config is not None:
-        return env.task_config.compute_batch_action_mask(
+        mask = env.task_config.compute_batch_action_mask(
             x_batch["inputs"],
             int(env.vocab_size),
             int(env.stop_action_id),
             current_state=y_batch,
         )
-    return PlanEditEnv.compute_batch_action_mask(
-        x_batch["inputs"],
-        int(env.vocab_size),
-        int(env.stop_action_id),
-        stop_mode=env._stop_mode,
-    )
+    else:
+        mask = PlanEditEnv.compute_batch_action_mask(
+            x_batch["inputs"],
+            int(env.vocab_size),
+            int(env.stop_action_id),
+            stop_mode=env._stop_mode,
+        )
+    mask = mask.clone()
+    mask[..., int(env.stop_action_id)] = env._stop_mode != "disabled"
+    return mask
 
 
-def project_to_ball(z: torch.Tensor, radius: float) -> torch.Tensor:
+def project_joint_to_ball(
+    z_h: torch.Tensor,
+    z_l: torch.Tensor,
+    radius: float,
+) -> Tuple[torch.Tensor, torch.Tensor]:
     if radius <= 0.0:
-        return z
-    norm = z.norm(p=2, dim=(1, 2), keepdim=True).clamp(min=1e-8)
+        return z_h, z_l
+    norm = torch.sqrt(
+        z_h.pow(2).sum(dim=(1, 2), keepdim=True)
+        + z_l.pow(2).sum(dim=(1, 2), keepdim=True)
+    ).clamp(min=1e-8)
     scale = torch.clamp(radius / norm, max=1.0)
-    return z * scale
+    return z_h * scale, z_l * scale
 
 
 def combined_latent_norm(z_h: torch.Tensor, z_l: torch.Tensor) -> torch.Tensor:
@@ -379,8 +390,7 @@ def estimate_projection_terms(
     rho_r = float(pre_norms.min().item()) if pre_norms.numel() > 0 else math.inf
     active_count = int((pre_norms > radius).sum().item()) if radius > 0 else 0
 
-    z_h_post = project_to_ball(z_h_next, radius)
-    z_l_post = project_to_ball(z_l_next, radius)
+    z_h_post, z_l_post = project_joint_to_ball(z_h_next, z_l_next, radius)
 
     seq_len = int(z_h.shape[1])
     hidden_size = int(z_h.shape[2])
@@ -396,8 +406,9 @@ def estimate_projection_terms(
         z_h_pert = z_h + delta_h
         z_l_pert = z_l + delta_l
         z_h_next_p, z_l_next_p = manual_preprojection_update(model, x_batch, y_batch, z_h_pert, z_l_pert)
-        z_h_post_p = project_to_ball(z_h_next_p, radius)
-        z_l_post_p = project_to_ball(z_l_next_p, radius)
+        z_h_post_p, z_l_post_p = project_joint_to_ball(
+            z_h_next_p, z_l_next_p, radius
+        )
 
         diff_norm = combined_latent_norm(z_h_post_p - z_h_post, z_l_post_p - z_l_post)
         lz_post = max(lz_post, float((diff_norm / eps).max().item()))
@@ -423,7 +434,11 @@ def load_trainer_from_checkpoint(
     trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=torch.device(device))
     trainer.set_checker_fn(checker)
 
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(
+        checkpoint_path,
+        map_location=device,
+        weights_only=False,
+    )
     if not isinstance(checkpoint, dict) or "model_state_dict" not in checkpoint:
         raise RuntimeError(
             f"{checkpoint_path} is not a full RL checkpoint with model_state_dict / policy_state_dict payloads."
@@ -505,6 +520,7 @@ def compute_checkpoint_diagnostics(
                 gamma=gamma,
                 checker_fn=checker,
                 action_mask=action_mask,
+                policy_probs=old_probs,
             )
             exact_baseline_ref, q_all_ref = compute_exact_baseline_summation(
                 model=trainer.policy_model_old,
@@ -515,6 +531,7 @@ def compute_checkpoint_diagnostics(
                 gamma=gamma,
                 checker_fn=checker,
                 action_mask=action_mask,
+                policy_probs=old_probs,
             )
 
             q_valid_n = torch.where(action_mask, q_all_n, torch.zeros_like(q_all_n))
@@ -590,9 +607,7 @@ def compute_checkpoint_diagnostics(
                 device=str(device),
                 seed=rollout_seed,
             )
-            expected_adv_mean = expected_adv_sums[alpha] / float(total_states)
-            lhat_alpha = eta_old_proxy + expected_adv_mean / (1.0 - gamma)
-            gap_alpha = lhat_alpha - float(eta_alpha_stats.discounted_return_mean)
+            uniform_batch_advantage_mean = expected_adv_sums[alpha] / float(total_states)
 
             if l_z_post >= 1.0:
                 penalty = math.inf
@@ -608,12 +623,10 @@ def compute_checkpoint_diagnostics(
 
             alpha_metrics[f"{alpha:.2f}"] = {
                 "alpha": alpha,
-                "expected_adv_mean": expected_adv_mean,
+                "uniform_batch_advantage_mean": uniform_batch_advantage_mean,
                 "eta_proxy": float(eta_alpha_stats.discounted_return_mean),
                 "eta_proxy_std": float(eta_alpha_stats.discounted_return_std),
-                "lhat_alpha": lhat_alpha,
-                "surrogate_true_gap": gap_alpha,
-                "predicted_penalty": penalty,
+                "finite_batch_penalty_proxy": penalty,
             }
     finally:
         trainer.rl_cfg.mixture_alpha = orig_alpha
@@ -629,6 +642,8 @@ def compute_checkpoint_diagnostics(
         "projection_active_rate": projection_active / float(max(total_states, 1)),
         "eta_old_proxy": eta_old_proxy,
         "eta_old_proxy_std": float(eta_old_stats.discounted_return_std),
+        "state_weighting": "uniform_materialized_batch",
+        "is_discounted_occupancy": False,
         "alpha_grid": alpha_metrics,
     }
 

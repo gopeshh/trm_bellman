@@ -37,19 +37,27 @@ def _make_small_config():
 
 
 class TestLipschitzSpectralNorm(unittest.TestCase):
-    """Tests for Lipschitz spectral normalization."""
+    """Tests for contraction-oriented normalization components."""
 
-    def test_spectral_norm_is_applied_to_inner_and_value_head(self):
-        """Test that spectral normalization is applied to inner model and value head."""
+    def test_clamping_scaling_and_value_head_norm_are_applied(self):
+        """The recurrent path uses scaling; the value head retains spectral norm."""
         config = _make_small_config()
         model = TinyRecursiveReasoningModel_ACTV1(config)
 
-        has_sn_inner = False
-        for module in model.inner.modules():
-            if getattr(module, "weight_u", None) is not None and getattr(module, "weight_v", None) is not None:
-                has_sn_inner = True
-                break
-        self.assertTrue(has_sn_inner, "Expected at least one spectral-norm-wrapped linear in inner model")
+        reasoning_modules = [
+            module
+            for name, module in model.inner.named_modules()
+            if name.startswith("L_level") and hasattr(module, "weight")
+        ]
+        self.assertTrue(reasoning_modules)
+        self.assertTrue(
+            any(hasattr(module, "_inner_lip_scale") for module in reasoning_modules),
+            "Expected contraction scaling on the recurrent reasoning path",
+        )
+        self.assertFalse(
+            any(hasattr(module, "weight_u") for module in reasoning_modules),
+            "The recurrent path uses direct clamping, not spectral-norm wrappers",
+        )
 
         self.assertIsNotNone(model.value_head)
         has_sn_value = False

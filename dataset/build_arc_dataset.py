@@ -1,3 +1,4 @@
+import argparse
 from typing import List, Tuple, Dict
 from dataclasses import dataclass
 import os
@@ -5,13 +6,9 @@ import json
 import hashlib
 import numpy as np
 
-from argdantic import ArgParser
 from pydantic import BaseModel
 
 from dataset.common import PuzzleDatasetMetadata, dihedral_transform, inverse_dihedral_transform
-
-
-cli = ArgParser()
 
 
 class DataProcessConfig(BaseModel):
@@ -286,7 +283,7 @@ def convert_dataset(config: DataProcessConfig):
             
             for k, v in results.items():
                 if k in {"inputs", "labels"}:
-                    v = np.stack(v, 0)
+                    v = np.stack([np.asarray(item) for item in v], 0)
                 else:
                     v = np.array(v, dtype=np.int32)
                 
@@ -320,15 +317,21 @@ def convert_dataset(config: DataProcessConfig):
         json.dump(test_puzzles, f)
 
 
-@cli.command(singleton=True)
 def main(config: DataProcessConfig):
     convert_dataset(config)
 
 
 if __name__ == "__main__":
-    cli()
-
-
+    parser = argparse.ArgumentParser(description="Build an ARC puzzle dataset.")
+    parser.add_argument("--input-file-prefix", required=True)
+    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--subsets", nargs="+", required=True)
+    parser.add_argument("--test-set-name", required=True)
+    parser.add_argument("--test-set-name2", default="your_test_set")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--num-aug", type=int, default=1000)
+    parser.add_argument("--puzzle-identifiers-start", type=int, default=1)
+    main(DataProcessConfig(**vars(parser.parse_args())))
 
 
 

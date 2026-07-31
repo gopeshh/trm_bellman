@@ -21,7 +21,7 @@ import argparse
 import copy
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -57,7 +57,7 @@ def load_batch(dataset_path: str, batch_size: int = 4) -> Tuple[Dict, torch.Tens
     return x_batch, y_batch, vocab_size, seq_len
 
 
-def count_layers(model) -> Tuple[int, int, float]:
+def count_layers(model) -> Tuple[int, int, Optional[float]]:
     """Count SN layers, scaled layers, and get sample scale value."""
     sn_count = 0
     scale_count = 0

@@ -5,6 +5,12 @@ python_library(
     name = "dataset",
     srcs = glob(["dataset/*.py"]),
     base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/huggingface-hub:huggingface-hub",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/tqdm:tqdm",
+    ],
 )
 
 python_library(
@@ -12,6 +18,7 @@ python_library(
     srcs = glob(["models/*.py", "models/**/*.py"]),
     base_module = "",
     deps = [
+        ":utils",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/einops:einops",
@@ -45,10 +52,13 @@ python_library(
     srcs = glob(["evaluators/*.py"]),
     base_module = "",
     deps = [
+        ":dataset",
         ":models",
         ":utils",
         ":rl",
         "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numba:numba",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -377,6 +387,7 @@ python_unittest(
         ":evaluators",
         ":puzzle_dataset_lib",
         ":upi_trm_train_lib",
+        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
     ],
@@ -598,11 +609,71 @@ python_unittest(
     base_module = "",
     deps = [
         ":models",
+        ":puzzle_dataset_lib",
         ":rl",
         ":utils",
         ":evaluators",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+    ],
+)
+
+python_unittest(
+    name = "test_diagnostic_postprocess",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_diagnostic_postprocess_unittest.py",
+        "scripts/postprocess_episodic_z_hard_suite.py",
+    ],
+    base_module = "",
+)
+
+python_unittest(
+    name = "test_result_provenance",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_result_provenance_unittest.py",
+        "scripts/aggregate_exp1_results.py",
+        "scripts/aggregate_hard4x4_trusted_baselines.py",
+    ],
+    base_module = "",
+    resources = [
+        "README.md",
+        "AUDIT_REPORT.md",
+        "scripts/build_artifact_zip.sh",
+    ],
+    deps = [
+        ":utils",
+    ],
+)
+
+python_unittest(
+    name = "test_dataset_builders",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_dataset_builders_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":dataset",
+    ],
+)
+
+python_unittest(
+    name = "test_cleanrl_regressions",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_cleanrl_regressions_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":puzzle_dataset_lib",
+        ":rl",
+        "fbsource//third-party/pypi/gym:gym",
+        "fbsource//third-party/pypi/gymnasium:gymnasium",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
     ],
 )
 
@@ -693,7 +764,9 @@ python_unittest(
         "tests/test_config_integrity.py",
     ],
     base_module = "",
+    resources = ["README.md"] + glob(["configs/**/*.yaml"]),
     deps = [
+        ":rl",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
@@ -1438,6 +1511,7 @@ python_library(
     srcs = glob(["external_baselines/*.py"]),
     base_module = "",
     deps = [
+        ":utils",
         "fbsource//third-party/pypi/gym:gym",
         "fbsource//third-party/pypi/gymnasium:gymnasium",
         "fbsource//third-party/pypi/numpy:numpy",

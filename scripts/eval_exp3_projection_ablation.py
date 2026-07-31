@@ -42,14 +42,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 class NumpyEncoder(json.JSONEncoder):
     """Custom JSON encoder for numpy types."""
-    def default(self, obj):
-        if isinstance(obj, (np.bool_, np.integer)):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return super().default(obj)
+    def default(self, o: object) -> Any:
+        if isinstance(o, (np.bool_, np.integer)):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        return super().default(o)
 
 
 # =============================================================================
@@ -119,7 +119,7 @@ class ConditionResult:
     seeds: List[int]
 
     # Training metrics (averaged over seeds)
-    training: TrainingMetrics = None
+    training: Optional[TrainingMetrics] = None
 
     # Unroll sensitivity (at each depth)
     unroll_metrics: List[UnrollMetrics] = field(default_factory=list)

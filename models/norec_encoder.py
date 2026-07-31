@@ -226,6 +226,7 @@ class NoRecursionEncoder(nn.Module):
         super().__init__()
 
         self.config = config
+        self.encoder: MLPEncoder | TransformerEncoder
 
         # Create encoder based on type
         if config.encoder_type == "transformer":

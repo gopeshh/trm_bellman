@@ -342,9 +342,13 @@ class PPOTrainer:
         dones = torch.tensor(self.rollout_buffer.dones, dtype=torch.bool)
 
         # Get bootstrap value for last state
+        current_x = self._current_x
+        current_y = self._current_y
+        if current_x is None or current_y is None:
+            raise RuntimeError("Cannot bootstrap PPO returns before rollout initialization.")
         with torch.no_grad():
-            batch_x = self._prepare_batch_x(self._current_x)
-            batch_y = self._prepare_plan(self._current_y)
+            batch_x = self._prepare_batch_x(current_x)
+            batch_y = self._prepare_plan(current_y)
             last_value, _ = self.model.used_value(
                 batch_x, batch_y,
                 n=self.config.inner_unroll_n
@@ -526,7 +530,7 @@ class PPOTrainer:
         dataset: Any,
         checker: Any,
         num_episodes: Optional[int] = None,
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any]:
         """
         Evaluate the policy using greedy rollouts, returning success rate and mean score.
 

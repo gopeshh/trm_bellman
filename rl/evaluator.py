@@ -7,14 +7,13 @@ from typing import Any, Callable, Optional, Tuple
 
 import torch
 
-from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.sudoku_utils import sudoku_is_solved, sudoku_get_stats
 
 
 def evaluate_plan_policy_with_scores(
-    model: TinyRecursiveReasoningModel_ACTV1,
+    model: Any,
     dataset: Any,
     checker: Callable[[Any, Any], float],
     env_cfg: PlanEditEnvConfig,
@@ -24,6 +23,8 @@ def evaluate_plan_policy_with_scores(
     episodic_latent: bool = True,
     greedy: bool = True,
     use_sudoku_solved_criterion: bool = True,
+    policy_dist_fn: Optional[Callable[..., Tuple[Any, Any]]] = None,
+    allow_cycle: bool = False,
 ) -> Tuple[float, float, dict]:
     """
     Evaluate a TRM + policy head in plan space on a given dataset.
@@ -43,6 +44,12 @@ def evaluate_plan_policy_with_scores(
             If False, sample from the policy distribution (stochastic evaluation).
         use_sudoku_solved_criterion: If True (default), use sudoku_is_solved() to determine
             success (filled==N and violations==0). If False, use score matching.
+        policy_dist_fn: Optional deployed-policy callback. When supplied, evaluation
+            calls it instead of ``model.policy_dist``. This is required for an
+            explicit probability-space mixture represented by two networks.
+        allow_cycle: Permit repeated dataset records when ``num_episodes`` exceeds
+            the dataset size. Disabled by default to prevent accidental reuse of a
+            small evaluation pool.
 
     Returns:
         Tuple of (mean_checker_score, success_rate, detailed_stats)
@@ -61,6 +68,15 @@ def evaluate_plan_policy_with_scores(
             - final_zero_cand_mean: mean zero-candidate cells at episode end (Sudoku only)
     """
 
+    dataset_size = len(dataset)
+    if dataset_size == 0:
+        return 0.0, 0.0, {}
+    if num_episodes > dataset_size and not allow_cycle:
+        raise ValueError(
+            "Evaluation requested more episodes than distinct dataset records; "
+            f"refusing to cycle the pool ({num_episodes} > {dataset_size})."
+        )
+
     device = next(model.parameters()).device
     model.eval()
     env = PlanEditEnv(dataset=dataset, checker=checker, config=env_cfg, task_config=task_config)
@@ -73,10 +89,6 @@ def evaluate_plan_policy_with_scores(
 
     if inner_unroll_n is None:
         inner_unroll_n = 4
-
-    dataset_size = len(dataset)
-    if dataset_size == 0:
-        return 0.0, 0.0, {}
 
     num_solved = 0
     total_score = 0.0
@@ -96,7 +108,8 @@ def evaluate_plan_policy_with_scores(
 
     with torch.no_grad():
         for episode_idx in range(num_episodes):
-            x, y = env.reset(idx=episode_idx % dataset_size)
+            dataset_index = episode_idx % dataset_size if allow_cycle else episode_idx
+            x, y = env.reset(idx=dataset_index)
             done = False
             episode_return = 0.0
             episode_steps = 0
@@ -149,13 +162,28 @@ def evaluate_plan_policy_with_scores(
                     action_mask = action_mask.to(device)
 
                 # Pass z for persistent mode; z=None for episodic mode (reinitializes each step)
-                dist, z_new = model.policy_dist(batch_x, plan, n=inner_unroll_n, action_mask=action_mask, z=z)
+                if policy_dist_fn is None:
+                    dist, z_new = model.policy_dist(
+                        batch_x,
+                        plan,
+                        n=inner_unroll_n,
+                        action_mask=action_mask,
+                        z=z,
+                    )
+                else:
+                    dist, z_new = policy_dist_fn(
+                        batch_x,
+                        plan,
+                        n=inner_unroll_n,
+                        action_mask=action_mask,
+                        z=z,
+                    )
 
                 # Greedy (argmax) for deterministic evaluation; sample for stochastic
                 if greedy:
-                    action = dist.logits.argmax(dim=-1).item()
+                    action = int(dist.logits.argmax(dim=-1).item())
                 else:
-                    action = dist.sample().item()
+                    action = int(dist.sample().item())
 
                 if action_mask is not None:
                     if action < 0 or action >= action_mask.numel() or not bool(action_mask[action].item()):
@@ -235,7 +263,7 @@ def evaluate_plan_policy_with_scores(
 
 
 def evaluate_plan_policy(
-    model: TinyRecursiveReasoningModel_ACTV1,
+    model: Any,
     dataset: Any,
     checker: Callable[[Any, Any], float],
     env_cfg: PlanEditEnvConfig,
@@ -244,6 +272,7 @@ def evaluate_plan_policy(
     inner_unroll_n: Optional[int] = None,
     episodic_latent: bool = True,
     greedy: bool = True,
+    allow_cycle: bool = False,
 ) -> float:
     """
     Backwards-compatible wrapper that only returns the strict success rate.
@@ -252,6 +281,7 @@ def evaluate_plan_policy(
         episodic_latent: If True (default), reinitialize z each step.
             If False (persistent mode), carry z forward across steps.
         greedy: If True (default), use argmax for deterministic evaluation.
+        allow_cycle: Permit repeated dataset records. Disabled by default.
     """
 
     _, success_rate, _ = evaluate_plan_policy_with_scores(
@@ -264,5 +294,6 @@ def evaluate_plan_policy(
         inner_unroll_n=inner_unroll_n,
         episodic_latent=episodic_latent,
         greedy=greedy,
+        allow_cycle=allow_cycle,
     )
     return success_rate

@@ -81,18 +81,21 @@ def wilson_from_values(values: List[int]) -> Tuple[float, float, float]:
 # Data Loading
 # =============================================================================
 
-def load_per_state_csv(csv_path: str) -> List[Dict]:
+def load_per_state_csv(csv_path: str) -> List[Dict[str, float | str]]:
     """Load per-state CSV with proper type handling."""
-    rows = []
+    rows: List[Dict[str, float | str]] = []
     with open(csv_path, "r") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            parsed = {}
+            parsed: Dict[str, float | str] = {}
             for k, v in row.items():
+                if k is None or v is None:
+                    continue
+                key = str(k)
                 try:
-                    parsed[k] = float(v)
+                    parsed[key] = float(v)
                 except ValueError:
-                    parsed[k] = v
+                    parsed[key] = v
             rows.append(parsed)
     return rows
 
@@ -157,7 +160,7 @@ def _load_rows_into_data(csv_path: Path, model_data: Dict):
                 col_name = "saturation"
 
             if col_name in row:
-                val = row[col_name]
+                val = float(row[col_name])
                 # Skip N/A saturation values (R=0 case)
                 if metric == "saturated" and val < 0:
                     continue

@@ -34,6 +34,13 @@ tmp/
 temp/
 outputs/
 logs/
+*.profraw
+*.pid
+*.lock
+*.partial.*
+*.smoke.log
+/slurm_*.txt
+/*.log
 
 # Dataset artifacts (ignore by default, but allow small reproducibility datasets)
 datasets/
@@ -41,6 +48,7 @@ data/*
 !data/sudoku-4x4-trivial/
 *.zip
 artifact/*.zip
+artifact/*.zip.sha256
 *.tar
 *.tar.gz
 
@@ -65,7 +73,7 @@ dist/
 # ----------------------------
 # Cursor / Debug Logs
 # ----------------------------
-.cursor/debug.log
+.cursor/
 
 # ----------------------------
 # Keep run directories out of git, but allow small summaries
