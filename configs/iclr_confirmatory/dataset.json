@@ -1,0 +1,38 @@
+{
+  "artifact_schema_version": 1,
+  "build_config_sha256": "d5331bdd6c6602773ccc057287b268db29baa8d3e94fe8cfcc0985524c558db0",
+  "builder_commit": "94a7199260a7f8467907a56b0d0331d6d0a11f60",
+  "checksums_file_sha256": "a69c93bf9b26dd31fbfe82a758d58bdca95f1d25669d5573d0c5e00a0551e239",
+  "corpus_manifest_sha256": "54dc6d07958736cab347a24f008915ab807a9e939267144e8ffe46d9c00f62d2",
+  "dataset_root": "data/iclr-confirmatory-sudoku4x4-v1",
+  "domain": "sudoku_4x4",
+  "max_empty_cells": 8,
+  "min_empty_cells": 6,
+  "pairwise_input_overlap_count": 0,
+  "pairwise_record_overlap_count": 0,
+  "require_unique_solution": true,
+  "splits": {
+    "test": {
+      "count": 512,
+      "manifest_sha256": "163a083a9f5744b7cc485663b269b89acc3103d9e1ec64c7e93f78e36fa79d40",
+      "ordered_input_sha256": "14262b1edbc445295f52fec49cf74ba9c99aaad7b9ef0d15b02139c240f512b0",
+      "ordered_record_sha256": "f7a13446e4ffcc5db8d5aa3d17641e7e7851b63c540c80dbe4b12d60b31fad24",
+      "seed": 26080303
+    },
+    "train": {
+      "count": 1024,
+      "manifest_sha256": "8def4f59387c1ab9466d043c40a7fdd3c7c670e2778b8d949295811ae7b6088a",
+      "ordered_input_sha256": "2c914289f4272dbe437e37715dbc1d40b02de265fec7327a87a2102dbb853579",
+      "ordered_record_sha256": "94aa99e182b338a6238bd3a3db5c347bd28c0df07fb30b12e762ffc2ed2c1737",
+      "seed": 26080301
+    },
+    "validation": {
+      "count": 256,
+      "manifest_sha256": "4644a3b1bb8b6e384896888154c9e56252368c1fc2f32962b089ade95a5bc1f2",
+      "ordered_input_sha256": "81aad1fab292d12f5706180b5392793e0c6363c887e178891b9513f350fb6626",
+      "ordered_record_sha256": "2b3a5525d506c3078d9c1a1db184c1a48893cb97ee66c3128f8de516709bf21a",
+      "seed": 26080302
+    }
+  },
+  "status": "materialized_and_verified"
+}

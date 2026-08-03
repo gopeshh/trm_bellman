@@ -1,0 +1,22 @@
+{
+  "build_config_sha256": "d5331bdd6c6602773ccc057287b268db29baa8d3e94fe8cfcc0985524c558db0",
+  "build_schema_version": 1,
+  "builder": "dataset.build_iclr_confirmatory_4x4",
+  "manifest_schema_version": 1,
+  "pairwise_input_overlap_count": 0,
+  "pairwise_record_overlap_count": 0,
+  "split_manifests": {
+    "test": {
+      "path": "manifests/test.json",
+      "sha256": "163a083a9f5744b7cc485663b269b89acc3103d9e1ec64c7e93f78e36fa79d40"
+    },
+    "train": {
+      "path": "manifests/train.json",
+      "sha256": "8def4f59387c1ab9466d043c40a7fdd3c7c670e2778b8d949295811ae7b6088a"
+    },
+    "validation": {
+      "path": "manifests/validation.json",
+      "sha256": "4644a3b1bb8b6e384896888154c9e56252368c1fc2f32962b089ade95a5bc1f2"
+    }
+  }
+}

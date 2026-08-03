@@ -120,3 +120,16 @@ bridge, matched UPI-TRM/PPO runs, projection cross-design, and second domain
 remain missing experiments. The registered Sudoku matrix needs at least 245
 GPU-hours on the available single-GPU setup. Do not infer an outcome from
 smoke tests or from the historical 57.4% record.
+
+## Confirmatory dataset addendum
+
+The registered hard 4 by 4 Sudoku corpus is now materialized at
+`data/iclr-confirmatory-sudoku4x4-v1`. It contains 1,024/256/512 unique,
+pairwise-disjoint train/validation/test records with 6 to 8 empty cells and one
+valid completion. The exact producer commit, commands, ordered record hashes,
+split-manifest hashes, byte-identical rebuild, and validation results are in
+`reports/CONFIRMATORY_DATASET_REPORT.md`.
+
+This closes the raw data-materialization gate only. No training run has
+started. Exact-budget PPO, per-instance result retention, executable bridge
+and matched-comparison configs, and the registry lock remain open.

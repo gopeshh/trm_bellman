@@ -1,0 +1,38 @@
+{
+  "build_schema_version": 1,
+  "builder": "dataset.build_iclr_confirmatory_4x4",
+  "domain": "sudoku_4x4",
+  "empty_cells": {
+    "max": 8,
+    "min": 6
+  },
+  "producer_git_commit": "94a7199260a7f8467907a56b0d0331d6d0a11f60",
+  "require_unique_inputs": true,
+  "require_unique_records": true,
+  "require_unique_solution": true,
+  "runtime": {
+    "numpy_version": "2.2.1",
+    "python_implementation": "CPython",
+    "python_version": "3.12.13+meta"
+  },
+  "seed": 26080301,
+  "split_order": [
+    "train",
+    "validation",
+    "test"
+  ],
+  "splits": {
+    "test": {
+      "count": 512,
+      "seed": 26080303
+    },
+    "train": {
+      "count": 1024,
+      "seed": 26080301
+    },
+    "validation": {
+      "count": 256,
+      "seed": 26080302
+    }
+  }
+}

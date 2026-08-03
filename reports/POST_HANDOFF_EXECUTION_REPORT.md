@@ -118,3 +118,19 @@ hashes are in `reports/PERSISTENT_CHECKPOINT_DIAGNOSTICS_REPORT.md` and
 No learned checkpoint or hard held-out corpus was found. Consequently,
 historical persistent diagnostic values, the bridge result, and the matched
 PPO result remain not verifiable from supplied evidence.
+
+## Confirmatory dataset addendum
+
+After schema-v5 source identity was committed, a dedicated builder generated
+the registered 1,024/256/512 hard Sudoku train/validation/test corpus. It
+enforces 6 to 8 empty cells, one valid completion, unique input and record
+hashes, pairwise split disjointness, shared provenance hash functions,
+runtime-to-producer source equality, and atomic no-replace publication. A full
+detached-checkout rebuild was byte-identical. See
+`reports/CONFIRMATORY_DATASET_REPORT.md`.
+
+The earlier statement that the hard held-out corpus was absent is retained
+above as chronology. The corpus now exists, but no learned checkpoint or
+confirmatory result exists. The next blockers are exact-budget PPO,
+per-instance evaluation artifacts, complete cell configs, and a locked
+registry.
