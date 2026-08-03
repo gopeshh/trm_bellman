@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 import warnings
 
 from pydantic import BaseModel, Field
@@ -15,23 +15,22 @@ class RLConfig(BaseModel):
     - Theory-exact features
     - STOP action handling
     
-    THEORY ALIGNMENT NOTES (ICML 2026 Paper):
-    =========================================
-    For full theoretical guarantees (Theorem 5.9), you need:
-    
-    1. **Forward-invariant projection (Assumption 4.1):**
-       Set `latent_ball_radius > 0` (default: 10.0) to ensure z ∈ Z_inv
-       
-    2. **Exact baseline for O(α·ε_A) bound (Theorem 5.9) [KEY CONTRIBUTION]:**
+    FIXED-SNAPSHOT PROTOCOL NOTES:
+    ==============================
+    The primary finite-reference result does not require latent contraction.
+    For the exact centered CPI specialization, use:
+
+    1. **Exact baseline for the alpha-scaled advantage-error term:**
        Set `exact_baseline_summation=True` for discrete action spaces.
        This computes E_{a~π}[Q̂(s,a)] via exact summation, ensuring
        E_{a~π}[Â(s,a)] = 0 EXACTLY for each state s.
-       Without this, you get the weaker O(ε_A/(1-γ)) bound.
-       
-    3. **Contraction requirement (Assumption 4.2):**
-       Ensure `enable_contraction=True` and `target_Lz < 1.0`
-       
-    4. **Distillation warning (Section 6.5):**
+
+    2. **Fixed-base training:**
+       Set `training_protocol="fixed_base_exact"` with exact K-step targets,
+       exact mixture deployment, zero exploration mixture, and no scheduled
+       recurrent-map mutation.
+
+    3. **Distillation warning:**
        `distill_mixture_policy=True` is NOT covered by theory.
        The projection step introduces unanalyzed error.
     
@@ -133,9 +132,14 @@ class RLConfig(BaseModel):
     trust_region_kl: float = 0.01  # KL divergence threshold for trust-region updates (0 = disabled)
     enable_kl_trust_region: bool = False  # If True, apply KL penalty/early stopping in policy update
 
-    # Theory-exact toggles (Section 5 of paper)
+    # Theory-facing toggles
     exact_k_step_targets: bool = False  # If True, use fixed-horizon γ^K bootstrap in K-step value update
     distill_mixture_policy: bool = False  # If True, distill the mixture policy into policy_model_old
+
+    # Historical runs used the mutable ``legacy`` training path. The corrected
+    # fixed-base protocol must be selected explicitly so old checkpoints and
+    # configurations cannot be reinterpreted as theorem-facing runs.
+    training_protocol: Literal["legacy", "fixed_base_exact"] = "legacy"
     
     # === Theory-exact mixture mode (Issue 4 - CPI guarantee) ===
     # 
@@ -149,14 +153,11 @@ class RLConfig(BaseModel):
     #     - This is NOT equivalent to policy-space mixture after softmax
     #     - The CPI improvement guarantee does NOT strictly apply
     # 
-    # Theory-exact mode (theory_exact_mixture=True):
-    #     - Data collection uses policy-space mixture in _mixed_policy_dist()
-    #     - Does NOT update policy_model_old after policy update
-    #     - The deployed policy is the explicit mixture π_new for one fixed-base
-    #       CPI proposal. Multiple candidate-gradient steps do not recursively
-    #       promote π_new to become the next old policy.
-    #     - This matches the paper's one-step frozen-snapshot statement, not a
-    #       repeated exact CPI training theorem, and evaluates two networks.
+    # ``theory_exact_mixture`` selects exact probability-space deployment. It
+    # does not by itself fix the training protocol. Pair it with
+    # ``training_protocol="fixed_base_exact"`` to collect from one frozen base,
+    # train only a policy-independent value head, and optimize one candidate
+    # proposal without recursively promoting the mixture.
     # 
     # When distill_mixture_policy=True (Section 6.5):
     #     - The mixture is distilled into policy_model_old via KL minimization
@@ -300,6 +301,24 @@ class RLConfig(BaseModel):
             )
         if not 0.0 <= self.mixture_alpha <= 1.0:
             issues.append("mixture_alpha must lie in [0, 1] for a convex policy mixture.")
+
+        if self.training_protocol == "fixed_base_exact":
+            if not self.theory_exact_mixture:
+                issues.append(
+                    "fixed_base_exact requires theory_exact_mixture=True for "
+                    "probability-space proposal deployment."
+                )
+            if self.enable_contraction and self.opnorm_clamp_interval > 0:
+                issues.append(
+                    "fixed_base_exact requires opnorm_clamp_interval=0 because "
+                    "scheduled clamping would mutate the frozen recurrent map."
+                )
+        elif self.theory_exact_mixture:
+            issues.append(
+                "theory_exact_mixture=True with training_protocol='legacy' does "
+                "not implement fixed-base training; use fixed_base_exact for a "
+                "frozen one-step proposal."
+            )
         
         # Check distillation (Section 6.5)
         if self.distill_mixture_policy:
@@ -341,12 +360,14 @@ class RLConfig(BaseModel):
             "exact_baseline": self.exact_baseline_summation,
             "distillation_used": self.distill_mixture_policy,
             "theory_exact_mixture": self.theory_exact_mixture,
+            "training_protocol": self.training_protocol,
+            "fixed_base_proposal_exact": self.is_fixed_base_proposal_exact(),
             "specialization_notes": specialization_notes,
         }
-    
-    def is_theory_exact(self) -> bool:
+
+    def is_fixed_base_proposal_exact(self) -> bool:
         """
-        Check if configuration matches the paper's frozen one-step protocol.
+        Check whether configuration matches the frozen one-step proposal protocol.
         
         Returns True if configuration matches the exact CPI snapshot protocol.
         Projection and contraction are optional specializations of the finite-reference
@@ -361,10 +382,21 @@ class RLConfig(BaseModel):
         """
         return (
             0.0 < self.gamma < 1.0 and
+            self.training_protocol == "fixed_base_exact" and
             self.exact_k_step_targets and
             self.exact_baseline_summation and  # THE KEY REQUIREMENT for O(α·ε_A)
             self.theory_exact_mixture and  # Policy-space mixture for CPI guarantee
             not self.distill_mixture_policy and
             self.policy_epsilon == 0.0 and
-            0.0 <= self.mixture_alpha <= 1.0
+            0.0 <= self.mixture_alpha <= 1.0 and
+            (not self.enable_contraction or self.opnorm_clamp_interval == 0)
         )
+
+    def is_theory_exact(self) -> bool:
+        """Compatibility alias for the exact fixed-base proposal check.
+
+        This describes protocol mechanics only. It does not certify uniform
+        theorem assumptions or learned-model performance.
+        """
+
+        return self.is_fixed_base_proposal_exact()

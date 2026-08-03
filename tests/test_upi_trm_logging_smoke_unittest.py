@@ -3,6 +3,7 @@ Tests for UPI-TRM logging smoke test - unittest version.
 Converts pytest-style tests to unittest.TestCase for Buck2 compatibility.
 """
 
+import copy
 import json
 import random
 import tempfile
@@ -104,7 +105,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         )
 
     @staticmethod
-    def _make_persistent_budget_trainer():
+    def _make_persistent_budget_trainer(training_protocol="legacy"):
         class FixedDataset:
             seq_len = 2
             vocab_size = 4
@@ -158,9 +159,14 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             reward_shaping=False,
             fail_terminal_reward=-1.0,
             enable_contraction=False,
+            opnorm_clamp_interval=0,
             latent_ball_radius=0.0,
             lr_schedule="constant",
             use_tqdm=False,
+            training_protocol=training_protocol,
+            theory_exact_mixture=training_protocol == "fixed_base_exact",
+            exact_k_step_targets=training_protocol == "fixed_base_exact",
+            exact_baseline_summation=training_protocol == "fixed_base_exact",
         )
         model = TinyRecursiveReasoningModel_ACTV1(
             _tiny_trm_cfg(
@@ -401,9 +407,11 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             uninterrupted.policy_update.call_count, paused.policy_update.call_count
         )
 
-    def test_schema_v3_resume_continues_persistent_episode_exactly(self):
+    def test_schema_v4_fixed_base_resume_continues_persistent_episode_exactly(self):
         torch.manual_seed(404)
-        model, original, cfg = self._make_persistent_budget_trainer()
+        model, original, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact"
+        )
         provenance = self._checkpoint_provenance(original)
         self._stub_updates(original)
         random.seed(505)
@@ -411,12 +419,13 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         torch.manual_seed(505)
         original.train_step(max_env_steps_to_collect=1)
         saved_transition = original.replay.storage[0]
+        saved_step = original.get_env_step_count()
 
         with tempfile.TemporaryDirectory() as tmp:
             checkpoint_path = save_checkpoint(
                 model,
                 original,
-                step=original.get_env_step_count(),
+                step=saved_step,
                 checkpoint_dir=tmp,
                 rl_cfg=cfg,
                 dataset_provenance=provenance,
@@ -427,7 +436,9 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             expected_torch = torch.rand(4)
 
             torch.manual_seed(999)
-            restored_model, restored, _ = self._make_persistent_budget_trainer()
+            restored_model, restored, _ = self._make_persistent_budget_trainer(
+                "fixed_base_exact"
+            )
             self._stub_updates(restored)
             start_update = resume_from_checkpoint(
                 checkpoint_path,
@@ -435,6 +446,22 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 restored,
                 "cpu",
                 expected_dataset_provenance=provenance,
+            )
+
+            payload = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            self.assertEqual(payload["checkpoint_schema_version"], 4)
+            self.assertEqual(payload["training_protocol"], "fixed_base_exact")
+            self.assertEqual(
+                payload["rl_config"]["training_protocol"],
+                "fixed_base_exact",
+            )
+            self.assertEqual(payload["execution_device"], "cpu")
+            self.assertFalse(
+                (Path(tmp) / f"model_step_{saved_step}.pt").exists()
             )
 
             self.assertEqual(start_update, 0)
@@ -480,6 +507,53 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 map_location="cpu",
                 weights_only=False,
             )
+            schema3_payload = copy.deepcopy(payload)
+            schema3_payload["checkpoint_schema_version"] = 3
+            schema3_payload.pop("training_protocol", None)
+            schema3_payload["rl_config"].pop("training_protocol", None)
+            schema3_path = str(Path(tmp) / "schema3_legacy.pt")
+            torch.save(schema3_payload, schema3_path)
+
+            legacy_model, legacy_trainer, _ = self._make_persistent_budget_trainer()
+            start_step = resume_from_checkpoint(
+                schema3_path,
+                legacy_model,
+                legacy_trainer,
+                "cpu",
+                expected_dataset_provenance=self._checkpoint_provenance(trainer),
+            )
+            self.assertEqual(start_step, 0)
+
+            fixed_model, fixed_trainer, _ = self._make_persistent_budget_trainer(
+                "fixed_base_exact"
+            )
+            with patch.object(
+                fixed_model,
+                "load_state_dict",
+                wraps=fixed_model.load_state_dict,
+            ) as model_load, patch.object(
+                fixed_trainer.value_opt,
+                "load_state_dict",
+                wraps=fixed_trainer.value_opt.load_state_dict,
+            ) as optimizer_load, patch.object(
+                fixed_trainer.replay,
+                "clear",
+                wraps=fixed_trainer.replay.clear,
+            ) as replay_clear:
+                with self.assertRaisesRegex(RuntimeError, "Schema-v3"):
+                    resume_from_checkpoint(
+                        schema3_path,
+                        fixed_model,
+                        fixed_trainer,
+                        "cpu",
+                        expected_dataset_provenance=self._checkpoint_provenance(
+                            fixed_trainer
+                        ),
+                    )
+            model_load.assert_not_called()
+            optimizer_load.assert_not_called()
+            replay_clear.assert_not_called()
+
             payload["checkpoint_schema_version"] = 2
             legacy_path = str(Path(tmp) / "legacy.pt")
             torch.save(payload, legacy_path)
@@ -511,6 +585,30 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             self.assertEqual(warm_trainer.get_env_step_count(), 0)
             self.assertEqual(len(warm_trainer.replay), 0)
             self.assertIsNone(warm_trainer._active_episode)
+
+    def test_fixed_base_checkpoint_rejects_stale_single_model_artifact(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            stale_path = Path(tmp) / "model_step_2.pt"
+            stale_path.write_bytes(b"stale legacy weights")
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "stale single-model artifact",
+            ):
+                save_checkpoint(
+                    model,
+                    trainer,
+                    step=3,
+                    checkpoint_dir=tmp,
+                    rl_cfg=cfg,
+                    dataset_provenance=self._checkpoint_provenance(trainer),
+                )
+
+            self.assertEqual(stale_path.read_bytes(), b"stale legacy weights")
+            self.assertFalse((Path(tmp) / "rl_checkpoint_step_3.pt").exists())
 
     def test_checkpoint_roundtrip_restores_target_replay_and_counters(self):
         dataset = DummyPuzzleDataset(num_instances=4, seq_len=8, vocab_size=16)
@@ -563,7 +661,9 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 map_location="cpu",
                 weights_only=False,
             )
-            self.assertEqual(checkpoint_payload["checkpoint_schema_version"], 3)
+            self.assertEqual(checkpoint_payload["checkpoint_schema_version"], 4)
+            self.assertEqual(checkpoint_payload["training_protocol"], "legacy")
+            self.assertTrue((Path(tmp) / "model_step_7.pt").exists())
             self.assertEqual(checkpoint_payload["dataset_provenance"], provenance)
             self.assertIn("rng_state", checkpoint_payload)
 
@@ -696,6 +796,107 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             np.testing.assert_array_equal(numpy_rng_after[1], numpy_rng_before[1])
             self.assertEqual(numpy_rng_after[2:], numpy_rng_before[2:])
             torch.testing.assert_close(torch.random.get_rng_state(), torch_rng_before)
+
+    def test_resume_preflights_environment_before_mutating_model(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer()
+        provenance = self._checkpoint_provenance(trainer)
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=0,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+            )
+            payload = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            payload["trainer_state"]["environment_state"]["config"][
+                "max_edits"
+            ] += 1
+            corrupt_path = str(Path(tmp) / "bad_environment.pt")
+            torch.save(payload, corrupt_path)
+
+            restored_model, restored, _ = self._make_persistent_budget_trainer()
+            with patch.object(
+                restored_model,
+                "load_state_dict",
+                wraps=restored_model.load_state_dict,
+            ) as model_load, patch.object(
+                restored.value_opt,
+                "load_state_dict",
+                wraps=restored.value_opt.load_state_dict,
+            ) as optimizer_load, patch.object(
+                restored.replay,
+                "clear",
+                wraps=restored.replay.clear,
+            ) as replay_clear, patch(
+                "upi_trm_train._restore_rng_state"
+            ) as restore_rng:
+                with self.assertRaisesRegex(RuntimeError, "configuration mismatch"):
+                    resume_from_checkpoint(
+                        corrupt_path,
+                        restored_model,
+                        restored,
+                        "cpu",
+                        expected_dataset_provenance=provenance,
+                    )
+
+            model_load.assert_not_called()
+            optimizer_load.assert_not_called()
+            replay_clear.assert_not_called()
+            restore_rng.assert_not_called()
+
+    def test_resume_rejects_execution_device_mismatch_before_mutation(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer()
+        provenance = self._checkpoint_provenance(trainer)
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=0,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+            )
+            payload = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            payload["execution_device"] = "cuda:0"
+            mismatch_path = str(Path(tmp) / "bad_device.pt")
+            torch.save(payload, mismatch_path)
+
+            restored_model, restored, _ = self._make_persistent_budget_trainer()
+            with patch.object(
+                restored_model,
+                "load_state_dict",
+                wraps=restored_model.load_state_dict,
+            ) as model_load, patch.object(
+                restored.value_opt,
+                "load_state_dict",
+                wraps=restored.value_opt.load_state_dict,
+            ) as optimizer_load, patch.object(
+                restored.replay,
+                "clear",
+                wraps=restored.replay.clear,
+            ) as replay_clear:
+                with self.assertRaisesRegex(RuntimeError, "execution device"):
+                    resume_from_checkpoint(
+                        mismatch_path,
+                        restored_model,
+                        restored,
+                        "cpu",
+                        expected_dataset_provenance=provenance,
+                    )
+
+            model_load.assert_not_called()
+            optimizer_load.assert_not_called()
+            replay_clear.assert_not_called()
 
 
 if __name__ == "__main__":

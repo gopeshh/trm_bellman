@@ -142,6 +142,9 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
         distill_mixture_policy=False,
         exact_baseline_summation=False,
         exact_k_step_targets=False,
+        training_protocol="legacy",
+        enable_contraction=True,
+        opnorm_clamp_interval=100,
     ):
         dataset = DummyPuzzleDataset(num_instances=6, seq_len=8, vocab_size=12)
         env_cfg = PlanEditEnvConfig(
@@ -168,6 +171,9 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
             distill_mixture_policy=distill_mixture_policy,
             exact_baseline_summation=exact_baseline_summation,
             exact_k_step_targets=exact_k_step_targets,
+            training_protocol=training_protocol,
+            enable_contraction=enable_contraction,
+            opnorm_clamp_interval=opnorm_clamp_interval,
         )
         model = TinyRecursiveReasoningModel_ACTV1(
             _tiny_trm_cfg(
@@ -210,6 +216,9 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
             theory_exact_mixture=True,
             exact_baseline_summation=True,
             exact_k_step_targets=True,
+            training_protocol="fixed_base_exact",
+            enable_contraction=False,
+            opnorm_clamp_interval=0,
         )
         trainer.set_checker_fn(dummy_checker)
         trainer.collect_episode()
@@ -220,7 +229,7 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
         self.assertTrue(math.isfinite(result["loss_policy"]))
 
     def test_exact_mixture_evaluation_uses_deployed_policy_callback(self):
-        trainer, dataset = self._make_trainer(theory_exact_mixture=True)
+        trainer, dataset = self._make_fixed_base_trainer()
 
         def consume_evaluation_rng(*args, **kwargs):
             torch.rand(3)
@@ -245,7 +254,7 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
         self.assertIs(callback.__self__, trainer)
         self.assertIs(callback.__func__, trainer._mixed_policy_dist.__func__)
 
-    def test_exact_actor_is_insulated_until_post_value_snapshot_sync(self):
+    def test_legacy_exact_actor_is_insulated_until_post_value_snapshot_sync(self):
         trainer, _ = self._make_trainer(theory_exact_mixture=True)
         trainer.collect_episode()
 
@@ -284,7 +293,7 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
         self.assertEqual(observed_insulation, [True])
         torch.testing.assert_close(old_parameter, critic_parameter)
 
-    def test_exact_snapshot_copies_nonpolicy_state_and_preserves_policy_heads(self):
+    def test_legacy_exact_snapshot_copies_nonpolicy_state_and_preserves_policy_heads(self):
         trainer, _ = self._make_trainer(theory_exact_mixture=True)
         for actor in (
             trainer.model,
@@ -325,7 +334,7 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
         for name, value in trainer.policy_model_candidate.edit_policy.state_dict().items():
             torch.testing.assert_close(value, candidate_head_before[name])
 
-    def test_exact_clamp_precedes_target_snapshot_and_policy_update(self):
+    def test_legacy_exact_clamp_precedes_target_snapshot_and_policy_update(self):
         trainer, _ = self._make_trainer(theory_exact_mixture=True)
         trainer.rl_cfg.enable_contraction = True
         trainer.rl_cfg.opnorm_clamp_interval = 1
@@ -391,6 +400,133 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
             restrict_to_reasoning_layers=True,
         )
         self.assertEqual(events, ["clamp", "target", "actors", "policy"])
+
+    def _make_fixed_base_trainer(self, *, episodic_latent=True):
+        return self._make_trainer(
+            episodic_latent=episodic_latent,
+            theory_exact_mixture=True,
+            exact_baseline_summation=True,
+            exact_k_step_targets=True,
+            training_protocol="fixed_base_exact",
+            enable_contraction=False,
+            opnorm_clamp_interval=0,
+        )
+
+    def test_fixed_base_optimizer_owns_only_value_head(self):
+        trainer, _ = self._make_fixed_base_trainer()
+        optimizer_ids = {
+            id(parameter)
+            for group in trainer.value_opt.param_groups
+            for parameter in group["params"]
+        }
+        expected_ids = {
+            id(parameter)
+            for name, parameter in trainer.model.named_parameters()
+            if name.startswith("value_head.")
+        }
+
+        self.assertEqual(optimizer_ids, expected_ids)
+        self.assertTrue(expected_ids)
+        self.assertTrue(
+            all(
+                parameter.requires_grad == name.startswith("value_head.")
+                for name, parameter in trainer.model.named_parameters()
+            )
+        )
+        self.assertFalse(
+            any(parameter.requires_grad for parameter in trainer.policy_model_old.parameters())
+        )
+        self.assertTrue(
+            all(
+                parameter.requires_grad == name.startswith("edit_policy.")
+                for name, parameter in trainer.policy_model_candidate.named_parameters()
+            )
+        )
+
+    def test_fixed_base_collection_uses_old_policy_not_deployed_mixture(self):
+        trainer, _ = self._make_fixed_base_trainer(episodic_latent=False)
+        original_old_policy_dist = trainer.policy_model_old.policy_dist
+        with patch.object(
+            trainer.model,
+            "init_latent",
+            side_effect=AssertionError("critic initialized persistent actor state"),
+        ), patch.object(
+            trainer.policy_model_old,
+            "policy_dist",
+            wraps=original_old_policy_dist,
+        ) as old_policy_dist, patch.object(
+            trainer,
+            "_mixed_policy_dist",
+            side_effect=AssertionError("deployed mixture used for collection"),
+        ):
+            trainer.collect_episode(max_env_steps=1)
+
+        self.assertGreaterEqual(old_policy_dist.call_count, 1)
+        transition = trainer.replay.storage[0]
+        batched = trainer._state_is_batched(transition.x)
+        x_batch = trainer._prepare_batch_x(transition.x, batched=batched)
+        y_batch = trainer._prepare_plan(transition.y, batched=batched)
+        action_mask = trainer._compute_training_action_mask(x_batch, y_batch)
+        with torch.no_grad():
+            old_dist, _ = original_old_policy_dist(
+                x_batch,
+                y_batch,
+                n=trainer.rl_cfg.inner_unroll_n,
+                action_mask=action_mask,
+                z=transition.latent,
+            )
+            expected_log_prob = old_dist.log_prob(
+                transition.action.to(trainer.device).reshape(1)
+            ).cpu().reshape(())
+        torch.testing.assert_close(transition.behavior_log_prob, expected_log_prob)
+
+    def test_fixed_base_stays_frozen_across_outer_updates(self):
+        trainer, _ = self._make_fixed_base_trainer()
+        trainer.set_checker_fn(dummy_checker)
+        base_before = {
+            name: value.detach().clone()
+            for name, value in trainer.policy_model_old.state_dict().items()
+            if not name.startswith("value_head.")
+        }
+        critic_map_before = {
+            name: value.detach().clone()
+            for name, value in trainer.model.state_dict().items()
+            if not name.startswith(("value_head.", "edit_policy."))
+        }
+
+        trainer.train_step()
+        trainer.train_step()
+
+        for name, expected in base_before.items():
+            torch.testing.assert_close(
+                trainer.policy_model_old.state_dict()[name], expected
+            )
+        for name, expected in critic_map_before.items():
+            torch.testing.assert_close(trainer.model.state_dict()[name], expected)
+        for name, base_value in trainer.policy_model_old.state_dict().items():
+            if name.startswith(("value_head.", "edit_policy.")):
+                continue
+            torch.testing.assert_close(
+                trainer.policy_model_candidate.state_dict()[name], base_value
+            )
+        for actor in (trainer.policy_model_old, trainer.policy_model_candidate):
+            for name, value in trainer.model.value_head.state_dict().items():
+                torch.testing.assert_close(actor.value_head.state_dict()[name], value)
+
+    def test_fixed_base_rejects_scheduled_clamp_and_sparse_optimizer(self):
+        with self.assertRaisesRegex(ValueError, "fixed_base_exact"):
+            self._make_trainer(
+                theory_exact_mixture=True,
+                exact_baseline_summation=True,
+                exact_k_step_targets=True,
+                training_protocol="fixed_base_exact",
+                enable_contraction=True,
+                opnorm_clamp_interval=1,
+            )
+
+        trainer, _ = self._make_fixed_base_trainer()
+        with self.assertRaisesRegex(ValueError, "trainable puzzle embeddings"):
+            trainer.set_puzzle_embedding_optimizer(object())
 
     def test_advantage_clipping_preserves_statewise_centering(self):
         advantages = torch.tensor([[20.0, -180.0, 999.0]])

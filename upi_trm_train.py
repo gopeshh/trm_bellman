@@ -1,5 +1,6 @@
 
 import argparse
+import copy
 import logging
 import os
 import random
@@ -35,6 +36,7 @@ from models.sparse_embedding import CastedSparseEmbeddingSignSGD_Distributed
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.upi_trm_trainer import UPITrmTrainer
+from rl.replay import ReplayBuffer
 from rl.algos.ppo import PPOTrainer, PPOConfig
 from rl.algos.a2c import A2CTrainer, A2CConfig
 from rl.algos.dqn import DQNTrainer, DQNConfig
@@ -469,6 +471,16 @@ def _config_dict(config: Any) -> Dict[str, Any]:
     raise TypeError("Checkpoint configuration must be a Pydantic model or dictionary.")
 
 
+def _canonical_device(device: Any) -> str:
+    resolved = torch.device(device)
+    if resolved.type == "cuda":
+        index = resolved.index
+        if index is None:
+            index = torch.cuda.current_device()
+        return f"cuda:{index}"
+    return str(resolved)
+
+
 def save_checkpoint(
     model: nn.Module,
     trainer: "UPITrmTrainer",
@@ -495,14 +507,14 @@ def save_checkpoint(
     """
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    is_exact_upi_checkpoint = isinstance(trainer, UPITrmTrainer)
-    if is_exact_upi_checkpoint and dataset_provenance is None:
+    is_upi_checkpoint = isinstance(trainer, UPITrmTrainer)
+    if is_upi_checkpoint and dataset_provenance is None:
         raise RuntimeError(
-            "Schema-v3 exact checkpoints require dataset provenance."
+            "Schema-v4 UPI checkpoints require dataset provenance."
         )
     canonical_dataset_provenance: Optional[Dict[str, Any]] = None
     if dataset_provenance is not None:
-        if is_exact_upi_checkpoint:
+        if is_upi_checkpoint:
             canonical_dataset_provenance = validate_dataset_provenance(
                 dataset_provenance
             )
@@ -511,9 +523,46 @@ def save_checkpoint(
             # optional metadata without presenting it as exact-resume identity.
             canonical_dataset_provenance = dict(dataset_provenance)
 
+    trainer_rl_cfg = getattr(trainer, "rl_cfg", None)
+    if is_upi_checkpoint:
+        if trainer_rl_cfg is None:
+            raise RuntimeError("UPI checkpoint requires the trainer RL configuration.")
+        if rl_cfg is not None and _config_dict(rl_cfg) != _config_dict(trainer_rl_cfg):
+            raise RuntimeError(
+                "Caller RL configuration differs from the active trainer configuration."
+            )
+        effective_rl_cfg = trainer_rl_cfg
+    else:
+        effective_rl_cfg = rl_cfg if rl_cfg is not None else trainer_rl_cfg
+    if effective_rl_cfg is None:
+        raise RuntimeError("Checkpoint requires the active RL configuration.")
+    training_protocol = (
+        str(getattr(effective_rl_cfg, "training_protocol", "legacy"))
+        if is_upi_checkpoint
+        else "weights_only"
+    )
+    model_path = os.path.join(checkpoint_dir, f"model_step_{step}.pt")
+    stale_model_paths = sorted(
+        os.path.join(checkpoint_dir, name)
+        for name in os.listdir(checkpoint_dir)
+        if name.startswith("model_step_") and name.endswith(".pt")
+    )
+    if training_protocol == "fixed_base_exact" and stale_model_paths:
+        raise RuntimeError(
+            "Refusing fixed-base checkpoint save because stale single-model "
+            f"artifacts exist: {stale_model_paths}"
+        )
+
+    try:
+        execution_device = _canonical_device(next(model.parameters()).device)
+    except StopIteration:
+        execution_device = "cpu"
+
     rng_state = _capture_rng_state()
     checkpoint = {
-        "checkpoint_schema_version": 3 if is_exact_upi_checkpoint else 2,
+        "checkpoint_schema_version": 4 if is_upi_checkpoint else 2,
+        "training_protocol": training_protocol,
+        "execution_device": execution_device,
         "trainer_kind": type(trainer).__name__,
         "step": step,
         "progress": {
@@ -537,10 +586,7 @@ def save_checkpoint(
     if hasattr(trainer, "target_model") and trainer.target_model is not None:
         checkpoint["target_model_state_dict"] = trainer.target_model.state_dict()
 
-    # Save RL config for reproducibility and correct eval loading
-    effective_rl_cfg = rl_cfg if rl_cfg is not None else getattr(trainer, "rl_cfg", None)
-    if effective_rl_cfg is None:
-        raise RuntimeError("Exact checkpoint requires the active RL configuration.")
+    # Save RL config for reproducibility and correct eval loading.
     checkpoint["rl_config"] = _config_dict(effective_rl_cfg)
 
     # Save optimizer states - different trainers have different optimizer structures
@@ -584,7 +630,7 @@ def save_checkpoint(
         "plan_changes": list(getattr(trainer, "_plan_changes", [])),
         "value_of_memory": list(getattr(trainer, "_value_of_memory", [])),
     }
-    if is_exact_upi_checkpoint:
+    if is_upi_checkpoint:
         checkpoint["trainer_state"].update(
             {
                 "collection_state": trainer.collection_checkpoint_state(),
@@ -594,7 +640,7 @@ def save_checkpoint(
     else:
         print(
             "[Checkpoint] Baseline trainer checkpoint is weights-only for future "
-            "warm starts; exact resume requires the schema-v3 UPI path."
+            "warm starts; exact resume requires the schema-v4 UPI path."
         )
 
     # Replay is required for a semantic resume. It can make checkpoints large,
@@ -609,9 +655,11 @@ def save_checkpoint(
         torch.save(checkpoint, path)
         print(f"[Checkpoint] Saved to {path}")
 
-        # Also save just the model weights for easy loading
-        model_path = os.path.join(checkpoint_dir, f"model_step_{step}.pt")
-        torch.save(model.state_dict(), model_path)
+        # A single state dict cannot represent an exact old/candidate mixture.
+        # Keep the convenient weights-only artifact only for protocols whose
+        # deployed policy is a single model.
+        if training_protocol != "fixed_base_exact":
+            torch.save(model.state_dict(), model_path)
     except Exception as e:
         print(f"[Checkpoint] Warning: Failed to save checkpoint: {e}")
         print("[Checkpoint] Continuing training without saving...")
@@ -665,9 +713,9 @@ def resume_from_checkpoint(
             "start."
             + legacy_flag_note
         )
-    if schema_version != 3:
+    if schema_version not in (3, 4):
         raise RuntimeError(
-            f"Unsupported checkpoint schema version {schema_version}; expected 3."
+            f"Unsupported checkpoint schema version {schema_version}; expected 3 or 4."
         )
     if checkpoint.get("trainer_kind") != type(trainer).__name__:
         raise RuntimeError(
@@ -675,9 +723,51 @@ def resume_from_checkpoint(
             f"{checkpoint.get('trainer_kind')!r} != {type(trainer).__name__!r}."
         )
 
+    active_protocol = str(getattr(trainer.rl_cfg, "training_protocol", "legacy"))
+    saved_rl_config = checkpoint.get("rl_config")
+    if not isinstance(saved_rl_config, dict):
+        raise RuntimeError(f"Schema-v{schema_version} checkpoint is missing RL config.")
+    saved_rl_config = dict(saved_rl_config)
+    if schema_version == 3:
+        if active_protocol != "legacy":
+            raise RuntimeError(
+                "Schema-v3 checkpoints predate fixed-base protocol identity and "
+                "cannot resume into fixed_base_exact."
+            )
+        saved_protocol = "legacy"
+        saved_rl_config.setdefault("training_protocol", "legacy")
+    else:
+        saved_protocol = checkpoint.get("training_protocol")
+        nested_protocol = saved_rl_config.get("training_protocol")
+        if not isinstance(saved_protocol, str) or not isinstance(nested_protocol, str):
+            raise RuntimeError("Schema-v4 checkpoint is missing training protocol identity.")
+        if saved_protocol != nested_protocol:
+            raise RuntimeError(
+                "Checkpoint top-level and nested training protocols disagree."
+            )
+        if saved_protocol != active_protocol:
+            raise RuntimeError(
+                "Checkpoint training protocol does not match the active trainer."
+            )
+
+        saved_device = checkpoint.get("execution_device")
+        try:
+            active_device = _canonical_device(next(model.parameters()).device)
+        except StopIteration:
+            active_device = "cpu"
+        requested_device = _canonical_device(device)
+        if requested_device != active_device:
+            raise RuntimeError(
+                "Requested resume device does not match the active model device."
+            )
+        if not isinstance(saved_device, str) or saved_device != active_device:
+            raise RuntimeError(
+                "Checkpoint execution device does not match the active model device."
+            )
+
     rng_state = checkpoint.get("rng_state")
     if not isinstance(rng_state, dict):
-        raise RuntimeError("Schema-v3 checkpoint is missing RNG state.")
+        raise RuntimeError(f"Schema-v{schema_version} checkpoint is missing RNG state.")
     cuda_rng_state = rng_state.get("torch_cuda")
     if cuda_rng_state is not None:
         if not torch.cuda.is_available():
@@ -694,7 +784,7 @@ def resume_from_checkpoint(
     checkpoint_provenance = checkpoint.get("dataset_provenance")
     if expected_dataset_provenance is None:
         raise RuntimeError(
-            "Schema-v3 exact resume requires current dataset provenance."
+            f"Schema-v{schema_version} exact resume requires current dataset provenance."
         )
     if not isinstance(checkpoint_provenance, dict):
         raise RuntimeError(
@@ -709,7 +799,6 @@ def resume_from_checkpoint(
     except DatasetProvenanceError as exc:
         raise RuntimeError(str(exc)) from exc
 
-    saved_rl_config = checkpoint.get("rl_config")
     current_rl_config = _config_dict(trainer.rl_cfg)
     if saved_rl_config != current_rl_config:
         raise RuntimeError(
@@ -735,13 +824,15 @@ def resume_from_checkpoint(
     missing = sorted(required_top_level - set(checkpoint))
     if missing:
         raise RuntimeError(
-            f"Schema-v3 checkpoint is missing required fields: {missing}."
+            f"Schema-v{schema_version} checkpoint is missing required fields: {missing}."
         )
     if not isinstance(progress, dict) or not isinstance(trainer_state, dict):
-        raise RuntimeError("Schema-v3 checkpoint is missing progress or trainer state.")
+        raise RuntimeError(
+            f"Schema-v{schema_version} checkpoint is missing progress or trainer state."
+        )
     if "environment_state" not in trainer_state or "collection_state" not in trainer_state:
         raise RuntimeError(
-            "Schema-v3 checkpoint is missing live environment or collector state."
+            f"Schema-v{schema_version} checkpoint is missing live environment or collector state."
         )
     if int(checkpoint["replay_capacity"]) != int(trainer.replay.storage.maxlen):
         raise RuntimeError(
@@ -782,6 +873,19 @@ def resume_from_checkpoint(
             raise RuntimeError(
                 f"Checkpoint field {field!r} does not match the active trainer."
             )
+
+    # Validate nested mutable state on isolated shells before restoring any live
+    # module, optimizer, replay, environment, collector, or RNG state.
+    environment_probe = copy.copy(trainer.env)
+    environment_probe.load_checkpoint_state(trainer_state["environment_state"])
+    replay_probe = ReplayBuffer(capacity=int(checkpoint["replay_capacity"]))
+    for transition in replay_transitions:
+        replay_probe.add(transition)
+    trainer_probe = copy.copy(trainer)
+    trainer_probe.env = environment_probe
+    trainer_probe.replay = replay_probe
+    trainer_probe._next_episode_id = int(trainer_state["next_episode_id"])
+    trainer_probe.load_collection_checkpoint_state(trainer_state["collection_state"])
 
     model.load_state_dict(checkpoint["model_state_dict"])
     trainer.policy_model_old.load_state_dict(checkpoint["policy_model_old_state_dict"])
@@ -1635,7 +1739,16 @@ def main():
     # === Setup puzzle embedding optimizer (separate from main optimizer) ===
     puzzle_emb_optimizer = None
     puzzle_emb_optimizer_managed_by_trainer = False
-    if puzzle_emb_ndim > 0 and hasattr(model, "inner") and hasattr(model.inner, "puzzle_emb"):
+    fixed_base_exact = (
+        isinstance(trainer, UPITrmTrainer)
+        and getattr(rl_cfg, "training_protocol", "legacy") == "fixed_base_exact"
+    )
+    if fixed_base_exact and puzzle_emb_ndim > 0:
+        print(
+            "[INFO] Puzzle embeddings are frozen under fixed_base_exact; "
+            "no sparse optimizer is attached."
+        )
+    elif puzzle_emb_ndim > 0 and hasattr(model, "inner") and hasattr(model.inner, "puzzle_emb"):
         # Use SignSGD for sparse puzzle embeddings (same as pretrain.py)
         puzzle_emb_optimizer = CastedSparseEmbeddingSignSGD_Distributed(
             model.inner.puzzle_emb.buffers(),
@@ -1689,7 +1802,7 @@ def main():
         validation = rl_cfg.validate_theory_alignment(warn=False)  # Get results without duplicate warnings
 
         if validation["theory_aligned"]:
-            print("✓ Configuration aligns with theoretical guarantees")
+            print("✓ Configuration matches the frozen proposal protocol")
         else:
             print("⚠ Configuration has theory gaps:")
             for issue in validation["issues"]:
@@ -1701,7 +1814,10 @@ def main():
         print("  Global contraction certified: ✗ (local proxies are not a certificate)")
         print(f"  Exact baseline (Thm 5.9): {'✓' if validation['exact_baseline'] else '✗'}")
         print(f"  Distillation (not in theory): {'✗ ENABLED' if validation['distillation_used'] else '✓ disabled'}")
-        print(f"\nIs theory-exact: {rl_cfg.is_theory_exact()}")
+        print(
+            "\nFixed-base proposal protocol exact: "
+            f"{rl_cfg.is_fixed_base_proposal_exact()}"
+        )
         print("="*60 + "\n")
 
         print("UPI-TRM theoretical dials:")
@@ -1757,7 +1873,7 @@ def main():
             "num_identifiers": num_identifiers,
             "num_actions": rl_num_actions,
             "device": str(device),
-            "theory_exact": rl_cfg.is_theory_exact(),
+            "fixed_base_proposal_exact": rl_cfg.is_fixed_base_proposal_exact(),
             # Model architecture
             "hidden_size": hidden_size,
             "h_cycles": args.h_cycles,

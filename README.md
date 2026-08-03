@@ -17,10 +17,12 @@ The July 2026 correctness audit repaired the following implementation paths:
 - exact-mixture evaluation evaluates the mixture, not only its old-policy component;
 - evaluation uses a private seeded RNG stream and cannot perturb later training samples;
 - exact per-state advantages remain centered after clipping;
-- exact-mixture actors share the post-value-update, post-clamp recurrent snapshot;
+- fixed-base training collects from one frozen base actor, updates only the
+  policy-independent value head, and evaluates the explicit proposal mixture;
 - projection and projection diagnostics use the same joint latent norm;
 - multi-root datasets receive disjoint puzzle-identifier ranges;
-- schema-v2 checkpoints retain model construction config, target state, replay,
+- schema-v4 checkpoints retain training-protocol identity, model construction
+  config, target state, replay,
   schedulers, counters, optimizer state, dataset identity, and Python/NumPy/Torch
   RNG state without loading replay onto CUDA;
 - Sudoku and maze dataset builders use a recorded local RNG seed and accept a
@@ -93,10 +95,11 @@ pytest -q
 
 ## Interpretation constraints
 
-`theory_exact_mixture=true` evaluates a pointwise exact mixture between a fixed
-base policy and the current candidate. Candidate optimization may take many
-gradient steps, but this is one fixed-base CPI proposal, not an exact recursive
-sequence of deployed CPI mixtures.
+`theory_exact_mixture=true` controls pointwise probability-space deployment. It
+does not repair the historical mutable training path by itself. New theorem-facing
+runs must also set `training_protocol: fixed_base_exact`, which collects replay
+from one frozen base, updates only the value head, and treats all candidate steps
+as one proposal rather than a recursive sequence of deployed CPI mixtures.
 
 Operator-norm clamping is a contraction-oriented intervention. Local
 finite-difference diagnostics do not certify a global contraction modulus.
@@ -105,9 +108,10 @@ Evaluation checkpoints persist the exact model construction config. Legacy
 checkpoints with ambiguous per-puzzle embeddings fail closed instead of silently
 dropping embedding weights.
 
-New schema-v2 training checkpoints support exact continuation when the dataset
-hashes and CUDA topology match. Older checkpoints require
-`--allow-legacy-resume` and are treated as warm starts.
+New schema-v4 training checkpoints record the training protocol and support exact
+continuation when dataset hashes and CUDA topology match. Schema-v3 checkpoints
+resume only under the legacy protocol. Older checkpoints are weights-only warm
+starts and are never treated as exact continuation.
 
 UPI outer updates and SB3 environment steps are different budget units.
 Aggregate outputs keep those units separate and do not report a between-method

@@ -115,6 +115,17 @@ class UPITrmTrainer:
         self.env = env
         self.env_config: PlanEditEnvConfig = env.config
         self.rl_cfg = rl_cfg
+        self._fixed_base_exact = (
+            getattr(self.rl_cfg, "training_protocol", "legacy")
+            == "fixed_base_exact"
+        )
+        if self._fixed_base_exact and not self.rl_cfg.is_fixed_base_proposal_exact():
+            raise ValueError(
+                "training_protocol='fixed_base_exact' requires exact K-step "
+                "targets, exact baseline summation, exact mixture deployment, "
+                "zero policy epsilon, no distillation, and no scheduled "
+                "operator-norm clamping."
+            )
         assert math.isclose(
             self.env_config.gamma,
             self.rl_cfg.gamma,
@@ -173,11 +184,22 @@ class UPITrmTrainer:
         ).to(device)
         self.policy_model_candidate.load_state_dict(self.model.state_dict())
 
+        if self._fixed_base_exact:
+            if self.model.value_head is None:
+                raise ValueError("fixed_base_exact requires an enabled value head.")
+            for name, param in self.model.named_parameters():
+                param.requires_grad_(name.startswith("value_head."))
+            for buffer in self.model.buffers():
+                if buffer.requires_grad:
+                    buffer.requires_grad_(False)
+
         value_params: List[nn.Parameter] = []
         for name, param in self.model.named_parameters():
             if not param.requires_grad:
                 continue
             if "edit_policy" in name:
+                continue
+            if self._fixed_base_exact and not name.startswith("value_head."):
                 continue
             value_params.append(param)
 
@@ -317,6 +339,14 @@ class UPITrmTrainer:
             return
         clamp_interval = getattr(self.rl_cfg, "opnorm_clamp_interval", 0)
         if (
+            self._fixed_base_exact
+            and getattr(self.rl_cfg, "enable_contraction", False)
+            and clamp_interval > 0
+        ):
+            raise RuntimeError(
+                "Scheduled operator-norm clamping would mutate the fixed base map."
+            )
+        if (
             not getattr(self.rl_cfg, "enable_contraction", False)
             or clamp_interval <= 0
             or train_step_number % clamp_interval != 0
@@ -357,10 +387,12 @@ class UPITrmTrainer:
 
     def _mixed_policy_dist(self, x_batch, y_batch, n: int, action_mask: Optional[torch.Tensor] = None, z=None):
         """
-        Return the behavior policy distribution used for data collection.
-        Mathematically, this is intended to correspond to a mixture policy
-        pi_beh = (1 - alpha) * pi_old + alpha * pi_candidate,
-        optionally mixed with a small uniform component (policy_epsilon).
+        Return the exact deployed proposal distribution.
+
+        This corresponds to pi_alpha = (1-alpha) * pi_old + alpha *
+        pi_candidate, optionally mixed with a small uniform component. Fixed-base
+        training data are collected separately from pi_old by
+        ``_collection_policy_dist``.
         Note: The deployed policy_model_old is updated toward the candidate policy
         via parameter interpolation in `_sync_policy_old_towards_candidate`, so
         its action distribution is only an approximation of this mixture unless
@@ -419,6 +451,32 @@ class UPITrmTrainer:
         # Return both distribution and updated z (use candidate's z for persistent mode)
         return torch.distributions.Categorical(probs=probs_mix), z_new
 
+    def _collection_policy_dist(
+        self,
+        x_batch,
+        y_batch,
+        n: int,
+        action_mask: Optional[torch.Tensor] = None,
+        z=None,
+    ):
+        """Return the policy used to generate replay transitions."""
+
+        if self._fixed_base_exact:
+            return self.policy_model_old.policy_dist(
+                x_batch,
+                y_batch,
+                n=n,
+                action_mask=action_mask,
+                z=z,
+            )
+        return self._mixed_policy_dist(
+            x_batch,
+            y_batch,
+            n=n,
+            action_mask=action_mask,
+            z=z,
+        )
+
     def _sync_policy_old_towards_candidate(self) -> None:
         """
         Interpolate the deployed policy's edit_policy head toward the candidate's head.
@@ -430,6 +488,9 @@ class UPITrmTrainer:
         the distributional mixture _mixed_policy_dist into policy_model_old using
         a KL loss, rather than raw weight interpolation.
         """
+
+        if self._fixed_base_exact:
+            raise RuntimeError("The fixed base policy cannot be interpolated or promoted.")
 
         alpha = self.rl_cfg.mixture_alpha
         if alpha <= 0.0:
@@ -557,12 +618,27 @@ class UPITrmTrainer:
                 target_state[name].copy_(source_value)
 
     def _sync_exact_policy_snapshot_from_model(self) -> None:
-        """Freeze the post-value evaluator into both exact-mixture actors."""
+        """Synchronize evaluator state for the selected training protocol."""
 
         if not getattr(self.rl_cfg, "theory_exact_mixture", False):
             return
+        if self._fixed_base_exact:
+            self._copy_value_head_state(self.model, self.policy_model_old)
+            self._copy_value_head_state(self.model, self.policy_model_candidate)
+            return
         self._copy_nonpolicy_state(self.model, self.policy_model_old)
         self._copy_nonpolicy_state(self.model, self.policy_model_candidate)
+
+    def _copy_value_head_state(
+        self,
+        source_model: TinyRecursiveReasoningModel_ACTV1,
+        target_model: TinyRecursiveReasoningModel_ACTV1,
+    ) -> None:
+        """Copy the policy-independent value head without changing actor state."""
+
+        if source_model.value_head is None or target_model.value_head is None:
+            raise RuntimeError("Fixed-base value-head synchronization requires value heads.")
+        target_model.value_head.load_state_dict(source_model.value_head.state_dict())
 
     def _sync_candidate_policy_from_old(self) -> None:
         """Start the next candidate search from the newly deployed policy head."""
@@ -648,7 +724,10 @@ class UPITrmTrainer:
             batch_x = self._prepare_batch_x(x, batched=batched)
             batch_y = self._prepare_plan(y, batched=batched)
             with torch.no_grad():
-                latent = self.model.init_latent(batch_x, batch_y)
+                latent_model = (
+                    self.policy_model_old if self._fixed_base_exact else self.model
+                )
+                latent = latent_model.init_latent(batch_x, batch_y)
 
         self._active_episode = {
             "episode_id": self._next_episode_id,
@@ -959,12 +1038,12 @@ class UPITrmTrainer:
             ):
                 print(
                     f"[DEBUG] Episode {active['episode_id']}, Step {timestep}: "
-                    "calling _mixed_policy_dist",
+                    "calling _collection_policy_dist",
                     flush=True,
                 )
             latent_before = active["latent"]
             with torch.no_grad():
-                dist, latent_after = self._mixed_policy_dist(
+                dist, latent_after = self._collection_policy_dist(
                     batch_x,
                     batch_y,
                     n=self.rl_cfg.inner_unroll_n,
@@ -1517,14 +1596,10 @@ class UPITrmTrainer:
             # Step before any later forward can overwrite those IDs.
             self.puzzle_emb_optimizer.step()
             self.puzzle_emb_optimizer.zero_grad()
-        # Clamping is part of the evaluator update. It must precede target and
-        # actor snapshot synchronization so Q, pi, and pi_cand share one map.
+        # Legacy training may clamp and resnapshot the actor map. The fixed-base
+        # protocol rejects scheduled clamping and synchronizes only the value head.
         self._maybe_apply_scheduled_opnorm_clamp(scheduled_train_step)
         self._soft_update_target()
-        # The frozen CPI snapshot begins after the value update. Keep the base
-        # actor insulated during the optimizer step, then give both action
-        # kernels the same post-update recurrent map while preserving their
-        # respective policy heads.
         self._sync_exact_policy_snapshot_from_model()
 
         if debug_batch is not None:
@@ -1811,11 +1886,11 @@ class UPITrmTrainer:
         # The CPI bound requires a POLICY-SPACE mixture π_new = (1-α)π_old + α·π_candidate.
         # The code supports three modes with different theory compatibility:
         #
-        # 1. theory_exact_mixture=True (ONE FIXED-BASE CPI PROPOSAL):
-        #    - Do NOT update policy_model_old at all
-        #    - The behavior policy is always the explicit mixture from _mixed_policy_dist()
-        #    - Matches the paper's one-step frozen-snapshot mixture
-        #    - Does not recursively promote the mixture across outer updates
+        # 1. fixed_base_exact + theory_exact_mixture=True:
+        #    - Keep policy_model_old and its recurrent map frozen
+        #    - Collect replay from policy_model_old
+        #    - Deploy/evaluate the explicit mixture from _mixed_policy_dist()
+        #    - Optimize one candidate proposal without recursive promotion
         #
         # 2. distill_mixture_policy=True (HEURISTIC - Section 6.5):
         #    - Distill the mixture into policy_model_old via KL minimization
@@ -1830,10 +1905,8 @@ class UPITrmTrainer:
         distill_enabled = getattr(self.rl_cfg, "distill_mixture_policy", False)
         
         if theory_exact_mixture:
-            # Keep the frozen base policy and optimize one candidate proposal.
-            # Exact recursive CPI would require retaining a growing mixture of
-            # policy components; a two-network parameterization cannot represent
-            # that distribution in general.
+            # Both legacy exact-mixture mode and fixed-base mode retain the old
+            # head. Only fixed_base_exact also freezes collection and recurrence.
             pass
         elif distill_enabled and self.old_policy_distill_opt is not None:
             # Mode 2: Distill mixture into policy_model_old (heuristic, not theory-exact)
@@ -1893,14 +1966,10 @@ class UPITrmTrainer:
         """
         One outer training step: collect data, then run value and policy updates.
         
-        Execution order matters for correctness:
-        1. Sync candidate backbone FIRST (ensures both policies use same latent representation)
-        2. Collect episodes (both policy_model_old and policy_model_candidate have same backbone)
-        3. Value update (modifies self.model backbone, temporarily desync'd with candidate)
-        4. Policy update (re-syncs candidate backbone at the start)
-        
-        The sync at step 1 is redundant with step 4's sync from the previous train_step,
-        but we include it explicitly for robustness and clarity.
+        In fixed-base mode the candidate shares the immutable base recurrence,
+        collection uses the base policy, and the value update changes only the
+        policy-independent value head. Legacy mode retains its historical update
+        order for reproducibility.
         """
         
         if max_env_steps_to_collect is not None and max_env_steps_to_collect < 0:
@@ -1908,9 +1977,8 @@ class UPITrmTrainer:
                 "max_env_steps_to_collect must be non-negative or None."
             )
 
-        # Ensure candidate backbone is synced before episode collection.
-        # This guarantees both policies operate on the same latent representation
-        # during _mixed_policy_dist(), which is required for proper CPI mixture semantics.
+        # Ensure the candidate uses the same recurrent map as the base before
+        # collection and exact-mixture evaluation.
         self._sync_candidate_backbone_from_model()
 
         # Debug: track train_step phases periodically
@@ -2121,6 +2189,11 @@ class UPITrmTrainer:
     ) -> None:
         """Attach the sparse embedding optimizer at the value-update boundary."""
 
+        if self._fixed_base_exact:
+            raise ValueError(
+                "fixed_base_exact forbids trainable puzzle embeddings because "
+                "they change the recurrent actor map."
+            )
         self.puzzle_emb_optimizer = optimizer
         self.puzzle_emb_optimizer.zero_grad()
     
@@ -2454,8 +2527,10 @@ class UPITrmTrainer:
         
         opt.step()
         
-        # Sync policy models
-        self._sync_policy_old_towards_candidate()
+        # Imitation may initialize the candidate proposal, but the fixed base
+        # remains immutable after protocol selection.
+        if not self._fixed_base_exact:
+            self._sync_policy_old_towards_candidate()
         
         return {
             "imitation_loss": avg_loss.item(),

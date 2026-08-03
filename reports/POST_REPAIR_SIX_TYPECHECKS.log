@@ -1,0 +1,6 @@
+[2026-08-03T10:21:43.925-07:00] Buck UI: https://www.internalfb.com/buck2/15147e8d-54ad-454d-bd6c-4c5ed6e83981
+[2026-08-03T10:21:46.081-07:00] RE Session: reSessionID-37221201-5288-4ef5-9a9c-c9dbb7f49323
+[2026-08-03T10:21:46.943-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/20547673335861787
+[2026-08-03T10:21:53.055-07:00] Network: up 0B  down 0B  session reSessionID-37221201-5288-4ef5-9a9c-c9dbb7f49323
+[2026-08-03T10:21:53.055-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/20547673335861787
+Tests finished: [mPass 6[m. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0

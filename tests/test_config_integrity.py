@@ -47,6 +47,28 @@ class TestConfigIntegrity(unittest.TestCase):
             parsed = RLConfig(**cfg)
             self.assertIsInstance(parsed, RLConfig, f"Failed to parse {config_path}")
 
+    def test_revision_exact_config_uses_fixed_base_protocol(self):
+        config_path = (
+            self.config_dir
+            / "revision"
+            / "upi_trm_feasibility_episodic_z_hard_suite_theory_exact.yaml"
+        )
+        parsed = RLConfig(**_load_yaml(config_path))
+
+        self.assertEqual(parsed.training_protocol, "fixed_base_exact")
+        self.assertTrue(parsed.is_fixed_base_proposal_exact())
+
+    def test_exact_mixture_flag_does_not_relabel_legacy_training(self):
+        parsed = RLConfig(
+            theory_exact_mixture=True,
+            exact_k_step_targets=True,
+            exact_baseline_summation=True,
+            enable_contraction=False,
+        )
+
+        self.assertEqual(parsed.training_protocol, "legacy")
+        self.assertFalse(parsed.is_theory_exact())
+
     def test_stability_experiments_disable_value_head_norm(self):
         stability_dirs = [
             self.config_dir / "exp2_contraction_sweep",

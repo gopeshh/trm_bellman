@@ -1,0 +1,104 @@
+# Post-handoff execution report
+
+Date: 2026-08-03, America/Los_Angeles
+
+## Repository baseline
+
+- Repository: `/home/buiksat/trm_bellman`
+- Branch: `iclr-confirmatory-repair`
+- Starting commit: `111e3a96655d1b3414ba15801a3ebfa393e8e394`
+- Buck cell: `/data/repos/fbsource/fbcode/buiksat_trm`
+- The Buck cell is a symlink to the repository. Remote execution cannot
+  materialize newly added files through that external symlink, so authoritative
+  post-repair runs use `--local-only`.
+
+## Correctness repair
+
+The former `theory_exact_mixture` switch selected a probability-space mixture
+but did not define an end-to-end fixed-base training protocol. The repaired
+implementation adds the explicit opt-in protocol `fixed_base_exact`:
+
+- collect replay from the frozen base policy;
+- freeze the base edit policy and recurrent transition map;
+- train only the policy-independent value head in the critic;
+- train the candidate edit head as one proposal;
+- deploy and evaluate the exact probability-space base/candidate mixture;
+- do not recursively promote the mixture or synchronize candidate parameters
+  into the base;
+- reject scheduled operator-norm clamping and trainable sparse puzzle
+  embeddings because both mutate policy-relevant fixed state;
+- retain `legacy` as the default so old runs are not reclassified.
+
+Schema-v4 checkpoints record the protocol and execution device. Resume checks
+the top-level, nested, and active protocol; dataset provenance; device; model
+and optimizer identity; replay; environment; and collector state before any
+live state is mutated. Schema-v3 checkpoints remain legacy-only. Fixed-base
+saves reject output directories containing any `model_step_*.pt` artifact,
+because one state dict cannot represent the deployed mixture.
+
+Regression coverage includes frozen optimizer ownership, base-only collection,
+behavior log-probability identity, persistent latent initialization, two-update
+base immutability, exact-mixture evaluation, schema-v4 resume equivalence,
+schema-v3 rejection, nested-state preflight, device mismatch, and stale
+single-model artifacts.
+
+## Validation chronology
+
+1. The first focused remote run passed 71 tests and had two build failures.
+   Both failures were missing files during remote materialization of the
+   external Buck-cell symlink, not test failures. Evidence:
+   `reports/POST_HANDOFF_FOCUSED_RERUN.log`.
+2. An initial local command from the repository root failed because that path
+   is not a Buck project. The failed attempt is retained in
+   `reports/POST_HANDOFF_AUGMENTED_LOCAL_ATTEMPT.log`.
+3. The corrected local augmented-state target passed 10 tests. Eleven focused
+   targets then passed 121 tests. Evidence:
+   `reports/POST_HANDOFF_AUGMENTED_LOCAL_RERUN.log` and
+   `reports/POST_HANDOFF_FOCUSED_LOCAL_RERUN.log`.
+4. Before the fixed-base edits, all 31 declared Python unittest targets passed
+   301 tests, and the six known type-check targets passed. Evidence:
+   `reports/POST_REPAIR_FULL_UNITTESTS.log` and
+   `reports/POST_REPAIR_SIX_TYPECHECKS.log`.
+5. After the edits, one uncapped all-target run passed 308 tests. One logging
+   case printed `Ran 1 test ... OK`, then TPX reported that the process never
+   completed during parallel teardown. This run is retained as failed and is
+   not counted as a clean suite result:
+   `reports/POST_FIXED_BASE_FULL_UNITTESTS.log`.
+6. A four-worker retry produced no progress event for more than 20 minutes and
+   was deliberately interrupted with exit code 130. It is retained as an
+   incomplete attempt in `reports/POST_FIXED_BASE_FULL_UNITTESTS_RERUN.log`.
+7. The authoritative partitioned runtime gate is green. The 30 non-logging
+   targets passed 296 tests in one invocation. The logging/checkpoint target
+   passed all 14 tests alone from a fresh daemon. Total: 310 passing cases,
+   zero test failures, zero timeouts, zero build failures. Evidence:
+   `reports/POST_FIXED_BASE_UNITTESTS_EXCLUDING_LOGGING.log` and
+   `reports/POST_FIXED_BASE_LOGGING_FINAL.log`.
+8. The six known package type-check targets passed. Evidence:
+   `reports/POST_FIXED_BASE_SIX_TYPECHECKS.log`.
+9. `git diff --check` passed.
+
+All retained log hashes are in
+`reports/POST_HANDOFF_TEST_LOG_SHA256SUMS.txt`.
+
+## Evidence state and next dependency
+
+No `.pt`, `.pth`, or `.ckpt` learned-model checkpoint is present. The existing
+episodic diagnostic script resets the latent and omits remaining budget, so it
+cannot produce persistent augmented-state evidence. Historical persistent
+checkpoint diagnostics are **not verifiable from supplied evidence**.
+
+`configs/iclr_confirmatory/` and the registered 1,024/256/512 unique hard
+train/validation/test split do not exist. The only local corpus is a 450/50
+trivial dataset with incomplete builder provenance. Therefore the bridge and
+interaction-matched PPO results are **not verifiable from supplied evidence**.
+
+No confirmatory training was launched in this slice. The next dependency chain
+is:
+
+1. implement and test an end-to-end persistent schema-v4 diagnostics runner;
+2. materialize unique, pairwise-disjoint hard splits and immutable manifests;
+3. add the corrected persistent reference, bridge, and matched-PPO configs;
+4. lock the registry and hashes before inspecting confirmatory outcomes;
+5. run debug-only smoke tests on seed 9001;
+6. run persistent diagnostics, the one-factor bridge, and the matched PPO
+   comparison in that order.

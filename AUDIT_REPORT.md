@@ -66,8 +66,9 @@ Fresh held-out experiments are required.
 - Stochastic mixture evaluation uses a private fixed RNG stream and restores
   CPU and CUDA RNG state before training resumes.
 - Clipped exact advantages are re-centered under the current statewise policy.
-- Exact old and candidate actors receive the same post-value-update,
-  post-clamping recurrent snapshot before policy improvement.
+- The historical legacy path gives old and candidate actors the same
+  post-value-update recurrent snapshot. The opt-in `fixed_base_exact` path
+  instead freezes the recurrent actor map and trains only the value head.
 - Candidate recurrence synchronization copies parameters and persistent
   buffers. Target soft updates also copy persistent buffers.
 
@@ -99,9 +100,10 @@ Fresh held-out experiments are required.
 - Sudoku and maze builders use local seeded NumPy generators, record their build
   configuration, and accept a source revision for pinned downloads.
 
-`theory_exact_mixture=true` is now documented as one fixed-base CPI proposal.
-The two-network implementation does not represent a recursively growing exact
-mixture across outer updates.
+`theory_exact_mixture=true` selects exact probability-space deployment but does
+not identify the training protocol. `training_protocol=fixed_base_exact` is the
+one fixed-base CPI proposal path. The two-network implementation does not
+represent a recursively growing exact mixture across outer updates.
 
 ### Projection and diagnostics
 

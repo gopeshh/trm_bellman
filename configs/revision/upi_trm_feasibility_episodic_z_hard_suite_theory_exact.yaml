@@ -37,7 +37,9 @@ batch_centered_advantage: false
 exact_k_step_targets: true
 exact_baseline_summation: true
 theory_exact_mixture: true
+training_protocol: fixed_base_exact
 distill_mixture_policy: false
+opnorm_clamp_interval: 0
 
 log_interval: 50
 eval_interval: 100
