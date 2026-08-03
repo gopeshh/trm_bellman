@@ -183,6 +183,22 @@ def dataset_input_sha256s(dataset: Any) -> list[str]:
     return fingerprints
 
 
+def dataset_puzzle_identifier_sha256s(dataset: Any) -> list[str]:
+    fingerprints = []
+    for index in range(len(dataset)):
+        sample = dataset[index]
+        if not isinstance(sample, dict) or "puzzle_identifiers" not in sample:
+            raise TypeError(
+                "Dataset provenance requires puzzle_identifiers on every sample."
+            )
+        encoded = json.dumps(
+            _to_list(sample["puzzle_identifiers"]),
+            separators=(",", ":"),
+        ).encode("utf-8")
+        fingerprints.append(hashlib.sha256(encoded).hexdigest())
+    return fingerprints
+
+
 def sequence_input_sha256s(inputs: Sequence[Any]) -> list[str]:
     return [input_sha256(value) for value in inputs]
 

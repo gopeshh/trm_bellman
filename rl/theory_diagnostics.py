@@ -14,13 +14,15 @@ from typing import Any, Dict, List, Optional
 import torch
 
 
-FINITE_BATCH_SCOPE = "finite-batch diagnostic only"
+FINITE_BATCH_SCOPE = "finite_batch"
+FINITE_BATCH_INTERPRETATION = "finite-batch diagnostic only"
 
 
 def _scope(metric: str) -> Dict[str, Any]:
     return {
         "metric": metric,
         "scope": FINITE_BATCH_SCOPE,
+        "interpretation": FINITE_BATCH_INTERPRETATION,
         "uniform_certificate": False,
     }
 

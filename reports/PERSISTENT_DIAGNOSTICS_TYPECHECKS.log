@@ -1,0 +1,64 @@
+[2026-08-03T13:36:46.561-07:00] Buck UI: https://www.internalfb.com/buck2/8b05937c-d5cb-4acb-90ca-fec126fad14e
+[2026-08-03T13:36:47.846-07:00] RE Session: reSessionID-720ee500-7668-47b4-8cfb-d3984e69a9ad
+[2026-08-03T13:36:48.479-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/27866022730378940
+[2026-08-03T13:36:52.352-07:00] ✗ Fail: fbcode//buiksat_trm:upi_trm_train_lib-type-checking - unmanaged (0.2s)
+[2026-08-03T13:36:52.352-07:00] Test returned with non-zero exit code
+[2026-08-03T13:36:52.352-07:00] stdout:
+[2026-08-03T13:36:52.352-07:00]
+[2026-08-03T13:36:52.352-07:00] stderr:
+[2026-08-03T13:36:52.352-07:00] Found type errors!
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:27:12 Cannot find module `wandb`
+[2026-08-03T13:36:52.352-07:00]   Looked in these locations:
+[2026-08-03T13:36:52.352-07:00]   Build system source database
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:106:23 Expected a type form, got instance of `(obj: object, /) -> TypeIs[(...) -> object]`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:181:7 Could not find name `Union`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:218:39 Argument `Module` is not assignable to parameter `model` with type `TinyRecursiveReasoningModel_ACTV1` in function `rl.upi_trm_trainer.UPITrmTrainer.__init__`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:359:19 Default `None` is not assignable to parameter `device` with type `str`
+[2026-08-03T13:36:52.352-07:00]   The declared type does not allow `None`. Consider changing the declared type to `str | None`.
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:398:30 Object of class `Tensor` has no attribute `weights`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:601:17 Object of class `NoneType` has no attribute `state_dict`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:611:52 Object of class `NoneType` has no attribute `state_dict`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:613:53 Object of class `NoneType` has no attribute `state_dict`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:652:41 `int | None` is not assignable to dict key `replay_capacity` with type `dict[str, Any] | int | str | dict[str, int]`
+[2026-08-03T13:36:52.352-07:00]   The declared type does not allow `None`. Consider changing the declared type to `dict[str, Any] | int | str | dict[str, int] | None`.
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:653:44 `list[Transition]` is not assignable to dict key `replay_transitions` with type `dict[str, Any] | int | str | dict[str, int]`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:839:50 Argument `int | None` is not assignable to parameter `x` with type `Buffer | SupportsIndex | SupportsInt | SupportsTrunc | str` in function `int.__new__`
+[2026-08-03T13:36:52.352-07:00]   Protocol `Buffer` requires attribute `__buffer__`
+[2026-08-03T13:36:52.352-07:00]   The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:904:9 Object of class `NoneType` has no attribute `load_state_dict`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:911:9 Object of class `NoneType` has no attribute `load_state_dict`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:916:9 Object of class `NoneType` has no attribute `load_state_dict`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:1263:9 Object of class `NoneType` has no attribute `log`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:1348:13 Object of class `NoneType` has no attribute `log`
+[2026-08-03T13:36:52.352-07:00] fbcode/buiksat_trm/upi_trm_train.py:1368:13 Object of class `NoneType` has no attribute `log`
+[2026-08-03T13:36:52.352-07:00]
+[2026-08-03T13:36:52.850-07:00] ✗ Fail: fbcode//buiksat_trm:rl-type-checking - unmanaged (0.2s)
+[2026-08-03T13:36:52.850-07:00] Test returned with non-zero exit code
+[2026-08-03T13:36:52.850-07:00] stdout:
+[2026-08-03T13:36:52.850-07:00]
+[2026-08-03T13:36:52.850-07:00] stderr:
+[2026-08-03T13:36:52.850-07:00] Found type errors!
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/algos/dqn.py:541:16 Object of class `NoneType` has no attribute `numel`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/algos/dqn.py:543:40 Object of class `NoneType` has no attribute `numel`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/algos/dqn.py:546:30 Object of class `NoneType` has no attribute `to`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/cleanrl/trm_adapter.py:218:16 Argument `object` is not assignable to parameter `obj` with type `Sized` in function `len`
+[2026-08-03T13:36:52.850-07:00]   Protocol `Sized` requires attribute `__len__`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/cleanrl/trm_adapter.py:221:54 Argument `object` is not assignable to parameter `obj` with type `Sized` in function `len`
+[2026-08-03T13:36:52.850-07:00]   Protocol `Sized` requires attribute `__len__`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/cleanrl/trm_adapter.py:234:62 Argument `object` is not assignable to parameter `obj` with type `Sized` in function `len`
+[2026-08-03T13:36:52.850-07:00]   Protocol `Sized` requires attribute `__len__`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/cleanrl/trm_adapter.py:237:70 Argument `object` is not assignable to parameter `obj` with type `Sized` in function `len`
+[2026-08-03T13:36:52.850-07:00]   Protocol `Sized` requires attribute `__len__`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/envs/plan_edit_env.py:343:38 Object of class `NoneType` has no attribute `device`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/envs/plan_edit_env.py:344:17 Object of class `NoneType` has no attribute `to`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/persistent_diagnostics.py:489:38 Object of class `NoneType` has no attribute `numel`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/persistent_diagnostics.py:491:14 Object of class `NoneType` has no attribute `detach`
+[2026-08-03T13:36:52.850-07:00] fbcode/buiksat_trm/rl/persistent_diagnostics.py:554:12 Object of class `NoneType` has no attribute `detach`
+[2026-08-03T13:36:52.850-07:00]
+[2026-08-03T13:36:53.920-07:00] Network: up 0B  down 14KiB  session reSessionID-720ee500-7668-47b4-8cfb-d3984e69a9ad
+[2026-08-03T13:36:53.920-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/27866022730378940
+Tests finished: [mPass 6[m. [mFail 2[m. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+2 TESTS FAILED
+  ✗ fbcode//buiksat_trm:upi_trm_train_lib-type-checking - unmanaged (cfg:dev-linux-x86_64-fbcode-platform010-clang21-asan-ubsan-dev#bec1f7e7791dad19)
+  ✗ fbcode//buiksat_trm:rl-type-checking - unmanaged (cfg:dev-linux-x86_64-fbcode-platform010-clang21-asan-ubsan-dev#bec1f7e7791dad19)
+[32mUse Devmate to fix your errors. Just click the following link: ]8;;fb-vscode://nuclide.code-compose/devmate/fixtests?run_id=27866022730378940&expiry=2026-08-03T20%3A41%3A53Z&viewer=691376739&signature=43cbc805028d9fb62eb10482e4ccf59801d02d367f0d50a1de3cc2f161e7281071f09ee6d6b012bf65767bb5cf57edbf544c0702d263f5072bbc1872b87bba9b2c4a336401\fb-vscode://nuclide.code-compose/devmate/fixtests?run_id=27866022730378940&expiry=2026-08-03T20%3A41%3A53Z&viewer=691376739&signature=43cbc805028d9fb62eb10482e4ccf59801d02d367f0d50a1de3cc2f161e7281071f09ee6d6b012bf65767bb5cf57edbf544c0702d263f5072bbc1872b87bba9b2c4a336401]8;;\[0m

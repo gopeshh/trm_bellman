@@ -61,9 +61,11 @@ from utils.dataset_provenance import (
     assert_matching_dataset_provenance,
     build_dataset_provenance,
     dataset_input_sha256s,
+    dataset_puzzle_identifier_sha256s,
     dataset_pool_sha256,
     dataset_sample_sha256s,
     dataset_source_build_metadata,
+    ordered_record_sha256,
     validate_dataset_provenance,
 )
 
@@ -1486,16 +1488,15 @@ def main():
         print(f"[DATASET] dataset_paths={args.dataset_paths}")
         print(f"[DATASET] resolved_dataset_name={dataset_name}")
         train_pool_hash = dataset_pool_sha256(dataset, len(dataset))
-        eval_pool_hash = dataset_pool_sha256(
-            eval_dataset, rl_cfg.eval_num_episodes
-        )
+        eval_pool_hash = dataset_pool_sha256(eval_dataset, len(eval_dataset))
         print(
             f"[DATASET] train_split={args.train_split} train_samples={len(dataset)} "
             f"train_pool_sha256={train_pool_hash}"
         )
         print(
             f"[DATASET] eval_split={args.eval_split} "
-            f"eval_samples={rl_cfg.eval_num_episodes} "
+            f"eval_pool_samples={len(eval_dataset)} "
+            f"eval_episodes_per_checkpoint={rl_cfg.eval_num_episodes} "
             f"eval_pool_sha256={eval_pool_hash} "
             f"eval_puzzle_id_offset={train_identifier_count}"
         )
@@ -1514,7 +1515,7 @@ def main():
             provenance_generation_seed = None
         provenance_train_split = args.train_split
         provenance_eval_split = args.eval_split
-        provenance_eval_count = rl_cfg.eval_num_episodes
+        provenance_eval_count = len(eval_dataset)
         provenance_metadata = {
             "train_pool_sha256": train_pool_hash,
             "eval_pool_sha256": eval_pool_hash,
@@ -1527,6 +1528,12 @@ def main():
             ],
             "source_build_metadata": source_build_metadata,
             "materialization_seed": 0,
+            "train_puzzle_identifier_ordered_sha256": ordered_record_sha256(
+                dataset_puzzle_identifier_sha256s(dataset)
+            ),
+            "eval_puzzle_identifier_ordered_sha256": ordered_record_sha256(
+                dataset_puzzle_identifier_sha256s(eval_dataset)
+            ),
         }
     else:
         print(f"[DATASET] dataset_paths=None (using dummy dataset)")
@@ -1548,6 +1555,12 @@ def main():
             "num_identifiers": num_identifiers,
             "eval_puzzle_id_offset": 0,
             "dataset_source_names": [],
+            "train_puzzle_identifier_ordered_sha256": ordered_record_sha256(
+                dataset_puzzle_identifier_sha256s(dataset)
+            ),
+            "eval_puzzle_identifier_ordered_sha256": ordered_record_sha256(
+                dataset_puzzle_identifier_sha256s(eval_dataset)
+            ),
         }
 
     checker_resolution = resolve_checker_from_dataset(rl_cfg=rl_cfg, dataset=dataset, seq_len=seq_len)

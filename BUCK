@@ -268,6 +268,22 @@ python_binary(
 )
 
 python_binary(
+    name = "persistent_checkpoint_diagnostics",
+    srcs = ["scripts/persistent_checkpoint_diagnostics.py"],
+    base_module = "",
+    main_module = "scripts.persistent_checkpoint_diagnostics",
+    keep_gpu_sections = True,
+    deps = [
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_binary(
     name = "materialize_hard4x4_closure_batch",
     srcs = ["scripts/materialize_hard4x4_closure_batch.py"],
     base_module = "",
@@ -765,6 +781,24 @@ python_unittest(
         ":replay_theory_diagnostics",
         ":utils",
         "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_unittest(
+    name = "test_persistent_checkpoint_diagnostics",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_persistent_checkpoint_diagnostics_unittest.py",
+        "scripts/persistent_checkpoint_diagnostics.py",
+    ],
+    base_module = "",
+    deps = [
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 

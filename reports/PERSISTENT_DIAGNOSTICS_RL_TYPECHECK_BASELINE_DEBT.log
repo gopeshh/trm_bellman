@@ -1,0 +1,31 @@
+[2026-08-03T14:16:40.854-07:00] Could not connect to buck2 daemon (buck2 daemon is not running), killing daemon..
+[2026-08-03T14:16:54.132-07:00] Connected to new buck2 daemon.
+[2026-08-03T14:16:54.150-07:00] Buck UI: https://www.internalfb.com/buck2/5f9d5631-32fd-4b03-8697-4085b2a76480
+[2026-08-03T14:16:56.533-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/32088147368181796
+[2026-08-03T14:17:35.353-07:00] RE Session: reSessionID-06285f90-de44-4a3e-8fed-06d641cb0a32
+[2026-08-03T14:17:46.596-07:00] ✗ Fail: fbcode//buiksat_trm:rl-type-checking - unmanaged (0.2s)
+[2026-08-03T14:17:46.596-07:00] Test returned with non-zero exit code
+[2026-08-03T14:17:46.596-07:00] stdout:
+[2026-08-03T14:17:46.596-07:00]
+[2026-08-03T14:17:46.596-07:00] stderr:
+[2026-08-03T14:17:46.596-07:00] Found type errors!
+[2026-08-03T14:17:46.596-07:00] fbcode/buiksat_trm/rl/algos/dqn.py:541:16 Object of class `NoneType` has no attribute `numel`
+[2026-08-03T14:17:46.596-07:00] fbcode/buiksat_trm/rl/algos/dqn.py:543:40 Object of class `NoneType` has no attribute `numel`
+[2026-08-03T14:17:46.596-07:00] fbcode/buiksat_trm/rl/algos/dqn.py:546:30 Object of class `NoneType` has no attribute `to`
+[2026-08-03T14:17:46.596-07:00] fbcode/buiksat_trm/rl/cleanrl/trm_adapter.py:218:16 Argument `object` is not assignable to parameter `obj` with type `Sized` in function `len`
+[2026-08-03T14:17:46.596-07:00]   Protocol `Sized` requires attribute `__len__`
+[2026-08-03T14:17:46.596-07:00] fbcode/buiksat_trm/rl/cleanrl/trm_adapter.py:221:54 Argument `object` is not assignable to parameter `obj` with type `Sized` in function `len`
+[2026-08-03T14:17:46.596-07:00]   Protocol `Sized` requires attribute `__len__`
+[2026-08-03T14:17:46.596-07:00] fbcode/buiksat_trm/rl/cleanrl/trm_adapter.py:234:62 Argument `object` is not assignable to parameter `obj` with type `Sized` in function `len`
+[2026-08-03T14:17:46.596-07:00]   Protocol `Sized` requires attribute `__len__`
+[2026-08-03T14:17:46.596-07:00] fbcode/buiksat_trm/rl/cleanrl/trm_adapter.py:237:70 Argument `object` is not assignable to parameter `obj` with type `Sized` in function `len`
+[2026-08-03T14:17:46.596-07:00]   Protocol `Sized` requires attribute `__len__`
+[2026-08-03T14:17:46.596-07:00] fbcode/buiksat_trm/rl/envs/plan_edit_env.py:343:38 Object of class `NoneType` has no attribute `device`
+[2026-08-03T14:17:46.596-07:00] fbcode/buiksat_trm/rl/envs/plan_edit_env.py:344:17 Object of class `NoneType` has no attribute `to`
+[2026-08-03T14:17:46.596-07:00]
+[2026-08-03T14:17:48.743-07:00] Network: up 0B  down 6.5MiB  session reSessionID-06285f90-de44-4a3e-8fed-06d641cb0a32
+[2026-08-03T14:17:48.743-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/32088147368181796
+Tests finished: Pass 0. [mFail 1[m. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+1 TESTS FAILED
+  ✗ fbcode//buiksat_trm:rl-type-checking - unmanaged (cfg:dev-linux-x86_64-fbcode-platform010-clang21-asan-ubsan-dev#bec1f7e7791dad19)
+[32mUse Devmate to fix your errors. Just click the following link: ]8;;fb-vscode://nuclide.code-compose/devmate/fixtests?run_id=32088147368181796&expiry=2026-08-03T21%3A22%3A47Z&viewer=691376739&signature=43cbc8050226f6a0edaf783afa6d1308f8bf20722b924bcfb929cfcfced135764d7ff5299505931f434a5b299d0b9d678ca33c9e62612a18b6d86f27bec53d2631162b080b\fb-vscode://nuclide.code-compose/devmate/fixtests?run_id=32088147368181796&expiry=2026-08-03T21%3A22%3A47Z&viewer=691376739&signature=43cbc8050226f6a0edaf783afa6d1308f8bf20722b924bcfb929cfcfced135764d7ff5299505931f434a5b299d0b9d678ca33c9e62612a18b6d86f27bec53d2631162b080b]8;;\[0m

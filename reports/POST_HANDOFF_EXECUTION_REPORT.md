@@ -85,20 +85,36 @@ All retained log hashes are in
 No `.pt`, `.pth`, or `.ckpt` learned-model checkpoint is present. The existing
 episodic diagnostic script resets the latent and omits remaining budget, so it
 cannot produce persistent augmented-state evidence. Historical persistent
-checkpoint diagnostics are **not verifiable from supplied evidence**.
+checkpoint diagnostics are not verifiable from supplied evidence.
 
 `configs/iclr_confirmatory/` and the registered 1,024/256/512 unique hard
 train/validation/test split do not exist. The only local corpus is a 450/50
 trivial dataset with incomplete builder provenance. Therefore the bridge and
-interaction-matched PPO results are **not verifiable from supplied evidence**.
+interaction-matched PPO results are not verifiable from supplied evidence.
 
 No confirmatory training was launched in this slice. The next dependency chain
 is:
 
-1. implement and test an end-to-end persistent schema-v4 diagnostics runner;
+1. extend schema 4 with immutable producer/run/seed identity or bind an
+   equivalent external run manifest before confirmatory training;
 2. materialize unique, pairwise-disjoint hard splits and immutable manifests;
 3. add the corrected persistent reference, bridge, and matched-PPO configs;
 4. lock the registry and hashes before inspecting confirmatory outcomes;
 5. run debug-only smoke tests on seed 9001;
-6. run persistent diagnostics, the one-factor bridge, and the matched PPO
+6. produce a valid persistent checkpoint and run the registered diagnostics;
+7. run the one-factor bridge and matched PPO
    comparison in that order.
+
+## Persistent diagnostics addendum
+
+The schema-v4 persistent diagnostic runner is now implemented and tested. It
+uses `(x, y, z, h)` occurrences, the production transition and mixture-policy
+callbacks, exact one-step and Monte Carlo K-step backups, registered
+finite-reference depths, and deterministic artifact/source manifests. The
+final runtime gate is 325 passing cases across 32 targets. Full details and log
+hashes are in `reports/PERSISTENT_CHECKPOINT_DIAGNOSTICS_REPORT.md` and
+`reports/PERSISTENT_DIAGNOSTICS_LOG_SHA256SUMS.txt`.
+
+No learned checkpoint or hard held-out corpus was found. Consequently,
+historical persistent diagnostic values, the bridge result, and the matched
+PPO result remain not verifiable from supplied evidence.

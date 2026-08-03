@@ -32,6 +32,11 @@ completed confirmatory experiment and must not be cited as one.
 - Local seeded 4x4, curriculum Sudoku, canonical Sudoku, and maze generation.
 - Pure finite-batch augmented-state diagnostic summaries. These outputs are
   explicitly not uniform certificates.
+- A deterministic persistent-checkpoint diagnostic CLI with clock-complete
+  state collection, exact one-step and Monte Carlo K-step residuals at `n` and
+  registered finite-reference depths, production exact-baseline parity,
+  reconstructed centering, production-mixture callback comparison, depth and
+  carry diagnostics, immutable held-out materialization, and source manifests.
 - Explicit `fixed_base_exact` training: collection from one frozen base,
   value-head-only critic fitting, candidate-head proposal training, exact
   probability-space mixture evaluation, and no recursive promotion.
@@ -59,6 +64,16 @@ The exact chronology, commands, session identifiers, and SHA-256 log manifest
 are in `reports/POST_HANDOFF_EXECUTION_REPORT.md` and
 `reports/POST_HANDOFF_TEST_LOG_SHA256SUMS.txt`.
 
+The subsequent persistent-diagnostics slice expanded the runtime suite to 32
+targets. Its final exact-state gate passed 311 cases across the 31 non-logging
+targets and 14 cases in the isolated logging target: 325 total, zero failures.
+The focused diagnostic target plus packaged CLI typecheck passed 16 cases.
+The full `rl-type-checking` target still reports nine unchanged baseline errors
+outside the new files; it reports no error in the persistent diagnostic code.
+Evidence and chronology are in
+`reports/PERSISTENT_CHECKPOINT_DIAGNOSTICS_REPORT.md` and
+`reports/PERSISTENT_DIAGNOSTICS_LOG_SHA256SUMS.txt`.
+
 ## Correctness review outcome
 
 The unresolved training-protocol issue was closed by implementing the first
@@ -76,8 +91,10 @@ contains such a single-model artifact, with a regression test.
 
 ## Experiments not run
 
-No repaired learned-model result was executed. Persistent checkpoint
-diagnostics, the one-factor bridge, matched UPI-TRM/PPO runs, the projection
-cross-design, and the second domain remain missing experiments. The registered
-Sudoku matrix needs at least 245 GPU-hours on the available single-GPU setup.
-Do not infer an outcome from smoke tests or from the historical 57.4% record.
+No repaired learned-model result was executed. The persistent checkpoint
+diagnostic pipeline is implemented, but no learned checkpoint exists, so its
+historical outputs are not verifiable from supplied evidence. The one-factor
+bridge, matched UPI-TRM/PPO runs, projection cross-design, and second domain
+remain missing experiments. The registered Sudoku matrix needs at least 245
+GPU-hours on the available single-GPU setup. Do not infer an outcome from
+smoke tests or from the historical 57.4% record.

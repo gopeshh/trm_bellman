@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "record_selection": {
+    "kind": "ordered_prefix_without_replacement",
+    "record_count": 128
+  },
+  "reference_depth_offsets": [
+    1,
+    2,
+    4
+  ],
+  "monte_carlo": {
+    "repeats": 256,
+    "seed": 26080321
+  },
+  "collection_seed": 26080321,
+  "max_retained_states": 256,
+  "chunk_size": 16,
+  "probability_tolerance": 1e-06,
+  "ratio_denominator_tolerance": 1e-12,
+  "initial_latent_sensitivity": {
+    "perturbation_l2_norm": 0.01,
+    "seed": 26080321
+  }
+}

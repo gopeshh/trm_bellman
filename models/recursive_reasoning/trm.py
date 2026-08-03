@@ -280,19 +280,51 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
         input_embeddings: torch.Tensor,
         seq_info: Dict[str, Optional[CosSin]],
     ) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
+        next_carry, _, _ = self.latent_step_with_projection_info(
+            carry,
+            input_embeddings,
+            seq_info,
+        )
+        return next_carry
+
+    def latent_step_with_projection_info(
+        self,
+        carry: TinyRecursiveReasoningModel_ACTV1InnerCarry,
+        input_embeddings: torch.Tensor,
+        seq_info: Dict[str, Optional[CosSin]],
+    ) -> Tuple[
+        TinyRecursiveReasoningModel_ACTV1InnerCarry,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """Apply one step and expose pre-projection norm and activation."""
+
         z_H, z_L = carry.z_H, carry.z_L
         for _L_step in range(self.config.L_cycles):
             z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
         z_H = self.L_level(z_H, z_L, **seq_info)
+
+        pre_projection_norm = torch.sqrt(
+            z_H.pow(2).sum(dim=(1, 2)) + z_L.pow(2).sum(dim=(1, 2))
+        )
         
         # === Forward-invariant projection (Assumption 4.1, Eq. 14 in paper) ===
         # Project z to ball of radius R: z ← z · min(1, R/||z||)
         # This ensures z ∈ Z_inv = {z : ||z|| ≤ R} for contraction guarantees
         R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
+        projection_active = torch.zeros_like(
+            pre_projection_norm,
+            dtype=torch.bool,
+        )
         if R > 0.0:
+            projection_active = pre_projection_norm > R
             z_H, z_L = self._project_carry_to_ball(z_H, z_L, R)
         
-        return TinyRecursiveReasoningModel_ACTV1InnerCarry(z_H=z_H, z_L=z_L)
+        return (
+            TinyRecursiveReasoningModel_ACTV1InnerCarry(z_H=z_H, z_L=z_L),
+            pre_projection_norm,
+            projection_active,
+        )
     
     def _project_carry_to_ball(
         self,
@@ -674,6 +706,27 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         context = self._resolve_latent_context(batch)
         input_embeds = context["input_embeddings_with_plan"]
         return self.inner.latent_step(z, input_embeds, context["seq_info"])
+
+    def update_latent_with_projection_info(
+        self,
+        z: TinyRecursiveReasoningModel_ACTV1InnerCarry,
+        y: Any,
+        x: Any,
+    ) -> Tuple[
+        TinyRecursiveReasoningModel_ACTV1InnerCarry,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """Apply one recurrent step and expose radial-projection diagnostics."""
+
+        batch = self._standardize_latent_batch(x, y)
+        context = self._resolve_latent_context(batch)
+        input_embeds = context["input_embeddings_with_plan"]
+        return self.inner.latent_step_with_projection_info(
+            z,
+            input_embeds,
+            context["seq_info"],
+        )
 
     def unroll_latent(
         self,
