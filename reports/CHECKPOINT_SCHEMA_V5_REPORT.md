@@ -17,7 +17,7 @@ was produced.
 - an explicit run ID and seed;
 - the exact effective training configuration and its canonical SHA-256;
 - clean producer Git commit, source inventory, and source blobs equal to HEAD;
-- train, validation, and held-out record identities and dataset provenance;
+- training and evaluation record identities and dataset provenance;
 - initialization mode and weights-checkpoint SHA-256 when applicable;
 - Python, NumPy, Torch, CUDA, cuDNN, deterministic-runtime, device, thread, and
   selected environment settings;

@@ -2367,6 +2367,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--train-pool-size",
+        type=int,
+        default=None,
+        help=(
+            "Number of fixed training instances to materialize. Required for "
+            "fixed_base_exact so optimizer batch size cannot silently define "
+            "the training population."
+        ),
+    )
+    parser.add_argument(
         "--eval-pool-size",
         type=int,
         default=None,
@@ -2782,6 +2792,31 @@ def _run_eval_and_log(
         trainer.clear_debug_stats()
 
 
+def _resolve_train_pool_size(
+    *,
+    requested_size: Optional[int],
+    batch_size: int,
+    require_explicit: bool,
+) -> int:
+    """Separate the training population from the optimizer mini-batch size."""
+
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
+        raise ValueError("Training batch size must be a positive integer.")
+    if requested_size is None:
+        if require_explicit:
+            raise RuntimeError(
+                "Confirmatory training requires an explicit training pool size."
+            )
+        return max(batch_size, 8)
+    if (
+        isinstance(requested_size, bool)
+        or not isinstance(requested_size, int)
+        or requested_size < 1
+    ):
+        raise ValueError("Training pool size must be a positive integer.")
+    return requested_size
+
+
 def main():
     args = parse_args()
 
@@ -2882,6 +2917,11 @@ def main():
                 "Schema-v5 fixed-base runs require materialized disjoint train and "
                 "evaluation splits; the dummy dataset is smoke-only."
             )
+        if args.train_pool_size is None:
+            raise RuntimeError(
+                "fixed_base_exact requires an explicit --train-pool-size; "
+                "optimizer batch size must not define the training population."
+            )
         try:
             initial_producer_identity = discover_clean_git_source(
                 producer_repo_root
@@ -2898,11 +2938,21 @@ def main():
             f"{args.train_split!r} for both."
         )
 
+    train_pool_size = _resolve_train_pool_size(
+        requested_size=args.train_pool_size,
+        batch_size=rl_cfg.batch_size,
+        require_explicit=confirmatory_fixed_base,
+    )
     dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
         dataset_paths=args.dataset_paths,
-        pool_size=max(rl_cfg.batch_size, 8),
+        pool_size=train_pool_size,
         split=args.train_split,
     )
+    if args.train_pool_size is not None and len(dataset) != train_pool_size:
+        raise RuntimeError(
+            "Training split is smaller than --train-pool-size; refusing to "
+            f"silently use {len(dataset)} of {train_pool_size} requested records."
+        )
     train_identifier_count = num_identifiers
     if args.dataset_paths:
         eval_pool_size = args.eval_pool_size or rl_cfg.eval_num_episodes

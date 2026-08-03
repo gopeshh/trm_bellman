@@ -1,7 +1,10 @@
 """Determinism tests for downloaded dataset builders."""
 
 import csv
+import json
 import random
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +14,7 @@ import numpy as np
 
 from dataset import build_easy_sudoku, build_maze_dataset, build_sudoku_dataset
 from dataset import build_4x4_sudoku, build_4x4_trivial
+from dataset import build_iclr_confirmatory_4x4
 
 
 def _tree_bytes(root: Path) -> dict[str, bytes]:
@@ -61,6 +65,184 @@ class TestDatasetBuilderDeterminism(unittest.TestCase):
                 for left, right in zip(first, second)
             )
         )
+
+    def test_confirmatory_4x4_builder_is_deterministic_and_disjoint(self):
+        spec = build_iclr_confirmatory_4x4.BuildSpec(
+            splits=(
+                build_iclr_confirmatory_4x4.SplitSpec("train", 12, 26080301),
+                build_iclr_confirmatory_4x4.SplitSpec(
+                    "validation", 6, 26080302
+                ),
+                build_iclr_confirmatory_4x4.SplitSpec("test", 8, 26080303),
+            ),
+            producer_commit="a" * 40,
+        )
+        random.seed(811)
+        np.random.seed(812)
+        python_state = random.getstate()
+        numpy_state = np.random.get_state()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first"
+            second = root / "second"
+            first_hashes = build_iclr_confirmatory_4x4.build_dataset(first, spec)
+            second_hashes = build_iclr_confirmatory_4x4.build_dataset(second, spec)
+
+            self.assertEqual(_tree_bytes(first), _tree_bytes(second))
+            self.assertEqual(first_hashes, second_hashes)
+            self.assertEqual(
+                first_hashes,
+                build_iclr_confirmatory_4x4.verify_dataset(first),
+            )
+            for split, count in (("train", 12), ("validation", 6), ("test", 8)):
+                manifest = json.loads(
+                    (first / "manifests" / f"{split}.json").read_text()
+                )
+                self.assertEqual(manifest["generated_count"], count)
+                self.assertEqual(len(set(manifest["input_sha256s"])), count)
+                inputs = np.load(first / split / "all__inputs.npy")
+                empty_counts = np.count_nonzero(inputs == 1, axis=1)
+                self.assertTrue(np.all((empty_counts >= 6) & (empty_counts <= 8)))
+
+            with self.assertRaisesRegex(
+                build_iclr_confirmatory_4x4.DatasetBuildError,
+                "Refusing to overwrite",
+            ):
+                build_iclr_confirmatory_4x4.build_dataset(first, spec)
+
+        self.assertEqual(random.getstate(), python_state)
+        self.assert_numpy_rng_state_equal(np.random.get_state(), numpy_state)
+
+    def test_confirmatory_4x4_verifier_detects_mutation(self):
+        spec = build_iclr_confirmatory_4x4.BuildSpec(
+            splits=(
+                build_iclr_confirmatory_4x4.SplitSpec("train", 4, 11),
+                build_iclr_confirmatory_4x4.SplitSpec("validation", 2, 12),
+                build_iclr_confirmatory_4x4.SplitSpec("test", 3, 13),
+            ),
+            producer_commit="b" * 40,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "dataset"
+            build_iclr_confirmatory_4x4.build_dataset(root, spec)
+            path = root / "train" / "all__inputs.npy"
+            encoded = bytearray(path.read_bytes())
+            encoded[-1] ^= 1
+            path.write_bytes(encoded)
+            with self.assertRaisesRegex(
+                build_iclr_confirmatory_4x4.DatasetBuildError,
+                "SHA-256 differs",
+            ):
+                build_iclr_confirmatory_4x4.verify_dataset(root)
+
+    def test_confirmatory_builder_binds_running_source_to_producer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for relative in build_iclr_confirmatory_4x4.PRODUCER_SOURCE_PATHS:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("# unrelated source\n")
+            with patch.object(
+                build_iclr_confirmatory_4x4,
+                "assert_git_files_match_head",
+            ), self.assertRaisesRegex(
+                build_iclr_confirmatory_4x4.DatasetBuildError,
+                "differs from the running binary",
+            ):
+                build_iclr_confirmatory_4x4._verify_producer_source_matches_runtime(
+                    root
+                )
+
+    def test_confirmatory_builder_publication_never_replaces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stage = root / "stage"
+            output = root / "output"
+            stage.mkdir()
+            output.mkdir()
+            (stage / "new.txt").write_text("new")
+            (output / "old.txt").write_text("old")
+            with self.assertRaisesRegex(
+                build_iclr_confirmatory_4x4.DatasetBuildError,
+                "Refusing to replace",
+            ):
+                build_iclr_confirmatory_4x4._publish_directory_no_replace(
+                    stage,
+                    output,
+                )
+
+            self.assertEqual((output / "old.txt").read_text(), "old")
+            self.assertEqual((stage / "new.txt").read_text(), "new")
+
+    def test_confirmatory_builder_refills_after_duplicate_candidate(self):
+        solution = np.array(
+            [
+                [1, 2, 3, 4],
+                [3, 4, 1, 2],
+                [2, 1, 4, 3],
+                [4, 3, 2, 1],
+            ],
+            dtype=np.int32,
+        )
+        first = solution.copy()
+        second = solution.copy()
+        first.flat[[0, 1, 4, 5, 10, 15]] = 0
+        second.flat[[2, 3, 6, 7, 8, 9]] = 0
+        with patch.object(
+            build_iclr_confirmatory_4x4,
+            "generate_solved_4x4",
+            return_value=solution,
+        ), patch.object(
+            build_iclr_confirmatory_4x4,
+            "create_puzzle",
+            side_effect=[first, first.copy(), second],
+        ), patch.object(
+            build_iclr_confirmatory_4x4,
+            "count_solutions",
+            return_value=1,
+        ):
+            records, stats = build_iclr_confirmatory_4x4._generate_split(
+                build_iclr_confirmatory_4x4.SplitSpec("train", 2, 17),
+                min_empty_cells=6,
+                max_empty_cells=8,
+                seen_inputs=set(),
+                seen_records=set(),
+            )
+
+        self.assertEqual(len(records), 2)
+        self.assertEqual(stats["attempts"], 3)
+        self.assertEqual(stats["rejected_duplicate_input"], 1)
+
+    def test_confirmatory_builder_is_byte_identical_across_processes(self):
+        program = """
+import sys
+from dataset.build_iclr_confirmatory_4x4 import BuildSpec, SplitSpec, build_dataset
+
+build_dataset(
+    sys.argv[1],
+    BuildSpec(
+        splits=(
+            SplitSpec("train", 3, 31),
+            SplitSpec("validation", 2, 32),
+            SplitSpec("test", 2, 33),
+        ),
+        producer_commit="c" * 40,
+    ),
+)
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first"
+            second = root / "second"
+            for output in (first, second):
+                subprocess.run(
+                    [sys.executable, "-c", program, str(output)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+
+            self.assertEqual(_tree_bytes(first), _tree_bytes(second))
 
     def test_4x4_trivial_generator_is_local_and_seeded(self):
         random.seed(303)

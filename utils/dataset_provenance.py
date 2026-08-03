@@ -7,7 +7,7 @@ import json
 import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
 DATASET_PROVENANCE_SCHEMA_VERSION = 1
@@ -23,6 +23,8 @@ class DatasetSourceBuildMetadata(TypedDict):
     builder_version: str | int
     generation_seed: int | None
     build_config_sha256: str | None
+    split_generation_seeds: NotRequired[dict[str, int]]
+    producer_git_commit: NotRequired[str]
 
 
 def dataset_source_build_metadata(
@@ -56,6 +58,37 @@ def dataset_source_build_metadata(
             builder_name = config.get("builder")
             builder_version = config.get("build_schema_version")
             generation_seed = config.get("seed")
+            raw_splits = config.get("splits")
+            split_generation_seeds: dict[str, int] | None = None
+            if raw_splits is not None:
+                if not isinstance(raw_splits, Mapping) or not all(
+                    isinstance(name, str) and isinstance(value, Mapping)
+                    for name, value in raw_splits.items()
+                ):
+                    raise DatasetProvenanceError(
+                        f"Dataset source {root.name!r} has invalid split metadata."
+                    )
+                split_generation_seeds = {}
+                for name, value in raw_splits.items():
+                    split_seed = value.get("seed")
+                    if isinstance(split_seed, bool) or not isinstance(split_seed, int):
+                        raise DatasetProvenanceError(
+                            f"Dataset source {root.name!r} has invalid seed for "
+                            f"split {name!r}."
+                        )
+                    split_generation_seeds[name] = split_seed
+            producer_git_commit = config.get("producer_git_commit")
+            if producer_git_commit is not None and (
+                not isinstance(producer_git_commit, str)
+                or len(producer_git_commit) != 40
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in producer_git_commit
+                )
+            ):
+                raise DatasetProvenanceError(
+                    f"Dataset source {root.name!r} has invalid producer commit."
+                )
             if not isinstance(builder_name, str) or not builder_name:
                 raise DatasetProvenanceError(
                     f"Dataset source {root.name!r} has no recorded builder."
@@ -83,6 +116,10 @@ def dataset_source_build_metadata(
                     "build_config_sha256": hashlib.sha256(encoded).hexdigest(),
                 }
             )
+            if split_generation_seeds is not None:
+                source["split_generation_seeds"] = split_generation_seeds
+            if producer_git_commit is not None:
+                source["producer_git_commit"] = producer_git_commit
         sources.append(source)
     if not sources:
         raise ValueError("At least one dataset source is required.")

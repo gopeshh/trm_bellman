@@ -27,6 +27,7 @@ from rl.upi_trm_trainer import UPITrmTrainer
 import upi_trm_train
 from upi_trm_train import (
     _capture_rng_state,
+    _resolve_train_pool_size,
     _restore_rng_state,
     _verify_producer_source_matches_runtime,
     resume_from_checkpoint,
@@ -104,8 +105,12 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         set_all.assert_called_once_with(cuda_states)
 
     @staticmethod
-    def _write_dataset_root(root: Path, num_puzzles: int) -> None:
-        split_dir = root / "test"
+    def _write_dataset_root(
+        root: Path,
+        num_puzzles: int,
+        split: str = "test",
+    ) -> None:
+        split_dir = root / split
         split_dir.mkdir(parents=True)
         inputs = np.arange(num_puzzles * 2, dtype=np.int32).reshape(num_puzzles, 2)
         np.save(split_dir / "all__inputs.npy", inputs)
@@ -441,6 +446,48 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             for call in mock_print.call_args_list
         )
         self.assertIn("falling back to dummy dataset", emitted)
+
+    def test_confirmatory_training_pool_size_is_explicit(self):
+        self.assertEqual(
+            _resolve_train_pool_size(
+                requested_size=None,
+                batch_size=32,
+                require_explicit=False,
+            ),
+            32,
+        )
+        with self.assertRaisesRegex(RuntimeError, "explicit training pool size"):
+            _resolve_train_pool_size(
+                requested_size=None,
+                batch_size=32,
+                require_explicit=True,
+            )
+        self.assertEqual(
+            _resolve_train_pool_size(
+                requested_size=1024,
+                batch_size=32,
+                require_explicit=True,
+            ),
+            1024,
+        )
+        with self.assertRaisesRegex(ValueError, "positive integer"):
+            _resolve_train_pool_size(
+                requested_size=0,
+                batch_size=32,
+                require_explicit=False,
+            )
+
+    def test_training_materialization_uses_requested_pool_not_batch_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "dataset"
+            self._write_dataset_root(root, num_puzzles=12, split="train")
+            dataset, *_ = build_dataset_from_paths(
+                [str(root)],
+                pool_size=10,
+                split="train",
+            )
+
+        self.assertEqual(len(dataset), 10)
 
     def test_requested_dataset_failure_is_fatal_by_default(self):
         with patch("rl.training_setup.PuzzleDataset", side_effect=RuntimeError("boom")):

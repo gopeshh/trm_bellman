@@ -6,6 +6,7 @@ python_library(
     srcs = glob(["dataset/*.py"]),
     base_module = "",
     deps = [
+        ":utils",
         "fbsource//third-party/pypi/huggingface-hub:huggingface-hub",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/pydantic:pydantic",
@@ -175,6 +176,20 @@ python_binary(
     base_module = "",
     main_module = "dataset.build_4x4_sudoku",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_binary(
+    name = "build_iclr_confirmatory_4x4",
+    srcs = [
+        "dataset/build_4x4_sudoku.py",
+        "dataset/build_iclr_confirmatory_4x4.py",
+    ],
+    base_module = "",
+    main_module = "dataset.build_iclr_confirmatory_4x4",
+    deps = [
+        ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
@@ -690,6 +705,7 @@ python_unittest(
 python_unittest(
     name = "test_dataset_builders",
     srcs = [
+        "dataset/build_iclr_confirmatory_4x4.py",
         "tests/__init__.py",
         "tests/test_dataset_builders_unittest.py",
     ],

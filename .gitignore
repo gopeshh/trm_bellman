@@ -46,6 +46,8 @@ logs/
 datasets/
 data/*
 !data/sudoku-4x4-trivial/
+!data/iclr-confirmatory-sudoku4x4-v1/
+!data/iclr-confirmatory-sudoku4x4-v1/**
 *.zip
 artifact/*.zip
 artifact/*.zip.sha256

@@ -140,7 +140,10 @@ class TestResultProvenance(unittest.TestCase):
             config_path = root / "build_config.json"
             config_path.write_text(
                 '{"builder":"dataset.build_4x4_sudoku",'
-                '"build_schema_version":2,"seed":31415}\n'
+                '"build_schema_version":2,"seed":31415,'
+                '"producer_git_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
+                '"splits":{"test":{"seed":31417},'
+                '"train":{"seed":31415}}}\n'
             )
             metadata = dataset_source_build_metadata([str(root)])
 
@@ -148,10 +151,36 @@ class TestResultProvenance(unittest.TestCase):
         self.assertEqual(metadata[0]["builder_name"], "dataset.build_4x4_sudoku")
         self.assertEqual(metadata[0]["builder_version"], 2)
         self.assertEqual(metadata[0]["generation_seed"], 31415)
+        self.assertEqual(
+            metadata[0]["split_generation_seeds"],
+            {"test": 31417, "train": 31415},
+        )
+        self.assertEqual(metadata[0]["producer_git_commit"], "a" * 40)
         build_config_sha256 = metadata[0]["build_config_sha256"]
         self.assertIsNotNone(build_config_sha256)
         assert build_config_sha256 is not None
         self.assertEqual(len(build_config_sha256), 64)
+
+    def test_legacy_source_metadata_shape_remains_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "legacy-dataset"
+            root.mkdir()
+            (root / "build_config.json").write_text(
+                '{"builder":"dataset.build_4x4_sudoku",'
+                '"build_schema_version":1,"seed":42}\n'
+            )
+            metadata = dataset_source_build_metadata([str(root)])[0]
+
+        self.assertEqual(
+            set(metadata),
+            {
+                "source_name",
+                "builder_name",
+                "builder_version",
+                "generation_seed",
+                "build_config_sha256",
+            },
+        )
 
     def test_radius_aggregation_fixes_evaluation_depth(self):
         with tempfile.TemporaryDirectory() as tmp:
