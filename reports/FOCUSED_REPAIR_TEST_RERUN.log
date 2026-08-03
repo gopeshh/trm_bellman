@@ -1,0 +1,37 @@
+[2026-08-03T09:32:27.858-07:00] Buck UI: https://www.internalfb.com/buck2/31116100-8e4c-4ff4-9e06-8a696ca89f38
+[2026-08-03T09:32:31.758-07:00] RE Session: reSessionID-4fffa51a-d02f-4f5c-9da8-734c7323b5a1
+[2026-08-03T09:32:32.424-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/11540474232137045
+[2026-08-03T09:33:49.068-07:00] ✗ Fail: fbcode//buiksat_trm:test_cleanrl_regressions - test_ppo_truncation_bootstraps_once_and_stops_gae_trace (tests.test_cleanrl_regressions_unittest.TestCleanRLRegressions) (0.2s)
+[2026-08-03T09:33:49.068-07:00] WARNING:2026-08-03 09:33:36 1339357:1339357 ActivityProfilerController.cpp:125] Overwriting logger factory for protocol: file
+[2026-08-03T09:33:49.068-07:00] monitoring.obc.py.OBCClient:13: ThriftPyDeprecatedWarning: Uses thrift-py-deprecated. Migrate to thrift-python. See https://fburl.com/thrift-python and https://fburl.com/wiki/jihy02dr. Future automatic thrift-py-deprecated code generation may stop for non-migrated targets: https://fburl.com/workplace/wer48s4m.
+[2026-08-03T09:33:49.068-07:00] /data/repos/fbsource/buck-out/v2/art/fbcode/8ce5402880ed0382/buiksat_trm/__test_cleanrl_regressions__/test_cleanrl_regressions#link-tree/torch/_utils_internal.py:283: NCCL_DEBUG env var is set to None
+[2026-08-03T09:33:49.068-07:00] /data/repos/fbsource/buck-out/v2/art/fbcode/8ce5402880ed0382/buiksat_trm/__test_cleanrl_regressions__/test_cleanrl_regressions#link-tree/torch/_utils_internal.py:292: NCCL_DEBUG is WARN from /etc/nccl.conf
+[2026-08-03T09:33:49.068-07:00] test_ppo_truncation_bootstraps_once_and_stops_gae_trace (tests.test_cleanrl_regressions_unittest.TestCleanRLRegressions) ... ERROR
+[2026-08-03T09:33:49.068-07:00]
+[2026-08-03T09:33:49.068-07:00] ======================================================================
+[2026-08-03T09:33:49.068-07:00] ERROR: test_ppo_truncation_bootstraps_once_and_stops_gae_trace (tests.test_cleanrl_regressions_unittest.TestCleanRLRegressions)
+[2026-08-03T09:33:49.068-07:00] ----------------------------------------------------------------------
+[2026-08-03T09:33:49.068-07:00] Traceback (most recent call last):
+[2026-08-03T09:33:49.068-07:00]   File "/data/repos/fbsource/buck-out/v2/art/fbcode/8ce5402880ed0382/buiksat_trm/__test_cleanrl_regressions__/test_cleanrl_regressions#link-tree/tests/test_cleanrl_regressions_unittest.py", line 125, in test_ppo_truncation_bootstraps_once_and_stops_gae_trace
+[2026-08-03T09:33:49.068-07:00]     boundary = _episode_done_flags(
+[2026-08-03T09:33:49.068-07:00]                ^^^^^^^^^^^^^^^^^^^^
+[2026-08-03T09:33:49.068-07:00]   File "/data/repos/fbsource/buck-out/v2/art/fbcode/8ce5402880ed0382/buiksat_trm/__test_cleanrl_regressions__/test_cleanrl_regressions#link-tree/rl/cleanrl/ppo_trm.py", line 193, in _episode_done_flags
+[2026-08-03T09:33:49.068-07:00]     if rewards.ndim != 1 or terminated.ndim != 1:
+[2026-08-03T09:33:49.068-07:00]        ^^^^^^^
+[2026-08-03T09:33:49.068-07:00] NameError: name 'rewards' is not defined
+[2026-08-03T09:33:49.068-07:00]
+[2026-08-03T09:33:49.068-07:00] ----------------------------------------------------------------------
+[2026-08-03T09:33:49.068-07:00] Ran 1 test in 0.165s
+[2026-08-03T09:33:49.068-07:00]
+[2026-08-03T09:33:49.068-07:00] FAILED (errors=1)
+[2026-08-03T09:33:49.068-07:00]
+[2026-08-03T09:34:35.667-07:00] Network: up 2.0MiB  down 2.4GiB  session reSessionID-4fffa51a-d02f-4f5c-9da8-734c7323b5a1
+[2026-08-03T09:34:35.667-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/11540474232137045
+Tests finished: [mPass 120[m. [mFail 1[m. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+1 TESTS FAILED
+  ✗ fbcode//buiksat_trm:test_cleanrl_regressions - test_ppo_truncation_bootstraps_once_and_stops_gae_trace (tests.test_cleanrl_regressions_unittest.TestCleanRLRegressions) (cfg:dev-linux-x86_64-fbcode-platform010-clang19-asan-ubsan-dev#983d5c31e875a5f6)
+
+Run [1m$ fdb buck test <args>[0m to debug fbcode//buiksat_trm:test_cleanrl_regressions - test_ppo_truncation_bootstraps_once_and_stops_gae_trace (tests.test_cleanrl_regressions_unittest.TestCleanRLRegressions)
+      ^^^ just prefix your previous command! ($ fdb !!)
+Learn more at https://fburl.com/fdb
+[32mUse Devmate to fix your errors. Just click the following link: ]8;;fb-vscode://nuclide.code-compose/devmate/fixtests?run_id=11540474232137045&expiry=2026-08-03T16%3A39%3A33Z&viewer=691376739&signature=43cbc80502bdb6c0a7d1eb7fcbd7e14000be79bea1132ebb119d91e05e08e2e9b3c980ec9db981795949dde6f82253ad4c1c0ddd12eb6895b0f14a4fae0a49ce0bf02e3e05\fb-vscode://nuclide.code-compose/devmate/fixtests?run_id=11540474232137045&expiry=2026-08-03T16%3A39%3A33Z&viewer=691376739&signature=43cbc80502bdb6c0a7d1eb7fcbd7e14000be79bea1132ebb119d91e05e08e2e9b3c980ec9db981795949dde6f82253ad4c1c0ddd12eb6895b0f14a4fae0a49ce0bf02e3e05]8;;\[0m

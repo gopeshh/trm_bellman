@@ -190,8 +190,8 @@ def _episode_done_flags(
     """Return episode-boundary flags for rollout and GAE bookkeeping."""
     if terminated.shape != truncated.shape:
         raise ValueError("terminated and truncated flags must have matching shapes")
-    if rewards.ndim != 1 or terminated.ndim != 1:
-        raise ValueError("reward and boundary batches must be one-dimensional")
+    if terminated.ndim != 1:
+        raise ValueError("boundary batches must be one-dimensional")
     return np.logical_or(terminated, truncated)
 
 

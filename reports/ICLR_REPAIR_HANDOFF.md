@@ -42,16 +42,21 @@ confirmatory experiment and must not be cited as one.
 - The provenance sub-slice also passed `fbpython -m py_compile` and scoped diff
   checks before integration.
 
-## Validation interrupted
+## Focused post-repair validation
 
-The combined focused Buck batch did not finish before the machine handoff.
-The first attempt exposed a remote materialization failure for the empty
-`dataset/__init__.py`; the file now contains a package docstring. The retry was
-terminated after several minutes with no test result so the branch could be
-committed before host loss. Its retained log is
-`reports/FOCUSED_REPAIR_TEST_ATTEMPT.log`.
+The final single-session focused Buck batch ran 121 tests. It initially passed
+120 and exposed one `NameError` in the new PPO boundary-shape check. That defect
+was fixed, then the complete 12-test CleanRL regression target passed. The
+focused repair set therefore has no remaining test failure. Logs are
+`reports/FOCUSED_REPAIR_TEST_RERUN.log` and
+`reports/CLEANRL_REGRESSION_RERUN.log`.
 
-Run this first on the next machine:
+An earlier accidentally concurrent Buck attempt produced TPX duplicate-event
+fatals even though the captured individual test processes printed `OK`. It is
+retained as `reports/FOCUSED_REPAIR_TEST_ATTEMPT.log` and is not counted as a
+valid test result.
+
+Run the full declared suite first on the next machine:
 
 ```bash
 cd /data/repos/fbsource/fbcode
