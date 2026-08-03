@@ -4,8 +4,8 @@ Date: 2026-08-03
 
 Branch: `iclr-confirmatory-repair`
 
-This branch is an interrupted implementation checkpoint. It is not a completed
-confirmatory experiment and must not be cited as one.
+This branch contains the repaired implementation baseline. It is not a
+completed confirmatory experiment and must not be cited as one.
 
 ## Implemented in the working diff
 
@@ -19,7 +19,8 @@ confirmatory experiment and must not be cited as one.
 - Live mid-episode collection checkpoints and exact UPI environment-interaction
   budgets. A collector cap no longer creates a false terminal or optimizer
   boundary.
-- Schema-v3 fail-closed resume with full replay, live environment/collector
+- Schema-v4 fail-closed resume with training-protocol and execution-device
+  identity, full replay, live environment/collector
   state, process RNGs, dataset provenance, environment configuration, and
   action-mask configuration.
 - Canonical dataset provenance with builder/version, recorded generation seed,
@@ -31,6 +32,9 @@ confirmatory experiment and must not be cited as one.
 - Local seeded 4x4, curriculum Sudoku, canonical Sudoku, and maze generation.
 - Pure finite-batch augmented-state diagnostic summaries. These outputs are
   explicitly not uniform certificates.
+- Explicit `fixed_base_exact` training: collection from one frozen base,
+  value-head-only critic fitting, candidate-head proposal training, exact
+  probability-space mixture evaluation, and no recursive promotion.
 - Regression tests for the paths above.
 
 ## Validation completed
@@ -42,60 +46,33 @@ confirmatory experiment and must not be cited as one.
 - The provenance sub-slice also passed `fbpython -m py_compile` and scoped diff
   checks before integration.
 
-## Focused post-repair validation
+## Post-repair validation
 
-The final single-session focused Buck batch ran 121 tests. It initially passed
-120 and exposed one `NameError` in the new PPO boundary-shape check. That defect
-was fixed, then the complete 12-test CleanRL regression target passed. The
-focused repair set therefore has no remaining test failure. Logs are
-`reports/FOCUSED_REPAIR_TEST_RERUN.log` and
-`reports/CLEANRL_REGRESSION_RERUN.log`.
+The final focused Buck batch passed 121 tests. The complete post-handoff runtime
+gate was partitioned to avoid a reproducible TPX parallel-teardown artifact in
+the logging target: 30 targets passed 296 tests together, and the isolated
+logging/checkpoint target passed 14 tests. Total: 310 passing cases, zero code
+failures. The six known package type-check targets also passed.
 
-An earlier accidentally concurrent Buck attempt produced TPX duplicate-event
-fatals even though the captured individual test processes printed `OK`. It is
-retained as `reports/FOCUSED_REPAIR_TEST_ATTEMPT.log` and is not counted as a
-valid test result.
+Failed and interrupted attempts are retained rather than counted as passes.
+The exact chronology, commands, session identifiers, and SHA-256 log manifest
+are in `reports/POST_HANDOFF_EXECUTION_REPORT.md` and
+`reports/POST_HANDOFF_TEST_LOG_SHA256SUMS.txt`.
 
-Run the full declared suite first on the next machine:
+## Correctness review outcome
 
-```bash
-cd /data/repos/fbsource/fbcode
-buck2 test \
-  //buiksat_trm:test_result_provenance \
-  //buiksat_trm:test_upi_trm_logging_smoke \
-  //buiksat_trm:test_upi_trm_trainer_smoke \
-  //buiksat_trm:test_plan_edit_env \
-  //buiksat_trm:test_rl_k_step_value_update_trainer \
-  //buiksat_trm:test_optimized_exact_baseline \
-  //buiksat_trm:test_augmented_replay_diagnostics \
-  //buiksat_trm:test_cleanrl_regressions \
-  //buiksat_trm:test_dataset_builders \
-  //buiksat_trm:test_rl_algos_mock \
-  //buiksat_trm:test_config_integrity
-```
+The unresolved training-protocol issue was closed by implementing the first
+design above as an explicit opt-in. `theory_exact_mixture=True` alone no longer
+labels legacy multi-update training as exact. `fixed_base_exact` freezes the
+base policy and recurrent map, collects from that base, trains only the value
+head and one candidate policy head, and evaluates the explicit mixture without
+promoting it. Schema-v4 resume fails closed on protocol or device mismatch.
 
-Then rerun all declared Python unit-test targets and the six package type-check
-targets recorded in `reports/PRE_REPAIR_TEST_REPORT.md`.
-
-## Open correctness review
-
-An adversarial review cleared exact probability-space deployment, stochastic
-mixture evaluation, persistent carry order, exact centering, and shared
-old/candidate recurrent snapshots. It raised one unresolved training-protocol
-issue: in a multi-update `theory_exact_mixture` run, replay is collected from
-the explicit old/candidate mixture while advantages are centered under the old
-component, and the value step can change policy-affecting recurrent parameters
-before the next frozen snapshot. The fixed-snapshot theorem remains a
-conditional post-update statement, but `is_theory_exact()` overstates the
-end-to-end training path. Do not call a multi-step run theorem aligned until
-one of these designs is implemented and tested:
-
-1. freeze the recurrent actor map and train only a policy-independent value
-   head for one fixed-base proposal, collecting under that same base policy; or
-2. represent and promote the exact mixture as the next current policy, then
-   evaluate and center under that same policy.
-
-`mixture_alpha` is now constrained to `[0, 1]`.
+Two adversarial re-reviews cleared collection identity, recurrent-map
+immutability, exact-mixture evaluation, optimizer ownership, pre-mutation
+checkpoint validation, and device restoration. They found a stale
+`model_step_*.pt` hazard; fixed-base saves now reject any output directory that
+contains such a single-model artifact, with a regression test.
 
 ## Experiments not run
 
