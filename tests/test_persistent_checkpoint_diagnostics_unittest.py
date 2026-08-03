@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -56,6 +57,7 @@ from utils.dataset_provenance import (
     dataset_source_build_metadata,
     ordered_record_sha256,
 )
+from utils.run_identity import build_checkpoint_lineage, canonical_json_sha256
 
 
 def _model_dump(config: Any) -> dict[str, Any]:
@@ -428,13 +430,87 @@ def _checkpoint_payload(
         environment_config={"max_edits": 2},
         action_mask_config={"stop_action_mode": "disabled"},
     )
+    serialized_rl_config = _model_dump(rl_config)
+    serialized_model_config = _model_dump(model_config)
+    runtime_fingerprint = {"test_runtime": True}
+    effective_config = {
+        "effective_config_schema_version": 1,
+        "algorithm": "upi_trm",
+        "training_protocol": "fixed_base_exact",
+        "backbone": "trm",
+        "rl_config": copy.deepcopy(serialized_rl_config),
+        "model_config": copy.deepcopy(serialized_model_config),
+        "execution_device": "cpu",
+        "runtime_fingerprint_sha256": canonical_json_sha256(
+            runtime_fingerprint
+        ),
+        "dataset": {
+            "train_split": provenance["splits"]["train"],
+            "eval_split": provenance["splits"]["eval"],
+            "train_record_count": provenance["ordered_records"]["train"][
+                "count"
+            ],
+            "eval_record_count": provenance["ordered_records"]["eval"][
+                "count"
+            ],
+        },
+        "budget": {
+            "outer_train_steps": serialized_rl_config["num_train_steps"],
+            "environment_interactions": 1,
+        },
+        "schedule": {
+            "log_outer_interval": serialized_rl_config["log_interval"],
+            "eval_outer_interval": serialized_rl_config["eval_interval"],
+            "save_outer_interval": 1,
+            "log_environment_interval": 1,
+            "eval_environment_interval": 1,
+            "save_environment_interval": 1,
+        },
+        "evaluation": {
+            "episode_count": serialized_rl_config["eval_num_episodes"],
+            "seed": serialized_rl_config["eval_seed"],
+            "pool_size": provenance["ordered_records"]["eval"]["count"],
+        },
+        "puzzle_embedding_optimizer": {
+            "learning_rate": 0.01,
+            "weight_decay": 0.1,
+        },
+        "imitation": {"enabled": False, "epochs": 0},
+        "external_logging": "disabled",
+        "debug_checks": serialized_rl_config["debug_checks"],
+        "config_source_sha256s": [],
+    }
+    run_identity = {
+        "run_identity_schema_version": 1,
+        "run_id": "diagnostic.seed7",
+        "training_seed": 7,
+        "producer": {"git_commit": "a" * 40, "git_clean": True},
+        "effective_config": effective_config,
+        "effective_config_sha256": canonical_json_sha256(effective_config),
+        "dataset_provenance_sha256": canonical_json_sha256(provenance),
+        "initialization": {"kind": "random", "artifact_sha256": None},
+    }
+    parameter_names = [name for name, _ in model.named_parameters()]
+    module_names = (
+        "model",
+        "policy_model_old",
+        "policy_model_candidate",
+        "target_model",
+    )
     return {
-        "checkpoint_schema_version": 4,
+        "checkpoint_schema_version": 5,
         "training_protocol": "fixed_base_exact",
         "execution_device": "cpu",
         "trainer_kind": "UPITrmTrainer",
         "step": 1,
-        "progress": {"env_steps": 1, "optimizer_updates": 0},
+        "progress": {
+            "env_steps": 1,
+            "outer_steps": 0,
+            "value_optimizer_steps": 0,
+            "policy_optimizer_steps": 0,
+            "distill_optimizer_steps": 0,
+            "puzzle_optimizer_steps": 0,
+        },
         "model_state_dict": copy.deepcopy(model_state),
         "policy_model_old_state_dict": copy.deepcopy(model_state),
         "policy_model_candidate_state_dict": copy.deepcopy(model_state),
@@ -443,11 +519,28 @@ def _checkpoint_payload(
         "policy_optimizer_state_dict": {},
         "rng_state": {},
         "dataset_provenance": provenance,
-        "model_config": _model_dump(model_config),
-        "rl_config": _model_dump(rl_config),
+        "model_config": serialized_model_config,
+        "rl_config": serialized_rl_config,
+        "run_identity": run_identity,
+        "checkpoint_lineage": build_checkpoint_lineage(
+            parent_checkpoint_sha256=None,
+            parent_checkpoint_step=None,
+            parent_environment_steps=None,
+        ),
+        "runtime_fingerprint": runtime_fingerprint,
+        "module_training_modes": {name: False for name in module_names},
+        "parameter_gradients": {
+            module_name: {name: None for name in parameter_names}
+            for module_name in module_names
+        },
+        "checkpoint_phase": "idle_between_training_calls",
         "trainer_state": {
             "env_step_count": 1,
             "train_step_count": 0,
+            "value_optimizer_step_count": 0,
+            "policy_optimizer_step_count": 0,
+            "distill_optimizer_step_count": 0,
+            "puzzle_optimizer_step_count": 0,
             "environment_state": environment_state,
             "collection_state": {
                 "schema_version": 1,
@@ -459,6 +552,45 @@ def _checkpoint_payload(
         "replay_capacity": 4,
         "replay_transitions": [transition],
     }
+
+
+def _refresh_run_identity(payload: dict[str, Any]) -> None:
+    identity = payload["run_identity"]
+    effective = identity["effective_config"]
+    identity["effective_config"]["rl_config"] = copy.deepcopy(
+        payload["rl_config"]
+    )
+    identity["effective_config"]["model_config"] = copy.deepcopy(
+        payload["model_config"]
+    )
+    provenance = payload["dataset_provenance"]
+    effective["dataset"] = {
+        "train_split": provenance["splits"]["train"],
+        "eval_split": provenance["splits"]["eval"],
+        "train_record_count": provenance["ordered_records"]["train"]["count"],
+        "eval_record_count": provenance["ordered_records"]["eval"]["count"],
+    }
+    effective["budget"]["outer_train_steps"] = payload["rl_config"][
+        "num_train_steps"
+    ]
+    effective["schedule"]["log_outer_interval"] = payload["rl_config"][
+        "log_interval"
+    ]
+    effective["schedule"]["eval_outer_interval"] = payload["rl_config"][
+        "eval_interval"
+    ]
+    effective["evaluation"] = {
+        "episode_count": payload["rl_config"]["eval_num_episodes"],
+        "seed": payload["rl_config"]["eval_seed"],
+        "pool_size": provenance["ordered_records"]["eval"]["count"],
+    }
+    effective["debug_checks"] = payload["rl_config"]["debug_checks"]
+    identity["effective_config_sha256"] = canonical_json_sha256(
+        identity["effective_config"]
+    )
+    identity["dataset_provenance_sha256"] = canonical_json_sha256(
+        payload["dataset_provenance"]
+    )
 
 
 class TestPersistentDiagnostics(unittest.TestCase):
@@ -840,7 +972,7 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
         torch.save(dict(payload), path)
         return path
 
-    def test_valid_schema4_fixed_base_checkpoint_loads_without_rng_mutation(
+    def test_valid_schema5_fixed_base_checkpoint_loads_without_rng_mutation(
         self,
     ) -> None:
         payload = _checkpoint_payload()
@@ -853,7 +985,9 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
         self.assertTrue(torch.equal(torch.random.get_rng_state(), rng_before))
         self.assertEqual(loaded.checkpoint_step, 1)
         self.assertEqual(loaded.environment_steps, 1)
-        self.assertEqual(loaded.optimizer_updates, 0)
+        self.assertEqual(loaded.outer_steps, 0)
+        self.assertEqual(loaded.value_optimizer_steps, 0)
+        self.assertEqual(loaded.policy_optimizer_steps, 0)
         self.assertEqual(loaded.replay.transition_count, 1)
         self.assertEqual(loaded.replay.terminal_transition_count, 1)
         self.assertTrue(loaded.recurrent_map_shared)
@@ -863,6 +997,103 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
         self.assertFalse(loaded.evaluator.training)
         self.assertFalse(loaded.current_policy.training)
         self.assertFalse(loaded.candidate_policy.training)
+        self.assertEqual(loaded.producer_code_commit, "a" * 40)
+        self.assertEqual(loaded.training_seed, 7)
+        self.assertEqual(loaded.run_id, "diagnostic.seed7")
+        self.assertEqual(
+            loaded.effective_config_sha256,
+            payload["run_identity"]["effective_config_sha256"],
+        )
+        self.assertEqual(loaded.initialization_kind, "random")
+        self.assertIsNone(loaded.initialization_artifact_sha256)
+        self.assertIsNone(loaded.parent_checkpoint_sha256)
+        self.assertIsNone(loaded.parent_checkpoint_step)
+
+    def test_rejects_checkpoint_mutated_during_single_open_load(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._save(directory, _checkpoint_payload(), "mutable.pt")
+            real_torch_load = torch.load
+
+            def load_then_mutate(handle, *args, **kwargs):
+                payload = real_torch_load(handle, *args, **kwargs)
+                with path.open("ab") as writer:
+                    writer.write(b"changed")
+                return payload
+
+            with patch(
+                "rl.persistent_diagnostic_checkpoint.torch.load",
+                side_effect=load_then_mutate,
+            ):
+                with self.assertRaisesRegex(
+                    PersistentDiagnosticInputError,
+                    "changed while it was being loaded",
+                ):
+                    load_persistent_checkpoint(path, device="cpu")
+
+    def test_schema5_run_identity_is_strictly_bound(self) -> None:
+        base = _checkpoint_payload()
+        cases: list[tuple[str, dict[str, Any], str]] = []
+
+        missing = copy.deepcopy(base)
+        missing.pop("run_identity")
+        cases.append(("missing", missing, "missing required fields"))
+
+        bad_commit = copy.deepcopy(base)
+        bad_commit["run_identity"]["producer"]["git_commit"] = "A" * 40
+        cases.append(("bad_commit", bad_commit, "identity or lineage is invalid"))
+
+        bad_config_hash = copy.deepcopy(base)
+        bad_config_hash["run_identity"]["effective_config_sha256"] = "f" * 64
+        cases.append(
+            (
+                "bad_config_hash",
+                bad_config_hash,
+                "identity or lineage is invalid",
+            )
+        )
+
+        bad_lineage = copy.deepcopy(base)
+        bad_lineage["checkpoint_lineage"]["parent_checkpoint_sha256"] = "a" * 64
+        cases.append(
+            ("bad_lineage", bad_lineage, "identity or lineage is invalid")
+        )
+
+        dataset_mismatch = copy.deepcopy(base)
+        dataset_mismatch["run_identity"]["dataset_provenance_sha256"] = "f" * 64
+        cases.append(
+            (
+                "dataset_mismatch",
+                dataset_mismatch,
+                "dataset provenance hash",
+            )
+        )
+
+        config_mismatch = copy.deepcopy(base)
+        config_mismatch["run_identity"]["effective_config"]["rl_config"][
+            "K"
+        ] += 1
+        config_mismatch["run_identity"]["effective_config_sha256"] = (
+            canonical_json_sha256(
+                config_mismatch["run_identity"]["effective_config"]
+            )
+        )
+        cases.append(
+            ("config_mismatch", config_mismatch, "RL configuration")
+        )
+
+        schema4 = copy.deepcopy(base)
+        schema4["checkpoint_schema_version"] = 4
+        cases.append(("schema4", schema4, "checkpoint schema 5"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            for name, payload, expected_message in cases:
+                with self.subTest(name=name):
+                    path = self._save(directory, payload, f"{name}.pt")
+                    with self.assertRaisesRegex(
+                        PersistentDiagnosticInputError,
+                        expected_message,
+                    ):
+                        load_persistent_checkpoint(path, device="cpu")
 
     def test_state_hash_handles_scalar_bfloat_view_without_storage_overreach(
         self,
@@ -936,10 +1167,11 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
 
         schema3 = copy.deepcopy(base)
         schema3["checkpoint_schema_version"] = 3
-        cases.append(("schema3", schema3, "checkpoint schema 4"))
+        cases.append(("schema3", schema3, "checkpoint schema 5"))
 
         episodic = copy.deepcopy(base)
         episodic["rl_config"]["episodic_latent"] = True
+        _refresh_run_identity(episodic)
         cases.append(("episodic", episodic, "episodic-latent"))
 
         missing_pair = copy.deepcopy(base)
@@ -982,6 +1214,25 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
                 "positive_log_probability",
                 positive_log_probability,
                 "positive behavior log probability",
+            )
+        )
+
+        skipped_episode_id = copy.deepcopy(base)
+        skipped_transition = copy.deepcopy(
+            skipped_episode_id["replay_transitions"][0]
+        )
+        skipped_transition.episode_id = 2
+        skipped_transition.timestep = 0
+        skipped_transition.x["remaining_edits"] = torch.tensor(2)
+        skipped_transition.x_next["remaining_edits"] = torch.tensor(1)
+        skipped_transition.done = torch.tensor(False)
+        skipped_episode_id["replay_transitions"].append(skipped_transition)
+        skipped_episode_id["replay_buffer_size"] = 2
+        cases.append(
+            (
+                "skipped_episode_id",
+                skipped_episode_id,
+                "not consecutive",
             )
         )
 
@@ -1176,6 +1427,36 @@ class TestPersistentDiagnosticArtifacts(unittest.TestCase):
                 validation["diagnostic"]["code_commit"]["status"],
                 "not verifiable from supplied evidence",
             )
+            self.assertEqual(
+                validation["checkpoint"]["producer_code_commit"],
+                {"value": "a" * 40, "status": "verified from artifact"},
+            )
+            self.assertEqual(
+                validation["checkpoint"]["training_seed"],
+                {"value": 7, "status": "verified from artifact"},
+            )
+            self.assertEqual(
+                validation["checkpoint"]["run_id"],
+                {
+                    "value": "diagnostic.seed7",
+                    "status": "verified from artifact",
+                },
+            )
+            self.assertEqual(
+                validation["checkpoint"][
+                    "optimizer_rng_and_live_trainer_restore"
+                ]["status"],
+                "not verifiable from supplied evidence",
+            )
+            self.assertEqual(
+                validation["checkpoint"]["lineage"],
+                {
+                    "parent_checkpoint_sha256": None,
+                    "parent_checkpoint_step": None,
+                    "parent_environment_interactions": None,
+                    "status": "verified from artifact",
+                },
+            )
             loaded_sources = validation["diagnostic"]["loaded_source_sha256s"]
             self.assertTrue(loaded_sources)
             self.assertTrue(
@@ -1333,6 +1614,7 @@ class TestPersistentDiagnosticArtifacts(unittest.TestCase):
                 dataset_provenance=provenance,
             )
             checkpoint_payload["rl_config"]["eval_num_episodes"] = 2
+            _refresh_run_identity(checkpoint_payload)
             torch.save(checkpoint_payload, checkpoint_path)
             manifest_path = Path(directory) / "dataset_manifest.json"
             manifest_path.write_text(

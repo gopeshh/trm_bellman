@@ -1,6 +1,6 @@
-"""Fail-closed inputs for persistent schema-v4 checkpoint diagnostics.
+"""Fail-closed inputs for persistent schema-v5 checkpoint diagnostics.
 
-This module loads trusted local training checkpoints. Schema-v4 checkpoints
+This module loads trusted local training checkpoints. Schema-v5 checkpoints
 contain replay dataclasses and therefore require ``torch.load`` pickle support;
 callers must not use it for downloaded or otherwise untrusted files.
 
@@ -50,9 +50,16 @@ from utils.dataset_provenance import (
     ordered_record_sha256,
     validate_dataset_provenance,
 )
+from utils.run_identity import (
+    RunIdentityError,
+    run_identity_sha256,
+    validate_checkpoint_lineage,
+    validate_run_identity,
+    validate_upi_effective_config,
+)
 
 
-CHECKPOINT_SCHEMA_VERSION = 4
+CHECKPOINT_SCHEMA_VERSION = 5
 DATASET_MANIFEST_SCHEMA_VERSION = 1
 TRAINING_PROTOCOL = "fixed_base_exact"
 UNVERIFIABLE_STATUS = "not verifiable from supplied evidence"
@@ -105,11 +112,26 @@ class LoadedPersistentCheckpoint:
     replay: ReplayValidation
     checkpoint_step: int
     environment_steps: int
-    optimizer_updates: int
+    outer_steps: int
+    value_optimizer_steps: int
+    policy_optimizer_steps: int
+    distill_optimizer_steps: int
+    puzzle_optimizer_steps: int
     source_execution_device: str
     checkpoint_schema_version: int
     training_protocol: str
     deployment_kind: str
+    producer_code_commit: str
+    training_seed: int
+    run_id: str
+    effective_config_sha256: str
+    run_identity_sha256: str
+    runtime_fingerprint_sha256: str
+    initialization_kind: str
+    initialization_artifact_sha256: str | None
+    parent_checkpoint_sha256: str | None
+    parent_checkpoint_step: int | None
+    parent_environment_steps: int | None
 
 
 @dataclass(frozen=True)
@@ -188,6 +210,36 @@ def file_sha256(path: str | Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _load_stable_torch_checkpoint(path: Path) -> tuple[Any, str]:
+    """Hash, load, and re-hash one open checkpoint before using its payload."""
+
+    try:
+        with path.open("rb") as handle:
+            digest_before = hashlib.sha256()
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest_before.update(chunk)
+            checkpoint_sha256 = digest_before.hexdigest()
+            handle.seek(0)
+            payload = torch.load(
+                handle,
+                map_location="cpu",
+                weights_only=False,
+            )
+            handle.seek(0)
+            digest_after = hashlib.sha256()
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest_after.update(chunk)
+    except OSError as exc:
+        raise PersistentDiagnosticInputError(
+            "The trusted local checkpoint could not be read."
+        ) from exc
+    if digest_after.hexdigest() != checkpoint_sha256:
+        raise PersistentDiagnosticInputError(
+            "The checkpoint changed while it was being loaded."
+        )
+    return payload, checkpoint_sha256
 
 
 def _update_length_prefixed(digest: Any, value: bytes) -> None:
@@ -461,9 +513,9 @@ def _validate_persistent_replay(
                         f"Replay records {index - 1} and {index} are discontinuous: {exc}"
                     ) from exc
             else:
-                if transition.episode_id <= previous.episode_id:
+                if transition.episode_id != previous.episode_id + 1:
                     raise PersistentDiagnosticInputError(
-                        "Replay episode IDs are not strictly increasing."
+                        "Replay episode IDs are not consecutive at a retained boundary."
                     )
                 if not _scalar_bool(previous.done):
                     raise PersistentDiagnosticInputError(
@@ -538,20 +590,17 @@ def load_persistent_checkpoint(
     *,
     device: str | torch.device = "cpu",
 ) -> LoadedPersistentCheckpoint:
-    """Load and validate one fixed-base persistent schema-v4 checkpoint.
+    """Load and validate one fixed-base persistent schema-v5 checkpoint.
 
     The pickle payload is loaded exactly once and always onto CPU. Models move
     to ``device`` only after every CPU-side validation succeeds.
     """
 
     path = Path(checkpoint_path).expanduser().resolve()
-    checkpoint_sha256 = file_sha256(path)
     try:
-        raw_checkpoint = torch.load(
-            path,
-            map_location="cpu",
-            weights_only=False,
-        )
+        raw_checkpoint, checkpoint_sha256 = _load_stable_torch_checkpoint(path)
+    except PersistentDiagnosticInputError:
+        raise
     except Exception as exc:
         raise PersistentDiagnosticInputError(
             "The trusted local checkpoint could not be loaded."
@@ -579,11 +628,17 @@ def load_persistent_checkpoint(
         "replay_buffer_size",
         "replay_capacity",
         "replay_transitions",
+        "run_identity",
+        "runtime_fingerprint",
+        "module_training_modes",
+        "parameter_gradients",
+        "checkpoint_phase",
+        "checkpoint_lineage",
     }
     missing = sorted(required_fields - set(checkpoint))
     if missing:
         raise PersistentDiagnosticInputError(
-            f"Schema-v4 checkpoint is missing required fields: {missing}."
+            f"Schema-v5 checkpoint is missing required fields: {missing}."
         )
     if checkpoint.get("checkpoint_schema_version") != CHECKPOINT_SCHEMA_VERSION:
         raise PersistentDiagnosticInputError(
@@ -593,6 +648,19 @@ def load_persistent_checkpoint(
         raise PersistentDiagnosticInputError(
             "Persistent diagnostics require an UPITrmTrainer checkpoint."
         )
+    if checkpoint.get("checkpoint_phase") != "idle_between_training_calls":
+        raise PersistentDiagnosticInputError(
+            "Schema-v5 checkpoint has an invalid training phase."
+        )
+    try:
+        run_identity = validate_run_identity(checkpoint["run_identity"])
+        checkpoint_lineage = validate_checkpoint_lineage(
+            checkpoint["checkpoint_lineage"]
+        )
+    except RunIdentityError as exc:
+        raise PersistentDiagnosticInputError(
+            "Schema-v5 checkpoint identity or lineage is invalid."
+        ) from exc
 
     rl_config = _strict_config(checkpoint["rl_config"], RLConfig, label="RL config")
     model_config = _strict_config(
@@ -660,7 +728,7 @@ def load_persistent_checkpoint(
     )
     if not valid_source_device:
         raise PersistentDiagnosticInputError(
-            "Schema-v4 checkpoint has an invalid execution-device identity."
+            "Schema-v5 checkpoint has an invalid execution-device identity."
         )
     assert isinstance(source_device, str)
 
@@ -675,6 +743,120 @@ def load_persistent_checkpoint(
             "Checkpoint dataset provenance is invalid."
         ) from exc
     _validate_provenance_record_sets(provenance)
+
+    try:
+        effective_config = validate_upi_effective_config(
+            run_identity["effective_config"]
+        )
+    except RunIdentityError as exc:
+        raise PersistentDiagnosticInputError(
+            "Schema-v5 effective configuration is invalid."
+        ) from exc
+    identity_bindings = {
+        "training_protocol": TRAINING_PROTOCOL,
+        "execution_device": source_device,
+    }
+    for field, expected in identity_bindings.items():
+        if effective_config.get(field) != expected:
+            raise PersistentDiagnosticInputError(
+                f"Run identity {field!r} does not match the checkpoint."
+            )
+    if not _canonical_json_equal(
+        effective_config.get("rl_config"),
+        _model_dump(rl_config),
+    ):
+        raise PersistentDiagnosticInputError(
+            "Run identity RL configuration does not match the checkpoint."
+        )
+    if not _canonical_json_equal(
+        effective_config.get("model_config"),
+        _model_dump(model_config),
+    ):
+        raise PersistentDiagnosticInputError(
+            "Run identity model configuration does not match the checkpoint."
+        )
+    if run_identity["dataset_provenance_sha256"] != canonical_json_sha256(
+        provenance
+    ):
+        raise PersistentDiagnosticInputError(
+            "Run identity dataset provenance hash does not match the checkpoint."
+        )
+    provenance_records = provenance["ordered_records"]
+    if effective_config["dataset"] != {
+        "train_split": provenance["splits"]["train"],
+        "eval_split": provenance["splits"]["eval"],
+        "train_record_count": provenance_records["train"]["count"],
+        "eval_record_count": provenance_records["eval"]["count"],
+    }:
+        raise PersistentDiagnosticInputError(
+            "Run identity dataset configuration does not match provenance."
+        )
+    if effective_config["budget"]["outer_train_steps"] != (
+        rl_config.num_train_steps
+    ):
+        raise PersistentDiagnosticInputError(
+            "Run identity outer-step budget does not match RL config."
+        )
+    for field, expected in (
+        ("log_outer_interval", rl_config.log_interval),
+        ("eval_outer_interval", rl_config.eval_interval),
+    ):
+        if effective_config["schedule"][field] != expected:
+            raise PersistentDiagnosticInputError(
+                f"Run identity schedule field {field!r} does not match RL config."
+            )
+    if effective_config["evaluation"] != {
+        "episode_count": rl_config.eval_num_episodes,
+        "seed": rl_config.eval_seed,
+        "pool_size": provenance_records["eval"]["count"],
+    }:
+        raise PersistentDiagnosticInputError(
+            "Run identity evaluation configuration does not match provenance."
+        )
+    if effective_config["debug_checks"] != rl_config.debug_checks:
+        raise PersistentDiagnosticInputError(
+            "Run identity debug setting does not match RL config."
+        )
+
+    saved_runtime_fingerprint = _require_mapping(
+        checkpoint["runtime_fingerprint"],
+        label="runtime_fingerprint",
+    )
+    if effective_config["runtime_fingerprint_sha256"] != canonical_json_sha256(
+        saved_runtime_fingerprint
+    ):
+        raise PersistentDiagnosticInputError(
+            "Run identity runtime fingerprint does not match the checkpoint."
+        )
+    module_modes = _require_mapping(
+        checkpoint["module_training_modes"],
+        label="module_training_modes",
+    )
+    parameter_gradients = _require_mapping(
+        checkpoint["parameter_gradients"],
+        label="parameter_gradients",
+    )
+    module_names = {
+        "model",
+        "policy_model_old",
+        "policy_model_candidate",
+        "target_model",
+    }
+    if set(module_modes) != module_names or not all(
+        isinstance(value, bool) for value in module_modes.values()
+    ):
+        raise PersistentDiagnosticInputError(
+            "Schema-v5 module training-mode inventory is invalid."
+        )
+    if set(parameter_gradients) != module_names:
+        raise PersistentDiagnosticInputError(
+            "Schema-v5 parameter-gradient inventory is invalid."
+        )
+    for module_name in sorted(module_names):
+        _require_mapping(
+            parameter_gradients[module_name],
+            label=f"parameter_gradients.{module_name}",
+        )
     effective_puzzle_emb_len = (
         model_config.puzzle_emb_len
         if model_config.puzzle_emb_len != 0
@@ -724,10 +906,51 @@ def load_persistent_checkpoint(
         progress.get("env_steps"),
         label="progress.env_steps",
     )
-    optimizer_updates = _require_nonnegative_int(
-        progress.get("optimizer_updates"),
-        label="progress.optimizer_updates",
+    expected_progress_fields = {
+        "env_steps",
+        "outer_steps",
+        "value_optimizer_steps",
+        "policy_optimizer_steps",
+        "distill_optimizer_steps",
+        "puzzle_optimizer_steps",
+    }
+    if set(progress) != expected_progress_fields:
+        raise PersistentDiagnosticInputError(
+            "Schema-v5 progress counter inventory is invalid."
+        )
+    outer_steps = _require_nonnegative_int(
+        progress.get("outer_steps"),
+        label="progress.outer_steps",
     )
+    value_optimizer_steps = _require_nonnegative_int(
+        progress.get("value_optimizer_steps"),
+        label="progress.value_optimizer_steps",
+    )
+    policy_optimizer_steps = _require_nonnegative_int(
+        progress.get("policy_optimizer_steps"),
+        label="progress.policy_optimizer_steps",
+    )
+    distill_optimizer_steps = _require_nonnegative_int(
+        progress.get("distill_optimizer_steps"),
+        label="progress.distill_optimizer_steps",
+    )
+    puzzle_optimizer_steps = _require_nonnegative_int(
+        progress.get("puzzle_optimizer_steps"),
+        label="progress.puzzle_optimizer_steps",
+    )
+    parent_step = checkpoint_lineage["parent_checkpoint_step"]
+    parent_environment_steps = checkpoint_lineage["parent_environment_steps"]
+    if parent_step is not None and parent_step > checkpoint_step:
+        raise PersistentDiagnosticInputError(
+            "Checkpoint parent step exceeds the child step."
+        )
+    if (
+        parent_environment_steps is not None
+        and parent_environment_steps > environment_steps
+    ):
+        raise PersistentDiagnosticInputError(
+            "Checkpoint parent interaction count exceeds the child count."
+        )
     if replay_validation.capacity != rl_config.replay_capacity:
         raise PersistentDiagnosticInputError(
             "Checkpoint replay capacity disagrees with the embedded RL config."
@@ -736,11 +959,44 @@ def load_persistent_checkpoint(
         raise PersistentDiagnosticInputError(
             "Checkpoint reports fewer interactions than retained replay transitions."
         )
-    if trainer_state.get("env_step_count") != environment_steps or trainer_state.get(
-        "train_step_count"
-    ) != optimizer_updates:
+    trainer_progress = {
+        "env_steps": trainer_state.get("env_step_count"),
+        "outer_steps": trainer_state.get("train_step_count"),
+        "value_optimizer_steps": trainer_state.get("value_optimizer_step_count"),
+        "policy_optimizer_steps": trainer_state.get("policy_optimizer_step_count"),
+        "distill_optimizer_steps": trainer_state.get("distill_optimizer_step_count"),
+        "puzzle_optimizer_steps": trainer_state.get("puzzle_optimizer_step_count"),
+    }
+    if trainer_progress != {
+        field: progress[field] for field in expected_progress_fields
+    }:
         raise PersistentDiagnosticInputError(
             "Checkpoint progress counters disagree with trainer state."
+        )
+    environment_budget = effective_config["budget"]["environment_interactions"]
+    if environment_budget is not None:
+        if checkpoint_step != environment_steps or environment_steps > environment_budget:
+            raise PersistentDiagnosticInputError(
+                "Checkpoint violates its registered environment-interaction budget."
+            )
+    elif (
+        checkpoint_step != outer_steps
+        or outer_steps > effective_config["budget"]["outer_train_steps"]
+    ):
+        raise PersistentDiagnosticInputError(
+            "Checkpoint violates its registered outer-step budget."
+        )
+    if value_optimizer_steps > outer_steps or policy_optimizer_steps > outer_steps:
+        raise PersistentDiagnosticInputError(
+            "Optimizer-step counters exceed completed outer steps."
+        )
+    if distill_optimizer_steps > policy_optimizer_steps:
+        raise PersistentDiagnosticInputError(
+            "Distillation steps exceed policy optimizer steps."
+        )
+    if puzzle_optimizer_steps > value_optimizer_steps:
+        raise PersistentDiagnosticInputError(
+            "Puzzle optimizer steps exceed value optimizer steps."
         )
 
     evaluator_state = _validate_state_dict(
@@ -843,17 +1099,37 @@ def load_persistent_checkpoint(
         replay=replay_validation,
         checkpoint_step=checkpoint_step,
         environment_steps=environment_steps,
-        optimizer_updates=optimizer_updates,
+        outer_steps=outer_steps,
+        value_optimizer_steps=value_optimizer_steps,
+        policy_optimizer_steps=policy_optimizer_steps,
+        distill_optimizer_steps=distill_optimizer_steps,
+        puzzle_optimizer_steps=puzzle_optimizer_steps,
         source_execution_device=source_device,
         checkpoint_schema_version=CHECKPOINT_SCHEMA_VERSION,
         training_protocol=TRAINING_PROTOCOL,
         deployment_kind="exact_probability_mixture",
+        producer_code_commit=run_identity["producer"]["git_commit"],
+        training_seed=run_identity["training_seed"],
+        run_id=run_identity["run_id"],
+        effective_config_sha256=run_identity["effective_config_sha256"],
+        run_identity_sha256=run_identity_sha256(run_identity),
+        runtime_fingerprint_sha256=effective_config[
+            "runtime_fingerprint_sha256"
+        ],
+        initialization_kind=run_identity["initialization"]["kind"],
+        initialization_artifact_sha256=run_identity["initialization"][
+            "artifact_sha256"
+        ],
+        parent_checkpoint_sha256=checkpoint_lineage[
+            "parent_checkpoint_sha256"
+        ],
+        parent_checkpoint_step=parent_step,
+        parent_environment_steps=parent_environment_steps,
     )
 
 
 def _load_provenance_manifest(path: str | Path) -> tuple[dict[str, Any], str]:
     manifest_path = Path(path).expanduser().resolve()
-    manifest_sha256 = file_sha256(manifest_path)
 
     def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -866,8 +1142,12 @@ def _load_provenance_manifest(path: str | Path) -> tuple[dict[str, Any], str]:
         return result
 
     try:
-        with manifest_path.open("r", encoding="utf-8") as handle:
-            parsed = json.load(handle, object_pairs_hook=reject_duplicates)
+        encoded = manifest_path.read_bytes()
+        manifest_sha256 = hashlib.sha256(encoded).hexdigest()
+        parsed = json.loads(
+            encoded.decode("utf-8"),
+            object_pairs_hook=reject_duplicates,
+        )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PersistentDiagnosticInputError(
             "Dataset provenance manifest is not valid UTF-8 JSON."

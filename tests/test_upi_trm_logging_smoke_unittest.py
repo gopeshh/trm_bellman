@@ -24,10 +24,22 @@ from rl.training_setup import (
     offset_puzzle_identifiers,
 )
 from rl.upi_trm_trainer import UPITrmTrainer
-from upi_trm_train import resume_from_checkpoint, save_checkpoint
+import upi_trm_train
+from upi_trm_train import (
+    _capture_rng_state,
+    _restore_rng_state,
+    _verify_producer_source_matches_runtime,
+    resume_from_checkpoint,
+    save_checkpoint,
+)
 from utils.dataset_provenance import (
     build_dataset_provenance,
     dataset_sample_sha256s,
+)
+from utils.run_identity import (
+    build_checkpoint_lineage,
+    canonical_json_sha256,
+    file_sha256,
 )
 
 
@@ -68,6 +80,29 @@ def _tiny_trm_cfg(seq_len: int, vocab_size: int, num_identifiers: int, batch_siz
 class TestUPITrmLoggingSmoke(unittest.TestCase):
     """Smoke tests for UPI-TRM logging and evaluation hooks."""
 
+    def test_producer_root_must_match_executing_sources(self):
+        runtime_root = Path(upi_trm_train.__file__).resolve().parent
+        with patch("upi_trm_train.assert_git_files_match_head"):
+            _verify_producer_source_matches_runtime(runtime_root)
+        with tempfile.TemporaryDirectory() as directory:
+            unrelated_root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "missing source"):
+                _verify_producer_source_matches_runtime(unrelated_root)
+
+    def test_cuda_rng_capture_and_restore_use_all_devices(self):
+        cuda_states = [torch.tensor([1], dtype=torch.uint8), torch.tensor([2], dtype=torch.uint8)]
+        with patch("upi_trm_train.torch.cuda.is_available", return_value=True), patch(
+            "upi_trm_train.torch.cuda.get_rng_state_all",
+            return_value=cuda_states,
+        ) as get_all:
+            state = _capture_rng_state()
+        get_all.assert_called_once_with()
+        self.assertEqual(state["torch_cuda"], cuda_states)
+
+        with patch("upi_trm_train.torch.cuda.set_rng_state_all") as set_all:
+            _restore_rng_state(state)
+        set_all.assert_called_once_with(cuda_states)
+
     @staticmethod
     def _write_dataset_root(root: Path, num_puzzles: int) -> None:
         split_dir = root / "test"
@@ -105,7 +140,11 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         )
 
     @staticmethod
-    def _make_persistent_budget_trainer(training_protocol="legacy"):
+    def _make_persistent_budget_trainer(
+        training_protocol="legacy",
+        batch_size=8,
+        episodic_latent=False,
+    ):
         class FixedDataset:
             seq_len = 2
             vocab_size = 4
@@ -145,14 +184,14 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             stop_id=_num_actions(dataset.seq_len, dataset.vocab_size) - 1
         )
         cfg = RLConfig(
-            batch_size=8,
+            batch_size=batch_size,
             replay_capacity=32,
             rollout_episodes_per_step=1,
             max_edits=3,
             gamma=env_cfg.gamma,
             K=1,
             inner_unroll_n=1,
-            episodic_latent=False,
+            episodic_latent=episodic_latent,
             task_name="dummy",
             solved_threshold=None,
             stop_action_mode="disabled",
@@ -181,8 +220,12 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
 
     @staticmethod
     def _stub_updates(trainer):
-        trainer.value_update = MagicMock(return_value={"loss_value": 0.0})
-        trainer.policy_update = MagicMock(return_value={"loss_policy": 0.0})
+        trainer.value_update = MagicMock(
+            return_value={"loss_value": 0.0, "value_optimizer_step": 1.0}
+        )
+        trainer.policy_update = MagicMock(
+            return_value={"loss_policy": 0.0, "policy_optimizer_step": 1.0}
+        )
 
     @staticmethod
     def _checkpoint_provenance(trainer, *, generation_seed=123):
@@ -193,7 +236,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             builder_version=1,
             generation_seed=generation_seed,
             train_record_sha256s=dataset_sample_sha256s(dataset),
-            eval_record_sha256s=dataset_sample_sha256s(dataset),
+            eval_record_sha256s=["e" * 64 for _ in range(len(dataset))],
             train_split="unit-train",
             eval_split="unit-eval",
             environment_config=dict(vars(trainer.env.config)),
@@ -220,6 +263,92 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             },
         )
 
+    @staticmethod
+    def _run_identity(
+        model,
+        trainer,
+        provenance,
+        *,
+        run_id="unit.seed17",
+        seed=17,
+        environment_interactions=None,
+    ):
+        rl_config = (
+            trainer.rl_cfg.model_dump()
+            if hasattr(trainer.rl_cfg, "model_dump")
+            else trainer.rl_cfg.dict()
+        )
+        model_config = (
+            model.config.model_dump()
+            if hasattr(model.config, "model_dump")
+            else model.config.dict()
+        )
+        effective_config = {
+            "effective_config_schema_version": 1,
+            "algorithm": "upi_trm",
+            "training_protocol": "fixed_base_exact",
+            "backbone": "trm",
+            "rl_config": rl_config,
+            "model_config": model_config,
+            "execution_device": "cpu",
+            "runtime_fingerprint_sha256": canonical_json_sha256(
+                upi_trm_train._runtime_fingerprint()
+            ),
+            "dataset": {
+                "train_split": provenance["splits"]["train"],
+                "eval_split": provenance["splits"]["eval"],
+                "train_record_count": provenance["ordered_records"]["train"][
+                    "count"
+                ],
+                "eval_record_count": provenance["ordered_records"]["eval"][
+                    "count"
+                ],
+            },
+            "budget": {
+                "outer_train_steps": rl_config["num_train_steps"],
+                "environment_interactions": environment_interactions,
+            },
+            "schedule": {
+                "log_outer_interval": rl_config["log_interval"],
+                "eval_outer_interval": rl_config["eval_interval"],
+                "save_outer_interval": 1,
+                "log_environment_interval": None,
+                "eval_environment_interval": None,
+                "save_environment_interval": None,
+            },
+            "evaluation": {
+                "episode_count": rl_config["eval_num_episodes"],
+                "seed": rl_config["eval_seed"],
+                "pool_size": provenance["ordered_records"]["eval"]["count"],
+            },
+            "puzzle_embedding_optimizer": {
+                "learning_rate": 0.01,
+                "weight_decay": 0.1,
+            },
+            "imitation": {"enabled": False, "epochs": 0},
+            "external_logging": "disabled",
+            "debug_checks": False,
+            "config_source_sha256s": [],
+        }
+        return {
+            "run_identity_schema_version": 1,
+            "run_id": run_id,
+            "training_seed": seed,
+            "producer": {"git_commit": "a" * 40, "git_clean": True},
+            "effective_config": effective_config,
+            "effective_config_sha256": canonical_json_sha256(effective_config),
+            "dataset_provenance_sha256": canonical_json_sha256(provenance),
+            "initialization": {"kind": "random", "artifact_sha256": None},
+        }
+
+    @staticmethod
+    def _root_lineage():
+        return build_checkpoint_lineage(
+            parent_checkpoint_sha256=None,
+            parent_checkpoint_step=None,
+            parent_environment_steps=None,
+        )
+
     def _assert_replay_equal(self, expected, actual):
         self.assertEqual(len(expected.replay), len(actual.replay))
         for left, right in zip(expected.replay.storage, actual.replay.storage):
@@ -241,6 +370,25 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             torch.testing.assert_close(left.latent.z_L, right.latent.z_L)
             torch.testing.assert_close(left.next_latent.z_H, right.next_latent.z_H)
             torch.testing.assert_close(left.next_latent.z_L, right.next_latent.z_L)
+
+    def _assert_nested_equal(self, expected, actual):
+        if torch.is_tensor(expected) or torch.is_tensor(actual):
+            self.assertTrue(torch.is_tensor(expected) and torch.is_tensor(actual))
+            torch.testing.assert_close(expected, actual, rtol=0, atol=0)
+            return
+        if isinstance(expected, dict) or isinstance(actual, dict):
+            self.assertTrue(isinstance(expected, dict) and isinstance(actual, dict))
+            self.assertEqual(set(expected), set(actual))
+            for key in expected:
+                self._assert_nested_equal(expected[key], actual[key])
+            return
+        if isinstance(expected, (list, tuple)) or isinstance(actual, (list, tuple)):
+            self.assertIs(type(expected), type(actual))
+            self.assertEqual(len(expected), len(actual))
+            for expected_item, actual_item in zip(expected, actual):
+                self._assert_nested_equal(expected_item, actual_item)
+            return
+        self.assertEqual(expected, actual)
 
     def test_logging_and_eval_hooks_run(self):
         """Test that logging and evaluation hooks run without errors."""
@@ -407,12 +555,18 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             uninterrupted.policy_update.call_count, paused.policy_update.call_count
         )
 
-    def test_schema_v4_fixed_base_resume_continues_persistent_episode_exactly(self):
+    def test_schema_v5_fixed_base_resume_continues_persistent_episode_exactly(self):
         torch.manual_seed(404)
         model, original, cfg = self._make_persistent_budget_trainer(
             "fixed_base_exact"
         )
         provenance = self._checkpoint_provenance(original)
+        run_identity = self._run_identity(
+            model,
+            original,
+            provenance,
+            environment_interactions=3,
+        )
         self._stub_updates(original)
         random.seed(505)
         np.random.seed(505)
@@ -420,6 +574,12 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         original.train_step(max_env_steps_to_collect=1)
         saved_transition = original.replay.storage[0]
         saved_step = original.get_env_step_count()
+        model.eval()
+        original.policy_model_old.eval()
+        original.policy_model_candidate.train()
+        original.target_model.eval()
+        saved_gradient = torch.full_like(next(model.parameters()), 0.25)
+        next(model.parameters()).grad = saved_gradient.clone()
 
         with tempfile.TemporaryDirectory() as tmp:
             checkpoint_path = save_checkpoint(
@@ -429,6 +589,8 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 checkpoint_dir=tmp,
                 rl_cfg=cfg,
                 dataset_provenance=provenance,
+                run_identity=run_identity,
+                checkpoint_lineage=self._root_lineage(),
             )
             original.train_step(max_env_steps_to_collect=2)
             expected_python = random.random()
@@ -446,6 +608,8 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 restored,
                 "cpu",
                 expected_dataset_provenance=provenance,
+                expected_run_identity=run_identity,
+                expected_checkpoint_sha256=file_sha256(checkpoint_path),
             )
 
             payload = torch.load(
@@ -453,7 +617,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 map_location="cpu",
                 weights_only=False,
             )
-            self.assertEqual(payload["checkpoint_schema_version"], 4)
+            self.assertEqual(payload["checkpoint_schema_version"], 5)
             self.assertEqual(payload["training_protocol"], "fixed_base_exact")
             self.assertEqual(
                 payload["rl_config"]["training_protocol"],
@@ -462,6 +626,14 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             self.assertEqual(payload["execution_device"], "cpu")
             self.assertFalse(
                 (Path(tmp) / f"model_step_{saved_step}.pt").exists()
+            )
+            self.assertFalse(restored_model.training)
+            self.assertFalse(restored.policy_model_old.training)
+            self.assertTrue(restored.policy_model_candidate.training)
+            self.assertFalse(restored.target_model.training)
+            torch.testing.assert_close(
+                next(restored_model.parameters()).grad,
+                saved_gradient,
             )
 
             self.assertEqual(start_update, 0)
@@ -489,6 +661,463 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         self.assertEqual(original._train_step_count, restored._train_step_count)
         self.assertEqual(original._next_episode_id, restored._next_episode_id)
         self.assertIsNone(restored._active_episode)
+
+    def test_schema_v5_episodic_bridge_cell_round_trips_without_latents(self):
+        model, original, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact",
+            episodic_latent=True,
+        )
+        provenance = self._checkpoint_provenance(original)
+        identity = self._run_identity(
+            model,
+            original,
+            provenance,
+            run_id="unit.episodic17",
+            environment_interactions=3,
+        )
+        self._stub_updates(original)
+        original.train_step(max_env_steps_to_collect=1)
+        self.assertIsNone(original.replay.storage[0].latent)
+        self.assertIsNone(original.replay.storage[0].next_latent)
+        self.assertIsNone(original._active_episode["latent"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                original,
+                step=1,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+                run_identity=identity,
+                checkpoint_lineage=self._root_lineage(),
+            )
+            restored_model, restored, _ = self._make_persistent_budget_trainer(
+                "fixed_base_exact",
+                episodic_latent=True,
+            )
+            self._stub_updates(restored)
+            resume_from_checkpoint(
+                checkpoint_path,
+                restored_model,
+                restored,
+                "cpu",
+                expected_dataset_provenance=provenance,
+                expected_run_identity=identity,
+                expected_checkpoint_sha256=file_sha256(checkpoint_path),
+            )
+
+        self.assertIsNone(restored.replay.storage[0].latent)
+        self.assertIsNone(restored.replay.storage[0].next_latent)
+        self.assertIsNone(restored._active_episode["latent"])
+        self.assertEqual(restored.get_env_step_count(), 1)
+
+    def test_schema_v5_resume_rejects_wrong_persistent_latent_shape(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact"
+        )
+        provenance = self._checkpoint_provenance(trainer)
+        identity = self._run_identity(
+            model,
+            trainer,
+            provenance,
+            environment_interactions=3,
+        )
+        self._stub_updates(trainer)
+        trainer.train_step(max_env_steps_to_collect=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=1,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+                run_identity=identity,
+                checkpoint_lineage=self._root_lineage(),
+            )
+            payload = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            wrong_latent = payload["replay_transitions"][0].latent
+            hidden_size = wrong_latent.z_H.shape[-1]
+            wrong_latent.z_H = torch.zeros(1, 1, hidden_size)
+            wrong_latent.z_L = torch.zeros(1, 1, hidden_size)
+            corrupt_path = Path(tmp) / "wrong_latent.pt"
+            torch.save(payload, corrupt_path)
+
+            restored_model, restored, _ = self._make_persistent_budget_trainer(
+                "fixed_base_exact"
+            )
+            with patch.object(
+                restored_model,
+                "load_state_dict",
+                wraps=restored_model.load_state_dict,
+            ) as model_load:
+                with self.assertRaisesRegex(RuntimeError, "wrong model shape"):
+                    resume_from_checkpoint(
+                        str(corrupt_path),
+                        restored_model,
+                        restored,
+                        "cpu",
+                        expected_dataset_provenance=provenance,
+                        expected_run_identity=identity,
+                        expected_checkpoint_sha256=file_sha256(corrupt_path),
+                    )
+            model_load.assert_not_called()
+
+    def test_schema_v5_resume_rejects_wrong_timestep_zero_active_latent(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact"
+        )
+        provenance = self._checkpoint_provenance(trainer)
+        identity = self._run_identity(model, trainer, provenance)
+        trainer._start_episode()
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=0,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+                run_identity=identity,
+                checkpoint_lineage=self._root_lineage(),
+            )
+            payload = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            active_latent = payload["trainer_state"]["collection_state"][
+                "active_episode"
+            ]["latent"]
+            hidden_size = active_latent.z_H.shape[-1]
+            active_latent.z_H = torch.zeros(1, 1, hidden_size)
+            active_latent.z_L = torch.zeros(1, 1, hidden_size)
+            corrupt_path = Path(tmp) / "wrong_active_latent.pt"
+            torch.save(payload, corrupt_path)
+
+            restored_model, restored, _ = self._make_persistent_budget_trainer(
+                "fixed_base_exact"
+            )
+            with patch.object(
+                restored_model,
+                "load_state_dict",
+                wraps=restored_model.load_state_dict,
+            ) as model_load:
+                with self.assertRaisesRegex(RuntimeError, "active latent component"):
+                    resume_from_checkpoint(
+                        str(corrupt_path),
+                        restored_model,
+                        restored,
+                        "cpu",
+                        expected_dataset_provenance=provenance,
+                        expected_run_identity=identity,
+                        expected_checkpoint_sha256=file_sha256(corrupt_path),
+                    )
+            model_load.assert_not_called()
+
+    def test_fixed_base_save_requires_identity_and_never_overwrites(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact"
+        )
+        provenance = self._checkpoint_provenance(trainer)
+        identity = self._run_identity(model, trainer, provenance)
+        with tempfile.TemporaryDirectory() as tmp:
+            trainer._train_step_active = True
+            with self.assertRaisesRegex(RuntimeError, "idle trainer"):
+                save_checkpoint(
+                    model,
+                    trainer,
+                    step=0,
+                    checkpoint_dir=tmp,
+                    rl_cfg=cfg,
+                    dataset_provenance=provenance,
+                    run_identity=identity,
+                    checkpoint_lineage=self._root_lineage(),
+                )
+            trainer._train_step_active = False
+            with self.assertRaisesRegex(RuntimeError, "require a run identity"):
+                save_checkpoint(
+                    model,
+                    trainer,
+                    step=0,
+                    checkpoint_dir=tmp,
+                    rl_cfg=cfg,
+                    dataset_provenance=provenance,
+                )
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=0,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+                run_identity=identity,
+                checkpoint_lineage=self._root_lineage(),
+            )
+            original_bytes = Path(checkpoint_path).read_bytes()
+            with self.assertRaisesRegex(RuntimeError, "Refusing to overwrite"):
+                save_checkpoint(
+                    model,
+                    trainer,
+                    step=0,
+                    checkpoint_dir=tmp,
+                    rl_cfg=cfg,
+                    dataset_provenance=provenance,
+                    run_identity=identity,
+                    checkpoint_lineage=self._root_lineage(),
+                )
+            self.assertEqual(Path(checkpoint_path).read_bytes(), original_bytes)
+
+    def test_schema_v5_resume_matches_real_next_optimizer_update(self):
+        random.seed(1201)
+        np.random.seed(1201)
+        torch.manual_seed(1201)
+        model, uninterrupted, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact",
+            batch_size=1,
+        )
+        uninterrupted.set_checker_fn(dummy_checker)
+        provenance = self._checkpoint_provenance(uninterrupted)
+        identity = self._run_identity(model, uninterrupted, provenance)
+
+        first_metrics = uninterrupted.train_step()
+        self.assertEqual(first_metrics["value_optimizer_step"], 1.0)
+        self.assertEqual(first_metrics["policy_optimizer_step"], 1.0)
+        self.assertEqual(uninterrupted._value_optimizer_step_count, 1)
+        self.assertEqual(uninterrupted._policy_optimizer_step_count, 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                uninterrupted,
+                step=uninterrupted._train_step_count,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+                run_identity=identity,
+                checkpoint_lineage=self._root_lineage(),
+            )
+
+            expected_metrics = uninterrupted.train_step()
+            expected_modules = {
+                "model": copy.deepcopy(model.state_dict()),
+                "old": copy.deepcopy(uninterrupted.policy_model_old.state_dict()),
+                "candidate": copy.deepcopy(
+                    uninterrupted.policy_model_candidate.state_dict()
+                ),
+                "target": copy.deepcopy(uninterrupted.target_model.state_dict()),
+            }
+            expected_value_optimizer = copy.deepcopy(
+                uninterrupted.value_opt.state_dict()
+            )
+            expected_policy_optimizer = copy.deepcopy(
+                uninterrupted.policy_opt.state_dict()
+            )
+            expected_python = random.random()
+            expected_numpy = float(np.random.rand())
+            expected_torch = torch.rand(4)
+
+            random.seed(999)
+            np.random.seed(999)
+            torch.manual_seed(999)
+            restored_model, restored, _ = self._make_persistent_budget_trainer(
+                "fixed_base_exact",
+                batch_size=1,
+            )
+            restored.set_checker_fn(dummy_checker)
+            resume_from_checkpoint(
+                checkpoint_path,
+                restored_model,
+                restored,
+                "cpu",
+                expected_dataset_provenance=provenance,
+                expected_run_identity=identity,
+                expected_checkpoint_sha256=file_sha256(checkpoint_path),
+            )
+            actual_metrics = restored.train_step()
+            actual_python = random.random()
+            actual_numpy = float(np.random.rand())
+            actual_torch = torch.rand(4)
+
+        self._assert_nested_equal(expected_modules["model"], restored_model.state_dict())
+        self._assert_nested_equal(
+            expected_modules["old"], restored.policy_model_old.state_dict()
+        )
+        self._assert_nested_equal(
+            expected_modules["candidate"],
+            restored.policy_model_candidate.state_dict(),
+        )
+        self._assert_nested_equal(
+            expected_modules["target"], restored.target_model.state_dict()
+        )
+        self._assert_nested_equal(
+            expected_value_optimizer, restored.value_opt.state_dict()
+        )
+        self._assert_nested_equal(
+            expected_policy_optimizer, restored.policy_opt.state_dict()
+        )
+        self.assertEqual(
+            uninterrupted._value_optimizer_step_count,
+            restored._value_optimizer_step_count,
+        )
+        self.assertEqual(
+            uninterrupted._policy_optimizer_step_count,
+            restored._policy_optimizer_step_count,
+        )
+        self.assertEqual(
+            expected_metrics["value_optimizer_step"],
+            actual_metrics["value_optimizer_step"],
+        )
+        self.assertEqual(
+            expected_metrics["policy_optimizer_step"],
+            actual_metrics["policy_optimizer_step"],
+        )
+        self.assertEqual(expected_python, actual_python)
+        self.assertEqual(expected_numpy, actual_numpy)
+        torch.testing.assert_close(expected_torch, actual_torch, rtol=0, atol=0)
+
+    def test_schema_v5_identity_and_runtime_mismatch_fail_before_mutation(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact"
+        )
+        provenance = self._checkpoint_provenance(trainer)
+        identity = self._run_identity(model, trainer, provenance)
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=0,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+                run_identity=identity,
+                checkpoint_lineage=self._root_lineage(),
+            )
+            base = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            variants = []
+            for name, field, value in (
+                ("seed", "training_seed", 18),
+                ("run_id", "run_id", "unit.seed18"),
+            ):
+                payload = copy.deepcopy(base)
+                payload["run_identity"][field] = value
+                variants.append((name, payload, "Run identity mismatch"))
+
+            commit = copy.deepcopy(base)
+            commit["run_identity"]["producer"]["git_commit"] = "b" * 40
+            variants.append(("commit", commit, "Run identity mismatch"))
+
+            config = copy.deepcopy(base)
+            config["run_identity"]["effective_config"]["debug_checks"] = True
+            config["run_identity"]["effective_config_sha256"] = (
+                canonical_json_sha256(
+                    config["run_identity"]["effective_config"]
+                )
+            )
+            variants.append(("config", config, "Run identity mismatch"))
+
+            dataset = copy.deepcopy(base)
+            dataset["run_identity"]["dataset_provenance_sha256"] = "f" * 64
+            variants.append(("dataset", dataset, "Run identity mismatch"))
+
+            runtime = copy.deepcopy(base)
+            runtime["runtime_fingerprint"]["torch_version"] = "different"
+            variants.append(("runtime", runtime, "Runtime fingerprint"))
+
+            schema4 = copy.deepcopy(base)
+            schema4["checkpoint_schema_version"] = 4
+            variants.append(("schema4", schema4, "Schema-v4 fixed-base"))
+
+            module_state = copy.deepcopy(base)
+            removed_parameter = next(iter(module_state["model_state_dict"]))
+            module_state["model_state_dict"].pop(removed_parameter)
+            variants.append(("module_state", module_state, "model state failed"))
+
+            optimizer_state = copy.deepcopy(base)
+            optimizer_state["value_optimizer_state_dict"]["param_groups"][0][
+                "params"
+            ] = []
+            variants.append(
+                (
+                    "optimizer_state",
+                    optimizer_state,
+                    "value_optimizer_state_dict failed",
+                )
+            )
+
+            gradients = copy.deepcopy(base)
+            first_gradient_name = next(
+                iter(gradients["parameter_gradients"]["model"])
+            )
+            gradients["parameter_gradients"]["model"][
+                first_gradient_name
+            ] = torch.zeros(1)
+            variants.append(("gradients", gradients, "model state failed"))
+
+            trainer_state = copy.deepcopy(base)
+            trainer_state["trainer_state"]["term_stats"] = 1
+            variants.append(
+                ("trainer_state", trainer_state, "term_stats has an invalid")
+            )
+
+            for name, payload, expected_message in variants:
+                with self.subTest(name=name):
+                    variant_path = Path(tmp) / f"{name}.pt"
+                    torch.save(payload, variant_path)
+                    restored_model, restored, _ = (
+                        self._make_persistent_budget_trainer("fixed_base_exact")
+                    )
+                    before = {
+                        key: value.detach().clone()
+                        for key, value in restored_model.state_dict().items()
+                    }
+                    with patch.object(
+                        restored_model,
+                        "load_state_dict",
+                        wraps=restored_model.load_state_dict,
+                    ) as model_load, patch.object(
+                        restored.value_opt,
+                        "load_state_dict",
+                        wraps=restored.value_opt.load_state_dict,
+                    ) as optimizer_load, patch.object(
+                        restored.replay,
+                        "clear",
+                        wraps=restored.replay.clear,
+                    ) as replay_clear, patch(
+                        "upi_trm_train._restore_rng_state"
+                    ) as restore_rng:
+                        with self.assertRaisesRegex(
+                            RuntimeError,
+                            expected_message,
+                        ):
+                            resume_from_checkpoint(
+                                str(variant_path),
+                                restored_model,
+                                restored,
+                                "cpu",
+                                expected_dataset_provenance=provenance,
+                                expected_run_identity=identity,
+                                expected_checkpoint_sha256=file_sha256(
+                                    variant_path
+                                ),
+                            )
+                    model_load.assert_not_called()
+                    optimizer_load.assert_not_called()
+                    replay_clear.assert_not_called()
+                    restore_rng.assert_not_called()
+                    for key, value in restored_model.state_dict().items():
+                        torch.testing.assert_close(value, before[key])
 
     def test_legacy_checkpoint_requires_explicit_weights_only_warm_start(self):
         torch.manual_seed(606)

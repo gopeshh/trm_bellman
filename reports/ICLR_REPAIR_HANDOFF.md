@@ -42,6 +42,19 @@ completed confirmatory experiment and must not be cited as one.
   probability-space mixture evaluation, and no recursive promotion.
 - Regression tests for the paths above.
 
+## Schema-v5 confirmatory addendum
+
+Schema 4 remains part of the historical implementation chronology, but it is
+not sufficient for a new confirmatory run. `fixed_base_exact` now requires
+schema 5, an explicit run ID and seed, clean source blobs equal to the recorded
+producer commit, exact effective-configuration identity, runtime identity,
+initialization and parent-checkpoint lineage, actual optimizer-step counters,
+and atomic no-overwrite publication. Restore validates the complete payload on
+shadow objects before mutating live state.
+
+The schema-v5 implementation and evidence boundary are recorded in
+`reports/CHECKPOINT_SCHEMA_V5_REPORT.md`.
+
 ## Validation completed
 
 - The pre-repair branch baseline ran all 30 declared Python unit-test targets:
@@ -74,6 +87,14 @@ Evidence and chronology are in
 `reports/PERSISTENT_CHECKPOINT_DIAGNOSTICS_REPORT.md` and
 `reports/PERSISTENT_DIAGNOSTICS_LOG_SHA256SUMS.txt`.
 
+The schema-v5 expansion raises the authoritative runtime coverage to 344 cases
+across all 34 declared targets. A combined non-logging invocation recorded 320
+passes and two TPX result-file fatals even though both affected unittest cases
+printed `OK`; the isolated target rerun passed all 31 cases, and the isolated
+logging target passed all 22 cases. The package-wide type checker still reports
+the same nine baseline errors and no schema-v5 error. Exact session identifiers
+and limitations are in `reports/CHECKPOINT_SCHEMA_V5_REPORT.md`.
+
 ## Correctness review outcome
 
 The unresolved training-protocol issue was closed by implementing the first
@@ -91,7 +112,8 @@ contains such a single-model artifact, with a regression test.
 
 ## Experiments not run
 
-No repaired learned-model result was executed. The persistent checkpoint
+No repaired learned-model result was executed. No schema-v5 learned checkpoint
+exists. The persistent checkpoint
 diagnostic pipeline is implemented, but no learned checkpoint exists, so its
 historical outputs are not verifiable from supplied evidence. The one-factor
 bridge, matched UPI-TRM/PPO runs, projection cross-design, and second domain

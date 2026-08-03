@@ -1,9 +1,15 @@
 
 import argparse
 import copy
+import hashlib
+import importlib.metadata
 import logging
+import math
 import os
+import platform
 import random
+import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -36,7 +42,14 @@ from models.sparse_embedding import CastedSparseEmbeddingSignSGD_Distributed
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.upi_trm_trainer import UPITrmTrainer
-from rl.replay import ReplayBuffer
+from rl.replay import (
+    ReplayBuffer,
+    ReplayIntegrityError,
+    ReplayLatent,
+    Transition,
+    validate_transition,
+    validate_transition_continuity,
+)
 from rl.algos.ppo import PPOTrainer, PPOConfig
 from rl.algos.a2c import A2CTrainer, A2CConfig
 from rl.algos.dqn import DQNTrainer, DQNConfig
@@ -68,6 +81,19 @@ from utils.dataset_provenance import (
     ordered_record_sha256,
     validate_dataset_provenance,
 )
+from utils.run_identity import (
+    RunIdentityError,
+    assert_git_files_match_head,
+    assert_matching_run_identity,
+    build_checkpoint_lineage,
+    build_run_identity,
+    canonical_json_sha256,
+    discover_clean_git_source,
+    file_sha256,
+    validate_run_identity,
+    validate_checkpoint_lineage,
+    validate_upi_effective_config,
+)
 
 __all__ = [
     "BaselineSelection",
@@ -86,6 +112,10 @@ __all__ = [
     "save_checkpoint",
     "resume_from_checkpoint",
 ]
+
+
+FIXED_BASE_CHECKPOINT_SCHEMA_VERSION = 5
+LEGACY_UPI_CHECKPOINT_SCHEMA_VERSION = 4
 
 
 # =============================================================================
@@ -358,6 +388,7 @@ def load_checkpoint(
     checkpoint_path: str,
     device: str = None,
     strict: bool = False,
+    expected_sha256: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Load model weights from a pretrained checkpoint.
@@ -369,6 +400,7 @@ def load_checkpoint(
         checkpoint_path: Path to the checkpoint file
         device: Target device (auto-detected if None)
         strict: If True, raise error on missing/unexpected keys
+        expected_sha256: Optional content hash bound before model mutation
         
     Returns:
         Dict with loading info (missing_keys, unexpected_keys, etc.)
@@ -377,7 +409,15 @@ def load_checkpoint(
         device = "cuda" if torch.cuda.is_available() else "cpu"
     
     print(f"[Checkpoint] Loading from {checkpoint_path} to {device}")
-    state_dict = torch.load(checkpoint_path, map_location=device)
+    if expected_sha256 is not None:
+        state_dict, loaded_sha256 = _load_checkpoint_payload(
+            checkpoint_path,
+            expected_sha256=expected_sha256,
+        )
+        if loaded_sha256 != expected_sha256:
+            raise RuntimeError("Initialization checkpoint SHA-256 mismatch.")
+    else:
+        state_dict = torch.load(checkpoint_path, map_location=device)
     
     # Handle torch.compile wrapper naming
     # Pretrained models may have "_orig_mod." prefix from torch.compile
@@ -483,6 +523,758 @@ def _canonical_device(device: Any) -> str:
     return str(resolved)
 
 
+def _runtime_fingerprint() -> Dict[str, Any]:
+    """Capture runtime settings that can change exact continuation semantics."""
+
+    cuda_devices = []
+    if torch.cuda.is_available():
+        for index in range(torch.cuda.device_count()):
+            cuda_devices.append(
+                {
+                    "index": index,
+                    "name": torch.cuda.get_device_name(index),
+                    "capability": list(torch.cuda.get_device_capability(index)),
+                }
+            )
+    cuda_matmul = getattr(torch.backends.cuda, "matmul", None)
+    cudnn = getattr(torch.backends, "cudnn", None)
+    package_versions = {}
+    for package_name in ("einops", "omegaconf", "pydantic", "PyYAML"):
+        try:
+            package_versions[package_name] = importlib.metadata.version(package_name)
+        except importlib.metadata.PackageNotFoundError:
+            package_versions[package_name] = None
+    return {
+        "python_version": platform.python_version(),
+        "platform_system": platform.system(),
+        "platform_release": platform.release(),
+        "platform_machine": platform.machine(),
+        "numpy_version": str(np.__version__),
+        "package_versions": package_versions,
+        "torch_version": str(torch.__version__),
+        "torch_num_threads": int(torch.get_num_threads()),
+        "torch_num_interop_threads": int(torch.get_num_interop_threads()),
+        "determinism_environment": {
+            name: os.environ.get(name)
+            for name in (
+                "CUBLAS_WORKSPACE_CONFIG",
+                "CUDA_VISIBLE_DEVICES",
+                "MKL_NUM_THREADS",
+                "OMP_NUM_THREADS",
+                "PYTHONHASHSEED",
+            )
+        },
+        "cuda_version": str(torch.version.cuda) if torch.version.cuda else None,
+        "cudnn_version": (
+            int(cudnn.version())
+            if cudnn is not None and cudnn.version() is not None
+            else None
+        ),
+        "cuda_devices": cuda_devices,
+        "deterministic_algorithms": bool(
+            torch.are_deterministic_algorithms_enabled()
+        ),
+        "cudnn_benchmark": bool(getattr(cudnn, "benchmark", False)),
+        "cudnn_deterministic": bool(getattr(cudnn, "deterministic", False)),
+        "cuda_matmul_allow_tf32": bool(
+            getattr(cuda_matmul, "allow_tf32", False)
+        ),
+        "cudnn_allow_tf32": bool(getattr(cudnn, "allow_tf32", False)),
+        "float32_matmul_precision": (
+            torch.get_float32_matmul_precision()
+            if hasattr(torch, "get_float32_matmul_precision")
+            else None
+        ),
+    }
+
+
+def _verify_producer_source_matches_runtime(lookup_root: str | Path) -> None:
+    """Reject a clean but unrelated repository passed as the producer root."""
+
+    producer_root = Path(lookup_root).expanduser().resolve()
+    runtime_root = Path(__file__).resolve().parent
+
+    def source_inventory(root: Path, *, label: str) -> set[str]:
+        inventory = {"upi_trm_train.py", "puzzle_dataset.py"}
+        for root_file in tuple(inventory):
+            if not (root / root_file).is_file():
+                raise RuntimeError(f"{label} is missing source {root_file!r}.")
+        for source_directory in (
+            "dataset",
+            "evaluators",
+            "models",
+            "rl",
+            "utils",
+        ):
+            directory = root / source_directory
+            if not directory.is_dir():
+                raise RuntimeError(
+                    f"{label} is missing source directory {source_directory!r}."
+                )
+            inventory.update(
+                str(path.relative_to(root))
+                for path in directory.rglob("*.py")
+                if "__pycache__" not in path.parts
+            )
+        return inventory
+
+    producer_sources = source_inventory(producer_root, label="Producer repository")
+    runtime_sources = source_inventory(runtime_root, label="Runtime source tree")
+    if producer_sources != runtime_sources:
+        missing_from_producer = sorted(runtime_sources - producer_sources)
+        missing_from_runtime = sorted(producer_sources - runtime_sources)
+        raise RuntimeError(
+            "Producer/runtime source inventories differ: "
+            f"missing_from_producer={missing_from_producer[:8]}, "
+            f"missing_from_runtime={missing_from_runtime[:8]}."
+        )
+    behavior_sources = producer_sources
+    try:
+        assert_git_files_match_head(
+            producer_root,
+            sorted(behavior_sources),
+        )
+    except RunIdentityError as exc:
+        raise RuntimeError(
+            "Producer source inventory does not match the recorded Git commit."
+        ) from exc
+    for relative_path in sorted(behavior_sources):
+        producer_source = producer_root / relative_path
+        runtime_source = runtime_root / relative_path
+        if not producer_source.is_file() or not runtime_source.is_file():
+            raise RuntimeError(
+                f"Producer repository is missing behavior source {relative_path!r}."
+            )
+        try:
+            producer_sha256 = file_sha256(producer_source)
+            runtime_sha256 = file_sha256(runtime_source)
+        except RunIdentityError as exc:
+            raise RuntimeError(
+                f"Cannot hash behavior source {relative_path!r}."
+            ) from exc
+        if producer_sha256 != runtime_sha256:
+            raise RuntimeError(
+                "Producer repository does not match the executing source for "
+                f"{relative_path!r}."
+            )
+
+
+def _checkpoint_modules(
+    model: nn.Module,
+    trainer: "UPITrmTrainer",
+) -> Dict[str, nn.Module]:
+    modules = {"model": model}
+    for checkpoint_name, attribute_name in (
+        ("policy_model_old", "policy_model_old"),
+        ("policy_model_candidate", "policy_model_candidate"),
+        ("target_model", "target_model"),
+    ):
+        module = getattr(trainer, attribute_name, None)
+        if module is not None:
+            modules[checkpoint_name] = module
+    return modules
+
+
+def _capture_parameter_gradients(module: nn.Module) -> Dict[str, Any]:
+    return {
+        name: (
+            parameter.grad.detach().cpu().clone()
+            if parameter.grad is not None
+            else None
+        )
+        for name, parameter in module.named_parameters()
+    }
+
+
+def _restore_parameter_gradients(
+    module: nn.Module,
+    saved_gradients: Any,
+    *,
+    label: str,
+) -> None:
+    if not isinstance(saved_gradients, dict):
+        raise RuntimeError(f"Checkpoint {label} gradients must be a dictionary.")
+    parameters = dict(module.named_parameters())
+    if set(saved_gradients) != set(parameters):
+        raise RuntimeError(f"Checkpoint {label} gradient parameter set mismatch.")
+    for name, parameter in parameters.items():
+        gradient = saved_gradients[name]
+        if gradient is None:
+            parameter.grad = None
+            continue
+        if (
+            not torch.is_tensor(gradient)
+            or gradient.shape != parameter.shape
+            or gradient.dtype != parameter.dtype
+        ):
+            raise RuntimeError(
+                f"Checkpoint {label} gradient shape or dtype mismatch for {name!r}."
+            )
+        parameter.grad = gradient.to(
+            device=parameter.device,
+            dtype=parameter.dtype,
+        ).clone()
+
+
+def _strict_checkpoint_int(value: Any, *, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RuntimeError(f"Checkpoint {label} must be a non-negative integer.")
+    return value
+
+
+def _strict_checkpoint_float(value: Any, *, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError(f"Checkpoint {label} must be a finite number.")
+    converted = float(value)
+    if not math.isfinite(converted):
+        raise RuntimeError(f"Checkpoint {label} must be a finite number.")
+    return converted
+
+
+def _strict_checkpoint_list(
+    value: Any,
+    *,
+    label: str,
+    integers: bool = False,
+) -> List[Any]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"Checkpoint {label} must be a list.")
+    if integers:
+        return [
+            _strict_checkpoint_int(item, label=f"{label}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    return [
+        _strict_checkpoint_float(item, label=f"{label}[{index}]")
+        for index, item in enumerate(value)
+    ]
+
+
+def _validate_schema_v5_replay(
+    transitions: Any,
+    *,
+    action_count: int,
+    require_behavior_log_prob: bool,
+    episodic_latent: bool,
+    max_edits: int,
+    expected_latent_shape: Tuple[int, ...],
+    expected_latent_dtype: torch.dtype,
+    seq_len: int,
+    vocab_size: int,
+    num_puzzle_identifiers: int,
+) -> List[Transition]:
+    if not isinstance(transitions, list):
+        raise RuntimeError("Schema-v5 replay transitions must be a list.")
+
+    def validate_state(state: Any, *, label: str) -> None:
+        if not isinstance(state, dict) or not {
+            "inputs",
+            "puzzle_identifiers",
+            "remaining_edits",
+        }.issubset(state):
+            raise RuntimeError(f"Schema-v5 replay {label} has an invalid state inventory.")
+        inputs = state["inputs"]
+        puzzle_identifier = state["puzzle_identifiers"]
+        if (
+            not torch.is_tensor(inputs)
+            or tuple(inputs.shape) != (seq_len,)
+            or inputs.dtype not in (torch.int32, torch.int64)
+        ):
+            raise RuntimeError(f"Schema-v5 replay {label}.inputs is invalid.")
+        if inputs.numel() and (
+            int(inputs.min().item()) < 0 or int(inputs.max().item()) >= vocab_size
+        ):
+            raise RuntimeError(f"Schema-v5 replay {label}.inputs is out of range.")
+        if (
+            not torch.is_tensor(puzzle_identifier)
+            or puzzle_identifier.numel() != 1
+            or puzzle_identifier.dtype not in (torch.int32, torch.int64)
+        ):
+            raise RuntimeError(
+                f"Schema-v5 replay {label}.puzzle_identifiers is invalid."
+            )
+        puzzle_id = int(puzzle_identifier.detach().cpu().reshape(()).item())
+        if puzzle_id < 0 or puzzle_id >= num_puzzle_identifiers:
+            raise RuntimeError(
+                f"Schema-v5 replay {label}.puzzle_identifiers is out of range."
+            )
+
+    def validate_plan(plan: Any, *, label: str) -> None:
+        if (
+            not torch.is_tensor(plan)
+            or tuple(plan.shape) != (seq_len,)
+            or plan.dtype not in (torch.int32, torch.int64)
+        ):
+            raise RuntimeError(f"Schema-v5 replay {label} is invalid.")
+        if plan.numel() and (
+            int(plan.min().item()) < 0 or int(plan.max().item()) >= vocab_size
+        ):
+            raise RuntimeError(f"Schema-v5 replay {label} is out of range.")
+
+    previous: Optional[Transition] = None
+    for index, transition in enumerate(transitions):
+        if not isinstance(transition, Transition):
+            raise RuntimeError(
+                f"Schema-v5 replay record {index} is not a Transition."
+            )
+        try:
+            validate_transition(transition, require_clock=True)
+        except (ReplayIntegrityError, AttributeError, TypeError) as exc:
+            raise RuntimeError(
+                f"Schema-v5 replay record {index} is invalid."
+            ) from exc
+        validate_state(transition.x, label=f"record {index} x")
+        validate_state(transition.x_next, label=f"record {index} x_next")
+        if set(transition.x) != set(transition.x_next):
+            raise RuntimeError(
+                f"Schema-v5 replay record {index} changes state-field inventory."
+            )
+        validate_plan(transition.y, label=f"record {index} y")
+        validate_plan(transition.y_next, label=f"record {index} y_next")
+        if episodic_latent:
+            if transition.latent is not None or transition.next_latent is not None:
+                raise RuntimeError(
+                    "Schema-v5 episodic replay must not carry transition latents."
+                )
+        else:
+            if transition.latent is None or transition.next_latent is None:
+                raise RuntimeError(
+                    "Schema-v5 persistent replay requires input and successor latents."
+                )
+            for latent_name, latent in (
+                ("latent", transition.latent),
+                ("next_latent", transition.next_latent),
+            ):
+                if (
+                    tuple(latent.z_H.shape) != expected_latent_shape
+                    or tuple(latent.z_L.shape) != expected_latent_shape
+                    or latent.z_H.dtype != expected_latent_dtype
+                    or latent.z_L.dtype != expected_latent_dtype
+                ):
+                    raise RuntimeError(
+                        f"Schema-v5 replay {latent_name} {index} has wrong model shape."
+                    )
+        clock = int(
+            transition.x["remaining_edits"].detach().cpu().reshape(()).item()
+        )
+        next_clock = int(
+            transition.x_next["remaining_edits"]
+            .detach()
+            .cpu()
+            .reshape(())
+            .item()
+        )
+        expected_clock = max_edits - transition.timestep
+        if clock != expected_clock or next_clock != expected_clock - 1:
+            raise RuntimeError(
+                f"Schema-v5 replay clock {index} disagrees with timestep."
+            )
+        done = bool(transition.done.detach().cpu().reshape(()).item())
+        if next_clock == 0 and not done:
+            raise RuntimeError(
+                f"Schema-v5 replay record {index} is nonterminal at zero budget."
+            )
+        action = transition.action
+        if (
+            not torch.is_tensor(action)
+            or action.numel() != 1
+            or action.dtype not in (torch.int32, torch.int64)
+        ):
+            raise RuntimeError(f"Schema-v5 replay action {index} is not scalar integer.")
+        action_value = int(action.detach().cpu().reshape(()).item())
+        if action_value < 0 or action_value >= action_count:
+            raise RuntimeError(f"Schema-v5 replay action {index} is out of range.")
+        reward = transition.reward
+        if (
+            not torch.is_tensor(reward)
+            or reward.numel() != 1
+            or not bool(torch.isfinite(reward).all().item())
+        ):
+            raise RuntimeError(f"Schema-v5 replay reward {index} is invalid.")
+        behavior_log_prob = transition.behavior_log_prob
+        if require_behavior_log_prob:
+            if (
+                not torch.is_tensor(behavior_log_prob)
+                or behavior_log_prob.numel() != 1
+                or not bool(torch.isfinite(behavior_log_prob).all().item())
+                or float(behavior_log_prob.detach().cpu().reshape(()).item()) > 0
+            ):
+                raise RuntimeError(
+                    f"Schema-v5 replay behavior log probability {index} is invalid."
+                )
+        if previous is not None:
+            if transition.episode_id == previous.episode_id:
+                try:
+                    validate_transition_continuity(
+                        previous,
+                        transition,
+                        require_clock=True,
+                    )
+                except ReplayIntegrityError as exc:
+                    raise RuntimeError(
+                        f"Schema-v5 replay continuity fails at record {index}."
+                    ) from exc
+            else:
+                previous_done = bool(previous.done.detach().cpu().reshape(()).item())
+                if (
+                    transition.episode_id != previous.episode_id + 1
+                    or transition.timestep != 0
+                    or not previous_done
+                ):
+                    raise RuntimeError(
+                        f"Schema-v5 replay episode boundary fails at record {index}."
+                    )
+        previous = transition
+    return transitions
+
+
+def _validate_schema_v5_active_latent(
+    collection_state: Any,
+    *,
+    episodic_latent: bool,
+    expected_latent_shape: Tuple[int, ...],
+    expected_latent_dtype: torch.dtype,
+) -> None:
+    if not isinstance(collection_state, dict):
+        raise RuntimeError("Schema-v5 collector state must be a dictionary.")
+    active_episode = collection_state.get("active_episode")
+    if active_episode is None:
+        return
+    if not isinstance(active_episode, dict):
+        raise RuntimeError("Schema-v5 active episode must be a dictionary.")
+    active_latent = active_episode.get("latent")
+    if episodic_latent:
+        if active_latent is not None:
+            raise RuntimeError(
+                "Schema-v5 episodic active state must not carry a latent."
+            )
+        return
+    if not isinstance(active_latent, ReplayLatent):
+        raise RuntimeError("Schema-v5 persistent active state has no carried latent.")
+    for component_name, component in (
+        ("z_H", active_latent.z_H),
+        ("z_L", active_latent.z_L),
+    ):
+        if (
+            not torch.is_tensor(component)
+            or tuple(component.shape) != expected_latent_shape
+            or component.dtype != expected_latent_dtype
+            or not bool(torch.isfinite(component).all().item())
+        ):
+            raise RuntimeError(
+                f"Schema-v5 active latent component {component_name} is invalid."
+            )
+
+
+def _atomic_torch_save(value: Any, destination: str) -> None:
+    """Publish one checkpoint atomically without replacing an existing file."""
+
+    destination_path = Path(destination)
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination_path.name}.",
+        suffix=".tmp",
+        dir=str(destination_path.parent),
+    )
+    os.close(descriptor)
+    temporary_path = Path(temporary_name)
+    try:
+        torch.save(value, temporary_path)
+        with temporary_path.open("rb") as handle:
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary_path, destination_path)
+        except FileExistsError as exc:
+            raise RuntimeError(
+                f"Refusing to overwrite existing checkpoint {destination_path.name!r}."
+            ) from exc
+        directory_fd = os.open(destination_path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def _fixed_base_effective_config(
+    *,
+    args: argparse.Namespace,
+    rl_config: Dict[str, Any],
+    model_config: Dict[str, Any],
+    execution_device: str,
+    train_record_count: int,
+    eval_record_count: int,
+) -> Dict[str, Any]:
+    """Build path-free behavior and schedule identity for one registered run."""
+
+    config_source_sha256s = [file_sha256(path) for path in (args.config or [])]
+    return {
+        "effective_config_schema_version": 1,
+        "algorithm": "upi_trm",
+        "training_protocol": "fixed_base_exact",
+        "backbone": args.backbone,
+        "rl_config": rl_config,
+        "model_config": model_config,
+        "execution_device": execution_device,
+        "runtime_fingerprint_sha256": canonical_json_sha256(
+            _runtime_fingerprint()
+        ),
+        "dataset": {
+            "train_split": args.train_split,
+            "eval_split": args.eval_split,
+            "train_record_count": train_record_count,
+            "eval_record_count": eval_record_count,
+        },
+        "budget": {
+            "outer_train_steps": rl_config["num_train_steps"],
+            "environment_interactions": args.env_step_budget,
+        },
+        "schedule": {
+            "log_outer_interval": rl_config["log_interval"],
+            "eval_outer_interval": rl_config["eval_interval"],
+            "save_outer_interval": args.save_interval,
+            "log_environment_interval": args.log_env_interval,
+            "eval_environment_interval": args.eval_env_interval,
+            "save_environment_interval": args.save_env_interval,
+        },
+        "evaluation": {
+            "episode_count": rl_config["eval_num_episodes"],
+            "seed": rl_config["eval_seed"],
+            "pool_size": eval_record_count,
+        },
+        "puzzle_embedding_optimizer": {
+            "learning_rate": args.puzzle_emb_lr,
+            "weight_decay": args.puzzle_emb_weight_decay,
+        },
+        "imitation": {
+            "enabled": args.imitation_pretrain,
+            "epochs": args.imitation_epochs,
+        },
+        "external_logging": "disabled",
+        "debug_checks": args.debug_checks,
+        "config_source_sha256s": config_source_sha256s,
+    }
+
+
+def _validate_run_identity_bindings(
+    identity: Any,
+    *,
+    rl_config: Dict[str, Any],
+    model_config: Dict[str, Any],
+    dataset_provenance: Dict[str, Any],
+    execution_device: str,
+    runtime_fingerprint: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    try:
+        canonical = validate_run_identity(identity)
+    except RunIdentityError as exc:
+        raise RuntimeError(f"Invalid schema-v5 run identity: {exc}") from exc
+    effective = canonical["effective_config"]
+    try:
+        effective = validate_upi_effective_config(effective)
+    except RunIdentityError as exc:
+        raise RuntimeError(f"Invalid schema-v5 effective config: {exc}") from exc
+    expected_bindings = {
+        "training_protocol": "fixed_base_exact",
+        "rl_config": rl_config,
+        "model_config": model_config,
+        "execution_device": execution_device,
+    }
+    for field, expected in expected_bindings.items():
+        if effective.get(field) != expected:
+            raise RuntimeError(
+                f"Schema-v5 run identity {field!r} does not match the active run."
+            )
+    active_runtime_fingerprint = (
+        runtime_fingerprint
+        if runtime_fingerprint is not None
+        else _runtime_fingerprint()
+    )
+    if effective["runtime_fingerprint_sha256"] != canonical_json_sha256(
+        active_runtime_fingerprint
+    ):
+        raise RuntimeError(
+            "Schema-v5 runtime settings changed after run identity construction."
+        )
+    if canonical["dataset_provenance_sha256"] != canonical_json_sha256(
+        dataset_provenance
+    ):
+        raise RuntimeError(
+            "Schema-v5 run identity does not match dataset provenance."
+        )
+    dataset_identity = effective["dataset"]
+    provenance_splits = dataset_provenance["splits"]
+    provenance_records = dataset_provenance["ordered_records"]
+    train_record_hashes = provenance_records["train"]["record_sha256s"]
+    eval_record_hashes = provenance_records["eval"]["record_sha256s"]
+    if len(set(train_record_hashes)) != len(train_record_hashes):
+        raise RuntimeError("Schema-v5 training provenance contains duplicate records.")
+    if len(set(eval_record_hashes)) != len(eval_record_hashes):
+        raise RuntimeError("Schema-v5 evaluation provenance contains duplicate records.")
+    if set(train_record_hashes).intersection(eval_record_hashes):
+        raise RuntimeError("Schema-v5 train/evaluation provenance overlaps.")
+    dataset_bindings = {
+        "train_split": provenance_splits["train"],
+        "eval_split": provenance_splits["eval"],
+        "train_record_count": provenance_records["train"]["count"],
+        "eval_record_count": provenance_records["eval"]["count"],
+    }
+    if dataset_identity != dataset_bindings:
+        raise RuntimeError(
+            "Schema-v5 effective dataset configuration does not match provenance."
+        )
+    if effective["budget"]["outer_train_steps"] != rl_config["num_train_steps"]:
+        raise RuntimeError("Schema-v5 outer-step budget does not match RL config.")
+    schedule_bindings = {
+        "log_outer_interval": rl_config["log_interval"],
+        "eval_outer_interval": rl_config["eval_interval"],
+    }
+    for field, expected in schedule_bindings.items():
+        if effective["schedule"][field] != expected:
+            raise RuntimeError(
+                f"Schema-v5 schedule field {field!r} does not match RL config."
+            )
+    evaluation_bindings = {
+        "episode_count": rl_config["eval_num_episodes"],
+        "seed": rl_config["eval_seed"],
+        "pool_size": provenance_records["eval"]["count"],
+    }
+    if effective["evaluation"] != evaluation_bindings:
+        raise RuntimeError(
+            "Schema-v5 evaluation configuration does not match RL config and provenance."
+        )
+    if effective["imitation"]["enabled"]:
+        raise RuntimeError(
+            "Schema-v5 checkpoints do not support resumable imitation pretraining."
+        )
+    if effective["debug_checks"] != rl_config["debug_checks"]:
+        raise RuntimeError("Schema-v5 debug setting does not match RL config.")
+    return canonical
+
+
+def _validate_schema_v5_progress(
+    *,
+    checkpoint_step: int,
+    environment_steps: int,
+    outer_steps: int,
+    value_optimizer_steps: int,
+    policy_optimizer_steps: int,
+    distill_optimizer_steps: int,
+    puzzle_optimizer_steps: int,
+    effective_config: Dict[str, Any],
+) -> None:
+    checkpoint_step = _strict_checkpoint_int(checkpoint_step, label="step")
+    counters = {
+        "environment_steps": environment_steps,
+        "outer_steps": outer_steps,
+        "value_optimizer_steps": value_optimizer_steps,
+        "policy_optimizer_steps": policy_optimizer_steps,
+        "distill_optimizer_steps": distill_optimizer_steps,
+        "puzzle_optimizer_steps": puzzle_optimizer_steps,
+    }
+    for name, value in counters.items():
+        _strict_checkpoint_int(value, label=name)
+    environment_budget = effective_config["budget"]["environment_interactions"]
+    outer_budget = effective_config["budget"]["outer_train_steps"]
+    if environment_budget is not None:
+        if checkpoint_step != environment_steps:
+            raise RuntimeError(
+                "Environment-budget checkpoint step must equal exact interactions."
+            )
+        if environment_steps > environment_budget:
+            raise RuntimeError("Checkpoint exceeds its registered interaction budget.")
+    else:
+        if checkpoint_step != outer_steps:
+            raise RuntimeError(
+                "Outer-budget checkpoint step must equal completed outer steps."
+            )
+        if outer_steps > outer_budget:
+            raise RuntimeError("Checkpoint exceeds its registered outer-step budget.")
+    if value_optimizer_steps > outer_steps or policy_optimizer_steps > outer_steps:
+        raise RuntimeError("Optimizer-step counters exceed completed outer steps.")
+    if distill_optimizer_steps > policy_optimizer_steps:
+        raise RuntimeError("Distillation steps exceed policy optimizer steps.")
+    if puzzle_optimizer_steps > value_optimizer_steps:
+        raise RuntimeError("Puzzle optimizer steps exceed value optimizer steps.")
+
+
+def _load_schema_v5_resume_metadata(
+    checkpoint_path: str,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    checkpoint, checkpoint_sha256 = _load_checkpoint_payload(checkpoint_path)
+    if not isinstance(checkpoint, dict) or checkpoint.get(
+        "checkpoint_schema_version"
+    ) != FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        raise RuntimeError(
+            "Confirmatory resume requires a schema-v5 fixed-base checkpoint."
+        )
+    try:
+        identity = validate_run_identity(checkpoint.get("run_identity"))
+        validate_checkpoint_lineage(checkpoint.get("checkpoint_lineage"))
+    except RunIdentityError as exc:
+        raise RuntimeError(f"Checkpoint lineage metadata is invalid: {exc}") from exc
+    step = checkpoint.get("step")
+    progress = checkpoint.get("progress")
+    if (
+        isinstance(step, bool)
+        or not isinstance(step, int)
+        or step < 0
+        or not isinstance(progress, dict)
+    ):
+        raise RuntimeError("Schema-v5 resume checkpoint has invalid progress metadata.")
+    environment_steps = progress.get("env_steps")
+    if (
+        isinstance(environment_steps, bool)
+        or not isinstance(environment_steps, int)
+        or environment_steps < 0
+    ):
+        raise RuntimeError("Schema-v5 resume checkpoint has invalid interaction count.")
+    try:
+        parent_link = build_checkpoint_lineage(
+            parent_checkpoint_sha256=checkpoint_sha256,
+            parent_checkpoint_step=step,
+            parent_environment_steps=environment_steps,
+        )
+    except RunIdentityError as exc:
+        raise RuntimeError("Cannot hash schema-v5 resume checkpoint.") from exc
+    return identity, parent_link
+
+
+def _load_checkpoint_payload(
+    checkpoint_path: str,
+    *,
+    expected_sha256: Optional[str] = None,
+) -> Tuple[Any, str]:
+    """Hash and load one stable open file, detecting replacement or mutation."""
+
+    digest_before = hashlib.sha256()
+    try:
+        with open(checkpoint_path, "rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest_before.update(block)
+            checkpoint_sha256 = digest_before.hexdigest()
+            if expected_sha256 is not None and checkpoint_sha256 != expected_sha256:
+                raise RuntimeError(
+                    "Resume checkpoint SHA-256 does not match its registered parent link."
+                )
+            handle.seek(0)
+            checkpoint = torch.load(
+                handle,
+                map_location="cpu",
+                weights_only=False,
+            )
+            handle.seek(0)
+            digest_after = hashlib.sha256()
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest_after.update(block)
+    except OSError as exc:
+        raise RuntimeError("Resume checkpoint cannot be read.") from exc
+    if digest_after.hexdigest() != checkpoint_sha256:
+        raise RuntimeError("Resume checkpoint changed while it was being loaded.")
+    return checkpoint, checkpoint_sha256
+
+
 def save_checkpoint(
     model: nn.Module,
     trainer: "UPITrmTrainer",
@@ -491,6 +1283,8 @@ def save_checkpoint(
     puzzle_emb_optimizer: Optional[torch.optim.Optimizer] = None,
     rl_cfg: Optional["RLConfig"] = None,
     dataset_provenance: Optional[Dict[str, Any]] = None,
+    run_identity: Optional[Dict[str, Any]] = None,
+    checkpoint_lineage: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Save full training state for resumable RL training.
@@ -503,6 +1297,8 @@ def save_checkpoint(
         puzzle_emb_optimizer: Optional optimizer for puzzle embeddings
         rl_cfg: Optional RLConfig used for training (saved for reproducibility)
         dataset_provenance: Content-based train/eval dataset identity
+        run_identity: Required clean-source identity for fixed-base checkpoints
+        checkpoint_lineage: Content-addressed parent checkpoint, or a root marker
 
     Returns:
         Path to saved checkpoint
@@ -512,7 +1308,7 @@ def save_checkpoint(
     is_upi_checkpoint = isinstance(trainer, UPITrmTrainer)
     if is_upi_checkpoint and dataset_provenance is None:
         raise RuntimeError(
-            "Schema-v4 UPI checkpoints require dataset provenance."
+            "UPI checkpoints require dataset provenance."
         )
     canonical_dataset_provenance: Optional[Dict[str, Any]] = None
     if dataset_provenance is not None:
@@ -543,7 +1339,14 @@ def save_checkpoint(
         if is_upi_checkpoint
         else "weights_only"
     )
+    if training_protocol == "fixed_base_exact" and bool(
+        getattr(trainer, "_train_step_active", False)
+    ):
+        raise RuntimeError(
+            "Schema-v5 checkpoint save requires an idle trainer between train calls."
+        )
     model_path = os.path.join(checkpoint_dir, f"model_step_{step}.pt")
+    path = os.path.join(checkpoint_dir, f"rl_checkpoint_step_{step}.pt")
     stale_model_paths = sorted(
         os.path.join(checkpoint_dir, name)
         for name in os.listdir(checkpoint_dir)
@@ -554,31 +1357,193 @@ def save_checkpoint(
             "Refusing fixed-base checkpoint save because stale single-model "
             f"artifacts exist: {stale_model_paths}"
         )
+    intended_outputs = [path]
+    if training_protocol != "fixed_base_exact":
+        intended_outputs.append(model_path)
+    existing_outputs = [
+        output for output in intended_outputs if os.path.exists(output)
+    ]
+    if existing_outputs:
+        raise RuntimeError(
+            "Refusing to overwrite existing checkpoint artifacts: "
+            f"{existing_outputs}"
+        )
 
     try:
         execution_device = _canonical_device(next(model.parameters()).device)
     except StopIteration:
         execution_device = "cpu"
 
+    model_config_object = getattr(model, "config", None)
+    if model_config_object is None:
+        raise RuntimeError("Checkpoint requires the active model configuration.")
+    model_config = _config_dict(model_config_object)
+    rl_config = _config_dict(effective_rl_cfg)
+    runtime_fingerprint = _runtime_fingerprint()
+    canonical_run_identity: Optional[Dict[str, Any]] = None
+    if training_protocol == "fixed_base_exact":
+        if not is_upi_checkpoint:
+            raise RuntimeError(
+                "fixed_base_exact checkpoints require UPITrmTrainer."
+            )
+        if run_identity is None:
+            raise RuntimeError(
+                "Schema-v5 fixed-base checkpoints require a run identity."
+            )
+        assert canonical_dataset_provenance is not None
+        canonical_run_identity = _validate_run_identity_bindings(
+            run_identity,
+            rl_config=rl_config,
+            model_config=model_config,
+            dataset_provenance=canonical_dataset_provenance,
+            execution_device=execution_device,
+            runtime_fingerprint=runtime_fingerprint,
+        )
+        if checkpoint_lineage is None:
+            raise RuntimeError(
+                "Schema-v5 fixed-base checkpoints require checkpoint lineage."
+            )
+        try:
+            canonical_checkpoint_lineage = validate_checkpoint_lineage(
+                checkpoint_lineage
+            )
+        except RunIdentityError as exc:
+            raise RuntimeError(f"Invalid schema-v5 checkpoint lineage: {exc}") from exc
+        checkpoint_schema_version = FIXED_BASE_CHECKPOINT_SCHEMA_VERSION
+    else:
+        if run_identity is not None:
+            raise RuntimeError(
+                "Run identity is reserved for schema-v5 fixed-base checkpoints."
+            )
+        if checkpoint_lineage is not None:
+            raise RuntimeError(
+                "Checkpoint lineage is reserved for schema-v5 fixed-base checkpoints."
+            )
+        canonical_checkpoint_lineage = None
+        checkpoint_schema_version = (
+            LEGACY_UPI_CHECKPOINT_SCHEMA_VERSION if is_upi_checkpoint else 2
+        )
+
     rng_state = _capture_rng_state()
+    if checkpoint_schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        progress = {
+            "env_steps": int(getattr(trainer, "_env_step_count", 0)),
+            "outer_steps": int(getattr(trainer, "_train_step_count", 0)),
+            "value_optimizer_steps": int(
+                getattr(trainer, "_value_optimizer_step_count", 0)
+            ),
+            "policy_optimizer_steps": int(
+                getattr(trainer, "_policy_optimizer_step_count", 0)
+            ),
+            "distill_optimizer_steps": int(
+                getattr(trainer, "_distill_optimizer_step_count", 0)
+            ),
+            "puzzle_optimizer_steps": int(
+                getattr(trainer, "_puzzle_optimizer_step_count", 0)
+            ),
+        }
+    else:
+        progress = {
+            "env_steps": int(getattr(trainer, "_env_step_count", 0)),
+            "optimizer_updates": int(getattr(trainer, "_train_step_count", 0)),
+        }
+    if checkpoint_schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        assert canonical_run_identity is not None
+        _validate_schema_v5_progress(
+            checkpoint_step=step,
+            environment_steps=progress["env_steps"],
+            outer_steps=progress["outer_steps"],
+            value_optimizer_steps=progress["value_optimizer_steps"],
+            policy_optimizer_steps=progress["policy_optimizer_steps"],
+            distill_optimizer_steps=progress["distill_optimizer_steps"],
+            puzzle_optimizer_steps=progress["puzzle_optimizer_steps"],
+            effective_config=canonical_run_identity["effective_config"],
+        )
+    collection_checkpoint_state = None
+    environment_checkpoint_state = None
+    replay_snapshot = list(
+        getattr(getattr(trainer, "replay", None), "storage", [])
+    )
+    if is_upi_checkpoint:
+        collection_checkpoint_state = trainer.collection_checkpoint_state()
+        environment_checkpoint_state = trainer.env.checkpoint_state()
+    if checkpoint_schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        model_puzzle_emb_len = int(model_config.get("puzzle_emb_len", 0))
+        if model_puzzle_emb_len == 0:
+            model_puzzle_emb_len = -(
+                -int(model_config.get("puzzle_emb_ndim", 0))
+                // int(model_config["hidden_size"])
+            )
+        expected_latent_shape = (
+            1,
+            int(model_config["seq_len"]) + model_puzzle_emb_len,
+            int(model_config["hidden_size"]),
+        )
+        _validate_schema_v5_replay(
+            replay_snapshot,
+            action_count=int(model_config["rl_num_actions"]),
+            require_behavior_log_prob=bool(
+                rl_config.get("use_importance_sampling", True)
+            ),
+            episodic_latent=bool(rl_config["episodic_latent"]),
+            max_edits=int(rl_config["max_edits"]),
+            expected_latent_shape=expected_latent_shape,
+            expected_latent_dtype=next(model.parameters()).dtype,
+            seq_len=int(model_config["seq_len"]),
+            vocab_size=int(model_config["vocab_size"]),
+            num_puzzle_identifiers=int(model_config["num_puzzle_identifiers"]),
+        )
+        _validate_schema_v5_active_latent(
+            collection_checkpoint_state,
+            episodic_latent=bool(rl_config["episodic_latent"]),
+            expected_latent_shape=expected_latent_shape,
+            expected_latent_dtype=next(model.parameters()).dtype,
+        )
+        if replay_snapshot:
+            assert isinstance(collection_checkpoint_state, dict)
+            active_episode = collection_checkpoint_state.get("active_episode")
+            active_timestep = (
+                int(active_episode.get("timestep", -1))
+                if isinstance(active_episode, dict)
+                else None
+            )
+            expected_next_episode_id = (
+                replay_snapshot[-1].episode_id
+                if active_timestep is not None and active_timestep > 0
+                else replay_snapshot[-1].episode_id + 1
+            )
+            if int(getattr(trainer, "_next_episode_id", -1)) != (
+                expected_next_episode_id
+            ):
+                raise RuntimeError(
+                    "Schema-v5 next episode ID disagrees with replay before save."
+                )
     checkpoint = {
-        "checkpoint_schema_version": 4 if is_upi_checkpoint else 2,
+        "checkpoint_schema_version": checkpoint_schema_version,
         "training_protocol": training_protocol,
         "execution_device": execution_device,
         "trainer_kind": type(trainer).__name__,
         "step": step,
-        "progress": {
-            "env_steps": int(getattr(trainer, "_env_step_count", 0)),
-            "optimizer_updates": int(getattr(trainer, "_train_step_count", 0)),
-        },
+        "progress": progress,
         "model_state_dict": model.state_dict(),
         "rng_state": rng_state,
     }
+    if canonical_run_identity is not None:
+        checkpoint["run_identity"] = canonical_run_identity
+        checkpoint["checkpoint_lineage"] = canonical_checkpoint_lineage
+        modules = _checkpoint_modules(model, trainer)
+        checkpoint["runtime_fingerprint"] = runtime_fingerprint
+        checkpoint["module_training_modes"] = {
+            name: bool(module.training) for name, module in modules.items()
+        }
+        checkpoint["parameter_gradients"] = {
+            name: _capture_parameter_gradients(module)
+            for name, module in modules.items()
+        }
+        checkpoint["checkpoint_phase"] = "idle_between_training_calls"
     if canonical_dataset_provenance is not None:
         checkpoint["dataset_provenance"] = canonical_dataset_provenance
-    model_config = getattr(model, "config", None)
-    if model_config is not None:
-        checkpoint["model_config"] = _config_dict(model_config)
+    checkpoint["model_config"] = model_config
 
     # Preserve the old/candidate policy pair for post-candidate diagnostics.
     if hasattr(trainer, "policy_model_old") and trainer.policy_model_old is not None:
@@ -589,7 +1554,7 @@ def save_checkpoint(
         checkpoint["target_model_state_dict"] = trainer.target_model.state_dict()
 
     # Save RL config for reproducibility and correct eval loading.
-    checkpoint["rl_config"] = _config_dict(effective_rl_cfg)
+    checkpoint["rl_config"] = rl_config
 
     # Save optimizer states - different trainers have different optimizer structures
     if hasattr(trainer, 'value_opt') and hasattr(trainer, 'policy_opt'):
@@ -616,6 +1581,18 @@ def save_checkpoint(
         "next_episode_id": int(getattr(trainer, "_next_episode_id", 0)),
         "train_step_count": int(getattr(trainer, "_train_step_count", 0)),
         "env_step_count": int(getattr(trainer, "_env_step_count", 0)),
+        "value_optimizer_step_count": int(
+            getattr(trainer, "_value_optimizer_step_count", 0)
+        ),
+        "policy_optimizer_step_count": int(
+            getattr(trainer, "_policy_optimizer_step_count", 0)
+        ),
+        "distill_optimizer_step_count": int(
+            getattr(trainer, "_distill_optimizer_step_count", 0)
+        ),
+        "puzzle_optimizer_step_count": int(
+            getattr(trainer, "_puzzle_optimizer_step_count", 0)
+        ),
         "kl_coef": float(getattr(trainer, "_kl_coef", 1.0)),
         "term_stats": dict(getattr(trainer, "term_stats", {})),
         "debug_episode_lengths": list(
@@ -631,12 +1608,15 @@ def save_checkpoint(
         "drift_values": list(getattr(trainer, "_drift_values", [])),
         "plan_changes": list(getattr(trainer, "_plan_changes", [])),
         "value_of_memory": list(getattr(trainer, "_value_of_memory", [])),
+        "opnorm_clamp_warned": bool(
+            getattr(trainer, "_opnorm_clamp_warned", False)
+        ),
     }
     if is_upi_checkpoint:
         checkpoint["trainer_state"].update(
             {
-                "collection_state": trainer.collection_checkpoint_state(),
-                "environment_state": trainer.env.checkpoint_state(),
+                "collection_state": collection_checkpoint_state,
+                "environment_state": environment_checkpoint_state,
             }
         )
     else:
@@ -650,22 +1630,17 @@ def save_checkpoint(
     if hasattr(trainer, 'replay'):
         checkpoint["replay_buffer_size"] = len(trainer.replay)
         checkpoint["replay_capacity"] = trainer.replay.storage.maxlen
-        checkpoint["replay_transitions"] = list(trainer.replay.storage)
+        checkpoint["replay_transitions"] = replay_snapshot
     
-    path = os.path.join(checkpoint_dir, f"rl_checkpoint_step_{step}.pt")
     try:
-        torch.save(checkpoint, path)
+        _atomic_torch_save(checkpoint, path)
         print(f"[Checkpoint] Saved to {path}")
 
         # A single state dict cannot represent an exact old/candidate mixture.
         # Keep the convenient weights-only artifact only for protocols whose
         # deployed policy is a single model.
         if training_protocol != "fixed_base_exact":
-            torch.save(model.state_dict(), model_path)
-    except Exception as e:
-        print(f"[Checkpoint] Warning: Failed to save checkpoint: {e}")
-        print("[Checkpoint] Continuing training without saving...")
-        return ""
+            _atomic_torch_save(model.state_dict(), model_path)
     finally:
         # Checkpointing must not perturb an uninterrupted stochastic run.
         _restore_rng_state(rng_state)
@@ -680,6 +1655,8 @@ def resume_from_checkpoint(
     device: str,
     puzzle_emb_optimizer: Optional[torch.optim.Optimizer] = None,
     expected_dataset_provenance: Optional[Dict[str, Any]] = None,
+    expected_run_identity: Optional[Dict[str, Any]] = None,
+    expected_checkpoint_sha256: Optional[str] = None,
     allow_legacy_warm_start: bool = False,
 ) -> int:
     """
@@ -688,17 +1665,17 @@ def resume_from_checkpoint(
     Returns:
         Starting step number
     """
+    if bool(getattr(trainer, "_train_step_active", False)):
+        raise RuntimeError("Cannot resume while a trainer step is active.")
     print(f"[Checkpoint] Resuming from {checkpoint_path}")
     # Resume checkpoints contain replay Transition dataclasses, so this is a
     # trusted local artifact rather than a weights-only file.
-    checkpoint = torch.load(
+    checkpoint, loaded_checkpoint_sha256 = _load_checkpoint_payload(
         checkpoint_path,
-        # Replay transitions are intentionally CPU-resident. Loading a large
-        # replay directly onto CUDA can exhaust accelerator memory before the
-        # model state is restored.
-        map_location="cpu",
-        weights_only=False,
+        expected_sha256=expected_checkpoint_sha256,
     )
+    if not isinstance(checkpoint, dict):
+        raise RuntimeError("Resume checkpoint must contain a dictionary payload.")
     
     schema_version = int(checkpoint.get("checkpoint_schema_version", 0))
     if schema_version < 3:
@@ -715,9 +1692,10 @@ def resume_from_checkpoint(
             "start."
             + legacy_flag_note
         )
-    if schema_version not in (3, 4):
+    if schema_version not in (3, 4, FIXED_BASE_CHECKPOINT_SCHEMA_VERSION):
         raise RuntimeError(
-            f"Unsupported checkpoint schema version {schema_version}; expected 3 or 4."
+            "Unsupported checkpoint schema version "
+            f"{schema_version}; expected 3, 4, or 5."
         )
     if checkpoint.get("trainer_kind") != type(trainer).__name__:
         raise RuntimeError(
@@ -726,6 +1704,7 @@ def resume_from_checkpoint(
         )
 
     active_protocol = str(getattr(trainer.rl_cfg, "training_protocol", "legacy"))
+    validated_checkpoint_lineage: Optional[Dict[str, Any]] = None
     saved_rl_config = checkpoint.get("rl_config")
     if not isinstance(saved_rl_config, dict):
         raise RuntimeError(f"Schema-v{schema_version} checkpoint is missing RL config.")
@@ -742,7 +1721,9 @@ def resume_from_checkpoint(
         saved_protocol = checkpoint.get("training_protocol")
         nested_protocol = saved_rl_config.get("training_protocol")
         if not isinstance(saved_protocol, str) or not isinstance(nested_protocol, str):
-            raise RuntimeError("Schema-v4 checkpoint is missing training protocol identity.")
+            raise RuntimeError(
+                f"Schema-v{schema_version} checkpoint is missing training protocol identity."
+            )
         if saved_protocol != nested_protocol:
             raise RuntimeError(
                 "Checkpoint top-level and nested training protocols disagree."
@@ -751,6 +1732,49 @@ def resume_from_checkpoint(
             raise RuntimeError(
                 "Checkpoint training protocol does not match the active trainer."
             )
+
+        if schema_version == LEGACY_UPI_CHECKPOINT_SCHEMA_VERSION:
+            if active_protocol == "fixed_base_exact":
+                raise RuntimeError(
+                    "Schema-v4 fixed-base checkpoints lack confirmatory run identity; "
+                    "use them only as historical weights, not exact resume inputs."
+                )
+            if expected_run_identity is not None:
+                raise RuntimeError(
+                    "Legacy schema-v4 resume must not be assigned a schema-v5 run identity."
+                )
+        else:
+            if active_protocol != "fixed_base_exact":
+                raise RuntimeError(
+                    "Schema-v5 checkpoints are reserved for fixed_base_exact runs."
+                )
+            if expected_run_identity is None:
+                raise RuntimeError(
+                    "Schema-v5 exact resume requires the current run identity."
+                )
+            if expected_checkpoint_sha256 is None:
+                raise RuntimeError(
+                    "Schema-v5 exact resume requires the registered checkpoint SHA-256."
+                )
+            if loaded_checkpoint_sha256 != expected_checkpoint_sha256:
+                raise RuntimeError("Schema-v5 checkpoint SHA-256 mismatch.")
+            try:
+                assert_matching_run_identity(
+                    checkpoint.get("run_identity"),
+                    expected_run_identity,
+                )
+            except RunIdentityError as exc:
+                raise RuntimeError(
+                    f"Run identity mismatch; state was not restored: {exc}"
+                ) from exc
+            try:
+                validated_checkpoint_lineage = validate_checkpoint_lineage(
+                    checkpoint.get("checkpoint_lineage")
+                )
+            except RunIdentityError as exc:
+                raise RuntimeError(
+                    f"Checkpoint lineage is invalid; state was not restored: {exc}"
+                ) from exc
 
         saved_device = checkpoint.get("execution_device")
         try:
@@ -811,6 +1835,24 @@ def resume_from_checkpoint(
         raise RuntimeError(
             "Checkpoint model configuration mismatch; exact continuation is impossible."
         )
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        assert expected_run_identity is not None
+        assert isinstance(checkpoint_provenance, dict)
+        active_runtime_fingerprint = _runtime_fingerprint()
+        _validate_run_identity_bindings(
+            checkpoint["run_identity"],
+            rl_config=current_rl_config,
+            model_config=current_model_config,
+            dataset_provenance=checkpoint_provenance,
+            execution_device=_canonical_device(device),
+            runtime_fingerprint=active_runtime_fingerprint,
+        )
+        if checkpoint.get("checkpoint_phase") != "idle_between_training_calls":
+            raise RuntimeError("Schema-v5 checkpoint has an invalid training phase.")
+        if checkpoint.get("runtime_fingerprint") != active_runtime_fingerprint:
+            raise RuntimeError(
+                "Runtime fingerprint differs from the schema-v5 checkpoint."
+            )
     progress = checkpoint.get("progress")
     trainer_state = checkpoint.get("trainer_state")
     required_top_level = {
@@ -828,6 +1870,20 @@ def resume_from_checkpoint(
         raise RuntimeError(
             f"Schema-v{schema_version} checkpoint is missing required fields: {missing}."
         )
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        schema_v5_required = {
+            "run_identity",
+            "runtime_fingerprint",
+            "module_training_modes",
+            "parameter_gradients",
+            "checkpoint_phase",
+            "checkpoint_lineage",
+        }
+        missing_v5 = sorted(schema_v5_required - set(checkpoint))
+        if missing_v5:
+            raise RuntimeError(
+                f"Schema-v5 checkpoint is missing required fields: {missing_v5}."
+            )
     if not isinstance(progress, dict) or not isinstance(trainer_state, dict):
         raise RuntimeError(
             f"Schema-v{schema_version} checkpoint is missing progress or trainer state."
@@ -836,19 +1892,230 @@ def resume_from_checkpoint(
         raise RuntimeError(
             f"Schema-v{schema_version} checkpoint is missing live environment or collector state."
         )
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        saved_next_episode_id = _strict_checkpoint_int(
+            trainer_state.get("next_episode_id"),
+            label="trainer_state.next_episode_id",
+        )
+        saved_kl_coef = _strict_checkpoint_float(
+            trainer_state.get("kl_coef"),
+            label="trainer_state.kl_coef",
+        )
+        if saved_kl_coef < 0:
+            raise RuntimeError("Checkpoint trainer_state.kl_coef must be non-negative.")
+        raw_term_stats = trainer_state.get("term_stats")
+        if not isinstance(raw_term_stats, dict) or set(raw_term_stats) != {
+            "stop",
+            "solved",
+            "budget",
+        }:
+            raise RuntimeError(
+                "Checkpoint trainer_state.term_stats has an invalid inventory."
+            )
+        saved_term_stats = {
+            key: _strict_checkpoint_float(
+                raw_term_stats[key],
+                label=f"trainer_state.term_stats.{key}",
+            )
+            for key in ("stop", "solved", "budget")
+        }
+        if any(value < 0 for value in saved_term_stats.values()):
+            raise RuntimeError("Checkpoint termination counts must be non-negative.")
+        saved_debug_episode_lengths = _strict_checkpoint_list(
+            trainer_state.get("debug_episode_lengths"),
+            label="trainer_state.debug_episode_lengths",
+            integers=True,
+        )
+        saved_debug_episode_returns = _strict_checkpoint_list(
+            trainer_state.get("debug_episode_returns"),
+            label="trainer_state.debug_episode_returns",
+        )
+        saved_debug_stop_probs = _strict_checkpoint_list(
+            trainer_state.get("debug_stop_probs"),
+            label="trainer_state.debug_stop_probs",
+        )
+        saved_debug_score_changes = _strict_checkpoint_list(
+            trainer_state.get("debug_score_changes"),
+            label="trainer_state.debug_score_changes",
+        )
+        saved_drift_values = _strict_checkpoint_list(
+            trainer_state.get("drift_values"),
+            label="trainer_state.drift_values",
+        )
+        saved_plan_changes = _strict_checkpoint_list(
+            trainer_state.get("plan_changes"),
+            label="trainer_state.plan_changes",
+        )
+        saved_value_of_memory = _strict_checkpoint_list(
+            trainer_state.get("value_of_memory"),
+            label="trainer_state.value_of_memory",
+        )
+        raw_opnorm_warning = trainer_state.get("opnorm_clamp_warned")
+        if not isinstance(raw_opnorm_warning, bool):
+            raise RuntimeError(
+                "Checkpoint trainer_state.opnorm_clamp_warned must be boolean."
+            )
+        saved_opnorm_warning = raw_opnorm_warning
+        saved_value_optimizer_steps = _strict_checkpoint_int(
+            trainer_state.get("value_optimizer_step_count"),
+            label="trainer_state.value_optimizer_step_count",
+        )
+        saved_policy_optimizer_steps = _strict_checkpoint_int(
+            trainer_state.get("policy_optimizer_step_count"),
+            label="trainer_state.policy_optimizer_step_count",
+        )
+        saved_distill_optimizer_steps = _strict_checkpoint_int(
+            trainer_state.get("distill_optimizer_step_count"),
+            label="trainer_state.distill_optimizer_step_count",
+        )
+        saved_puzzle_optimizer_steps = _strict_checkpoint_int(
+            trainer_state.get("puzzle_optimizer_step_count"),
+            label="trainer_state.puzzle_optimizer_step_count",
+        )
+    else:
+        saved_next_episode_id = int(trainer_state["next_episode_id"])
+        saved_kl_coef = float(trainer_state.get("kl_coef", 1.0))
+        saved_term_stats = (
+            dict(trainer_state["term_stats"])
+            if trainer_state.get("term_stats") is not None
+            else None
+        )
+        saved_debug_episode_lengths = list(
+            trainer_state.get("debug_episode_lengths", [])
+        )
+        saved_debug_episode_returns = list(
+            trainer_state.get("debug_episode_returns", [])
+        )
+        saved_debug_stop_probs = list(trainer_state.get("debug_stop_probs", []))
+        saved_debug_score_changes = list(
+            trainer_state.get("debug_score_changes", [])
+        )
+        saved_drift_values = list(trainer_state.get("drift_values", []))
+        saved_plan_changes = list(trainer_state.get("plan_changes", []))
+        saved_value_of_memory = list(trainer_state.get("value_of_memory", []))
+        saved_opnorm_warning = bool(
+            trainer_state.get("opnorm_clamp_warned", False)
+        )
+        saved_value_optimizer_steps = int(
+            trainer_state.get("value_optimizer_step_count", 0)
+        )
+        saved_policy_optimizer_steps = int(
+            trainer_state.get("policy_optimizer_step_count", 0)
+        )
+        saved_distill_optimizer_steps = int(
+            trainer_state.get("distill_optimizer_step_count", 0)
+        )
+        saved_puzzle_optimizer_steps = int(
+            trainer_state.get("puzzle_optimizer_step_count", 0)
+        )
     if int(checkpoint["replay_capacity"]) != int(trainer.replay.storage.maxlen):
         raise RuntimeError(
             "Checkpoint replay capacity mismatch; exact continuation is impossible."
         )
-    saved_train_steps = int(trainer_state.get("train_step_count", -1))
-    saved_env_steps = int(trainer_state.get("env_step_count", -1))
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        saved_train_steps = _strict_checkpoint_int(
+            trainer_state.get("train_step_count"),
+            label="trainer_state.train_step_count",
+        )
+        saved_env_steps = _strict_checkpoint_int(
+            trainer_state.get("env_step_count"),
+            label="trainer_state.env_step_count",
+        )
+    else:
+        saved_train_steps = int(trainer_state.get("train_step_count", -1))
+        saved_env_steps = int(trainer_state.get("env_step_count", -1))
     if saved_train_steps < 0 or saved_env_steps < 0:
         raise RuntimeError("Checkpoint contains negative progress counters.")
-    if saved_train_steps != int(progress.get("optimizer_updates", -1)):
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        expected_progress_fields = {
+            "env_steps",
+            "outer_steps",
+            "value_optimizer_steps",
+            "policy_optimizer_steps",
+            "distill_optimizer_steps",
+            "puzzle_optimizer_steps",
+        }
+        if set(progress) != expected_progress_fields:
+            raise RuntimeError("Schema-v5 progress counter inventory is invalid.")
+        progress_counters = {
+            field: _strict_checkpoint_int(progress.get(field), label=f"progress.{field}")
+            for field in sorted(expected_progress_fields)
+        }
+        expected_counters = {
+            "env_steps": saved_env_steps,
+            "outer_steps": saved_train_steps,
+            "value_optimizer_steps": saved_value_optimizer_steps,
+            "policy_optimizer_steps": saved_policy_optimizer_steps,
+            "distill_optimizer_steps": saved_distill_optimizer_steps,
+            "puzzle_optimizer_steps": saved_puzzle_optimizer_steps,
+        }
+        if progress_counters != expected_counters:
+            raise RuntimeError("Schema-v5 progress counters disagree with trainer state.")
+    elif saved_train_steps != int(progress.get("optimizer_updates", -1)):
         raise RuntimeError("Checkpoint optimizer-update counters disagree.")
     if saved_env_steps != int(progress.get("env_steps", -1)):
         raise RuntimeError("Checkpoint environment-step counters disagree.")
+    checkpoint_step = (
+        _strict_checkpoint_int(checkpoint.get("step"), label="step")
+        if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION
+        else int(checkpoint.get("step", -1))
+    )
+    if checkpoint_step < 0:
+        raise RuntimeError("Checkpoint step must be non-negative.")
+    if validated_checkpoint_lineage is not None and (
+        validated_checkpoint_lineage["parent_checkpoint_step"] is not None
+    ):
+        if validated_checkpoint_lineage["parent_checkpoint_step"] > checkpoint_step:
+            raise RuntimeError("Checkpoint parent step exceeds the child step.")
+        if (
+            validated_checkpoint_lineage["parent_environment_steps"]
+            > saved_env_steps
+        ):
+            raise RuntimeError(
+                "Checkpoint parent interaction count exceeds the child count."
+            )
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        _validate_schema_v5_progress(
+            checkpoint_step=checkpoint_step,
+            environment_steps=saved_env_steps,
+            outer_steps=saved_train_steps,
+            value_optimizer_steps=saved_value_optimizer_steps,
+            policy_optimizer_steps=saved_policy_optimizer_steps,
+            distill_optimizer_steps=saved_distill_optimizer_steps,
+            puzzle_optimizer_steps=saved_puzzle_optimizer_steps,
+            effective_config=checkpoint["run_identity"]["effective_config"],
+        )
     replay_transitions = checkpoint["replay_transitions"]
+    expected_replay_latent_shape: Optional[Tuple[int, ...]] = None
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        puzzle_emb_len = int(current_model_config.get("puzzle_emb_len", 0))
+        if puzzle_emb_len == 0:
+            puzzle_emb_ndim = int(current_model_config.get("puzzle_emb_ndim", 0))
+            hidden_size = int(current_model_config["hidden_size"])
+            puzzle_emb_len = -(-puzzle_emb_ndim // hidden_size)
+        expected_replay_latent_shape = (
+            1,
+            int(current_model_config["seq_len"]) + puzzle_emb_len,
+            int(current_model_config["hidden_size"]),
+        )
+        replay_transitions = _validate_schema_v5_replay(
+            replay_transitions,
+            action_count=int(current_model_config["rl_num_actions"]),
+            require_behavior_log_prob=bool(
+                current_rl_config.get("use_importance_sampling", True)
+            ),
+            episodic_latent=bool(current_rl_config["episodic_latent"]),
+            max_edits=int(current_rl_config["max_edits"]),
+            expected_latent_shape=expected_replay_latent_shape,
+            expected_latent_dtype=next(model.parameters()).dtype,
+            seq_len=int(current_model_config["seq_len"]),
+            vocab_size=int(current_model_config["vocab_size"]),
+            num_puzzle_identifiers=int(
+                current_model_config["num_puzzle_identifiers"]
+            ),
+        )
+    elif not isinstance(replay_transitions, list):
+        raise RuntimeError("Checkpoint replay transitions must be a list.")
     if len(replay_transitions) != int(checkpoint.get("replay_buffer_size", -1)):
         raise RuntimeError("Checkpoint replay size does not match its transition list.")
     saved_puzzle_optimizer = "puzzle_emb_optimizer_state_dict" in checkpoint
@@ -876,6 +2143,16 @@ def resume_from_checkpoint(
                 f"Checkpoint field {field!r} does not match the active trainer."
             )
 
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        collection_state_for_latent = trainer_state["collection_state"]
+        assert expected_replay_latent_shape is not None
+        _validate_schema_v5_active_latent(
+            collection_state_for_latent,
+            episodic_latent=bool(current_rl_config["episodic_latent"]),
+            expected_latent_shape=expected_replay_latent_shape,
+            expected_latent_dtype=next(model.parameters()).dtype,
+        )
+
     # Validate nested mutable state on isolated shells before restoring any live
     # module, optimizer, replay, environment, collector, or RNG state.
     environment_probe = copy.copy(trainer.env)
@@ -886,8 +2163,115 @@ def resume_from_checkpoint(
     trainer_probe = copy.copy(trainer)
     trainer_probe.env = environment_probe
     trainer_probe.replay = replay_probe
-    trainer_probe._next_episode_id = int(trainer_state["next_episode_id"])
+    trainer_probe._next_episode_id = saved_next_episode_id
     trainer_probe.load_collection_checkpoint_state(trainer_state["collection_state"])
+    if replay_transitions:
+        replay_tail_episode_id = replay_transitions[-1].episode_id
+        active_episode_state = trainer_state["collection_state"].get(
+            "active_episode"
+        )
+        active_timestep = (
+            int(active_episode_state.get("timestep", -1))
+            if isinstance(active_episode_state, dict)
+            else None
+        )
+        expected_next_episode_id = (
+            replay_tail_episode_id
+            if active_timestep is not None and active_timestep > 0
+            else replay_tail_episode_id + 1
+        )
+        if saved_next_episode_id != expected_next_episode_id:
+            raise RuntimeError(
+                "Checkpoint next episode ID disagrees with the replay tail."
+            )
+
+    module_state_fields = {
+        "model": "model_state_dict",
+        "policy_model_old": "policy_model_old_state_dict",
+        "policy_model_candidate": "policy_model_candidate_state_dict",
+        "target_model": "target_model_state_dict",
+    }
+    modules = _checkpoint_modules(model, trainer)
+    if set(modules) != set(module_state_fields):
+        raise RuntimeError("Checkpoint module inventory is incomplete.")
+    saved_modes = checkpoint.get("module_training_modes")
+    saved_gradients = checkpoint.get("parameter_gradients")
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        if not isinstance(saved_modes, dict) or set(saved_modes) != set(modules):
+            raise RuntimeError("Schema-v5 module training-mode inventory mismatch.")
+        if not all(isinstance(value, bool) for value in saved_modes.values()):
+            raise RuntimeError("Schema-v5 module training modes must be boolean.")
+        if not isinstance(saved_gradients, dict) or set(saved_gradients) != set(
+            modules
+        ):
+            raise RuntimeError("Schema-v5 parameter-gradient inventory mismatch.")
+
+    # Module and optimizer state dictionaries are parsed on isolated copies.
+    # A corrupt late field therefore cannot leave the live run half-restored.
+    for name, module in modules.items():
+        try:
+            module_probe = copy.deepcopy(module)
+            module_probe.load_state_dict(
+                checkpoint[module_state_fields[name]],
+                strict=True,
+            )
+            if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+                assert isinstance(saved_gradients, dict)
+                _restore_parameter_gradients(
+                    module_probe,
+                    saved_gradients[name],
+                    label=name,
+                )
+            del module_probe
+        except Exception as exc:
+            raise RuntimeError(
+                f"Checkpoint {name} state failed preflight; state was not restored."
+            ) from exc
+
+    optimizer_state_pairs = (
+        (trainer.value_opt, "value_optimizer_state_dict"),
+        (trainer.policy_opt, "policy_optimizer_state_dict"),
+        (
+            getattr(trainer, "old_policy_distill_opt", None),
+            "old_policy_distill_optimizer_state_dict",
+        ),
+        (puzzle_emb_optimizer, "puzzle_emb_optimizer_state_dict"),
+    )
+    for optimizer, field in optimizer_state_pairs:
+        if optimizer is not None:
+            try:
+                optimizer_probe = copy.deepcopy(optimizer)
+                optimizer_probe.load_state_dict(checkpoint[field])
+                del optimizer_probe
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Checkpoint {field} failed preflight; state was not restored."
+                ) from exc
+    scheduler_state_pairs = (
+        (getattr(trainer, "value_scheduler", None), "value_scheduler_state_dict"),
+        (getattr(trainer, "policy_scheduler", None), "policy_scheduler_state_dict"),
+    )
+    for scheduler, field in scheduler_state_pairs:
+        if scheduler is not None:
+            try:
+                scheduler_probe = copy.deepcopy(scheduler)
+                scheduler_probe.load_state_dict(checkpoint[field])
+                del scheduler_probe
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Checkpoint {field} failed preflight; state was not restored."
+                ) from exc
+
+    current_rng_state = _capture_rng_state()
+    try:
+        try:
+            _restore_rng_state(rng_state)
+        except Exception as exc:
+            raise RuntimeError(
+                "Checkpoint RNG state failed preflight; state was not restored."
+            ) from exc
+    finally:
+        _restore_rng_state(current_rng_state)
 
     model.load_state_dict(checkpoint["model_state_dict"])
     trainer.policy_model_old.load_state_dict(checkpoint["policy_model_old_state_dict"])
@@ -918,25 +2302,35 @@ def resume_from_checkpoint(
     if puzzle_emb_optimizer is not None:
         puzzle_emb_optimizer.load_state_dict(checkpoint["puzzle_emb_optimizer_state_dict"])
 
-    trainer._next_episode_id = int(trainer_state["next_episode_id"])
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        assert isinstance(saved_modes, dict)
+        assert isinstance(saved_gradients, dict)
+        for name, module in modules.items():
+            module.train(saved_modes[name])
+            _restore_parameter_gradients(
+                module,
+                saved_gradients[name],
+                label=name,
+            )
+
+    trainer._next_episode_id = saved_next_episode_id
     trainer._train_step_count = saved_train_steps
     trainer._env_step_count = saved_env_steps
-    trainer._kl_coef = float(trainer_state.get("kl_coef", 1.0))
-    if trainer_state.get("term_stats") is not None:
-        trainer.term_stats = dict(trainer_state["term_stats"])
-    trainer._debug_episode_lengths = list(
-        trainer_state.get("debug_episode_lengths", [])
-    )
-    trainer._debug_episode_returns = list(
-        trainer_state.get("debug_episode_returns", [])
-    )
-    trainer._debug_stop_probs = list(trainer_state.get("debug_stop_probs", []))
-    trainer._debug_score_changes = list(
-        trainer_state.get("debug_score_changes", [])
-    )
-    trainer._drift_values = list(trainer_state.get("drift_values", []))
-    trainer._plan_changes = list(trainer_state.get("plan_changes", []))
-    trainer._value_of_memory = list(trainer_state.get("value_of_memory", []))
+    trainer._value_optimizer_step_count = saved_value_optimizer_steps
+    trainer._policy_optimizer_step_count = saved_policy_optimizer_steps
+    trainer._distill_optimizer_step_count = saved_distill_optimizer_steps
+    trainer._puzzle_optimizer_step_count = saved_puzzle_optimizer_steps
+    trainer._kl_coef = saved_kl_coef
+    if saved_term_stats is not None:
+        trainer.term_stats = saved_term_stats
+    trainer._debug_episode_lengths = saved_debug_episode_lengths
+    trainer._debug_episode_returns = saved_debug_episode_returns
+    trainer._debug_stop_probs = saved_debug_stop_probs
+    trainer._debug_score_changes = saved_debug_score_changes
+    trainer._drift_values = saved_drift_values
+    trainer._plan_changes = saved_plan_changes
+    trainer._value_of_memory = saved_value_of_memory
+    trainer._opnorm_clamp_warned = saved_opnorm_warning
 
     trainer.replay.clear()
     for transition in replay_transitions:
@@ -951,7 +2345,9 @@ def resume_from_checkpoint(
     start_step = trainer._train_step_count
     print(
         f"[Checkpoint] Resumed at env_step={trainer._env_step_count}, "
-        f"optimizer_update={start_step}"
+        f"outer_step={start_step}, "
+        f"value_optimizer_steps={trainer._value_optimizer_step_count}, "
+        f"policy_optimizer_steps={trainer._policy_optimizer_step_count}"
     )
 
     return start_step
@@ -991,6 +2387,21 @@ def parse_args():
     )
     parser.add_argument("--tqdm", action="store_true", help="Enable tqdm progress bar (disabled by default).")
     parser.add_argument("--seed", type=int, default=None, help="Optional global random seed.")
+    parser.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Stable registered run identifier (required for fixed_base_exact).",
+    )
+    parser.add_argument(
+        "--producer-repo-root",
+        type=str,
+        default=None,
+        help=(
+            "Git lookup root used to verify a clean producer commit; the path is "
+            "never stored in checkpoint metadata."
+        ),
+    )
     parser.add_argument("--debug-checks", action="store_true", help="Enable additional debug assertions/prints.")
     # Baseline algorithm selection
     parser.add_argument(
@@ -1437,6 +2848,50 @@ def main():
         # Baseline was auto-selected from YAML
         print(f"[INFO] Baseline algorithm '{selected_baseline}' auto-selected from YAML config")
 
+    confirmatory_fixed_base = (
+        selected_baseline is None
+        and rl_cfg.training_protocol == "fixed_base_exact"
+    )
+    producer_repo_root = args.producer_repo_root or os.getcwd()
+    initial_producer_identity: Optional[Dict[str, Any]] = None
+    if confirmatory_fixed_base:
+        if args.seed is None:
+            raise RuntimeError(
+                "fixed_base_exact requires an explicit --seed for schema-v5 identity."
+            )
+        if args.run_id is None:
+            raise RuntimeError(
+                "fixed_base_exact requires an explicit --run-id for schema-v5 identity."
+            )
+        if args.imitation_pretrain:
+            raise RuntimeError(
+                "Schema-v5 fixed-base runs currently reject imitation pretraining "
+                "because its completion phase is not resumable."
+            )
+        if args.wandb:
+            raise RuntimeError(
+                "Schema-v5 fixed-base runs disable WandB because its process-level "
+                "RNG isolation has not been established."
+            )
+        if args.load_checkpoint is not None and args.resume_checkpoint is not None:
+            raise RuntimeError(
+                "Use either --load-checkpoint or --resume-checkpoint, not both."
+            )
+        if not args.dataset_paths:
+            raise RuntimeError(
+                "Schema-v5 fixed-base runs require materialized disjoint train and "
+                "evaluation splits; the dummy dataset is smoke-only."
+            )
+        try:
+            initial_producer_identity = discover_clean_git_source(
+                producer_repo_root
+            )
+            _verify_producer_source_matches_runtime(producer_repo_root)
+        except RunIdentityError as exc:
+            raise RuntimeError(
+                f"fixed_base_exact requires a clean producer Git tree: {exc}"
+            ) from exc
+
     if args.dataset_paths and args.train_split == args.eval_split:
         raise RuntimeError(
             "Training and evaluation must use different dataset splits; got "
@@ -1465,17 +2920,26 @@ def main():
             raise RuntimeError(
                 "Evaluation split is smaller than eval_num_episodes; refusing to "
                 f"repeat instances ({len(eval_dataset)} < {rl_cfg.eval_num_episodes})."
-            )
+        )
         offset_puzzle_identifiers(eval_dataset, train_identifier_count)
         eval_num_identifiers = train_identifier_count + eval_num_identifiers
-        overlap = set(dataset_input_sha256s(dataset)).intersection(
-            dataset_input_sha256s(eval_dataset)
-        )
+        train_input_hashes = dataset_input_sha256s(dataset)
+        eval_input_hashes = dataset_input_sha256s(eval_dataset)
+        overlap = set(train_input_hashes).intersection(eval_input_hashes)
         if overlap:
             raise RuntimeError(
                 "Training and evaluation pools overlap; refusing an in-sample "
                 f"evaluation ({len(overlap)} duplicate records)."
             )
+        if confirmatory_fixed_base:
+            if len(set(train_input_hashes)) != len(train_input_hashes):
+                raise RuntimeError(
+                    "Schema-v5 training pool contains duplicate inputs."
+                )
+            if len(set(eval_input_hashes)) != len(eval_input_hashes):
+                raise RuntimeError(
+                    "Schema-v5 evaluation pool contains duplicate inputs."
+                )
         num_identifiers = eval_num_identifiers
     else:
         eval_dataset = dataset
@@ -1501,6 +2965,20 @@ def main():
             f"eval_puzzle_id_offset={train_identifier_count}"
         )
         source_build_metadata = dataset_source_build_metadata(args.dataset_paths)
+        if confirmatory_fixed_base:
+            incomplete_sources = [
+                source["source_name"]
+                for source in source_build_metadata
+                if source["builder_name"] == "unrecorded"
+                or source["builder_version"] == "unrecorded"
+                or source["generation_seed"] is None
+                or source["build_config_sha256"] is None
+            ]
+            if incomplete_sources:
+                raise RuntimeError(
+                    "Schema-v5 dataset sources lack builder/version/seed/config "
+                    f"provenance: {incomplete_sources}"
+                )
         if len(source_build_metadata) == 1:
             provenance_builder_name = source_build_metadata[0]["builder_name"]
             provenance_builder_version = source_build_metadata[0][
@@ -1719,9 +3197,43 @@ def main():
     else:
         raise ValueError(f"Unknown backbone: {args.backbone}")
 
+    initialization_kind = "random"
+    initialization_artifact_sha256: Optional[str] = None
+    checkpoint_lineage = build_checkpoint_lineage(
+        parent_checkpoint_sha256=None,
+        parent_checkpoint_step=None,
+        parent_environment_steps=None,
+    )
+    if confirmatory_fixed_base and args.resume_checkpoint is not None:
+        saved_identity, checkpoint_lineage = _load_schema_v5_resume_metadata(
+            args.resume_checkpoint
+        )
+        initialization_kind = saved_identity["initialization"]["kind"]
+        initialization_artifact_sha256 = saved_identity["initialization"][
+            "artifact_sha256"
+        ]
+    elif confirmatory_fixed_base and args.load_checkpoint is not None:
+        initialization_kind = "weights_checkpoint"
+        try:
+            initialization_artifact_sha256 = file_sha256(args.load_checkpoint)
+        except RunIdentityError as exc:
+            raise RuntimeError(
+                f"Cannot bind initialization checkpoint identity: {exc}"
+            ) from exc
+
     # === Load pretrained checkpoint if provided ===
     if args.load_checkpoint is not None:
-        load_checkpoint(model, args.load_checkpoint, device=str(device), strict=False)
+        load_checkpoint(
+            model,
+            args.load_checkpoint,
+            device=str(device),
+            strict=False,
+            expected_sha256=(
+                initialization_artifact_sha256
+                if confirmatory_fixed_base
+                else None
+            ),
+        )
 
     # Debug: verify policy head initialization
     if hasattr(model, 'edit_policy') and model.edit_policy is not None:
@@ -1773,6 +3285,55 @@ def main():
         if hasattr(trainer, "set_puzzle_embedding_optimizer"):
             trainer.set_puzzle_embedding_optimizer(puzzle_emb_optimizer)
             puzzle_emb_optimizer_managed_by_trainer = True
+
+    run_identity: Optional[Dict[str, Any]] = None
+    if confirmatory_fixed_base:
+        assert args.seed is not None
+        assert args.run_id is not None
+        effective_config = _fixed_base_effective_config(
+            args=args,
+            rl_config=_config_dict(rl_cfg),
+            model_config=_config_dict(model.config),
+            execution_device=_canonical_device(device),
+            train_record_count=len(dataset),
+            eval_record_count=len(eval_dataset),
+        )
+        try:
+            producer_before_identity = discover_clean_git_source(
+                producer_repo_root
+            )
+            _verify_producer_source_matches_runtime(producer_repo_root)
+            producer_after_identity = discover_clean_git_source(
+                producer_repo_root
+            )
+            if (
+                producer_before_identity != initial_producer_identity
+                or producer_after_identity != initial_producer_identity
+            ):
+                raise RuntimeError(
+                    "Producer Git identity changed while constructing the run."
+                )
+            run_identity = build_run_identity(
+                run_id=args.run_id,
+                training_seed=args.seed,
+                git_lookup_root=producer_repo_root,
+                effective_config=effective_config,
+                dataset_provenance=dataset_provenance,
+                initialization_kind=initialization_kind,
+                initialization_artifact_sha256=initialization_artifact_sha256,
+            )
+        except RunIdentityError as exc:
+            raise RuntimeError(f"Cannot establish schema-v5 run identity: {exc}") from exc
+        if run_identity["producer"] != initial_producer_identity:
+            raise RuntimeError(
+                "Producer Git identity changed while constructing the run."
+            )
+        print(
+            "[IDENTITY] "
+            f"run_id={run_identity['run_id']} "
+            f"commit={run_identity['producer']['git_commit']} "
+            f"config_sha256={run_identity['effective_config_sha256']}"
+        )
     
     # === Resume from RL checkpoint if provided ===
     start_step = 0
@@ -1784,6 +3345,12 @@ def main():
             str(device),
             puzzle_emb_optimizer,
             expected_dataset_provenance=dataset_provenance,
+            expected_run_identity=run_identity,
+            expected_checkpoint_sha256=(
+                checkpoint_lineage["parent_checkpoint_sha256"]
+                if confirmatory_fixed_base
+                else None
+            ),
             allow_legacy_warm_start=args.allow_legacy_resume,
         )
     
@@ -1798,6 +3365,57 @@ def main():
     if checkpoint_dir is None and checkpointing_enabled:
         checkpoint_dir = os.path.join("checkpoints", f"rl_{dataset_name}_seed{args.seed or 0}")
         print(f"[INFO] Checkpoint directory: {checkpoint_dir}")
+
+    def save_training_checkpoint(progress_step: int) -> str:
+        nonlocal checkpoint_lineage
+        if checkpoint_dir is None:
+            raise RuntimeError("Checkpoint directory is not configured.")
+        lineage_for_save: Optional[Dict[str, Any]] = None
+        if confirmatory_fixed_base:
+            assert initial_producer_identity is not None
+            try:
+                producer_identity_before_hash = discover_clean_git_source(
+                    producer_repo_root
+                )
+                _verify_producer_source_matches_runtime(producer_repo_root)
+                producer_identity_after_hash = discover_clean_git_source(
+                    producer_repo_root
+                )
+            except RunIdentityError as exc:
+                raise RuntimeError(
+                    f"Cannot revalidate producer source before checkpoint: {exc}"
+                ) from exc
+            if (
+                producer_identity_before_hash != initial_producer_identity
+                or producer_identity_after_hash != initial_producer_identity
+            ):
+                raise RuntimeError(
+                    "Producer Git identity changed before checkpoint publication."
+                )
+            lineage_for_save = checkpoint_lineage
+        saved_path = save_checkpoint(
+            model,
+            trainer,
+            progress_step,
+            checkpoint_dir,
+            puzzle_emb_optimizer,
+            rl_cfg,
+            dataset_provenance,
+            run_identity,
+            lineage_for_save,
+        )
+        if confirmatory_fixed_base:
+            try:
+                checkpoint_lineage = build_checkpoint_lineage(
+                    parent_checkpoint_sha256=file_sha256(saved_path),
+                    parent_checkpoint_step=progress_step,
+                    parent_environment_steps=trainer.get_env_step_count(),
+                )
+            except RunIdentityError as exc:
+                raise RuntimeError(
+                    "Published checkpoint cannot be linked into the run lineage."
+                ) from exc
+        return saved_path
 
     # === Set checker function for exact baseline computation (Theorem 5.9) ===
     # Only applies to UPI-TRM trainer
@@ -2013,15 +3631,7 @@ def main():
                 )
 
             if args.save_interval > 0 and checkpoint_dir is not None and outer_step % args.save_interval == 0:
-                save_checkpoint(
-                    model,
-                    trainer,
-                    outer_step,
-                    checkpoint_dir,
-                    puzzle_emb_optimizer,
-                    rl_cfg,
-                    dataset_provenance,
-                )
+                save_training_checkpoint(outer_step)
                 last_saved_progress_step = outer_step
 
         final_progress_step = total_steps
@@ -2119,15 +3729,7 @@ def main():
                     next_eval_env += eval_env_interval
 
             if next_save_env is not None and checkpoint_dir is not None and current_env_step >= next_save_env:
-                save_checkpoint(
-                    model,
-                    trainer,
-                    progress_step,
-                    checkpoint_dir,
-                    puzzle_emb_optimizer,
-                    rl_cfg,
-                    dataset_provenance,
-                )
+                save_training_checkpoint(progress_step)
                 last_saved_progress_step = progress_step
                 while next_save_env is not None and current_env_step >= next_save_env:
                     next_save_env += save_env_interval
@@ -2136,15 +3738,7 @@ def main():
 
     # === Save final checkpoint ===
     if checkpointing_enabled and checkpoint_dir is not None and last_saved_progress_step != final_progress_step:
-        save_checkpoint(
-            model,
-            trainer,
-            final_progress_step,
-            checkpoint_dir,
-            puzzle_emb_optimizer,
-            rl_cfg,
-            dataset_provenance,
-        )
+        save_training_checkpoint(final_progress_step)
     
     # === WandB: Finish logging ===
     if use_wandb:

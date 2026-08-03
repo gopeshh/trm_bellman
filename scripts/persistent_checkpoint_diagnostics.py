@@ -551,7 +551,18 @@ def run_registered_diagnostics(
     provenance = {
         "checkpoint_sha256": context.checkpoint.checkpoint_sha256,
         "checkpoint_producer_code_commit": {
-            "status": UNVERIFIABLE_STATUS,
+            "value": context.checkpoint.producer_code_commit,
+            "status": "verified from artifact",
+        },
+        "checkpoint_lineage": {
+            "parent_checkpoint_sha256": (
+                context.checkpoint.parent_checkpoint_sha256
+            ),
+            "parent_checkpoint_step": context.checkpoint.parent_checkpoint_step,
+            "parent_environment_interactions": (
+                context.checkpoint.parent_environment_steps
+            ),
+            "status": "verified from artifact",
         },
         "dataset_manifest_sha256": context.dataset.manifest_sha256,
         "dataset_provenance_sha256": (
@@ -911,7 +922,13 @@ def write_artifact_bundle(
             "training_protocol": context.checkpoint.training_protocol,
             "checkpoint_step": context.checkpoint.checkpoint_step,
             "environment_interactions": context.checkpoint.environment_steps,
-            "optimizer_updates": context.checkpoint.optimizer_updates,
+            "outer_steps": context.checkpoint.outer_steps,
+            "optimizer_steps": {
+                "value": context.checkpoint.value_optimizer_steps,
+                "policy": context.checkpoint.policy_optimizer_steps,
+                "distill": context.checkpoint.distill_optimizer_steps,
+                "puzzle_embedding": context.checkpoint.puzzle_optimizer_steps,
+            },
             "source_execution_device": context.checkpoint.source_execution_device,
             "replay_structural_inventory": {
                 "transition_count": context.checkpoint.replay.transition_count,
@@ -925,9 +942,44 @@ def write_artifact_bundle(
             "endpoint_policy_pair_invariants_verified": (
                 context.checkpoint.endpoint_policy_pair_invariants_verified
             ),
-            "producer_code_commit": {"status": UNVERIFIABLE_STATUS},
-            "training_seed": {"status": UNVERIFIABLE_STATUS},
-            "run_id": {"status": UNVERIFIABLE_STATUS},
+            "producer_code_commit": {
+                "value": context.checkpoint.producer_code_commit,
+                "status": "verified from artifact",
+            },
+            "training_seed": {
+                "value": context.checkpoint.training_seed,
+                "status": "verified from artifact",
+            },
+            "run_id": {
+                "value": context.checkpoint.run_id,
+                "status": "verified from artifact",
+            },
+            "run_identity_sha256": context.checkpoint.run_identity_sha256,
+            "effective_config_sha256": (
+                context.checkpoint.effective_config_sha256
+            ),
+            "training_runtime_fingerprint_sha256": (
+                context.checkpoint.runtime_fingerprint_sha256
+            ),
+            "initialization": {
+                "kind": context.checkpoint.initialization_kind,
+                "artifact_sha256": (
+                    context.checkpoint.initialization_artifact_sha256
+                ),
+                "status": "verified from artifact",
+            },
+            "lineage": {
+                "parent_checkpoint_sha256": (
+                    context.checkpoint.parent_checkpoint_sha256
+                ),
+                "parent_checkpoint_step": (
+                    context.checkpoint.parent_checkpoint_step
+                ),
+                "parent_environment_interactions": (
+                    context.checkpoint.parent_environment_steps
+                ),
+                "status": "verified from artifact",
+            },
             "optimizer_rng_and_live_trainer_restore": {
                 "status": UNVERIFIABLE_STATUS,
             },
@@ -1038,7 +1090,29 @@ def write_artifact_bundle(
         "artifact_kind": "persistent_checkpoint_finite_batch_diagnostics",
         "deterministic_encoding": "sorted-key ASCII strict JSON v1",
         "checkpoint_sha256": context.checkpoint.checkpoint_sha256,
-        "checkpoint_producer_code_commit": {"status": UNVERIFIABLE_STATUS},
+        "checkpoint_producer_code_commit": {
+            "value": context.checkpoint.producer_code_commit,
+            "status": "verified from artifact",
+        },
+        "checkpoint_run_identity_sha256": (
+            context.checkpoint.run_identity_sha256
+        ),
+        "checkpoint_effective_config_sha256": (
+            context.checkpoint.effective_config_sha256
+        ),
+        "checkpoint_runtime_fingerprint_sha256": (
+            context.checkpoint.runtime_fingerprint_sha256
+        ),
+        "checkpoint_lineage": {
+            "parent_checkpoint_sha256": (
+                context.checkpoint.parent_checkpoint_sha256
+            ),
+            "parent_checkpoint_step": context.checkpoint.parent_checkpoint_step,
+            "parent_environment_interactions": (
+                context.checkpoint.parent_environment_steps
+            ),
+            "status": "verified from artifact",
+        },
         "dataset_manifest_sha256": context.dataset.manifest_sha256,
         "dataset_provenance_sha256": (
             context.checkpoint.dataset_provenance_sha256

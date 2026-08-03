@@ -159,6 +159,7 @@ class UPITrmTrainer:
         self._checker_fn = None  # Set by caller if using exact_baseline_summation
         # Track if we've warned about opnorm clamp failures (to print only one warning)
         self._opnorm_clamp_warned: bool = False
+        self._train_step_active: bool = False
 
         self.target_model = TinyRecursiveReasoningModel_ACTV1(self._config_to_dict(self.model.config)).to(device)
         self.target_model.eval()
@@ -230,8 +231,12 @@ class UPITrmTrainer:
         if old_policy_params:
             self.old_policy_distill_opt = torch.optim.Adam(old_policy_params, lr=rl_cfg.policy_lr)
         self._next_episode_id: int = 0
-        self._train_step_count: int = 0  # Track training steps for LR scheduling
+        self._train_step_count: int = 0  # Completed outer rollout/update boundaries
         self._env_step_count: int = 0
+        self._value_optimizer_step_count: int = 0
+        self._policy_optimizer_step_count: int = 0
+        self._distill_optimizer_step_count: int = 0
+        self._puzzle_optimizer_step_count: int = 0
         # Exact-budget collection may pause in the middle of an episode.  Keep
         # all transition-relevant collector state until a real environment
         # terminal is observed; a logging/checkpoint boundary is not terminal.
@@ -297,11 +302,16 @@ class UPITrmTrainer:
             self.policy_opt, lr_lambda=lr_lambda
         )
 
-    def _step_lr_schedulers(self) -> None:
-        """Step the learning rate schedulers after each training step."""
-        if self.value_scheduler is not None:
+    def _step_lr_schedulers(
+        self,
+        *,
+        value_optimizer_stepped: bool,
+        policy_optimizer_stepped: bool,
+    ) -> None:
+        """Advance each scheduler only with its corresponding optimizer."""
+        if value_optimizer_stepped and self.value_scheduler is not None:
             self.value_scheduler.step()
-        if self.policy_scheduler is not None:
+        if policy_optimizer_stepped and self.policy_scheduler is not None:
             self.policy_scheduler.step()
 
     def get_current_lr(self) -> Dict[str, float]:
@@ -393,10 +403,9 @@ class UPITrmTrainer:
         pi_candidate, optionally mixed with a small uniform component. Fixed-base
         training data are collected separately from pi_old by
         ``_collection_policy_dist``.
-        Note: The deployed policy_model_old is updated toward the candidate policy
-        via parameter interpolation in `_sync_policy_old_towards_candidate`, so
-        its action distribution is only an approximation of this mixture unless
-        `distill_mixture_policy=True`, which triggers an explicit KL distillation.
+        This callback always returns the probability-space mixture. Legacy
+        parameter-interpolation and distillation paths are separate deployment
+        mechanisms and must not be identified with this distribution.
         
         IMPORTANT INVARIANT: This function assumes that policy_model_old and
         policy_model_candidate have **identical backbone weights** (all non-edit_policy
@@ -1458,7 +1467,7 @@ class UPITrmTrainer:
         """
 
         if len(self.replay) < self.rl_cfg.batch_size:
-            return {"loss_value": 0.0}
+            return {"loss_value": 0.0, "value_optimizer_step": 0.0}
 
         debug_batch: Optional[Tuple[Dict[str, torch.Tensor], torch.Tensor]] = None
         target_stats: Dict[str, float] = {}
@@ -1591,10 +1600,12 @@ class UPITrmTrainer:
         if value_grad_clip is not None and value_grad_clip > 0 and self._value_params:
             nn_utils.clip_grad_norm_(self._value_params, value_grad_clip)
         self.value_opt.step()
+        self._value_optimizer_step_count += 1
         if self.puzzle_emb_optimizer is not None:
             # CastedSparseEmbedding stores the active IDs in mutable buffers.
             # Step before any later forward can overwrite those IDs.
             self.puzzle_emb_optimizer.step()
+            self._puzzle_optimizer_step_count += 1
             self.puzzle_emb_optimizer.zero_grad()
         # Legacy training may clamp and resnapshot the actor map. The fixed-base
         # protocol rejects scheduled clamping and synchronizes only the value head.
@@ -1605,7 +1616,11 @@ class UPITrmTrainer:
         if debug_batch is not None:
             self._maybe_run_value_debug_checks(*debug_batch)
 
-        return {"loss_value": float(loss_val.item()), **target_stats}
+        return {
+            "loss_value": float(loss_val.item()),
+            "value_optimizer_step": 1.0,
+            **target_stats,
+        }
 
     def policy_update(self) -> Dict[str, float]:
         """
@@ -1630,7 +1645,7 @@ class UPITrmTrainer:
         """
 
         if len(self.replay) < self.rl_cfg.batch_size:
-            return {"loss_policy": 0.0}
+            return {"loss_policy": 0.0, "policy_optimizer_step": 0.0}
 
         # Ensure the candidate policy uses the current critic backbone for its features.
         self._sync_candidate_backbone_from_model()
@@ -1835,7 +1850,11 @@ class UPITrmTrainer:
 
         # Skip batch if advantages are all NaN (degenerate case)
         if torch.isnan(adv).all():
-            return {"loss_policy": 0.0, "skipped_nan_adv": 1.0}
+            return {
+                "loss_policy": 0.0,
+                "skipped_nan_adv": 1.0,
+                "policy_optimizer_step": 0.0,
+            }
         
         # Replace NaN advantages with 0 (neutral gradient)
         adv_clean = torch.where(torch.isnan(adv), torch.zeros_like(adv), adv)
@@ -1868,6 +1887,7 @@ class UPITrmTrainer:
                     "policy_kl": kl_val,
                     "kl_coef": self._kl_coef,
                     "kl_early_stop": 1.0,
+                    "policy_optimizer_step": 0.0,
                 }
                 return result
 
@@ -1876,6 +1896,7 @@ class UPITrmTrainer:
         if policy_grad_clip is not None and policy_grad_clip > 0 and self._policy_params:
             nn_utils.clip_grad_norm_(self._policy_params, policy_grad_clip)
         self.policy_opt.step()
+        self._policy_optimizer_step_count += 1
         
         # Update adaptive KL coefficient after successful step
         if enable_kl_trust_region and kl_div is not None:
@@ -1948,6 +1969,7 @@ class UPITrmTrainer:
                 if policy_grad_clip is not None and policy_grad_clip > 0 and self._old_policy_params:
                     nn_utils.clip_grad_norm_(self._old_policy_params, policy_grad_clip)
                 self.old_policy_distill_opt.step()
+                self._distill_optimizer_step_count += 1
                 self._sync_candidate_policy_from_old()
         else:
             # Mode 3: Parameter-space interpolation (heuristic, not theory-exact)
@@ -1956,13 +1978,33 @@ class UPITrmTrainer:
             self._sync_policy_old_towards_candidate()
             self._sync_candidate_policy_from_old()
 
-        result = {"loss_policy": float(loss_policy.item())}
+        result = {
+            "loss_policy": float(loss_policy.item()),
+            "policy_optimizer_step": 1.0,
+        }
         if kl_div is not None:
             result["policy_kl"] = float(kl_div.item())
             result["kl_coef"] = self._kl_coef
         return result
 
-    def train_step(self, max_env_steps_to_collect: Optional[int] = None) -> Dict[str, float]:
+    def train_step(
+        self,
+        max_env_steps_to_collect: Optional[int] = None,
+    ) -> Dict[str, float]:
+        """Run one guarded outer step so checkpoints have an explicit idle phase."""
+
+        if self._train_step_active:
+            raise RuntimeError("UPI train_step is already active.")
+        self._train_step_active = True
+        try:
+            return self._train_step_impl(max_env_steps_to_collect)
+        finally:
+            self._train_step_active = False
+
+    def _train_step_impl(
+        self,
+        max_env_steps_to_collect: Optional[int] = None,
+    ) -> Dict[str, float]:
         """
         One outer training step: collect data, then run value and policy updates.
         
@@ -2028,6 +2070,12 @@ class UPITrmTrainer:
                 "active_episode": float(self._active_episode is not None),
                 "optimization_performed": 0.0,
                 "train_steps_total": float(self._train_step_count),
+                "value_optimizer_steps_total": float(
+                    self._value_optimizer_step_count
+                ),
+                "policy_optimizer_steps_total": float(
+                    self._policy_optimizer_step_count
+                ),
             }
             metrics.update(self.get_current_lr())
             return metrics
@@ -2054,6 +2102,13 @@ class UPITrmTrainer:
         else:
             loss_policy = policy_result
             policy_result = {}
+        value_optimizer_stepped = bool(
+            isinstance(value_result, dict)
+            and value_result.get("value_optimizer_step", 0.0) == 1.0
+        )
+        policy_optimizer_stepped = bool(
+            policy_result.get("policy_optimizer_step", 0.0) == 1.0
+        )
 
         debug_metrics: Dict[str, float] = {}
         
@@ -2103,7 +2158,11 @@ class UPITrmTrainer:
             "episodes_collected": float(episodes_collected),
             "episodes_pending_update": 0.0,
             "active_episode": float(self._active_episode is not None),
-            "optimization_performed": 1.0,
+            "optimization_performed": float(
+                value_optimizer_stepped or policy_optimizer_stepped
+            ),
+            "value_optimizer_step": float(value_optimizer_stepped),
+            "policy_optimizer_step": float(policy_optimizer_stepped),
         }
         metrics.update(debug_metrics)
         metrics.update(theory_metrics)
@@ -2116,9 +2175,17 @@ class UPITrmTrainer:
         # Step learning rate schedulers only if optimization occurred
         self._train_step_count += 1
         self._completed_episodes_since_update = 0
-        if loss_val != 0.0:  # Only step when we actually did an optimizer step
-            self._step_lr_schedulers()
+        self._step_lr_schedulers(
+            value_optimizer_stepped=value_optimizer_stepped,
+            policy_optimizer_stepped=policy_optimizer_stepped,
+        )
         metrics["train_steps_total"] = float(self._train_step_count)
+        metrics["value_optimizer_steps_total"] = float(
+            self._value_optimizer_step_count
+        )
+        metrics["policy_optimizer_steps_total"] = float(
+            self._policy_optimizer_step_count
+        )
         metrics.update(self.get_current_lr())
 
         # Reset termination stats for the next logging window

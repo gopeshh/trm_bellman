@@ -364,6 +364,18 @@ python_binary(
 load("@fbcode_macros//build_defs:python_unittest.bzl", "python_unittest")
 
 python_unittest(
+    name = "test_run_identity",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_run_identity_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":utils",
+    ],
+)
+
+python_unittest(
     name = "test_upi_trm_trainer_smoke",
     srcs = [
         "tests/__init__.py",
