@@ -18,12 +18,15 @@ import argparse
 import json
 import os
 import random
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
 
-def generate_solved_4x4() -> np.ndarray:
+BUILD_SCHEMA_VERSION = 1
+
+
+def generate_solved_4x4(rng: random.Random) -> np.ndarray:
     """Generate a valid solved 4x4 Sudoku grid."""
     grid = np.zeros((4, 4), dtype=np.int32)
     
@@ -48,7 +51,7 @@ def generate_solved_4x4() -> np.ndarray:
             return solve(grid, pos + 1)
         
         nums = list(range(1, 5))
-        random.shuffle(nums)
+        rng.shuffle(nums)
         for num in nums:
             if is_valid(grid, row, col, num):
                 grid[row, col] = num
@@ -61,11 +64,15 @@ def generate_solved_4x4() -> np.ndarray:
     return grid
 
 
-def create_puzzle(solution: np.ndarray, num_clues: int) -> np.ndarray:
+def create_puzzle(
+    solution: np.ndarray,
+    num_clues: int,
+    rng: random.Random,
+) -> np.ndarray:
     """Remove cells from solution to create a puzzle with given number of clues."""
     puzzle = solution.copy()
     cells = list(range(16))
-    random.shuffle(cells)
+    rng.shuffle(cells)
     
     cells_to_remove = 16 - num_clues
     for i in range(cells_to_remove):
@@ -79,17 +86,17 @@ def generate_puzzles(
     num_puzzles: int,
     min_clues: int = 4,
     max_clues: int = 10,
-    seed: int = 42
+    seed: int = 42,
+    rng: Optional[random.Random] = None,
 ) -> List[Tuple[np.ndarray, np.ndarray]]:
     """Generate puzzle-solution pairs."""
-    random.seed(seed)
-    np.random.seed(seed)
+    local_rng = random.Random(seed) if rng is None else rng
     
     puzzles = []
     for _ in range(num_puzzles):
-        solution = generate_solved_4x4()
-        num_clues = random.randint(min_clues, max_clues)
-        puzzle = create_puzzle(solution, num_clues)
+        solution = generate_solved_4x4(local_rng)
+        num_clues = local_rng.randint(min_clues, max_clues)
+        puzzle = create_puzzle(solution, num_clues, local_rng)
         puzzles.append((puzzle, solution))
     
     return puzzles
@@ -111,6 +118,7 @@ def main():
     print(f"  Hard (4-5 clues): {args.num_hard}")
     
     all_puzzles = []
+    rng = random.Random(args.seed)
     
     # Generate puzzles by difficulty
     configs = [
@@ -120,13 +128,19 @@ def main():
     ]
     
     for name, count, min_clues, max_clues in configs:
-        puzzles = generate_puzzles(count, min_clues, max_clues, seed=args.seed)
+        # One stream spans all cohorts. Restarting the same seed for each cohort
+        # creates correlated copies of the same solved grids.
+        puzzles = generate_puzzles(
+            count,
+            min_clues,
+            max_clues,
+            rng=rng,
+        )
         all_puzzles.extend(puzzles)
         print(f"  Generated {count} {name} puzzles")
     
     # Shuffle
-    random.seed(args.seed)
-    random.shuffle(all_puzzles)
+    rng.shuffle(all_puzzles)
     
     # Convert to arrays with encoding: 0 -> 1 (empty), 1-4 -> 2-5 (digits)
     inputs_list = []
@@ -151,6 +165,23 @@ def main():
     split_idx = int(0.9 * n)
     
     os.makedirs(args.output_dir, exist_ok=True)
+
+    with open(os.path.join(args.output_dir, "build_config.json"), "w") as f:
+        json.dump(
+            {
+                "builder": "dataset.build_4x4_sudoku",
+                "build_schema_version": BUILD_SCHEMA_VERSION,
+                "seed": args.seed,
+                "num_easy": args.num_easy,
+                "num_medium": args.num_medium,
+                "num_hard": args.num_hard,
+                "generated_count": len(all_puzzles),
+            },
+            f,
+            indent=2,
+            sort_keys=True,
+        )
+        f.write("\n")
     
     for split_name, start_idx, end_idx in [("train", 0, split_idx), ("test", split_idx, n)]:
         split_inputs = inputs_arr[start_idx:end_idx]
@@ -198,4 +229,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

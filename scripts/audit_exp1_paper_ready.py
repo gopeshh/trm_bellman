@@ -25,7 +25,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # =============================================================================
 # Configuration
@@ -78,7 +78,7 @@ def parse_latex_value(s: str) -> Tuple[float, float]:
 def parse_unroll_sensitivity_tex(path: Path) -> Dict:
     """Parse table_exp1_unroll_sensitivity.tex"""
     content = path.read_text()
-    result = {}
+    result: Dict[str, Any] = {}
 
     # Find No Contraction row (must match "No Contraction" explicitly)
     nc_match = re.search(
@@ -416,7 +416,7 @@ def get_env_info() -> Dict:
     # Torch version
     try:
         import torch
-        info["torch_version"] = torch.__version__
+        info["torch_version"] = getattr(torch, "__version__", "unknown")
     except ImportError:
         info["torch_version"] = "not available"
 

@@ -1,4 +1,5 @@
 
+import copy
 import unittest
 import torch
 
@@ -343,6 +344,64 @@ class TestPlanEditEnv(unittest.TestCase):
         self.assertTrue(updated_mask[second_conflict_action].item())
         self.assertFalse(updated_mask[:6].any().item())
         self.assertTrue(torch.equal(initial_mask, updated_mask))
+
+    def test_checkpoint_roundtrip_restores_live_clock_mask_and_undo_history(self):
+        dataset = DummyDataset()
+        cfg = PlanEditEnvConfig(
+            max_edits=3,
+            gamma=0.9,
+            reward_shaping=True,
+            vocab_size=4,
+            stop_action_mode="noop",
+            enable_undo=True,
+        )
+
+        def make_env():
+            environment = PlanEditEnv(dataset, dummy_checker, cfg)
+            environment.set_stop_action_id(stop_id=3 * cfg.vocab_size)
+            return environment
+
+        original = make_env()
+        original.reset(idx=0)
+        (_, _), _, done, _ = original.step(2)
+        self.assertFalse(done)
+        state = original.checkpoint_state()
+
+        restored = make_env()
+        restored.load_checkpoint_state(state)
+        self.assertEqual(restored.step_count, 1)
+        self.assertEqual(restored.x["remaining_edits"].item(), 2)
+        self.assertTrue(
+            torch.equal(original.get_action_mask(), restored.get_action_mask())
+        )
+        self.assertEqual(len(restored._edit_history), 2)
+
+        original_result = original.step(original.undo_action_id)
+        restored_result = restored.step(restored.undo_action_id)
+        (original_x, original_y), original_reward, original_done, original_info = (
+            original_result
+        )
+        (restored_x, restored_y), restored_reward, restored_done, restored_info = (
+            restored_result
+        )
+        self.assertTrue(torch.equal(original_x["inputs"], restored_x["inputs"]))
+        self.assertTrue(torch.equal(original_y, restored_y))
+        self.assertEqual(original_reward, restored_reward)
+        self.assertEqual(original_done, restored_done)
+        self.assertEqual(original_info, restored_info)
+        self.assertTrue(
+            torch.equal(original.get_action_mask(), restored.get_action_mask())
+        )
+
+        corrupt_clock = copy.deepcopy(state)
+        corrupt_clock["x"]["remaining_edits"] = torch.tensor(0)
+        with self.assertRaisesRegex(RuntimeError, "remaining_edits"):
+            make_env().load_checkpoint_state(corrupt_clock)
+
+        corrupt_mask = copy.deepcopy(state)
+        corrupt_mask["action_mask"][2] = ~corrupt_mask["action_mask"][2]
+        with self.assertRaisesRegex(RuntimeError, "action mask"):
+            make_env().load_checkpoint_state(corrupt_mask)
 
 if __name__ == "__main__":
     unittest.main()

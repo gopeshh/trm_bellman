@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils as nn_utils
 
-from rl.batch_utils import prepare_batch_x, prepare_plan, normalize_puzzle_id
+from rl.batch_utils import prepare_batch_x, prepare_plan, stack_batch_states
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.value_targets import compute_gae_trajectory
 
@@ -491,13 +491,7 @@ class PPOTrainer:
 
     def _stack_x_batch(self, x_list: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         """Stack a list of x dicts into a batched dict."""
-        inputs = torch.stack([x["inputs"] for x in x_list], dim=0).to(self.device)
-        puzzle_ids = torch.stack(
-            [normalize_puzzle_id(x["puzzle_identifiers"]) for x in x_list], dim=0
-        ).to(self.device)
-        if puzzle_ids.dim() > 1:
-            puzzle_ids = puzzle_ids.squeeze(-1)
-        return {"inputs": inputs, "puzzle_identifiers": puzzle_ids}
+        return stack_batch_states(x_list, self.device)
 
     def train_step(self) -> Dict[str, float]:
         """

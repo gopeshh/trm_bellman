@@ -5,6 +5,7 @@ Converts pytest-style tests to unittest.TestCase for Buck2 compatibility.
 
 import math
 import unittest
+from unittest.mock import patch
 import torch
 
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
@@ -109,19 +110,23 @@ class TestRLKStepValueUpdateTrainer(unittest.TestCase):
         )
         trainer = UPITrmTrainer(model, env, rl_cfg, torch.device("cpu"))
 
-        x = {
+        x_base = {
             "inputs": torch.zeros(dataset.seq_len, dtype=torch.long),
             "puzzle_identifiers": torch.tensor(0),
         }
         y = torch.zeros(dataset.seq_len, dtype=torch.long)
         for timestep in range(2):
+            x = dict(x_base)
+            x["remaining_edits"] = torch.tensor(3 - timestep)
+            x_next = dict(x_base)
+            x_next["remaining_edits"] = torch.tensor(2 - timestep)
             trainer.replay.add(
                 Transition(
                     x=x,
                     y=y,
                     action=torch.tensor(0),
                     reward=torch.tensor([0.0]),
-                    x_next=x,
+                    x_next=x_next,
                     y_next=y,
                     done=torch.tensor([False]),
                     episode_id=0,
@@ -132,6 +137,61 @@ class TestRLKStepValueUpdateTrainer(unittest.TestCase):
         self.assertFalse(trainer._has_complete_k_step_segment(0, 3))
         with self.assertRaisesRegex(RuntimeError, "No replay segment"):
             trainer._sample_k_step_batch(1)
+
+    def test_exact_targets_use_frozen_current_evaluator_not_ema(self):
+        for horizon in (1, 2):
+            with self.subTest(K=horizon):
+                dataset = DummyPuzzleDataset(
+                    num_instances=4, seq_len=8, vocab_size=16
+                )
+                env_cfg = PlanEditEnvConfig(
+                    max_edits=4,
+                    gamma=0.9,
+                    reward_shaping=True,
+                    vocab_size=dataset.vocab_size,
+                )
+                env = PlanEditEnv(
+                    dataset=dataset,
+                    checker=dummy_checker,
+                    config=env_cfg,
+                )
+                env.set_stop_action_id(
+                    _num_actions(dataset.seq_len, dataset.vocab_size) - 1
+                )
+                rl_cfg = RLConfig(
+                    batch_size=2,
+                    K=horizon,
+                    gamma=env_cfg.gamma,
+                    exact_k_step_targets=True,
+                    max_edits=4,
+                )
+                model = TinyRecursiveReasoningModel_ACTV1(
+                    _tiny_trm_cfg(
+                        dataset.seq_len,
+                        dataset.vocab_size,
+                        dataset.num_identifiers,
+                        rl_cfg.batch_size,
+                    )
+                )
+                trainer = UPITrmTrainer(
+                    model,
+                    env,
+                    rl_cfg,
+                    torch.device("cpu"),
+                )
+                for _ in range(2):
+                    trainer.collect_episode()
+
+                with patch.object(
+                    trainer.target_model,
+                    "used_value",
+                    side_effect=AssertionError(
+                        "exact targets must not use the EMA evaluator"
+                    ),
+                ):
+                    result = trainer.value_update()
+
+                self.assertTrue(math.isfinite(result["loss_value"]))
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -77,7 +77,7 @@ def load_per_state_csv(csv_path: Path) -> List[Dict]:
     with open(csv_path, "r") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            parsed = {}
+            parsed: Dict[str, Any] = {}
             for k, v in row.items():
                 try:
                     parsed[k] = float(v)
@@ -274,13 +274,13 @@ def create_radius_sweep_figure_single_batch(
         ax = axes[col]
 
         for i, model in enumerate(["model_a", "model_b"]):
-            means = []
-            yerr_list = []
+            means: List[float] = []
+            yerr_list: List[float] = []
 
             for R in radii:
                 if R not in data:
-                    means.append(0)
-                    yerr_list.append(0)
+                    means.append(0.0)
+                    yerr_list.append(0.0)
                     continue
 
                 stats = data[R].get(model, {}).get(metric, AggregatedStats(0, 0, 0))
@@ -419,8 +419,8 @@ def write_fixed_claims(
 
 def main():
     # Use absolute paths to ensure files are written to the right location
-    base_dir = Path("/home/buiksat/trm_bellman/results/validation/exp1_v4")
-    out_dir = Path("/home/buiksat/trm_bellman/results/paper_ready/exp1")
+    base_dir = PROJECT_ROOT / "results/validation/exp1_v4"
+    out_dir = PROJECT_ROOT / "results/paper_ready/exp1"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("=== Aggregating Radius Sweep Data ===")

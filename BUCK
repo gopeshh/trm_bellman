@@ -48,6 +48,18 @@ python_library(
 )
 
 python_library(
+    name = "replay_theory_diagnostics",
+    srcs = [
+        "rl/replay.py",
+        "rl/theory_diagnostics.py",
+    ],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_library(
     name = "evaluators",
     srcs = glob(["evaluators/*.py"]),
     base_module = "",
@@ -737,6 +749,20 @@ python_unittest(
     deps = [
         ":models",
         ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_unittest(
+    name = "test_augmented_replay_diagnostics",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_augmented_replay_diagnostics_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":replay_theory_diagnostics",
         ":utils",
         "fbsource//third-party/pypi/torch:torch",
     ],

@@ -28,7 +28,13 @@ def _layer_init(layer: nn.Linear, std: float = np.sqrt(2), bias_const: float = 0
     return layer
 
 
-def _ensure_action_mask(action_mask: Any, *, batch_size: int, device: torch.device) -> Optional[torch.Tensor]:
+def _ensure_action_mask(
+    action_mask: Any,
+    *,
+    batch_size: int,
+    num_actions: int,
+    device: torch.device,
+) -> Optional[torch.Tensor]:
     if action_mask is None:
         return None
     if torch.is_tensor(action_mask):
@@ -36,19 +42,40 @@ def _ensure_action_mask(action_mask: Any, *, batch_size: int, device: torch.devi
     else:
         mask = torch.as_tensor(action_mask, device=device, dtype=torch.bool)
     if mask.ndim == 1:
+        if mask.numel() != num_actions:
+            raise ValueError(
+                f"action mask has {mask.numel()} entries, expected {num_actions}"
+            )
         mask = mask.unsqueeze(0).expand(batch_size, -1)
+    elif mask.ndim != 2 or tuple(mask.shape) != (batch_size, num_actions):
+        raise ValueError(
+            "action mask must have shape [num_actions] or "
+            f"[batch_size, num_actions]; got {tuple(mask.shape)}, "
+            f"expected ({batch_size}, {num_actions})"
+        )
+    invalid_rows = ~mask.any(dim=-1)
+    if bool(invalid_rows.any().item()):
+        rows = torch.nonzero(invalid_rows, as_tuple=False).reshape(-1).tolist()
+        raise RuntimeError(
+            f"action mask has no valid actions for batch rows {rows}"
+        )
     return mask
 
 
 def apply_action_mask(logits: torch.Tensor, action_mask: Optional[Any]) -> torch.Tensor:
-    mask = _ensure_action_mask(action_mask, batch_size=logits.shape[0], device=logits.device)
+    if logits.ndim != 2:
+        raise ValueError(
+            f"action logits must have shape [batch_size, num_actions], got {tuple(logits.shape)}"
+        )
+    mask = _ensure_action_mask(
+        action_mask,
+        batch_size=logits.shape[0],
+        num_actions=logits.shape[1],
+        device=logits.device,
+    )
     if mask is None:
         return logits
-    masked_logits = logits.masked_fill(~mask, MASKED_LOGIT_VALUE)
-    all_masked = ~mask.any(dim=-1, keepdim=True)
-    if all_masked.any():
-        masked_logits = torch.where(all_masked.expand_as(masked_logits), torch.zeros_like(masked_logits), masked_logits)
-    return masked_logits
+    return logits.masked_fill(~mask, MASKED_LOGIT_VALUE)
 
 
 def action_mask_from_obs(obs: ObsType) -> Optional[torch.Tensor]:
@@ -452,10 +479,12 @@ class TRMActorCritic(nn.Module):
         x, y = self._parse_obs(obs)
         if action_mask is None:
             action_mask = action_mask_from_obs(obs)
-        if action_mask is not None:
-            action_mask = action_mask.to(device=x["inputs"].device, dtype=torch.bool)
-            if action_mask.ndim == 1:
-                action_mask = action_mask.unsqueeze(0).expand(x["inputs"].shape[0], -1)
+        action_mask = _ensure_action_mask(
+            action_mask,
+            batch_size=x["inputs"].shape[0],
+            num_actions=self.num_actions,
+            device=x["inputs"].device,
+        )
         dist, _ = self.model.policy_dist(x, y, n=self.inner_unroll_n, action_mask=action_mask)
         return dist.logits
 
@@ -468,10 +497,12 @@ class TRMActorCritic(nn.Module):
         x, y = self._parse_obs(obs)
         if action_mask is None:
             action_mask = action_mask_from_obs(obs)
-        if action_mask is not None:
-            action_mask = action_mask.to(device=x["inputs"].device, dtype=torch.bool)
-            if action_mask.ndim == 1:
-                action_mask = action_mask.unsqueeze(0).expand(x["inputs"].shape[0], -1)
+        action_mask = _ensure_action_mask(
+            action_mask,
+            batch_size=x["inputs"].shape[0],
+            num_actions=self.num_actions,
+            device=x["inputs"].device,
+        )
 
         dist, z = self.model.policy_dist(x, y, n=self.inner_unroll_n, action_mask=action_mask)
         if action is None:
@@ -526,8 +557,12 @@ class TRMQNetwork(nn.Module):
         x, y = self._parse_obs(obs)
         if action_mask is None:
             action_mask = action_mask_from_obs(obs)
-        if action_mask is not None:
-            action_mask = action_mask.to(device=x["inputs"].device, dtype=torch.bool)
+        action_mask = _ensure_action_mask(
+            action_mask,
+            batch_size=x["inputs"].shape[0],
+            num_actions=self.num_actions,
+            device=x["inputs"].device,
+        )
         return self.q_net(x, y, n=self.inner_unroll_n, action_mask=action_mask)
 
 
@@ -565,6 +600,8 @@ class _QNetworkEvalAdapter(nn.Module):
             "puzzle_identifiers": x["puzzle_identifiers"].float().unsqueeze(-1) if x["puzzle_identifiers"].ndim == 1 else x["puzzle_identifiers"].float(),
             "action_mask": action_mask,
         }
+        if "remaining_edits" in x:
+            obs["remaining_edits"] = x["remaining_edits"].float().reshape(-1)
         q_values = self.q_network(obs, action_mask=action_mask)
         dist = Categorical(logits=q_values)
         return dist, None

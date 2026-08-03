@@ -38,13 +38,17 @@ RADIUS_SWEEP_N2 = 8  # Paper-facing radius sweep uses the fixed 2→8 comparison
 N2_VALUES = [4, 8, 16]  # Evaluation depths
 RADII = [0.0, 10.0, 100.0]
 
-REFREEZE_RESULTS_DIR = Path("/home/buiksat/trm_bellman/results/validation/exp1_v4_refreeze")
-REFREEZE_CHECKPOINT_DIR = Path("/home/buiksat/trm_bellman/checkpoints/exp1_v4_refreeze")
-REFREEZE_BATCH_DIR = Path("/home/buiksat/trm_bellman/artifacts/eval_batches/exp1_v4_refreeze")
-TABLES_DIR = Path("/home/buiksat/trm_bellman/results/tables")
-OUT_DIR = Path("/home/buiksat/trm_bellman/results/paper_ready/exp1")  # docs & tables
-FIG_DIR = Path("/home/buiksat/UPI_TRM/UPI_TRM_NIPS/figures")  # figures for paper
-PAPER_TABLE_DIR = Path("/home/buiksat/UPI_TRM/UPI_TRM_NIPS/tables")  # mirrored TeX tables for paper
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+REFREEZE_RESULTS_DIR = PROJECT_ROOT / "results/validation/exp1_v4_refreeze"
+REFREEZE_CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints/exp1_v4_refreeze"
+REFREEZE_BATCH_DIR = PROJECT_ROOT / "artifacts/eval_batches/exp1_v4_refreeze"
+TABLES_DIR = PROJECT_ROOT / "results/tables"
+OUT_DIR = PROJECT_ROOT / "results/paper_ready/exp1"
+# Legacy versions wrote directly into the protected NeurIPS source tree. Keep
+# every generated output inside this repository; publication copies are staged
+# separately by the anonymous artifact builder.
+FIG_DIR = OUT_DIR / "figures"
+PAPER_TABLE_DIR = OUT_DIR / "tables"
 
 CONFIG_A = "configs/ablations/upi_trm_feasibility_no_contraction_no_vhead_norm.yaml"
 CONFIG_B = "configs/ablations/upi_trm_feasibility_contraction_no_vhead_norm.yaml"
@@ -200,15 +204,19 @@ def create_unroll_sensitivity_figure(
         ax = axes[col]
 
         for model in ["model_a", "model_b"]:
-            means = []
-            yerr_lower = []
-            yerr_upper = []
+            means: List[float] = []
+            yerr_lower: List[float] = []
+            yerr_upper: List[float] = []
 
             for n2 in n2_values:
                 stats = data[model].get(n2, {}).get(metric, AggregatedStats(0, 0, 0))
                 means.append(stats.mean)
 
-                if metric == "argmax_agree" and stats.ci_lower is not None:
+                if (
+                    metric == "argmax_agree"
+                    and stats.ci_lower is not None
+                    and stats.ci_upper is not None
+                ):
                     yerr_lower.append(max(0, stats.mean - stats.ci_lower))
                     yerr_upper.append(max(0, stats.ci_upper - stats.mean))
                 else:
@@ -272,19 +280,23 @@ def create_radius_sweep_figure(
         ax = axes[col]
 
         for i, model in enumerate(["model_a", "model_b"]):
-            means = []
-            yerr_list = []
+            means: List[float] = []
+            yerr_list: List[float] = []
 
             for R in radii:
                 if R not in data:
-                    means.append(0)
-                    yerr_list.append(0)
+                    means.append(0.0)
+                    yerr_list.append(0.0)
                     continue
 
                 stats = data[R].get(model, {}).get(metric, AggregatedStats(0, 0, 0))
                 means.append(stats.mean)
 
-                if metric == "argmax_agree" and stats.ci_lower is not None:
+                if (
+                    metric == "argmax_agree"
+                    and stats.ci_lower is not None
+                    and stats.ci_upper is not None
+                ):
                     ci_range = (stats.ci_upper - stats.ci_lower) / 2
                     yerr_list.append(ci_range)
                 else:
@@ -581,8 +593,8 @@ def write_provenance(out_path: Path):
         f.write("# Refresh paper-facing CSVs from the refrozen eval outputs\n")
         f.write(
             "python scripts/postprocess_exp1_v4_1.py "
-            "--results_dir /home/buiksat/trm_bellman/results/validation/exp1_v4_refreeze "
-            "--out_dir /home/buiksat/trm_bellman/results/tables "
+            "--results_dir results/validation/exp1_v4_refreeze "
+            "--out_dir results/tables "
             "--seeds 41,42,43,44,45,46,47,48,49,50 "
             "--radii 10,100,0 --n_train 2 --radius_n2 8\n\n"
         )

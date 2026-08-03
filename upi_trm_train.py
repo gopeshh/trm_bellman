@@ -54,7 +54,16 @@ from rl.training_setup import (
 )
 from rl.sudoku_utils import sudoku_is_solved, sudoku_get_stats
 from utils.seeding import set_global_seed
-from utils.dataset_provenance import dataset_input_sha256s, dataset_pool_sha256
+from utils.dataset_provenance import (
+    DatasetProvenanceError,
+    assert_matching_dataset_provenance,
+    build_dataset_provenance,
+    dataset_input_sha256s,
+    dataset_pool_sha256,
+    dataset_sample_sha256s,
+    dataset_source_build_metadata,
+    validate_dataset_provenance,
+)
 
 __all__ = [
     "BaselineSelection",
@@ -426,6 +435,40 @@ def load_checkpoint(
     return {"missing_keys": result.missing_keys, "unexpected_keys": result.unexpected_keys}
 
 
+def _capture_rng_state() -> Dict[str, Any]:
+    """Capture every process-global RNG used by the training paths."""
+
+    return {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch_cpu": torch.random.get_rng_state(),
+        "torch_cuda": (
+            torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+        ),
+    }
+
+
+def _restore_rng_state(rng_state: Dict[str, Any]) -> None:
+    """Restore a state produced by :func:`_capture_rng_state`."""
+
+    random.setstate(rng_state["python"])
+    np.random.set_state(rng_state["numpy"])
+    torch.random.set_rng_state(rng_state["torch_cpu"])
+    cuda_rng_state = rng_state.get("torch_cuda")
+    if cuda_rng_state is not None:
+        torch.cuda.set_rng_state_all(cuda_rng_state)
+
+
+def _config_dict(config: Any) -> Dict[str, Any]:
+    if hasattr(config, "model_dump"):
+        return config.model_dump()
+    if hasattr(config, "dict"):
+        return config.dict()
+    if isinstance(config, dict):
+        return dict(config)
+    raise TypeError("Checkpoint configuration must be a Pydantic model or dictionary.")
+
+
 def save_checkpoint(
     model: nn.Module,
     trainer: "UPITrmTrainer",
@@ -452,34 +495,39 @@ def save_checkpoint(
     """
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    checkpoint = {
-        "checkpoint_schema_version": 2,
-        "step": step,
-        "model_state_dict": model.state_dict(),
-        "rng_state": {
-            "python": random.getstate(),
-            "numpy": np.random.get_state(),
-            "torch_cpu": torch.random.get_rng_state(),
-            "torch_cuda": (
-                torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-            ),
-        },
-    }
+    is_exact_upi_checkpoint = isinstance(trainer, UPITrmTrainer)
+    if is_exact_upi_checkpoint and dataset_provenance is None:
+        raise RuntimeError(
+            "Schema-v3 exact checkpoints require dataset provenance."
+        )
+    canonical_dataset_provenance: Optional[Dict[str, Any]] = None
     if dataset_provenance is not None:
-        checkpoint["dataset_provenance"] = dict(dataset_provenance)
+        if is_exact_upi_checkpoint:
+            canonical_dataset_provenance = validate_dataset_provenance(
+                dataset_provenance
+            )
+        else:
+            # Baseline checkpoints are weights-only. Preserve their historical
+            # optional metadata without presenting it as exact-resume identity.
+            canonical_dataset_provenance = dict(dataset_provenance)
+
+    rng_state = _capture_rng_state()
+    checkpoint = {
+        "checkpoint_schema_version": 3 if is_exact_upi_checkpoint else 2,
+        "trainer_kind": type(trainer).__name__,
+        "step": step,
+        "progress": {
+            "env_steps": int(getattr(trainer, "_env_step_count", 0)),
+            "optimizer_updates": int(getattr(trainer, "_train_step_count", 0)),
+        },
+        "model_state_dict": model.state_dict(),
+        "rng_state": rng_state,
+    }
+    if canonical_dataset_provenance is not None:
+        checkpoint["dataset_provenance"] = canonical_dataset_provenance
     model_config = getattr(model, "config", None)
     if model_config is not None:
-        if hasattr(model_config, "model_dump"):
-            checkpoint["model_config"] = model_config.model_dump()
-        elif hasattr(model_config, "dict"):
-            checkpoint["model_config"] = model_config.dict()
-        elif isinstance(model_config, dict):
-            checkpoint["model_config"] = dict(model_config)
-        else:
-            raise TypeError(
-                "Model config must be a Pydantic model or dictionary to save a "
-                "reconstructable checkpoint."
-            )
+        checkpoint["model_config"] = _config_dict(model_config)
 
     # Preserve the old/candidate policy pair for post-candidate diagnostics.
     if hasattr(trainer, "policy_model_old") and trainer.policy_model_old is not None:
@@ -490,8 +538,10 @@ def save_checkpoint(
         checkpoint["target_model_state_dict"] = trainer.target_model.state_dict()
 
     # Save RL config for reproducibility and correct eval loading
-    if rl_cfg is not None:
-        checkpoint["rl_config"] = rl_cfg.model_dump() if hasattr(rl_cfg, "model_dump") else rl_cfg.dict()
+    effective_rl_cfg = rl_cfg if rl_cfg is not None else getattr(trainer, "rl_cfg", None)
+    if effective_rl_cfg is None:
+        raise RuntimeError("Exact checkpoint requires the active RL configuration.")
+    checkpoint["rl_config"] = _config_dict(effective_rl_cfg)
 
     # Save optimizer states - different trainers have different optimizer structures
     if hasattr(trainer, 'value_opt') and hasattr(trainer, 'policy_opt'):
@@ -520,12 +570,38 @@ def save_checkpoint(
         "env_step_count": int(getattr(trainer, "_env_step_count", 0)),
         "kl_coef": float(getattr(trainer, "_kl_coef", 1.0)),
         "term_stats": dict(getattr(trainer, "term_stats", {})),
+        "debug_episode_lengths": list(
+            getattr(trainer, "_debug_episode_lengths", [])
+        ),
+        "debug_episode_returns": list(
+            getattr(trainer, "_debug_episode_returns", [])
+        ),
+        "debug_stop_probs": list(getattr(trainer, "_debug_stop_probs", [])),
+        "debug_score_changes": list(
+            getattr(trainer, "_debug_score_changes", [])
+        ),
+        "drift_values": list(getattr(trainer, "_drift_values", [])),
+        "plan_changes": list(getattr(trainer, "_plan_changes", [])),
+        "value_of_memory": list(getattr(trainer, "_value_of_memory", [])),
     }
+    if is_exact_upi_checkpoint:
+        checkpoint["trainer_state"].update(
+            {
+                "collection_state": trainer.collection_checkpoint_state(),
+                "environment_state": trainer.env.checkpoint_state(),
+            }
+        )
+    else:
+        print(
+            "[Checkpoint] Baseline trainer checkpoint is weights-only for future "
+            "warm starts; exact resume requires the schema-v3 UPI path."
+        )
 
     # Replay is required for a semantic resume. It can make checkpoints large,
     # but storing only its length caused resumed runs to start from empty data.
     if hasattr(trainer, 'replay'):
         checkpoint["replay_buffer_size"] = len(trainer.replay)
+        checkpoint["replay_capacity"] = trainer.replay.storage.maxlen
         checkpoint["replay_transitions"] = list(trainer.replay.storage)
     
     path = os.path.join(checkpoint_dir, f"rl_checkpoint_step_{step}.pt")
@@ -540,6 +616,9 @@ def save_checkpoint(
         print(f"[Checkpoint] Warning: Failed to save checkpoint: {e}")
         print("[Checkpoint] Continuing training without saving...")
         return ""
+    finally:
+        # Checkpointing must not perturb an uninterrupted stochastic run.
+        _restore_rng_state(rng_state)
 
     return path
 
@@ -572,13 +651,34 @@ def resume_from_checkpoint(
     )
     
     schema_version = int(checkpoint.get("checkpoint_schema_version", 0))
-    rng_state = checkpoint.get("rng_state")
-    if (schema_version < 2 or rng_state is None) and not allow_legacy_warm_start:
-        raise RuntimeError(
-            "Checkpoint predates exact-resume RNG/provenance support. Pass "
-            "allow_legacy_warm_start=True only to perform a non-exact warm start."
+    if schema_version < 3:
+        legacy_flag_note = (
+            " The deprecated allow_legacy_warm_start flag cannot make this an "
+            "exact resume."
+            if allow_legacy_warm_start
+            else ""
         )
-    cuda_rng_state = rng_state.get("torch_cuda") if rng_state is not None else None
+        raise RuntimeError(
+            "Checkpoint predates schema-v3 live-episode and provenance support; "
+            "resume is refused before state mutation. Use the ordinary "
+            "--load-checkpoint weights-only flow for an explicit non-resume warm "
+            "start."
+            + legacy_flag_note
+        )
+    if schema_version != 3:
+        raise RuntimeError(
+            f"Unsupported checkpoint schema version {schema_version}; expected 3."
+        )
+    if checkpoint.get("trainer_kind") != type(trainer).__name__:
+        raise RuntimeError(
+            "Checkpoint trainer mismatch: "
+            f"{checkpoint.get('trainer_kind')!r} != {type(trainer).__name__!r}."
+        )
+
+    rng_state = checkpoint.get("rng_state")
+    if not isinstance(rng_state, dict):
+        raise RuntimeError("Schema-v3 checkpoint is missing RNG state.")
+    cuda_rng_state = rng_state.get("torch_cuda")
     if cuda_rng_state is not None:
         if not torch.cuda.is_available():
             raise RuntimeError(
@@ -592,38 +692,103 @@ def resume_from_checkpoint(
             )
 
     checkpoint_provenance = checkpoint.get("dataset_provenance")
-    if expected_dataset_provenance is not None:
-        if checkpoint_provenance is None:
-            if not allow_legacy_warm_start:
-                raise RuntimeError(
-                    "Checkpoint has no dataset provenance; refusing to mix restored "
-                    "replay with an unverified dataset."
-                )
-        else:
-            mismatches = {
-                key: (checkpoint_provenance.get(key), expected_value)
-                for key, expected_value in expected_dataset_provenance.items()
-                if checkpoint_provenance.get(key) != expected_value
-            }
-            if mismatches:
-                mismatch_text = ", ".join(
-                    f"{key}: checkpoint={old!r}, current={new!r}"
-                    for key, (old, new) in sorted(mismatches.items())
-                )
-                raise RuntimeError(
-                    "Checkpoint dataset provenance mismatch; state was not restored: "
-                    + mismatch_text
-                )
+    if expected_dataset_provenance is None:
+        raise RuntimeError(
+            "Schema-v3 exact resume requires current dataset provenance."
+        )
+    if not isinstance(checkpoint_provenance, dict):
+        raise RuntimeError(
+            "Checkpoint has no valid dataset provenance; refusing to mix restored "
+            "replay with an unverified dataset."
+        )
+    try:
+        assert_matching_dataset_provenance(
+            checkpoint_provenance,
+            expected_dataset_provenance,
+        )
+    except DatasetProvenanceError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    saved_rl_config = checkpoint.get("rl_config")
+    current_rl_config = _config_dict(trainer.rl_cfg)
+    if saved_rl_config != current_rl_config:
+        raise RuntimeError(
+            "Checkpoint RL configuration mismatch; exact continuation is impossible."
+        )
+    current_model_config = _config_dict(model.config)
+    if checkpoint.get("model_config") != current_model_config:
+        raise RuntimeError(
+            "Checkpoint model configuration mismatch; exact continuation is impossible."
+        )
+    progress = checkpoint.get("progress")
+    trainer_state = checkpoint.get("trainer_state")
+    required_top_level = {
+        "model_state_dict",
+        "policy_model_old_state_dict",
+        "policy_model_candidate_state_dict",
+        "target_model_state_dict",
+        "value_optimizer_state_dict",
+        "policy_optimizer_state_dict",
+        "replay_transitions",
+        "replay_capacity",
+    }
+    missing = sorted(required_top_level - set(checkpoint))
+    if missing:
+        raise RuntimeError(
+            f"Schema-v3 checkpoint is missing required fields: {missing}."
+        )
+    if not isinstance(progress, dict) or not isinstance(trainer_state, dict):
+        raise RuntimeError("Schema-v3 checkpoint is missing progress or trainer state.")
+    if "environment_state" not in trainer_state or "collection_state" not in trainer_state:
+        raise RuntimeError(
+            "Schema-v3 checkpoint is missing live environment or collector state."
+        )
+    if int(checkpoint["replay_capacity"]) != int(trainer.replay.storage.maxlen):
+        raise RuntimeError(
+            "Checkpoint replay capacity mismatch; exact continuation is impossible."
+        )
+    saved_train_steps = int(trainer_state.get("train_step_count", -1))
+    saved_env_steps = int(trainer_state.get("env_step_count", -1))
+    if saved_train_steps < 0 or saved_env_steps < 0:
+        raise RuntimeError("Checkpoint contains negative progress counters.")
+    if saved_train_steps != int(progress.get("optimizer_updates", -1)):
+        raise RuntimeError("Checkpoint optimizer-update counters disagree.")
+    if saved_env_steps != int(progress.get("env_steps", -1)):
+        raise RuntimeError("Checkpoint environment-step counters disagree.")
+    replay_transitions = checkpoint["replay_transitions"]
+    if len(replay_transitions) != int(checkpoint.get("replay_buffer_size", -1)):
+        raise RuntimeError("Checkpoint replay size does not match its transition list.")
+    saved_puzzle_optimizer = "puzzle_emb_optimizer_state_dict" in checkpoint
+    if saved_puzzle_optimizer != (puzzle_emb_optimizer is not None):
+        raise RuntimeError(
+            "Checkpoint puzzle-embedding optimizer presence does not match the run."
+        )
+    optional_state_pairs = (
+        (
+            "old_policy_distill_optimizer_state_dict",
+            getattr(trainer, "old_policy_distill_opt", None) is not None,
+        ),
+        (
+            "value_scheduler_state_dict",
+            getattr(trainer, "value_scheduler", None) is not None,
+        ),
+        (
+            "policy_scheduler_state_dict",
+            getattr(trainer, "policy_scheduler", None) is not None,
+        ),
+    )
+    for field, expected_present in optional_state_pairs:
+        if (field in checkpoint) != expected_present:
+            raise RuntimeError(
+                f"Checkpoint field {field!r} does not match the active trainer."
+            )
 
     model.load_state_dict(checkpoint["model_state_dict"])
-    if "policy_model_old_state_dict" in checkpoint and hasattr(trainer, "policy_model_old"):
-        trainer.policy_model_old.load_state_dict(checkpoint["policy_model_old_state_dict"])
-    if "policy_model_candidate_state_dict" in checkpoint and hasattr(trainer, "policy_model_candidate"):
-        trainer.policy_model_candidate.load_state_dict(checkpoint["policy_model_candidate_state_dict"])
-    if "target_model_state_dict" in checkpoint and hasattr(trainer, "target_model"):
-        trainer.target_model.load_state_dict(checkpoint["target_model_state_dict"])
-    elif hasattr(trainer, "_hard_update_target"):
-        trainer._hard_update_target()
+    trainer.policy_model_old.load_state_dict(checkpoint["policy_model_old_state_dict"])
+    trainer.policy_model_candidate.load_state_dict(
+        checkpoint["policy_model_candidate_state_dict"]
+    )
+    trainer.target_model.load_state_dict(checkpoint["target_model_state_dict"])
     trainer.value_opt.load_state_dict(checkpoint["value_optimizer_state_dict"])
     trainer.policy_opt.load_state_dict(checkpoint["policy_optimizer_state_dict"])
     if (
@@ -644,33 +809,45 @@ def resume_from_checkpoint(
     ):
         trainer.policy_scheduler.load_state_dict(checkpoint["policy_scheduler_state_dict"])
     
-    if puzzle_emb_optimizer is not None and "puzzle_emb_optimizer_state_dict" in checkpoint:
+    if puzzle_emb_optimizer is not None:
         puzzle_emb_optimizer.load_state_dict(checkpoint["puzzle_emb_optimizer_state_dict"])
 
-    trainer_state = checkpoint.get("trainer_state", {})
-    trainer._next_episode_id = int(trainer_state.get("next_episode_id", 0))
-    trainer._train_step_count = int(trainer_state.get("train_step_count", 0))
-    trainer._env_step_count = int(trainer_state.get("env_step_count", 0))
+    trainer._next_episode_id = int(trainer_state["next_episode_id"])
+    trainer._train_step_count = saved_train_steps
+    trainer._env_step_count = saved_env_steps
     trainer._kl_coef = float(trainer_state.get("kl_coef", 1.0))
     if trainer_state.get("term_stats") is not None:
         trainer.term_stats = dict(trainer_state["term_stats"])
-    if "replay_transitions" in checkpoint and hasattr(trainer, "replay"):
-        trainer.replay.clear()
-        for transition in checkpoint["replay_transitions"]:
-            trainer.replay.add(transition)
+    trainer._debug_episode_lengths = list(
+        trainer_state.get("debug_episode_lengths", [])
+    )
+    trainer._debug_episode_returns = list(
+        trainer_state.get("debug_episode_returns", [])
+    )
+    trainer._debug_stop_probs = list(trainer_state.get("debug_stop_probs", []))
+    trainer._debug_score_changes = list(
+        trainer_state.get("debug_score_changes", [])
+    )
+    trainer._drift_values = list(trainer_state.get("drift_values", []))
+    trainer._plan_changes = list(trainer_state.get("plan_changes", []))
+    trainer._value_of_memory = list(trainer_state.get("value_of_memory", []))
+
+    trainer.replay.clear()
+    for transition in replay_transitions:
+        trainer.replay.add(transition)
+    trainer.env.load_checkpoint_state(trainer_state["environment_state"])
+    trainer.load_collection_checkpoint_state(trainer_state["collection_state"])
 
     # Restore generators last so model/optimizer/replay reconstruction cannot
     # perturb the next random draw relative to an uninterrupted run.
-    if rng_state is not None:
-        random.setstate(rng_state["python"])
-        np.random.set_state(rng_state["numpy"])
-        torch.random.set_rng_state(rng_state["torch_cpu"])
-        if cuda_rng_state is not None:
-            torch.cuda.set_rng_state_all(cuda_rng_state)
-    
-    start_step = checkpoint["step"]
-    print(f"[Checkpoint] Resumed from step {start_step}")
-    
+    _restore_rng_state(rng_state)
+
+    start_step = trainer._train_step_count
+    print(
+        f"[Checkpoint] Resumed at env_step={trainer._env_step_count}, "
+        f"optimizer_update={start_step}"
+    )
+
     return start_step
 
 
@@ -682,7 +859,10 @@ def parse_args():
     parser.add_argument(
         "--allow-legacy-resume",
         action="store_true",
-        help="Warm-start from an old checkpoint lacking RNG or dataset provenance.",
+        help=(
+            "Deprecated compatibility flag. Legacy resume remains fail-closed; "
+            "use --load-checkpoint for an explicit weights-only warm start."
+        ),
     )
     parser.add_argument(
         "--eval-pool-size",
@@ -1215,33 +1395,55 @@ def main():
             f"eval_pool_sha256={eval_pool_hash} "
             f"eval_puzzle_id_offset={train_identifier_count}"
         )
-        dataset_provenance = {
-            "train_split": args.train_split,
-            "eval_split": args.eval_split,
+        source_build_metadata = dataset_source_build_metadata(args.dataset_paths)
+        if len(source_build_metadata) == 1:
+            provenance_builder_name = source_build_metadata[0]["builder_name"]
+            provenance_builder_version = source_build_metadata[0][
+                "builder_version"
+            ]
+            provenance_generation_seed = source_build_metadata[0][
+                "generation_seed"
+            ]
+        else:
+            provenance_builder_name = "composite_materialized_dataset"
+            provenance_builder_version = 1
+            provenance_generation_seed = None
+        provenance_train_split = args.train_split
+        provenance_eval_split = args.eval_split
+        provenance_eval_count = rl_cfg.eval_num_episodes
+        provenance_metadata = {
             "train_pool_sha256": train_pool_hash,
             "eval_pool_sha256": eval_pool_hash,
-            "train_count": len(dataset),
-            "eval_count": rl_cfg.eval_num_episodes,
             "seq_len": seq_len,
             "vocab_size": vocab_size,
             "num_identifiers": num_identifiers,
             "eval_puzzle_id_offset": train_identifier_count,
+            "dataset_source_names": [
+                os.path.basename(path.rstrip(os.sep)) for path in args.dataset_paths
+            ],
+            "source_build_metadata": source_build_metadata,
+            "materialization_seed": 0,
         }
     else:
         print(f"[DATASET] dataset_paths=None (using dummy dataset)")
         print(f"[DATASET] resolved_dataset_name=dummy")
         print(f"[DATASET] num_samples={len(dataset)}")
-        dataset_provenance = {
-            "train_split": "dummy",
-            "eval_split": "dummy",
+        provenance_builder_name = "rl.training_setup.DummyPuzzleDataset"
+        provenance_builder_version = 1
+        provenance_generation_seed = args.seed
+        provenance_train_split = "dummy"
+        provenance_eval_split = "dummy"
+        provenance_eval_count = len(eval_dataset)
+        provenance_metadata = {
             "train_pool_sha256": dataset_pool_sha256(dataset, len(dataset)),
-            "eval_pool_sha256": dataset_pool_sha256(eval_dataset, len(eval_dataset)),
-            "train_count": len(dataset),
-            "eval_count": len(eval_dataset),
+            "eval_pool_sha256": dataset_pool_sha256(
+                eval_dataset, len(eval_dataset)
+            ),
             "seq_len": seq_len,
             "vocab_size": vocab_size,
             "num_identifiers": num_identifiers,
             "eval_puzzle_id_offset": 0,
+            "dataset_source_names": [],
         }
 
     checker_resolution = resolve_checker_from_dataset(rl_cfg=rl_cfg, dataset=dataset, seq_len=seq_len)
@@ -1301,6 +1503,41 @@ def main():
     num_edit_actions = seq_len * vocab_size
     rl_num_actions = num_edit_actions + 1  # STOP action appended at the end
     env.set_stop_action_id(stop_id=rl_num_actions - 1)
+
+    dataset_provenance = build_dataset_provenance(
+        builder_name=provenance_builder_name,
+        builder_version=provenance_builder_version,
+        generation_seed=provenance_generation_seed,
+        train_record_sha256s=dataset_sample_sha256s(dataset),
+        eval_record_sha256s=dataset_sample_sha256s(
+            eval_dataset,
+            count=provenance_eval_count,
+        ),
+        train_split=provenance_train_split,
+        eval_split=provenance_eval_split,
+        environment_config=dict(vars(env_cfg)),
+        action_mask_config={
+            "task_config_class": (
+                type(task_config).__name__ if task_config is not None else None
+            ),
+            "task_config_name": (
+                getattr(task_config, "name", None) if task_config is not None else None
+            ),
+            "disable_constraint_masking": env_cfg.disable_constraint_masking,
+            "stop_action_mode": env._stop_mode,
+            "stop_action_id": env.stop_action_id,
+            "enable_undo": env._enable_undo,
+            "undo_action_id": env.undo_action_id,
+            "vocab_size": env.vocab_size,
+            "num_actions": (
+                env.undo_action_id + 1
+                if env.undo_action_id is not None
+                else rl_num_actions
+            ),
+            "masked_token_ids": [0, 1],
+        },
+        metadata=provenance_metadata,
+    )
 
     # === Model Configuration ===
     # Use CLI args for architecture (allows matching pretrained model)
@@ -1427,7 +1664,12 @@ def main():
     # === Setup checkpoint directory ===
     # Note: dataset_name is already set in the provenance logging section above
     checkpoint_dir = args.checkpoint_dir
-    if checkpoint_dir is None and args.save_interval > 0:
+    checkpointing_enabled = args.save_interval > 0 or (
+        env_step_budget is not None
+        and args.save_env_interval is not None
+        and args.save_env_interval > 0
+    )
+    if checkpoint_dir is None and checkpointing_enabled:
         checkpoint_dir = os.path.join("checkpoints", f"rl_{dataset_name}_seed{args.seed or 0}")
         print(f"[INFO] Checkpoint directory: {checkpoint_dir}")
 
@@ -1655,16 +1897,32 @@ def main():
 
         final_progress_step = total_steps
     else:
-        if start_step != 0:
-            raise ValueError("--env-step-budget does not currently support resume-checkpoint mode.")
+        if not isinstance(trainer, UPITrmTrainer):
+            raise ValueError(
+                "Exact --env-step-budget collection currently requires "
+                "UPITrmTrainer; baseline trainers must not fall back to nominal "
+                "outer-step accounting."
+            )
+        restored_env_steps = trainer.get_env_step_count()
+        if env_step_budget < restored_env_steps:
+            raise ValueError(
+                "Requested env-step budget is behind the restored checkpoint "
+                f"({env_step_budget} < {restored_env_steps})."
+            )
 
         log_env_interval = args.log_env_interval
         eval_env_interval = args.eval_env_interval
         save_env_interval = args.save_env_interval
-        next_log_env = log_env_interval if log_env_interval and log_env_interval > 0 else None
-        next_eval_env = eval_env_interval if eval_env_interval and eval_env_interval > 0 else None
-        next_save_env = save_env_interval if save_env_interval and save_env_interval > 0 else None
-        outer_step = 0
+
+        def next_strict_multiple(interval: Optional[int]) -> Optional[int]:
+            if interval is None or interval <= 0:
+                return None
+            return (restored_env_steps // interval + 1) * interval
+
+        next_log_env = next_strict_multiple(log_env_interval)
+        next_eval_env = next_strict_multiple(eval_env_interval)
+        next_save_env = next_strict_multiple(save_env_interval)
+        outer_step = int(getattr(trainer, "_train_step_count", start_step))
         step_iter = None
 
         while trainer.get_env_step_count() < env_step_budget:
@@ -1676,14 +1934,27 @@ def main():
             next_target = min(targets)
             collect_budget = next_target - current_env_step
             if collect_budget <= 0:
-                collect_budget = 1
+                raise RuntimeError("Exact-budget scheduler produced a nonpositive cap.")
 
             metrics = trainer.train_step(max_env_steps_to_collect=collect_budget)
-            outer_step += 1
+            new_env_step = trainer.get_env_step_count()
+            if new_env_step <= current_env_step:
+                raise RuntimeError(
+                    "Exact-budget trainer made no environment-step progress."
+                )
+            if new_env_step > next_target:
+                raise RuntimeError(
+                    "Exact-budget trainer exceeded its collection cap "
+                    f"({new_env_step} > {next_target})."
+                )
+            outer_step = int(
+                metrics.get("train_steps_total", trainer._train_step_count)
+            )
 
             if (
                 puzzle_emb_optimizer is not None
                 and not puzzle_emb_optimizer_managed_by_trainer
+                and metrics.get("optimization_performed", 0.0) > 0.0
             ):
                 puzzle_emb_optimizer.step()
                 puzzle_emb_optimizer.zero_grad()
@@ -1735,7 +2006,7 @@ def main():
         final_progress_step = trainer.get_env_step_count()
 
     # === Save final checkpoint ===
-    if args.save_interval > 0 and checkpoint_dir is not None and last_saved_progress_step != final_progress_step:
+    if checkpointing_enabled and checkpoint_dir is not None and last_saved_progress_step != final_progress_step:
         save_checkpoint(
             model,
             trainer,

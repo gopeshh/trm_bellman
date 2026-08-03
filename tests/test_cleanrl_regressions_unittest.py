@@ -9,9 +9,15 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
+import torch.nn as nn
 
 from rl.cleanrl.dqn_trm import _sample_random_action
-from rl.cleanrl.ppo_trm import _compute_gae, _episode_done_flags
+from rl.cleanrl.ppo_trm import (
+    _apply_truncation_bootstrap,
+    _compute_gae,
+    _episode_done_flags,
+    _validate_exact_interaction_budget,
+)
 from rl.cleanrl.ppo_trm import _evaluate_sudoku
 
 
@@ -140,15 +146,113 @@ class TestCleanRLRegressions(unittest.TestCase):
         expected = 1.0 + gamma * terminal_value - 2.0
         self.assertAlmostEqual(advantages[0, 0].item(), expected)
 
+    def test_ppo_truncation_reward_correction_handles_all_boundaries(self) -> None:
+        class ValueAgent:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def get_value(self, _obs):
+                self.calls += 1
+                return torch.tensor([[5.0]])
+
+        agent = ValueAgent()
+        corrected = _apply_truncation_bootstrap(
+            torch.tensor([1.0, 2.0, 3.0]),
+            np.asarray([False, True, True], dtype=np.bool_),
+            np.asarray([True, False, True], dtype=np.bool_),
+            [
+                {"final_observation": np.asarray([9.0], dtype=np.float32)},
+                {"final_observation": np.asarray([8.0], dtype=np.float32)},
+                {"final_observation": np.asarray([7.0], dtype=np.float32)},
+            ],
+            agent,
+            torch.device("cpu"),
+            gamma=0.9,
+        )
+
+        torch.testing.assert_close(corrected, torch.tensor([5.5, 2.0, 3.0]))
+        self.assertEqual(agent.calls, 1)
+
+    def test_ppo_truncation_requires_final_observation(self) -> None:
+        class ValueAgent:
+            def get_value(self, _obs):
+                return torch.tensor([[5.0]])
+
+        with self.assertRaisesRegex(RuntimeError, "missing final_observation"):
+            _apply_truncation_bootstrap(
+                torch.tensor([1.0]),
+                np.asarray([False], dtype=np.bool_),
+                np.asarray([True], dtype=np.bool_),
+                [{}],
+                ValueAgent(),
+                torch.device("cpu"),
+                gamma=0.9,
+            )
+
+    def test_ppo_interaction_budget_never_rounds_down(self) -> None:
+        self.assertEqual(_validate_exact_interaction_budget(80_000, 1, 64), 64)
+        self.assertEqual(_validate_exact_interaction_budget(80_000, 4, 20), 80)
+        with self.assertRaisesRegex(ValueError, "Exact interaction accounting"):
+            _validate_exact_interaction_budget(80_001, 4, 20)
+
     def test_dqn_epsilon_random_samples_only_valid_actions(self) -> None:
         random.seed(1729)
         mask = torch.tensor([False, False, True, False, False, True])
         sampled = {_sample_random_action(6, mask) for _ in range(200)}
         self.assertEqual(sampled, {2, 5})
 
+    def test_dqn_epsilon_random_with_one_valid_action_is_deterministic(self) -> None:
+        mask = torch.tensor([False, False, False, True])
+        self.assertEqual(_sample_random_action(4, mask), 3)
+
     def test_dqn_epsilon_random_rejects_empty_mask(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "action mask is empty"):
             _sample_random_action(4, torch.zeros(4, dtype=torch.bool))
+
+    def test_cleanrl_action_mask_rejects_empty_and_wrong_shape(self) -> None:
+        from rl.cleanrl.trm_adapter import apply_action_mask
+
+        logits = torch.zeros(2, 4)
+        with self.assertRaisesRegex(RuntimeError, r"batch rows \[1\]"):
+            apply_action_mask(
+                logits,
+                torch.tensor(
+                    [
+                        [True, False, False, False],
+                        [False, False, False, False],
+                    ]
+                ),
+            )
+        with self.assertRaisesRegex(ValueError, "action mask"):
+            apply_action_mask(logits, torch.ones(2, 3, dtype=torch.bool))
+
+    def test_q_eval_adapter_preserves_remaining_edits(self) -> None:
+        from rl.cleanrl.trm_adapter import _QNetworkEvalAdapter
+
+        class CapturingQNetwork(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.model = nn.Linear(1, 1)
+                self.observed = None
+
+            def forward(self, obs, action_mask=None):
+                self.observed = obs
+                return torch.zeros(1, 3)
+
+        q_network = CapturingQNetwork()
+        adapter = _QNetworkEvalAdapter(q_network)
+        adapter.policy_dist(
+            {
+                "inputs": torch.zeros(1, 4),
+                "puzzle_identifiers": torch.zeros(1, dtype=torch.long),
+                "remaining_edits": torch.tensor([6]),
+            },
+            torch.zeros(1, 4),
+            action_mask=torch.ones(3, dtype=torch.bool),
+        )
+
+        self.assertIsNotNone(q_network.observed)
+        self.assertEqual(q_network.observed["remaining_edits"].tolist(), [6.0])
 
     def test_cleanrl_ppo_evaluates_held_out_bundle_dataset(self) -> None:
         train_dataset = object()

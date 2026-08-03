@@ -61,7 +61,7 @@ def aggregate_across_seeds(
     model_name: str,
     seeds: List[int],
     batch: str = "b0",
-) -> Dict[str, Dict[str, float]]:
+) -> Dict[int, Dict[str, Dict[str, float]]]:
     """
     Aggregate metrics across seeds.
 
@@ -71,7 +71,7 @@ def aggregate_across_seeds(
     base = Path(base_dir)
 
     # Collect per-state data across seeds
-    all_data = {}  # n2 -> metric -> list of values across seeds
+    all_data: Dict[int, Dict[str, List[float]]] = {}
 
     for seed in seeds:
         csv_path = base / f"seed{seed}" / f"{model_name}_{batch}_per_state.csv"
@@ -94,7 +94,7 @@ def aggregate_across_seeds(
                     all_data[n2][metric].append(row[metric])
 
     # Compute mean ± std for each n2
-    result = {}
+    result: Dict[int, Dict[str, Dict[str, float]]] = {}
     for n2, metrics in all_data.items():
         result[n2] = {}
         for metric, values in metrics.items():

@@ -1,4 +1,5 @@
 import csv
+import copy
 import os
 import subprocess
 import tempfile
@@ -11,10 +12,41 @@ from scripts.aggregate_hard4x4_trusted_baselines import (
     _parse_final_success_rate,
     _write_summary_md,
 )
-from utils.dataset_provenance import ordered_pool_sha256
+from utils.dataset_provenance import (
+    DatasetProvenanceError,
+    assert_matching_dataset_provenance,
+    build_dataset_provenance,
+    dataset_source_build_metadata,
+    ordered_pool_sha256,
+    ordered_record_sha256,
+    sample_sha256,
+    validate_dataset_provenance,
+)
 
 
 class TestResultProvenance(unittest.TestCase):
+    @staticmethod
+    def _checkpoint_provenance():
+        train_records = [
+            sample_sha256([1, 2], [2, 1]),
+            sample_sha256([3, 4], [4, 3]),
+        ]
+        eval_records = [sample_sha256([5, 6], [6, 5])]
+        return build_dataset_provenance(
+            builder_name="dataset.build_4x4_sudoku",
+            builder_version=2,
+            generation_seed=1729,
+            train_record_sha256s=train_records,
+            eval_record_sha256s=eval_records,
+            train_split="train",
+            eval_split="test",
+            environment_config={"gamma": 0.99, "max_edits": 8},
+            action_mask_config={
+                "disable_constraint_masking": False,
+                "stop_action_id": 96,
+            },
+        )
+
     def test_upi_parser_requires_training_and_fixed_pool_provenance(self):
         with tempfile.TemporaryDirectory() as tmp:
             log_path = Path(tmp) / "run.log"
@@ -41,6 +73,85 @@ class TestResultProvenance(unittest.TestCase):
         forward = ordered_pool_sha256(inputs, solutions, 2)
         reverse = ordered_pool_sha256(inputs[::-1], solutions[::-1], 2)
         self.assertNotEqual(forward, reverse)
+
+    def test_checkpoint_provenance_rejects_tampered_record_digest(self):
+        provenance = self._checkpoint_provenance()
+        provenance["ordered_records"]["train"]["ordered_sha256"] = "0" * 64
+        with self.assertRaisesRegex(
+            DatasetProvenanceError,
+            "does not match its ordered record list",
+        ):
+            validate_dataset_provenance(provenance)
+
+    def test_checkpoint_provenance_compares_every_resume_dimension(self):
+        expected = self._checkpoint_provenance()
+        mutations = {
+            "builder version": lambda value: value["dataset_builder"].__setitem__(
+                "version", 3
+            ),
+            "generation seed": lambda value: value.__setitem__(
+                "generation_seed", 1730
+            ),
+            "environment": lambda value: value["environment_config"].__setitem__(
+                "gamma", 0.95
+            ),
+            "action mask": lambda value: value["action_mask_config"].__setitem__(
+                "disable_constraint_masking", True
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                saved = copy.deepcopy(expected)
+                mutate(saved)
+                with self.assertRaisesRegex(
+                    DatasetProvenanceError,
+                    "Dataset provenance mismatch",
+                ):
+                    assert_matching_dataset_provenance(saved, expected)
+
+        reordered = copy.deepcopy(expected)
+        records = reordered["ordered_records"]["train"]["record_sha256s"]
+        records.reverse()
+        reordered["ordered_records"]["train"]["ordered_sha256"] = (
+            ordered_record_sha256(records)
+        )
+        with self.assertRaisesRegex(
+            DatasetProvenanceError,
+            r"record_sha256s\[0\]",
+        ):
+            assert_matching_dataset_provenance(reordered, expected)
+
+    def test_checkpoint_provenance_rejects_schema_change(self):
+        provenance = self._checkpoint_provenance()
+        provenance["provenance_schema_version"] = 999
+        with self.assertRaisesRegex(
+            DatasetProvenanceError,
+            "schema version 999",
+        ):
+            assert_matching_dataset_provenance(
+                provenance,
+                self._checkpoint_provenance(),
+            )
+
+    def test_dataset_source_builder_version_and_seed_are_retained(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "anonymous-dataset"
+            root.mkdir()
+            config_path = root / "build_config.json"
+            config_path.write_text(
+                '{"builder":"dataset.build_4x4_sudoku",'
+                '"build_schema_version":2,"seed":31415}\n'
+            )
+            metadata = dataset_source_build_metadata([str(root)])
+
+        self.assertEqual(metadata[0]["source_name"], "anonymous-dataset")
+        self.assertEqual(metadata[0]["builder_name"], "dataset.build_4x4_sudoku")
+        self.assertEqual(metadata[0]["builder_version"], 2)
+        self.assertEqual(metadata[0]["generation_seed"], 31415)
+        build_config_sha256 = metadata[0]["build_config_sha256"]
+        self.assertIsNotNone(build_config_sha256)
+        assert build_config_sha256 is not None
+        self.assertEqual(len(build_config_sha256), 64)
 
     def test_radius_aggregation_fixes_evaluation_depth(self):
         with tempfile.TemporaryDirectory() as tmp:

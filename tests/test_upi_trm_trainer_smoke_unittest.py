@@ -140,6 +140,8 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
         theory_exact_mixture=False,
         enable_kl_trust_region=False,
         distill_mixture_policy=False,
+        exact_baseline_summation=False,
+        exact_k_step_targets=False,
     ):
         dataset = DummyPuzzleDataset(num_instances=6, seq_len=8, vocab_size=12)
         env_cfg = PlanEditEnvConfig(
@@ -164,6 +166,8 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
             theory_exact_mixture=theory_exact_mixture,
             enable_kl_trust_region=enable_kl_trust_region,
             distill_mixture_policy=distill_mixture_policy,
+            exact_baseline_summation=exact_baseline_summation,
+            exact_k_step_targets=exact_k_step_targets,
         )
         model = TinyRecursiveReasoningModel_ACTV1(
             _tiny_trm_cfg(
@@ -199,6 +203,21 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
         self.assertIn("solution", x_batch)
         self.assertIn("solution", x_next_batch)
         torch.testing.assert_close(x_batch["solution"][0], transition.x["solution"])
+
+    def test_persistent_exact_baseline_policy_update_runs(self):
+        trainer, _ = self._make_trainer(
+            episodic_latent=False,
+            theory_exact_mixture=True,
+            exact_baseline_summation=True,
+            exact_k_step_targets=True,
+        )
+        trainer.set_checker_fn(dummy_checker)
+        trainer.collect_episode()
+
+        result = trainer.policy_update()
+
+        self.assertIn("loss_policy", result)
+        self.assertTrue(math.isfinite(result["loss_policy"]))
 
     def test_exact_mixture_evaluation_uses_deployed_policy_callback(self):
         trainer, dataset = self._make_trainer(theory_exact_mixture=True)

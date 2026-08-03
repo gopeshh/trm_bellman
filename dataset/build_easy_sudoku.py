@@ -30,7 +30,10 @@ def is_valid_sudoku(board: np.ndarray) -> bool:
     return True
 
 
-def generate_filled_board() -> np.ndarray:
+BUILD_SCHEMA_VERSION = 1
+
+
+def generate_filled_board(rng: np.random.Generator) -> np.ndarray:
     """Generate a complete valid Sudoku board using backtracking."""
     board = np.zeros((9, 9), dtype=np.int32)
     
@@ -52,7 +55,7 @@ def generate_filled_board() -> np.ndarray:
             for col in range(9):
                 if board[row, col] == 0:
                     nums = list(range(1, 10))
-                    np.random.shuffle(nums)
+                    rng.shuffle(nums)
                     for num in nums:
                         if is_valid(board, row, col, num):
                             board[row, col] = num
@@ -66,14 +69,18 @@ def generate_filled_board() -> np.ndarray:
     return board
 
 
-def create_puzzle(solution: np.ndarray, num_clues: int) -> np.ndarray:
+def create_puzzle(
+    solution: np.ndarray,
+    num_clues: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
     """Create a puzzle from a solution by removing cells."""
     puzzle = solution.copy()
     cells_to_remove = 81 - num_clues
     
     # Get all cell positions and shuffle
     positions = [(i, j) for i in range(9) for j in range(9)]
-    np.random.shuffle(positions)
+    rng.shuffle(positions)
     
     removed = 0
     for row, col in positions:
@@ -104,7 +111,7 @@ def build_easy_dataset(
         num_aug: Number of augmentations per puzzle
         seed: Random seed
     """
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     
     os.makedirs(output_dir, exist_ok=True)
     
@@ -122,19 +129,19 @@ def build_easy_dataset(
     for diff_name, count, min_clues, max_clues in difficulties:
         print(f"  Generating {count} {diff_name} puzzles ({min_clues}-{max_clues} clues)...")
         for _ in tqdm(range(count), desc=diff_name):
-            solution = generate_filled_board()
+            solution = generate_filled_board(rng)
             if not is_valid_sudoku(solution):
                 continue
             
-            num_clues = np.random.randint(min_clues, max_clues + 1)
-            puzzle = create_puzzle(solution, num_clues)
+            num_clues = int(rng.integers(min_clues, max_clues + 1))
+            puzzle = create_puzzle(solution, num_clues, rng)
             
             # Store original and augmented versions
             for aug_idx in range(1 + num_aug):
                 if aug_idx == 0:
                     inp, sol = puzzle, solution
                 else:
-                    inp, sol = shuffle_sudoku(puzzle, solution)
+                    inp, sol = shuffle_sudoku(puzzle, solution, rng)
                 
                 all_inputs.append(inp)
                 all_labels.append(sol)
@@ -146,7 +153,7 @@ def build_easy_dataset(
     
     # Shuffle the dataset but keep track of original order for stratified splits
     indices = np.arange(len(inputs_arr))
-    np.random.shuffle(indices)
+    rng.shuffle(indices)
     inputs_arr = inputs_arr[indices]
     labels_arr = labels_arr[indices]
     
@@ -189,26 +196,48 @@ def build_easy_dataset(
     # Save identifiers
     with open(os.path.join(output_dir, "identifiers.json"), "w") as f:
         json.dump(["<blank>"], f)
+
+    with open(os.path.join(output_dir, "build_config.json"), "w") as f:
+        json.dump(
+            {
+                "builder": "dataset.build_easy_sudoku",
+                "build_schema_version": BUILD_SCHEMA_VERSION,
+                "seed": seed,
+                "num_easy": num_easy,
+                "num_medium": num_medium,
+                "num_hard": num_hard,
+                "num_aug": num_aug,
+                "generated_count": len(inputs_arr),
+            },
+            f,
+            indent=2,
+            sort_keys=True,
+        )
+        f.write("\n")
     
     print(f"\nDataset saved to {output_dir}")
     print(f"Total puzzles: {len(inputs_arr)} ({split_idx} train, {len(inputs_arr) - split_idx} test)")
 
 
-def shuffle_sudoku(board: np.ndarray, solution: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def shuffle_sudoku(
+    board: np.ndarray,
+    solution: np.ndarray,
+    rng: np.random.Generator,
+) -> Tuple[np.ndarray, np.ndarray]:
     """Apply random valid transformations to a Sudoku puzzle."""
     # Create a random digit mapping: a permutation of 1..9, with zero (blank) unchanged
-    digit_map = np.concatenate([[0], np.random.permutation(np.arange(1, 10))])
+    digit_map = np.concatenate([[0], rng.permutation(np.arange(1, 10))])
     
     # Randomly decide whether to transpose
-    transpose_flag = np.random.rand() < 0.5
+    transpose_flag = rng.random() < 0.5
 
     # Generate a valid row permutation
-    bands = np.random.permutation(3)
-    row_perm = np.concatenate([b * 3 + np.random.permutation(3) for b in bands])
+    bands = rng.permutation(3)
+    row_perm = np.concatenate([b * 3 + rng.permutation(3) for b in bands])
 
     # Similarly for columns
-    stacks = np.random.permutation(3)
-    col_perm = np.concatenate([s * 3 + np.random.permutation(3) for s in stacks])
+    stacks = rng.permutation(3)
+    col_perm = np.concatenate([s * 3 + rng.permutation(3) for s in stacks])
 
     def apply_transformation(x: np.ndarray) -> np.ndarray:
         result = x.reshape(9, 9).copy()
@@ -241,4 +270,3 @@ if __name__ == "__main__":
         num_aug=args.num_aug,
         seed=args.seed,
     )
-

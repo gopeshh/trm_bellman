@@ -24,7 +24,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -118,7 +118,10 @@ def check_correct_toggles(config_dir: Path) -> AuditResult:
     )
 
 
-def check_seeds_present(results_dir: Path, summary: Dict[str, Any] = None) -> AuditResult:
+def check_seeds_present(
+    results_dir: Path,
+    summary: Optional[Dict[str, Any]] = None,
+) -> AuditResult:
     """Check 3: All 3 seeds have results per condition (checks summary if available)."""
     # If we have summary, check that all condition/seed combos are present
     if summary:

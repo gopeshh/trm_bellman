@@ -655,6 +655,7 @@ def compute_exact_baseline_summation(
     checker_fn,
     action_mask: Optional[torch.Tensor] = None,
     policy_probs: Optional[torch.Tensor] = None,
+    successor_latent: Optional[Any] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Compute exact baseline E_{a ~ π}[Q̂(s,a)] via summation over ALL discrete actions.
@@ -675,22 +676,13 @@ def compute_exact_baseline_summation(
     to ensure EXACT consistency with the environment's reward semantics,
     including STOP penalties, terminal rewards, and shaping terms.
     
-    LATENT MODE ASSUMPTION:
-        This implementation assumes the **reset-latent / episodic** setting where
-        z is reinitialized from (x, y) at each step. Both the policy distribution
-        π(a|s) and the value function V(s') are computed by calling model.policy_dist
-        and model.used_value with z=None, which reinitializes the latent.
-        
-        For **persistent-latent** experiments (episodic_latent=False), the Q-values
-        computed here are V_memoryless from Section 5.4. The exact baseline remains
-        "memoryless by design" because:
-        1. We cannot tractably enumerate all possible latent trajectories z^(0:t).
-        2. The "value of memory" analysis (Remark 5.5) treats the mismatch as a 
-           bounded residual that vanishes as L_z → 0.
-        
-        The function compute_value_of_memory_residual() separately estimates this
-        gap for monitoring purposes, but the exact baseline algorithm itself does
-        not carry latent state.
+    LATENT CARRY ORDER:
+        In reset-latent mode, leave ``successor_latent`` unset and each successor
+        value reinitializes its latent from the successor plan. In persistent
+        mode, the recurrent unroll precedes the sampled edit. Pass that post-unroll
+        carry as ``successor_latent``; it is then the same input carry for every
+        enumerated action successor. This computes the baseline on the augmented
+        state rather than a memoryless approximation.
     
     Args:
         model: TRM model with policy_dist and used_value methods
@@ -704,18 +696,15 @@ def compute_exact_baseline_summation(
         policy_probs: Optional fixed current-policy probabilities [B, A].
             Supplying these keeps the policy fixed when Q is evaluated at a
             different recurrent reference depth.
+        successor_latent: Optional post-policy-unroll recurrent carry used as
+            the input latent for every nonterminal successor value. Leave unset
+            for reset-latent evaluation.
         
     Returns:
         Tuple of:
         - exact_baseline: [B] exact E_{a ~ π}[Q̂(s, a)]
         - q_all: [B, num_actions] Q̂(s, a) for all actions
     """
-    # Require reward_shaping for exact baseline (otherwise rewards are sparse and 
-    # the exact summation doesn't provide much benefit)
-    assert env.config.reward_shaping, (
-        "exact_baseline_summation currently requires reward_shaping=True. "
-        "With sparse rewards, most Q-values would be zero until terminal."
-    )
     if getattr(env, "_enable_undo", False):
         raise NotImplementedError(
             "Exact baseline enumeration does not reconstruct history-dependent UNDO actions."
@@ -723,13 +712,17 @@ def compute_exact_baseline_summation(
     
     policy_dist = _require_method(model, "policy_dist")
     used_value = _require_method(model, "used_value")
+    if successor_latent is not None and policy_probs is None:
+        raise ValueError(
+            "Persistent augmented-state baseline enumeration requires fixed "
+            "policy_probs computed from the same post-unroll policy state."
+        )
     with torch.no_grad():
         batch_size = y_batch.shape[0]
         device = y_batch.device
         
         if policy_probs is None:
-            # Get policy distribution (always using reset-latent evaluator).
-            # In persistent mode this is the memoryless approximation.
+            # Without fixed probabilities this is the reset-latent policy path.
             dist, _ = policy_dist(x_batch, y_batch, n=n, action_mask=action_mask)
             probs = dist.probs
         else:
@@ -820,14 +813,23 @@ def compute_exact_baseline_summation(
             # Determine if this action is terminal
             # STOP is terminal only if stop_action_mode == "terminal"
             # Otherwise STOP is a no-op and we bootstrap from V(s')
-            # NOTE: We always use a reset-latent critic here. Terminal rewards
-            # already fold in the absorbing tail and therefore do not bootstrap.
+            # Terminal rewards already fold in the absorbing tail and therefore
+            # do not bootstrap. Persistent mode uses the post-policy-unroll carry
+            # shared by every possible edit successor.
             x_next_batch = dict(x_batch)
             if "remaining_edits" in x_batch:
                 x_next_batch["remaining_edits"] = (
                     x_batch["remaining_edits"] - 1
                 ).clamp_min(0)
-            v_next, _ = used_value(x_next_batch, y_next, n=n)
+            if successor_latent is None:
+                v_next, _ = used_value(x_next_batch, y_next, n=n)
+            else:
+                v_next, _ = used_value(
+                    x_next_batch,
+                    y_next,
+                    n=n,
+                    z=successor_latent,
+                )
             q_values[:, a] = rewards + gamma * v_next * (~terminal_batch).to(v_next.dtype)
         
         # Apply action mask if provided (invalid actions get -inf Q-value)

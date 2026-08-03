@@ -14,7 +14,10 @@ from typing import List, Tuple
 import numpy as np
 
 
-def generate_solved_4x4() -> np.ndarray:
+BUILD_SCHEMA_VERSION = 1
+
+
+def generate_solved_4x4(rng: random.Random) -> np.ndarray:
     """Generate a valid solved 4x4 Sudoku grid."""
     grid = np.zeros((4, 4), dtype=np.int32)
 
@@ -36,7 +39,7 @@ def generate_solved_4x4() -> np.ndarray:
             return solve(grid, pos + 1)
 
         nums = list(range(1, 5))
-        random.shuffle(nums)
+        rng.shuffle(nums)
         for num in nums:
             if is_valid(grid, row, col, num):
                 grid[row, col] = num
@@ -49,11 +52,15 @@ def generate_solved_4x4() -> np.ndarray:
     return grid
 
 
-def create_puzzle(solution: np.ndarray, num_clues: int) -> np.ndarray:
+def create_puzzle(
+    solution: np.ndarray,
+    num_clues: int,
+    rng: random.Random,
+) -> np.ndarray:
     """Remove cells from solution to create a puzzle with given number of clues."""
     puzzle = solution.copy()
     cells = list(range(16))
-    random.shuffle(cells)
+    rng.shuffle(cells)
 
     cells_to_remove = 16 - num_clues
     for i in range(cells_to_remove):
@@ -70,14 +77,13 @@ def generate_ultra_easy_puzzles(
     seed: int = 42
 ) -> List[Tuple[np.ndarray, np.ndarray]]:
     """Generate puzzle-solution pairs with 12-15 clues (1-4 empties)."""
-    random.seed(seed)
-    np.random.seed(seed)
+    rng = random.Random(seed)
 
     puzzles = []
     for _ in range(num_puzzles):
-        solution = generate_solved_4x4()
-        num_clues = random.randint(min_clues, max_clues)
-        puzzle = create_puzzle(solution, num_clues)
+        solution = generate_solved_4x4(rng)
+        num_clues = rng.randint(min_clues, max_clues)
+        puzzle = create_puzzle(solution, num_clues, rng)
         puzzles.append((puzzle, solution))
 
     return puzzles
@@ -134,6 +140,23 @@ def main():
     split_idx = int(0.9 * n)
 
     os.makedirs(args.output_dir, exist_ok=True)
+
+    with open(os.path.join(args.output_dir, "build_config.json"), "w") as f:
+        json.dump(
+            {
+                "builder": "dataset.build_4x4_trivial",
+                "build_schema_version": BUILD_SCHEMA_VERSION,
+                "seed": args.seed,
+                "num_puzzles": args.num_puzzles,
+                "min_clues": args.min_clues,
+                "max_clues": args.max_clues,
+                "generated_count": len(puzzles),
+            },
+            f,
+            indent=2,
+            sort_keys=True,
+        )
+        f.write("\n")
 
     for split_name, start_idx, end_idx in [("train", 0, split_idx), ("test", split_idx, n)]:
         split_inputs = inputs_arr[start_idx:end_idx]

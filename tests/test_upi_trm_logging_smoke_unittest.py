@@ -8,7 +8,7 @@ import random
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import numpy as np
 import torch
 
@@ -24,6 +24,10 @@ from rl.training_setup import (
 )
 from rl.upi_trm_trainer import UPITrmTrainer
 from upi_trm_train import resume_from_checkpoint, save_checkpoint
+from utils.dataset_provenance import (
+    build_dataset_provenance,
+    dataset_sample_sha256s,
+)
 
 
 def _num_actions(seq_len: int, vocab_size: int) -> int:
@@ -98,6 +102,139 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 }
             )
         )
+
+    @staticmethod
+    def _make_persistent_budget_trainer():
+        class FixedDataset:
+            seq_len = 2
+            vocab_size = 4
+            num_identifiers = 1
+
+            def __init__(self):
+                self.samples = [
+                    {
+                        "inputs": torch.ones(2, dtype=torch.long),
+                        "puzzle_identifiers": torch.tensor(0, dtype=torch.long),
+                        "initial_plan": torch.ones(2, dtype=torch.long),
+                    }
+                ]
+
+            def __len__(self):
+                return 1
+
+            def __getitem__(self, idx):
+                return self.samples[idx]
+
+        dataset = FixedDataset()
+        env_cfg = PlanEditEnvConfig(
+            max_edits=3,
+            gamma=0.9,
+            reward_shaping=False,
+            task_type="dummy",
+            vocab_size=dataset.vocab_size,
+            stop_action_mode="disabled",
+            fail_terminal_reward=-1.0,
+        )
+        env = PlanEditEnv(
+            dataset=dataset,
+            checker=lambda _x, _y: 0.0,
+            config=env_cfg,
+        )
+        env.set_stop_action_id(
+            stop_id=_num_actions(dataset.seq_len, dataset.vocab_size) - 1
+        )
+        cfg = RLConfig(
+            batch_size=8,
+            replay_capacity=32,
+            rollout_episodes_per_step=1,
+            max_edits=3,
+            gamma=env_cfg.gamma,
+            K=1,
+            inner_unroll_n=1,
+            episodic_latent=False,
+            task_name="dummy",
+            solved_threshold=None,
+            stop_action_mode="disabled",
+            reward_shaping=False,
+            fail_terminal_reward=-1.0,
+            enable_contraction=False,
+            latent_ball_radius=0.0,
+            lr_schedule="constant",
+            use_tqdm=False,
+        )
+        model = TinyRecursiveReasoningModel_ACTV1(
+            _tiny_trm_cfg(
+                dataset.seq_len,
+                dataset.vocab_size,
+                dataset.num_identifiers,
+                cfg.batch_size,
+            )
+        )
+        trainer = UPITrmTrainer(model, env, cfg, torch.device("cpu"))
+        return model, trainer, cfg
+
+    @staticmethod
+    def _stub_updates(trainer):
+        trainer.value_update = MagicMock(return_value={"loss_value": 0.0})
+        trainer.policy_update = MagicMock(return_value={"loss_policy": 0.0})
+
+    @staticmethod
+    def _checkpoint_provenance(trainer, *, generation_seed=123):
+        dataset = trainer.env.dataset
+        stop_action_id = trainer.env.stop_action_id
+        return build_dataset_provenance(
+            builder_name="tests.FixedDataset",
+            builder_version=1,
+            generation_seed=generation_seed,
+            train_record_sha256s=dataset_sample_sha256s(dataset),
+            eval_record_sha256s=dataset_sample_sha256s(dataset),
+            train_split="unit-train",
+            eval_split="unit-eval",
+            environment_config=dict(vars(trainer.env.config)),
+            action_mask_config={
+                "task_config_class": (
+                    type(trainer.env.task_config).__name__
+                    if trainer.env.task_config is not None
+                    else None
+                ),
+                "disable_constraint_masking": (
+                    trainer.env.config.disable_constraint_masking
+                ),
+                "stop_action_mode": trainer.env._stop_mode,
+                "stop_action_id": stop_action_id,
+                "enable_undo": trainer.env._enable_undo,
+                "undo_action_id": trainer.env.undo_action_id,
+                "vocab_size": trainer.env.vocab_size,
+                "num_actions": (
+                    trainer.env.undo_action_id + 1
+                    if trainer.env.undo_action_id is not None
+                    else stop_action_id + 1
+                ),
+                "masked_token_ids": [0, 1],
+            },
+        )
+
+    def _assert_replay_equal(self, expected, actual):
+        self.assertEqual(len(expected.replay), len(actual.replay))
+        for left, right in zip(expected.replay.storage, actual.replay.storage):
+            self.assertEqual(left.episode_id, right.episode_id)
+            self.assertEqual(left.timestep, right.timestep)
+            self.assertTrue(torch.equal(left.action, right.action))
+            self.assertTrue(torch.equal(left.reward, right.reward))
+            self.assertTrue(torch.equal(left.done, right.done))
+            self.assertTrue(torch.equal(left.y, right.y))
+            self.assertTrue(torch.equal(left.y_next, right.y_next))
+            for key in left.x:
+                self.assertTrue(torch.equal(left.x[key], right.x[key]))
+                self.assertTrue(torch.equal(left.x_next[key], right.x_next[key]))
+            self.assertIsNotNone(left.latent)
+            self.assertIsNotNone(right.latent)
+            self.assertIsNotNone(left.next_latent)
+            self.assertIsNotNone(right.next_latent)
+            torch.testing.assert_close(left.latent.z_H, right.latent.z_H)
+            torch.testing.assert_close(left.latent.z_L, right.latent.z_L)
+            torch.testing.assert_close(left.next_latent.z_H, right.next_latent.z_H)
+            torch.testing.assert_close(left.next_latent.z_L, right.next_latent.z_L)
 
     def test_logging_and_eval_hooks_run(self):
         """Test that logging and evaluation hooks run without errors."""
@@ -200,6 +337,181 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         self.assertEqual(identifiers, [0, 1, 2, 3, 4])
         self.assertEqual(dataset.metadata.num_puzzle_identifiers, 5)
 
+    def test_exact_cap_pauses_persistent_episode_without_optimizing(self):
+        torch.manual_seed(101)
+        _, trainer, _ = self._make_persistent_budget_trainer()
+        self._stub_updates(trainer)
+
+        first_metrics = trainer.train_step(max_env_steps_to_collect=1)
+        self.assertEqual(trainer.get_env_step_count(), 1)
+        self.assertEqual(trainer._train_step_count, 0)
+        self.assertEqual(trainer._next_episode_id, 0)
+        self.assertIsNotNone(trainer._active_episode)
+        self.assertEqual(first_metrics["optimization_performed"], 0.0)
+        trainer.value_update.assert_not_called()
+        trainer.policy_update.assert_not_called()
+
+        first = trainer.replay.storage[0]
+        second_metrics = trainer.train_step(max_env_steps_to_collect=1)
+        second = trainer.replay.storage[1]
+        self.assertEqual(second.episode_id, first.episode_id)
+        self.assertEqual(second.timestep, first.timestep + 1)
+        self.assertTrue(torch.equal(first.y_next, second.y))
+        for key in first.x_next:
+            self.assertTrue(torch.equal(first.x_next[key], second.x[key]))
+        torch.testing.assert_close(first.next_latent.z_H, second.latent.z_H)
+        torch.testing.assert_close(first.next_latent.z_L, second.latent.z_L)
+        self.assertEqual(second_metrics["optimization_performed"], 0.0)
+        trainer.value_update.assert_not_called()
+        trainer.policy_update.assert_not_called()
+
+        final_metrics = trainer.train_step(max_env_steps_to_collect=1)
+        self.assertEqual(final_metrics["optimization_performed"], 1.0)
+        self.assertEqual(trainer.get_env_step_count(), 3)
+        self.assertEqual(trainer._train_step_count, 1)
+        self.assertEqual(trainer._next_episode_id, 1)
+        self.assertIsNone(trainer._active_episode)
+        trainer.value_update.assert_called_once()
+        trainer.policy_update.assert_called_once()
+
+    def test_collection_pause_schedule_matches_uninterrupted_episode(self):
+        torch.manual_seed(202)
+        _, uninterrupted, _ = self._make_persistent_budget_trainer()
+        self._stub_updates(uninterrupted)
+        torch.manual_seed(303)
+        uninterrupted.train_step()
+        uninterrupted_next_rng = torch.rand(4)
+
+        torch.manual_seed(202)
+        _, paused, _ = self._make_persistent_budget_trainer()
+        self._stub_updates(paused)
+        torch.manual_seed(303)
+        for _ in range(3):
+            paused.train_step(max_env_steps_to_collect=1)
+        paused_next_rng = torch.rand(4)
+
+        self._assert_replay_equal(uninterrupted, paused)
+        torch.testing.assert_close(uninterrupted_next_rng, paused_next_rng)
+        self.assertEqual(uninterrupted._train_step_count, paused._train_step_count)
+        self.assertEqual(uninterrupted._next_episode_id, paused._next_episode_id)
+        self.assertEqual(
+            uninterrupted.value_update.call_count, paused.value_update.call_count
+        )
+        self.assertEqual(
+            uninterrupted.policy_update.call_count, paused.policy_update.call_count
+        )
+
+    def test_schema_v3_resume_continues_persistent_episode_exactly(self):
+        torch.manual_seed(404)
+        model, original, cfg = self._make_persistent_budget_trainer()
+        provenance = self._checkpoint_provenance(original)
+        self._stub_updates(original)
+        random.seed(505)
+        np.random.seed(505)
+        torch.manual_seed(505)
+        original.train_step(max_env_steps_to_collect=1)
+        saved_transition = original.replay.storage[0]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                original,
+                step=original.get_env_step_count(),
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+            )
+            original.train_step(max_env_steps_to_collect=2)
+            expected_python = random.random()
+            expected_numpy = float(np.random.rand())
+            expected_torch = torch.rand(4)
+
+            torch.manual_seed(999)
+            restored_model, restored, _ = self._make_persistent_budget_trainer()
+            self._stub_updates(restored)
+            start_update = resume_from_checkpoint(
+                checkpoint_path,
+                restored_model,
+                restored,
+                "cpu",
+                expected_dataset_provenance=provenance,
+            )
+
+            self.assertEqual(start_update, 0)
+            self.assertEqual(restored.get_env_step_count(), 1)
+            self.assertIsNotNone(restored._active_episode)
+            self.assertEqual(restored._active_episode["timestep"], 1)
+            torch.testing.assert_close(
+                restored._active_episode["latent"].z_H,
+                saved_transition.next_latent.z_H,
+            )
+            torch.testing.assert_close(
+                restored._active_episode["latent"].z_L,
+                saved_transition.next_latent.z_L,
+            )
+
+            restored.train_step(max_env_steps_to_collect=2)
+            actual_python = random.random()
+            actual_numpy = float(np.random.rand())
+            actual_torch = torch.rand(4)
+
+        self._assert_replay_equal(original, restored)
+        self.assertEqual(expected_python, actual_python)
+        self.assertEqual(expected_numpy, actual_numpy)
+        torch.testing.assert_close(expected_torch, actual_torch)
+        self.assertEqual(original._train_step_count, restored._train_step_count)
+        self.assertEqual(original._next_episode_id, restored._next_episode_id)
+        self.assertIsNone(restored._active_episode)
+
+    def test_legacy_checkpoint_requires_explicit_weights_only_warm_start(self):
+        torch.manual_seed(606)
+        model, trainer, cfg = self._make_persistent_budget_trainer()
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=0,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=self._checkpoint_provenance(trainer),
+            )
+            payload = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            payload["checkpoint_schema_version"] = 2
+            legacy_path = str(Path(tmp) / "legacy.pt")
+            torch.save(payload, legacy_path)
+
+            _, strict_trainer, _ = self._make_persistent_budget_trainer()
+            with self.assertRaisesRegex(RuntimeError, "schema-v3"):
+                resume_from_checkpoint(
+                    legacy_path,
+                    strict_trainer.model,
+                    strict_trainer,
+                    "cpu",
+                )
+
+            warm_model, warm_trainer, _ = self._make_persistent_budget_trainer()
+            before = {
+                key: value.detach().clone()
+                for key, value in warm_model.state_dict().items()
+            }
+            with self.assertRaisesRegex(RuntimeError, "resume is refused"):
+                resume_from_checkpoint(
+                    legacy_path,
+                    warm_model,
+                    warm_trainer,
+                    "cpu",
+                    allow_legacy_warm_start=True,
+                )
+            for key, value in warm_model.state_dict().items():
+                torch.testing.assert_close(value, before[key])
+            self.assertEqual(warm_trainer.get_env_step_count(), 0)
+            self.assertEqual(len(warm_trainer.replay), 0)
+            self.assertIsNone(warm_trainer._active_episode)
+
     def test_checkpoint_roundtrip_restores_target_replay_and_counters(self):
         dataset = DummyPuzzleDataset(num_instances=4, seq_len=8, vocab_size=16)
         env_cfg = PlanEditEnvConfig(
@@ -231,18 +543,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             next(iter(trainer.target_model.parameters())).fill_(0.123)
 
         with tempfile.TemporaryDirectory() as tmp:
-            provenance = {
-                "train_split": "train",
-                "eval_split": "test",
-                "train_pool_sha256": "train-hash",
-                "eval_pool_sha256": "eval-hash",
-                "train_count": 5,
-                "eval_count": 5,
-                "seq_len": dataset.seq_len,
-                "vocab_size": dataset.vocab_size,
-                "num_identifiers": dataset.num_identifiers,
-                "eval_puzzle_id_offset": dataset.num_identifiers,
-            }
+            provenance = self._checkpoint_provenance(trainer)
             random.seed(1234)
             np.random.seed(1234)
             torch.manual_seed(1234)
@@ -262,7 +563,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 map_location="cpu",
                 weights_only=False,
             )
-            self.assertEqual(checkpoint_payload["checkpoint_schema_version"], 2)
+            self.assertEqual(checkpoint_payload["checkpoint_schema_version"], 3)
             self.assertEqual(checkpoint_payload["dataset_provenance"], provenance)
             self.assertIn("rng_state", checkpoint_payload)
 
@@ -334,7 +635,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             return model, UPITrmTrainer(model, env, cfg, torch.device("cpu")), cfg
 
         model, trainer, cfg = make_trainer()
-        saved_provenance = {"train_pool_sha256": "saved", "eval_pool_sha256": "eval"}
+        saved_provenance = self._checkpoint_provenance(trainer)
         with tempfile.TemporaryDirectory() as tmp:
             checkpoint_path = save_checkpoint(
                 model,
@@ -349,19 +650,52 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 key: value.detach().clone()
                 for key, value in restored_model.state_dict().items()
             }
-            with self.assertRaisesRegex(RuntimeError, "provenance mismatch"):
-                resume_from_checkpoint(
-                    checkpoint_path,
-                    restored_model,
-                    restored,
-                    "cpu",
-                    expected_dataset_provenance={
-                        "train_pool_sha256": "different",
-                        "eval_pool_sha256": "eval",
-                    },
-                )
+            python_rng_before = random.getstate()
+            numpy_rng_before = np.random.get_state()
+            torch_rng_before = torch.random.get_rng_state().clone()
+            with patch.object(
+                restored_model,
+                "load_state_dict",
+                wraps=restored_model.load_state_dict,
+            ) as model_load, patch.object(
+                restored.value_opt,
+                "load_state_dict",
+                wraps=restored.value_opt.load_state_dict,
+            ) as value_optimizer_load, patch.object(
+                restored.policy_opt,
+                "load_state_dict",
+                wraps=restored.policy_opt.load_state_dict,
+            ) as policy_optimizer_load, patch.object(
+                restored.replay,
+                "clear",
+                wraps=restored.replay.clear,
+            ) as replay_clear, patch(
+                "upi_trm_train._restore_rng_state"
+            ) as restore_rng:
+                with self.assertRaisesRegex(RuntimeError, "provenance mismatch"):
+                    resume_from_checkpoint(
+                        checkpoint_path,
+                        restored_model,
+                        restored,
+                        "cpu",
+                        expected_dataset_provenance=self._checkpoint_provenance(
+                            restored,
+                            generation_seed=999,
+                        ),
+                    )
+            model_load.assert_not_called()
+            value_optimizer_load.assert_not_called()
+            policy_optimizer_load.assert_not_called()
+            replay_clear.assert_not_called()
+            restore_rng.assert_not_called()
             for key, value in restored_model.state_dict().items():
                 torch.testing.assert_close(value, before[key])
+            self.assertEqual(random.getstate(), python_rng_before)
+            numpy_rng_after = np.random.get_state()
+            self.assertEqual(numpy_rng_after[0], numpy_rng_before[0])
+            np.testing.assert_array_equal(numpy_rng_after[1], numpy_rng_before[1])
+            self.assertEqual(numpy_rng_after[2:], numpy_rng_before[2:])
+            torch.testing.assert_close(torch.random.get_rng_state(), torch_rng_before)
 
 
 if __name__ == "__main__":

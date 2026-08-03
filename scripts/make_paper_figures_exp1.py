@@ -22,7 +22,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -89,7 +89,7 @@ def load_per_state_csv(csv_path: Path) -> List[Dict]:
     with open(csv_path, "r") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            parsed = {}
+            parsed: Dict[str, Any] = {}
             for k, v in row.items():
                 try:
                     parsed[k] = float(v)
@@ -419,8 +419,8 @@ def create_unroll_sensitivity_figure(
             ax = fig.add_subplot(gs[row, col])
 
             for model in ["model_a", "model_b"]:
-                means = []
-                stds = []
+                means: List[float] = []
+                stds: List[float] = []
                 for n2 in n2_values:
                     stats = data[model].get(n2, {}).get(metric, AggregatedStats(0, 0, 0))
                     means.append(stats.mean)
@@ -431,12 +431,12 @@ def create_unroll_sensitivity_figure(
 
                 if metric == "argmax_agree":
                     # Use Wilson CI for error bars
-                    ci_lower = []
-                    ci_upper = []
+                    ci_lower: List[float] = []
+                    ci_upper: List[float] = []
                     for n2 in n2_values:
                         stats = data[model].get(n2, {}).get(metric, AggregatedStats(0, 0, 0, 0, 1))
-                        ci_lower.append(max(0, stats.mean - (stats.ci_lower or 0)))
-                        ci_upper.append(max(0, (stats.ci_upper or 1) - stats.mean))
+                        ci_lower.append(max(0.0, stats.mean - (stats.ci_lower or 0.0)))
+                        ci_upper.append(max(0.0, (stats.ci_upper or 1.0) - stats.mean))
                     yerr = [ci_lower, ci_upper]
                 else:
                     yerr = stds
@@ -496,13 +496,13 @@ def create_radius_sweep_figure(
             ax = fig.add_subplot(gs[row, col])
 
             for i, model in enumerate(["model_a", "model_b"]):
-                means = []
-                yerr_list = []
+                means: List[float] = []
+                yerr_list: List[float] = []
 
                 for R in radii:
                     if R not in data:
-                        means.append(0)
-                        yerr_list.append(0)
+                        means.append(0.0)
+                        yerr_list.append(0.0)
                         continue
 
                     stats = data[R].get(model, {}).get(metric, AggregatedStats(0, 0, 0))

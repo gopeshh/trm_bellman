@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 import torch
 import torch.nn as nn
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from rl.algos.a2c import A2CTrainer, A2CConfig
 from rl.algos.dqn import (
@@ -284,6 +284,133 @@ class TestRLAlgos(unittest.TestCase):
 
         self.assertEqual(q_network._input_dim, 8)
         self.assertEqual(q_values.shape, (1, self.action_dim))
+
+    def test_baseline_state_batches_preserve_remaining_edits(self):
+        states = [
+            {
+                "inputs": torch.zeros(10),
+                "puzzle_identifiers": torch.tensor(index),
+                "remaining_edits": torch.tensor(clock),
+            }
+            for index, clock in enumerate((7, 3))
+        ]
+        trainers = [
+            PPOTrainer(
+                self.model,
+                self.env,
+                PPOConfig(num_steps=2, inner_unroll_n=0),
+            ),
+            A2CTrainer(
+                self.model,
+                self.env,
+                A2CConfig(num_steps=2, inner_unroll_n=0),
+            ),
+            DQNTrainer(
+                self.model,
+                self.env,
+                DQNConfig(min_buffer_size=1, batch_size=1, inner_unroll_n=0),
+            ),
+        ]
+
+        for trainer in trainers:
+            with self.subTest(trainer=type(trainer).__name__):
+                batch = trainer._stack_x_batch(states)
+                self.assertIn("remaining_edits", batch)
+                self.assertEqual(batch["remaining_edits"].tolist(), [7, 3])
+
+    def test_baseline_state_batch_rejects_inconsistent_clock_presence(self):
+        trainer = DQNTrainer(
+            self.model,
+            self.env,
+            DQNConfig(min_buffer_size=1, batch_size=1, inner_unroll_n=0),
+        )
+        states = [
+            {
+                "inputs": torch.zeros(10),
+                "puzzle_identifiers": torch.tensor(0),
+                "remaining_edits": torch.tensor(2),
+            },
+            {
+                "inputs": torch.zeros(10),
+                "puzzle_identifiers": torch.tensor(1),
+            },
+        ]
+
+        with self.assertRaisesRegex(ValueError, "mixes states"):
+            trainer._stack_x_batch(states)
+
+    def test_dqn_select_action_rejects_all_invalid_and_wrong_shape_masks(self):
+        trainer = DQNTrainer(
+            self.model,
+            self.env,
+            DQNConfig(
+                min_buffer_size=1,
+                batch_size=1,
+                inner_unroll_n=0,
+                epsilon_start=1.0,
+                epsilon_end=1.0,
+            ),
+        )
+        x, y = self.env.reset.return_value
+
+        with patch("rl.algos.dqn.random.random", return_value=0.0):
+            with self.assertRaisesRegex(RuntimeError, "no valid actions"):
+                trainer.select_action(
+                    x,
+                    y,
+                    action_mask=torch.zeros(self.action_dim, dtype=torch.bool),
+                )
+            with self.assertRaisesRegex(ValueError, "action mask"):
+                trainer.select_action(
+                    x,
+                    y,
+                    action_mask=torch.ones(self.action_dim - 1, dtype=torch.bool),
+                )
+
+    def test_dqn_select_action_samples_only_valid_actions(self):
+        trainer = DQNTrainer(
+            self.model,
+            self.env,
+            DQNConfig(
+                min_buffer_size=1,
+                batch_size=1,
+                inner_unroll_n=0,
+                epsilon_start=1.0,
+                epsilon_end=1.0,
+            ),
+        )
+        x, y = self.env.reset.return_value
+        mask = torch.tensor([False, False, True, False, True])
+
+        with patch("rl.algos.dqn.random.random", return_value=0.0):
+            actions = {
+                trainer.select_action(x, y, action_mask=mask)
+                for _ in range(100)
+            }
+        self.assertEqual(actions, {2, 4})
+
+        one_valid = torch.tensor([False, True, False, False, False])
+        with patch("rl.algos.dqn.random.random", return_value=0.0):
+            self.assertEqual(
+                trainer.select_action(x, y, action_mask=one_valid),
+                1,
+            )
+
+    def test_dqn_qnetwork_rejects_all_invalid_batch_row(self):
+        q_network = QNetwork(
+            MockNoRecStubModel(hidden_dim=8, seq_len=4),
+            num_actions=self.action_dim,
+        )
+        x = {
+            "inputs": torch.zeros(2, 10),
+            "puzzle_identifiers": torch.arange(2),
+        }
+        y = torch.zeros(2, 10)
+        mask = torch.ones(2, self.action_dim, dtype=torch.bool)
+        mask[1] = False
+
+        with self.assertRaisesRegex(RuntimeError, r"batch rows \[1\]"):
+            q_network(x, y, n=0, action_mask=mask)
 
     def test_dqn_train_batch_keeps_masks_when_first_transition_is_terminal(self):
         config = DQNConfig(

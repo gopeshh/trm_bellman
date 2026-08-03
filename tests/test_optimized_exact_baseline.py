@@ -207,6 +207,47 @@ class TestOptimizedExactBaseline(unittest.TestCase):
             torch.ones(self.batch_size, dtype=torch.long),
         )
 
+    def test_persistent_successor_latent_is_used_for_every_valid_action(self):
+        action_mask = torch.zeros(
+            self.batch_size, self.num_actions, dtype=torch.bool
+        )
+        action_mask[:, :2] = True
+        fixed_probs = torch.zeros(self.batch_size, self.num_actions)
+        fixed_probs[:, 0] = 0.4
+        fixed_probs[:, 1] = 0.6
+        successor_latent = object()
+        self.model.used_value.reset_mock()
+
+        compute_exact_baseline_summation(
+            model=self.model,
+            x_batch=self.x_batch,
+            y_batch=self.y_batch,
+            env=self.env,
+            n=1,
+            gamma=self.gamma,
+            checker_fn=self.checker_fn,
+            action_mask=action_mask,
+            policy_probs=fixed_probs,
+            successor_latent=successor_latent,
+        )
+
+        self.assertEqual(self.model.used_value.call_count, 2)
+        for call in self.model.used_value.call_args_list:
+            self.assertIs(call.kwargs["z"], successor_latent)
+
+    def test_persistent_successor_latent_requires_fixed_policy(self):
+        with self.assertRaisesRegex(ValueError, "requires fixed policy_probs"):
+            compute_exact_baseline_summation(
+                model=self.model,
+                x_batch=self.x_batch,
+                y_batch=self.y_batch,
+                env=self.env,
+                n=1,
+                gamma=self.gamma,
+                checker_fn=self.checker_fn,
+                successor_latent=object(),
+            )
+
 
 class TestExactBaselineEnvironmentParity(unittest.TestCase):
     def test_solution_reward_matches_environment_transition(self):

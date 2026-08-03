@@ -6,7 +6,7 @@ TinyRecursiveReasoningModel_ACTV1 and are used by both UPITrmTrainer and the
 evaluation helpers in evaluators/rl_plan_evaluator.py.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Sequence
 
 import torch
 
@@ -93,6 +93,64 @@ def prepare_batch_x(
         elif not batched:
             remaining = remaining.reshape(-1)[:1]
         batch["remaining_edits"] = remaining.to(device=device, dtype=torch.long)
+    return batch
+
+
+def stack_batch_states(
+    states: Sequence[Dict[str, torch.Tensor]],
+    device: torch.device,
+) -> Dict[str, torch.Tensor]:
+    """Stack replay or rollout states without dropping the edit clock.
+
+    ``remaining_edits`` is transition-relevant state. A mixed batch where only
+    some records contain it is malformed, so fail instead of silently training
+    on a projection of the state.
+    """
+
+    if not states:
+        raise ValueError("Cannot stack an empty state batch.")
+
+    required = ("inputs", "puzzle_identifiers")
+    for index, state in enumerate(states):
+        missing = [key for key in required if key not in state]
+        if missing:
+            raise KeyError(
+                f"State {index} is missing required fields: {missing}"
+            )
+
+    inputs = torch.stack([state["inputs"] for state in states], dim=0).to(device)
+    puzzle_ids = torch.stack(
+        [normalize_puzzle_id(state["puzzle_identifiers"]) for state in states],
+        dim=0,
+    ).to(device)
+    if puzzle_ids.dim() > 1:
+        puzzle_ids = puzzle_ids.squeeze(-1)
+
+    batch = {
+        "inputs": inputs,
+        "puzzle_identifiers": puzzle_ids,
+    }
+
+    clock_presence = ["remaining_edits" in state for state in states]
+    if any(clock_presence) and not all(clock_presence):
+        raise ValueError(
+            "Replay/rollout batch mixes states with and without remaining_edits."
+        )
+    if all(clock_presence):
+        clocks = []
+        for index, state in enumerate(states):
+            clock = state["remaining_edits"]
+            if clock.numel() != 1:
+                raise ValueError(
+                    "remaining_edits must be scalar per state; "
+                    f"state {index} has shape {tuple(clock.shape)}."
+                )
+            clocks.append(clock.reshape(()))
+        batch["remaining_edits"] = torch.stack(clocks, dim=0).to(
+            device=device,
+            dtype=torch.long,
+        )
+
     return batch
 
 

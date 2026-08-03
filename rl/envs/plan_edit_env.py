@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import copy
+from dataclasses import asdict, dataclass
 from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
@@ -159,6 +160,202 @@ class PlanEditEnv:
         Only needed if using non-standard action layout.
         """
         self.undo_action_id = undo_id
+
+    @staticmethod
+    def _clone_checkpoint_value(value: Any) -> Any:
+        """Clone mutable environment state without retaining live aliases."""
+
+        if torch.is_tensor(value):
+            return value.detach().clone()
+        if isinstance(value, dict):
+            return {
+                key: PlanEditEnv._clone_checkpoint_value(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [PlanEditEnv._clone_checkpoint_value(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(PlanEditEnv._clone_checkpoint_value(item) for item in value)
+        return copy.deepcopy(value)
+
+    def checkpoint_state(self) -> dict[str, Any]:
+        """Return the exact mutable state needed to continue one live episode.
+
+        Dataset identity and global RNG state belong to the run checkpoint, not
+        this environment payload.  The action mask is retained as an integrity
+        check: a restored nonterminal state must deterministically reconstruct
+        the same valid-action set.
+        """
+
+        initialized = self.x is not None and self.y is not None
+        return {
+            "schema_version": 1,
+            "initialized": initialized,
+            "config": asdict(self.config),
+            "stop_action_id": self.stop_action_id,
+            "undo_action_id": self.undo_action_id,
+            "x": self._clone_checkpoint_value(self.x),
+            "y": self._clone_checkpoint_value(self.y),
+            "step_count": int(self.step_count),
+            "done": bool(self.done),
+            "cached_phi": copy.deepcopy(getattr(self, "_cached_phi", None)),
+            "action_mask": self._clone_checkpoint_value(self._action_mask),
+            "original_inputs": self._clone_checkpoint_value(self._original_inputs),
+            "stop_penalty": float(self._stop_penalty),
+            "edit_history": self._clone_checkpoint_value(self._edit_history),
+        }
+
+    def load_checkpoint_state(self, state: dict[str, Any]) -> None:
+        """Restore a state produced by :meth:`checkpoint_state`, fail closed.
+
+        The constraint tracker is derived state.  It is rebuilt from ``x`` and
+        ``y`` rather than deserialized, then its action mask is compared with
+        the saved mask.  This catches a corrupt clock, plan, or mask before the
+        next interaction can be collected.
+        """
+
+        if not isinstance(state, dict):
+            raise TypeError("PlanEditEnv checkpoint state must be a dictionary.")
+        if int(state.get("schema_version", 0)) != 1:
+            raise RuntimeError(
+                "Unsupported PlanEditEnv checkpoint schema: "
+                f"{state.get('schema_version')!r}."
+            )
+        if state.get("config") != asdict(self.config):
+            raise RuntimeError("PlanEditEnv checkpoint configuration mismatch.")
+        if state.get("stop_action_id") != self.stop_action_id:
+            raise RuntimeError("PlanEditEnv checkpoint STOP-action mismatch.")
+        if state.get("undo_action_id") != self.undo_action_id:
+            raise RuntimeError("PlanEditEnv checkpoint UNDO-action mismatch.")
+
+        initialized = bool(state.get("initialized", False))
+        if not initialized:
+            if state.get("x") is not None or state.get("y") is not None:
+                raise RuntimeError(
+                    "Uninitialized PlanEditEnv checkpoint contains episode state."
+                )
+            if (
+                int(state.get("step_count", 0)) != 0
+                or bool(state.get("done", False))
+                or state.get("action_mask") is not None
+                or state.get("original_inputs") is not None
+                or state.get("edit_history")
+            ):
+                raise RuntimeError(
+                    "Uninitialized PlanEditEnv checkpoint contains mutable episode data."
+                )
+            self.step_count = 0
+            self.x = None
+            self.y = None
+            self.done = False
+            self._cached_phi = None
+            self._original_inputs = None
+            self._action_mask = None
+            self._stop_penalty = 0.0
+            self._edit_history = []
+            self._constraint_tracker = None
+            self._use_incremental_masking = False
+            return
+
+        if state.get("x") is None or state.get("y") is None:
+            raise RuntimeError("Initialized PlanEditEnv checkpoint is missing x or y.")
+        step_count = int(state.get("step_count", -1))
+        if step_count < 0 or step_count > self.config.max_edits:
+            raise RuntimeError(
+                "PlanEditEnv checkpoint has invalid step_count "
+                f"{step_count} for max_edits={self.config.max_edits}."
+            )
+        done = bool(state.get("done", False))
+        if not done and step_count >= self.config.max_edits:
+            raise RuntimeError(
+                "Nonterminal PlanEditEnv checkpoint has exhausted its edit budget."
+            )
+
+        restored_x = self._clone_checkpoint_value(state["x"])
+        restored_y = self._clone_checkpoint_value(state["y"])
+        if isinstance(restored_x, dict):
+            remaining = restored_x.get("remaining_edits")
+            if remaining is None or not torch.is_tensor(remaining) or remaining.numel() != 1:
+                raise RuntimeError(
+                    "PlanEditEnv checkpoint is missing its scalar remaining_edits clock."
+                )
+            expected_remaining = max(self.config.max_edits - step_count, 0)
+            if int(remaining.reshape(()).item()) != expected_remaining:
+                raise RuntimeError(
+                    "PlanEditEnv checkpoint remaining_edits is inconsistent with "
+                    f"step_count ({int(remaining.reshape(()).item())} != "
+                    f"{expected_remaining})."
+                )
+
+        edit_history = self._clone_checkpoint_value(state.get("edit_history", []))
+        if self._enable_undo:
+            if not edit_history:
+                raise RuntimeError(
+                    "UNDO-enabled PlanEditEnv checkpoint has no edit history."
+                )
+            history_tail = edit_history[-1]
+            tail_tensor = (
+                history_tail if torch.is_tensor(history_tail) else torch.as_tensor(history_tail)
+            )
+            plan_tensor = restored_y if torch.is_tensor(restored_y) else torch.as_tensor(restored_y)
+            if not torch.equal(tail_tensor, plan_tensor):
+                raise RuntimeError(
+                    "PlanEditEnv checkpoint edit-history tail does not match y."
+                )
+        elif edit_history:
+            raise RuntimeError(
+                "UNDO-disabled PlanEditEnv checkpoint contains edit history."
+            )
+
+        self.x = restored_x
+        self.y = restored_y
+        self.step_count = step_count
+        self.done = done
+        self._cached_phi = copy.deepcopy(state.get("cached_phi"))
+        self._stop_penalty = float(state.get("stop_penalty", 0.0))
+        self._edit_history = edit_history
+
+        saved_mask = self._clone_checkpoint_value(state.get("action_mask"))
+        saved_original_inputs = self._clone_checkpoint_value(
+            state.get("original_inputs")
+        )
+        if done:
+            # A terminal state's mask is never consumed and may reflect the
+            # pre-terminal plan because step() intentionally skips recomputing it.
+            self._action_mask = saved_mask
+            self._original_inputs = saved_original_inputs
+            self._constraint_tracker = None
+            self._use_incremental_masking = False
+            return
+
+        self._init_constraint_tracker()
+        self._action_mask = None
+        self._compute_action_mask()
+        reconstructed_mask = self._action_mask
+        if (saved_mask is None) != (reconstructed_mask is None):
+            raise RuntimeError(
+                "PlanEditEnv checkpoint action-mask presence is inconsistent."
+            )
+        if saved_mask is not None:
+            if not torch.is_tensor(saved_mask):
+                saved_mask = torch.as_tensor(saved_mask, dtype=torch.bool)
+            if not torch.equal(
+                saved_mask.to(device=reconstructed_mask.device, dtype=torch.bool),
+                reconstructed_mask.to(dtype=torch.bool),
+            ):
+                raise RuntimeError(
+                    "PlanEditEnv checkpoint action mask does not match restored state."
+                )
+        if saved_original_inputs is not None and self._original_inputs is not None:
+            if not torch.is_tensor(saved_original_inputs):
+                saved_original_inputs = torch.as_tensor(saved_original_inputs)
+            if not torch.equal(
+                saved_original_inputs.to(self._original_inputs.device),
+                self._original_inputs,
+            ):
+                raise RuntimeError(
+                    "PlanEditEnv checkpoint original inputs do not match restored state."
+                )
 
     def reset(self, idx: Optional[int] = None) -> Tuple[Any, Any]:
         """

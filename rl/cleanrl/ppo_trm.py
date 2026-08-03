@@ -28,7 +28,7 @@ import json
 import random
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -53,6 +53,11 @@ except ImportError:  # pragma: no cover
 
 
 ObsType = Union[torch.Tensor, Dict[str, torch.Tensor]]
+
+
+class _ValueAgent(Protocol):
+    def get_value(self, obs: ObsType) -> torch.Tensor:
+        ...
 
 
 def _parse_args() -> argparse.Namespace:
@@ -185,7 +190,61 @@ def _episode_done_flags(
     """Return episode-boundary flags for rollout and GAE bookkeeping."""
     if terminated.shape != truncated.shape:
         raise ValueError("terminated and truncated flags must have matching shapes")
+    if rewards.ndim != 1 or terminated.ndim != 1:
+        raise ValueError("reward and boundary batches must be one-dimensional")
     return np.logical_or(terminated, truncated)
+
+
+def _apply_truncation_bootstrap(
+    rewards: torch.Tensor,
+    terminated: np.ndarray,
+    truncated: np.ndarray,
+    infos: Sequence[Mapping[str, Any]],
+    agent: _ValueAgent,
+    device: torch.device,
+    *,
+    gamma: float,
+) -> torch.Tensor:
+    """Bootstrap a time-limit transition once, before cutting the GAE trace."""
+
+    if terminated.shape != truncated.shape:
+        raise ValueError("terminated and truncated flags must have matching shapes")
+    if rewards.numel() != terminated.size or len(infos) != terminated.size:
+        raise ValueError(
+            "reward, boundary flag, and info batches must have matching sizes"
+        )
+
+    corrected = rewards.clone()
+    for index in range(terminated.size):
+        if not truncated[index] or terminated[index]:
+            continue
+        final_obs = infos[index].get("final_observation")
+        if final_obs is None:
+            raise RuntimeError(
+                "A truncated transition is missing final_observation; "
+                "cannot compute its bootstrap value."
+            )
+        with torch.no_grad():
+            final_obs_t = obs_to_device(final_obs, device)
+            if isinstance(final_obs_t, dict):
+                final_obs_t = {
+                    key: (
+                        value.unsqueeze(0)
+                        if torch.is_tensor(value) and value.ndim == 1
+                        else value
+                    )
+                    for key, value in final_obs_t.items()
+                }
+            elif final_obs_t.ndim == 1:
+                final_obs_t = final_obs_t.unsqueeze(0)
+            terminal_value = agent.get_value(final_obs_t).reshape(-1)
+        if terminal_value.numel() != 1:
+            raise ValueError(
+                "Expected one bootstrap value per truncated transition, got "
+                f"shape {tuple(terminal_value.shape)}"
+            )
+        corrected[index] += gamma * terminal_value.item()
+    return corrected
 
 
 def _compute_gae(
@@ -371,6 +430,27 @@ def _write_jsonl(path: Path, record: Mapping[str, Any]) -> None:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+def _validate_exact_interaction_budget(
+    total_timesteps: int,
+    num_envs: int,
+    num_steps: int,
+) -> int:
+    """Return the rollout batch size or reject a silently rounded budget."""
+
+    batch_size = num_envs * num_steps
+    if total_timesteps <= 0:
+        raise ValueError("total_timesteps must be positive")
+    if batch_size <= 0:
+        raise ValueError("num_envs * num_steps must be positive")
+    if total_timesteps % batch_size != 0:
+        raise ValueError(
+            "Exact interaction accounting requires total_timesteps to be "
+            "divisible by num_envs * num_steps; got "
+            f"{total_timesteps} % {batch_size} = {total_timesteps % batch_size}."
+        )
+    return batch_size
+
+
 def run(config: Mapping[str, Any]) -> Dict[str, Any]:
     config = dict(config)
     seed = _config_int(config, "seed", 0)
@@ -389,7 +469,11 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
     total_timesteps = _config_int(config, "total_timesteps", 100000)
     num_envs = envs.num_envs
     num_steps = _config_int(config, "num_steps", 125)
-    batch_size = num_envs * num_steps
+    batch_size = _validate_exact_interaction_budget(
+        total_timesteps,
+        num_envs,
+        num_steps,
+    )
     num_minibatches = _config_int(config, "num_minibatches", 4)
     minibatch_size = batch_size // max(num_minibatches, 1)
     update_epochs = _config_int(config, "update_epochs", 4)
@@ -471,22 +555,18 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
             next_obs_env, reward, terminated, truncated, infos = envs.step(action.detach().cpu().numpy())
             reward_t = torch.as_tensor(reward, device=device, dtype=torch.float32)
 
-            # Bootstrap value at truncation (agent is still alive, not terminal)
-            for idx in range(num_envs):
-                if truncated[idx] and not terminated[idx]:
-                    final_obs = infos[idx].get("final_observation")
-                    if final_obs is not None:
-                        with torch.no_grad():
-                            final_obs_t = obs_to_device(final_obs, device)
-                            if isinstance(final_obs_t, dict):
-                                final_obs_t = {
-                                    k: v.unsqueeze(0) if torch.is_tensor(v) and v.ndim == 1 else v
-                                    for k, v in final_obs_t.items()
-                                }
-                            else:
-                                final_obs_t = final_obs_t.unsqueeze(0) if final_obs_t.ndim == 1 else final_obs_t
-                            terminal_value = agent.get_value(final_obs_t).reshape(-1)
-                        reward_t[idx] += gamma * terminal_value.item()
+            # Bootstrap value at truncation (agent is still alive, not terminal).
+            # GAE then treats truncation as an episode boundary, so this value is
+            # included exactly once and the reset state's trace cannot leak back.
+            reward_t = _apply_truncation_bootstrap(
+                reward_t,
+                terminated,
+                truncated,
+                infos,
+                agent,
+                device,
+                gamma=gamma,
+            )
 
             reward_storage.append(reward_t)
             next_done = torch.as_tensor(
@@ -613,7 +693,8 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
         "eval_pool_sha256": bundle.eval_pool_sha256 if bundle else None,
         "eval_puzzle_id_offset": bundle.eval_puzzle_id_offset if bundle else None,
         "action_space_n": bundle.num_actions if bundle else _config_int(config, "action_dim", 2),
-        "train_steps": total_timesteps,
+        "train_steps": global_step,
+        "requested_train_steps": total_timesteps,
         "eval_freq": eval_interval,
         "eval_episodes": _config_int(config, "eval_episodes", 20),
         "device": str(device),

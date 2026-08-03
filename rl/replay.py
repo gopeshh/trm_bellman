@@ -7,7 +7,7 @@ transitions during RL training.
 
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Deque, Dict, List, Optional, Tuple, Union
+from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 
@@ -28,10 +28,15 @@ class ReplayLatent:
 @dataclass
 class Transition:
     """
-    A single transition (s, a, r, s', done) in the plan-space MDP.
+    One transition in either the episodic or clock-complete augmented MDP.
+
+    ``x`` retains the transition-relevant ``remaining_edits`` clock. In
+    persistent mode, ``latent`` is the carry before the current recurrent
+    unroll and ``next_latent`` is the post-unroll carry passed to the successor
+    state. The edit action is applied after that recurrent unroll.
     
     Attributes:
-        x: Instance state (dict with "inputs", "puzzle_identifiers")
+        x: Instance state, including ``remaining_edits`` when available
         y: Current plan tensor or dict
         action: Action taken (edit or STOP)
         reward: Reward received
@@ -56,6 +61,177 @@ class Transition:
     latent: Optional[ReplayLatent] = None
     next_latent: Optional[ReplayLatent] = None
     behavior_log_prob: Optional[torch.Tensor] = None
+
+
+class ReplayIntegrityError(ValueError):
+    """Raised when replay records do not form valid augmented transitions."""
+
+
+def _scalar_bool(value: torch.Tensor, *, label: str) -> bool:
+    if not torch.is_tensor(value) or value.numel() != 1:
+        raise ReplayIntegrityError(f"`{label}` must be a scalar tensor.")
+    if value.dtype != torch.bool:
+        raise ReplayIntegrityError(f"`{label}` must have boolean dtype.")
+    return bool(value.detach().cpu().reshape(()).item())
+
+
+def _clock_value(state: StateDict, *, label: str) -> Optional[int]:
+    if "remaining_edits" not in state:
+        return None
+    value = state["remaining_edits"]
+    if not torch.is_tensor(value) or value.numel() != 1:
+        raise ReplayIntegrityError(
+            f"`{label}.remaining_edits` must be a scalar tensor."
+        )
+    scalar = value.detach().cpu().reshape(()).item()
+    integer = int(scalar)
+    if float(scalar) != float(integer) or integer < 0:
+        raise ReplayIntegrityError(
+            f"`{label}.remaining_edits` must be a nonnegative integer, got {scalar!r}."
+        )
+    return integer
+
+
+def _tensor_equal(left: torch.Tensor, right: torch.Tensor) -> bool:
+    return (
+        left.shape == right.shape
+        and left.dtype == right.dtype
+        and left.device == right.device
+        and torch.equal(left, right)
+    )
+
+
+def _value_equal(left: Any, right: Any) -> bool:
+    if torch.is_tensor(left) or torch.is_tensor(right):
+        return (
+            torch.is_tensor(left)
+            and torch.is_tensor(right)
+            and _tensor_equal(left, right)
+        )
+    if isinstance(left, dict) or isinstance(right, dict):
+        if not isinstance(left, dict) or not isinstance(right, dict):
+            return False
+        if set(left) != set(right):
+            return False
+        return all(_value_equal(left[key], right[key]) for key in left)
+    return bool(left == right)
+
+
+def _latent_equal(left: ReplayLatent, right: ReplayLatent) -> bool:
+    return _tensor_equal(left.z_H, right.z_H) and _tensor_equal(left.z_L, right.z_L)
+
+
+def _validate_latent(latent: ReplayLatent, *, label: str) -> None:
+    if not torch.is_tensor(latent.z_H) or not torch.is_tensor(latent.z_L):
+        raise ReplayIntegrityError(f"`{label}` H/L components must be tensors.")
+    if latent.z_H.shape != latent.z_L.shape:
+        raise ReplayIntegrityError(f"`{label}` H/L components must have equal shapes.")
+    if not bool(torch.isfinite(latent.z_H).all().item()) or not bool(
+        torch.isfinite(latent.z_L).all().item()
+    ):
+        raise ReplayIntegrityError(f"`{label}` contains a non-finite recurrent state.")
+
+
+def validate_transition(
+    transition: Transition,
+    *,
+    require_clock: bool = False,
+) -> None:
+    """Validate one replay record without assuming an adjacent record exists."""
+
+    if transition.episode_id < 0:
+        raise ReplayIntegrityError("`episode_id` must be nonnegative.")
+    if transition.timestep < 0:
+        raise ReplayIntegrityError("`timestep` must be nonnegative.")
+    _scalar_bool(transition.done, label="done")
+
+    has_latent = transition.latent is not None
+    has_next_latent = transition.next_latent is not None
+    if has_latent != has_next_latent:
+        raise ReplayIntegrityError(
+            "A transition must contain both `latent` and `next_latent`, or neither."
+        )
+    if transition.latent is not None and transition.next_latent is not None:
+        _validate_latent(transition.latent, label="latent")
+        _validate_latent(transition.next_latent, label="next_latent")
+
+    clock = _clock_value(transition.x, label="x")
+    next_clock = _clock_value(transition.x_next, label="x_next")
+    if (clock is None) != (next_clock is None):
+        raise ReplayIntegrityError(
+            "A transition must retain `remaining_edits` in both x and x_next."
+        )
+    if require_clock and clock is None:
+        raise ReplayIntegrityError(
+            "Clock-complete replay requires `remaining_edits` in x and x_next."
+        )
+    if clock is not None and next_clock is not None:
+        if clock <= 0:
+            raise ReplayIntegrityError(
+                "A replay transition cannot leave a state with zero remaining edits."
+            )
+        expected = max(clock - 1, 0)
+        if next_clock != expected:
+            raise ReplayIntegrityError(
+                "Replay clock must decrement exactly once: "
+                f"expected {expected}, got {next_clock}."
+            )
+
+
+def validate_transition_continuity(
+    current: Transition,
+    successor: Transition,
+    *,
+    require_clock: bool = False,
+) -> None:
+    """Validate that two records are adjacent states of one episode."""
+
+    validate_transition(current, require_clock=require_clock)
+    validate_transition(successor, require_clock=require_clock)
+    if current.episode_id != successor.episode_id:
+        raise ReplayIntegrityError("Adjacent records must have the same episode_id.")
+    if _scalar_bool(current.done, label="done"):
+        raise ReplayIntegrityError("No replay transition may follow a terminal record.")
+    if successor.timestep != current.timestep + 1:
+        raise ReplayIntegrityError(
+            "Replay timesteps must be consecutive: "
+            f"expected {current.timestep + 1}, got {successor.timestep}."
+        )
+    if not _value_equal(current.x_next, successor.x):
+        raise ReplayIntegrityError("current.x_next does not equal successor.x.")
+    if not _value_equal(current.y_next, successor.y):
+        raise ReplayIntegrityError("current.y_next does not equal successor.y.")
+
+    if current.next_latent is None:
+        if successor.latent is not None:
+            raise ReplayIntegrityError(
+                "Replay sequence changes from episodic to persistent latent mode."
+            )
+    else:
+        if successor.latent is None or not _latent_equal(
+            current.next_latent, successor.latent
+        ):
+            raise ReplayIntegrityError(
+                "current.next_latent does not equal successor.latent."
+            )
+
+
+def validate_transition_sequence(
+    transitions: Sequence[Transition],
+    *,
+    require_clock: bool = False,
+) -> None:
+    """Validate every record and adjacency relation in one nonempty sequence."""
+
+    if not transitions:
+        raise ReplayIntegrityError("Cannot validate an empty replay sequence.")
+    validate_transition(transitions[0], require_clock=require_clock)
+    for current, successor in zip(transitions, transitions[1:]):
+        validate_transition_continuity(
+            current,
+            successor,
+            require_clock=require_clock,
+        )
 
 
 class ReplayBuffer:
@@ -109,6 +285,86 @@ class ReplayBuffer:
     def is_ready(self, batch_size: int) -> bool:
         """Check if buffer has enough transitions for sampling."""
         return len(self.storage) >= batch_size
+
+    def contiguous_segment(
+        self,
+        start_index: int,
+        horizon: int,
+        *,
+        require_complete: bool,
+        require_clock: bool = False,
+    ) -> List[Transition]:
+        """Return a validated segment ending at ``horizon`` or a terminal record.
+
+        When ``require_complete`` is true, a nonterminal segment shorter than
+        ``horizon`` raises ``ReplayIntegrityError``. This is the fail-closed
+        primitive used by fixed-K target sampling.
+        """
+
+        if horizon < 1:
+            raise ValueError("horizon must be at least one.")
+        if start_index < 0 or start_index >= len(self.storage):
+            raise IndexError(f"Replay start index {start_index} is out of range.")
+
+        segment = [self.storage[start_index]]
+        validate_transition(segment[0], require_clock=require_clock)
+        if (
+            start_index > 0
+            and self.storage[start_index - 1].episode_id == segment[0].episode_id
+        ):
+            validate_transition_continuity(
+                self.storage[start_index - 1],
+                segment[0],
+                require_clock=require_clock,
+            )
+        while len(segment) < horizon and not _scalar_bool(
+            segment[-1].done, label="done"
+        ):
+            next_index = start_index + len(segment)
+            if next_index >= len(self.storage):
+                break
+            successor = self.storage[next_index]
+            if successor.episode_id != segment[0].episode_id:
+                break
+            validate_transition_continuity(
+                segment[-1],
+                successor,
+                require_clock=require_clock,
+            )
+            segment.append(successor)
+
+        if (
+            require_complete
+            and len(segment) < horizon
+            and not _scalar_bool(segment[-1].done, label="done")
+        ):
+            raise ReplayIntegrityError(
+                f"Replay start {start_index} has only {len(segment)} contiguous "
+                f"nonterminal transitions; fixed horizon requires {horizon}."
+            )
+        return segment
+
+    def has_complete_segment(
+        self,
+        start_index: int,
+        horizon: int,
+        *,
+        require_clock: bool = False,
+    ) -> bool:
+        """Return whether a fixed-K or earlier-terminal segment is valid."""
+
+        if horizon < 1:
+            raise ValueError("horizon must be at least one.")
+        try:
+            self.contiguous_segment(
+                start_index,
+                horizon,
+                require_complete=True,
+                require_clock=require_clock,
+            )
+        except (IndexError, ReplayIntegrityError):
+            return False
+        return True
 
     def sample_sequences(
         self,

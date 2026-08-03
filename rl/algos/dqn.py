@@ -19,7 +19,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils as nn_utils
 
-from rl.batch_utils import prepare_batch_x, prepare_plan, normalize_puzzle_id
+from rl.batch_utils import prepare_batch_x, prepare_plan, stack_batch_states
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.sudoku_utils import sudoku_is_solved, sudoku_get_stats
 
@@ -355,9 +355,30 @@ class QNetwork(nn.Module):
         # Mask invalid actions with large negative values
         if action_mask is not None:
             if action_mask.dim() == 1:
+                if action_mask.numel() != self.num_actions:
+                    raise ValueError(
+                        f"action mask has {action_mask.numel()} entries, "
+                        f"expected {self.num_actions}"
+                    )
                 action_mask = action_mask.unsqueeze(0).expand(q_values.shape[0], -1)
+            elif (
+                action_mask.dim() != 2
+                or tuple(action_mask.shape) != tuple(q_values.shape)
+            ):
+                raise ValueError(
+                    "action mask must have shape [num_actions] or "
+                    f"[batch_size, num_actions]; got {tuple(action_mask.shape)}, "
+                    f"expected ({q_values.shape[0]}, {self.num_actions})"
+                )
+            action_mask = action_mask.to(device=q_values.device, dtype=torch.bool)
+            invalid_rows = ~action_mask.any(dim=-1)
+            if bool(invalid_rows.any().item()):
+                rows = torch.nonzero(invalid_rows, as_tuple=False).reshape(-1).tolist()
+                raise RuntimeError(
+                    f"action mask has no valid actions for batch rows {rows}"
+                )
             # Set invalid action Q-values to very negative
-            q_values = q_values.masked_fill(~action_mask.bool(), -1e9)
+            q_values = q_values.masked_fill(~action_mask, -1e9)
 
         return q_values
 
@@ -508,12 +529,29 @@ class DQNTrainer:
         """
         epsilon = 0.0 if greedy else self._get_epsilon()
 
+        validated_mask = action_mask
+        if action_mask is not None:
+            if action_mask.dim() == 2 and action_mask.shape[0] == 1:
+                validated_mask = action_mask.reshape(-1)
+            elif action_mask.dim() != 1:
+                raise ValueError(
+                    "Single-state action mask must have shape [num_actions] or "
+                    f"[1, num_actions], got {tuple(action_mask.shape)}"
+                )
+            if validated_mask.numel() != self.num_actions:
+                raise ValueError(
+                    f"action mask has {validated_mask.numel()} entries, "
+                    f"expected {self.num_actions}"
+                )
+            validated_mask = validated_mask.to(dtype=torch.bool)
+            if not bool(validated_mask.any().item()):
+                raise RuntimeError("action mask has no valid actions")
+
         if random.random() < epsilon:
             # Random action (respecting mask)
-            if action_mask is not None:
-                valid_actions = torch.where(action_mask.bool())[0]
-                if len(valid_actions) > 0:
-                    return random.choice(valid_actions.tolist())
+            if validated_mask is not None:
+                valid_actions = torch.where(validated_mask)[0]
+                return random.choice(valid_actions.tolist())
             return random.randint(0, self.num_actions - 1)
 
         # Greedy action from Q-network
@@ -524,7 +562,11 @@ class DQNTrainer:
             q_values = self.q_network(
                 batch_x, batch_y,
                 n=self.config.inner_unroll_n,
-                action_mask=action_mask.to(self.device) if action_mask is not None else None,
+                action_mask=(
+                    validated_mask.to(self.device)
+                    if validated_mask is not None
+                    else None
+                ),
             )
             return int(q_values.argmax(dim=-1).item())
 
@@ -724,13 +766,7 @@ class DQNTrainer:
 
     def _stack_x_batch(self, x_list: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         """Stack a list of x dicts into a batched dict."""
-        inputs = torch.stack([x["inputs"] for x in x_list], dim=0).to(self.device)
-        puzzle_ids = torch.stack(
-            [normalize_puzzle_id(x["puzzle_identifiers"]) for x in x_list], dim=0
-        ).to(self.device)
-        if puzzle_ids.dim() > 1:
-            puzzle_ids = puzzle_ids.squeeze(-1)
-        return {"inputs": inputs, "puzzle_identifiers": puzzle_ids}
+        return stack_batch_states(x_list, self.device)
 
     def train_step(self) -> Dict[str, float]:
         """

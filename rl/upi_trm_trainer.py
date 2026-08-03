@@ -77,7 +77,7 @@ from models.recursive_reasoning.trm import (
 from rl.batch_utils import state_is_batched, prepare_batch_x, prepare_plan, normalize_puzzle_id
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
-from rl.replay import ReplayBuffer, ReplayLatent, Transition
+from rl.replay import ReplayBuffer, ReplayLatent, Transition, validate_transition
 from rl.value_targets import (
     compute_k_step_bootstrapped_target,
     compute_gae,
@@ -210,6 +210,11 @@ class UPITrmTrainer:
         self._next_episode_id: int = 0
         self._train_step_count: int = 0  # Track training steps for LR scheduling
         self._env_step_count: int = 0
+        # Exact-budget collection may pause in the middle of an episode.  Keep
+        # all transition-relevant collector state until a real environment
+        # terminal is observed; a logging/checkpoint boundary is not terminal.
+        self._active_episode: Optional[Dict[str, Any]] = None
+        self._completed_episodes_since_update: int = 0
         self.puzzle_emb_optimizer: Optional[torch.optim.Optimizer] = None
 
         # Learning rate schedulers
@@ -630,203 +635,259 @@ class UPITrmTrainer:
         except Exception as exc:
             print(f"[debug] local Lipschitz estimate failed: {exc}")
 
-    def collect_episode(self, max_env_steps: Optional[int] = None) -> int:
-        """
-        Run a single episode in the plan-space env using the current policy_dist,
-        store transitions in replay buffer.
-        
-        Supports two latent modes (controlled by rl_cfg.episodic_latent):
-        - episodic (default): z is reinitialized from (x, y) at every step
-        - persistent: z is initialized once per episode and carried across steps
-        """
+    def _start_episode(self) -> None:
+        """Initialize one live episode without incrementing completion counters."""
 
-        self.model.eval()
-        self.policy_model_old.eval()
-        self.policy_model_candidate.eval()
-        episode_id = self._next_episode_id
-        t = 0
+        if self._active_episode is not None:
+            raise RuntimeError("Cannot start a second episode while one is active.")
         x, y = self.env.reset()
-        done = False
-        edit_budget = min(self.rl_cfg.max_edits, self.env_config.max_edits)
-        last_info: Optional[Dict[str, Any]] = None
-        
-        # Debug tracking
-        episode_rewards = []
-        episode_actions = []
-        initial_score = None
-        stop_action_id = self.env.stop_action_id
-        
-        # Persistent latent mode: initialize z once at episode start
-        episodic_latent = getattr(self.rl_cfg, "episodic_latent", True)
-        z = None  # In episodic mode, z stays None and is reinitialized each step
+        episodic_latent = bool(getattr(self.rl_cfg, "episodic_latent", True))
+        latent = None
         if not episodic_latent:
-            # Initialize z from (x, y) for persistent mode
             batched = self._state_is_batched(x)
             batch_x = self._prepare_batch_x(x, batched=batched)
             batch_y = self._prepare_plan(y, batched=batched)
-            z = self.model.init_latent(batch_x, batch_y)
-        
-        # Debug: check action mask on first episode
+            with torch.no_grad():
+                latent = self.model.init_latent(batch_x, batch_y)
+
+        self._active_episode = {
+            "episode_id": self._next_episode_id,
+            "timestep": 0,
+            "latent": latent,
+            "episode_rewards": [],
+            "episode_actions": [],
+            "initial_score": None,
+            "last_info": None,
+            "time_prep": 0.0,
+            "time_policy": 0.0,
+            "time_env_step": 0.0,
+        }
+
         if self.debug_checks and self._next_episode_id == 0:
             mask = self.env.get_action_mask()
             if mask is not None:
                 valid_count = mask.sum().item()
-                print(f"[DEBUG] Action mask: {valid_count} valid actions out of {len(mask)} total")
-            print(f"[DEBUG] Latent mode: {'episodic' if episodic_latent else 'persistent'}")
-
-        # Timing instrumentation
-        import time
-        _time_policy = 0.0
-        _time_env_step = 0.0
-        _time_prep = 0.0
-        _time_other = 0.0
-        _profile_enabled = getattr(self, '_profile_rollout', False)
-        _t1 = 0.0
-        _t3 = 0.0
-
-        remaining_env_steps = max_env_steps
-
-        while (
-            not done
-            and self.env.step_count < edit_budget
-            and (remaining_env_steps is None or remaining_env_steps > 0)
-        ):
-            _t0 = time.perf_counter() if _profile_enabled else 0
-
-            batched = self._state_is_batched(x)
-            batch_x = self._prepare_batch_x(x, batched=batched)
-            batch_y = self._prepare_plan(y, batched=batched)
-
-            # Get action mask to prevent editing "given" cells
-            action_mask = self.env.get_action_mask()
-            if action_mask is not None:
-                action_mask = action_mask.to(self.device)
-
-            if _profile_enabled:
-                _t1 = time.perf_counter()
-                _time_prep += _t1 - _t0
-
-            # Data collection should not build autograd graphs.
-            # This avoids massive graph growth and potential stalls when mixing two policy forwards.
-            if self.debug_checks and self._next_episode_id < 5 and (t < 5 or t % 20 == 0):
-                print(f"[DEBUG] Episode {self._next_episode_id}, Step {t}: calling _mixed_policy_dist", flush=True)
-            latent_before = z
-            with torch.no_grad():
-                dist, z_new = self._mixed_policy_dist(
-                    batch_x,
-                    batch_y,
-                    n=self.rl_cfg.inner_unroll_n,
-                    action_mask=action_mask,
-                    z=z,
+                print(
+                    f"[DEBUG] Action mask: {valid_count} valid actions out of "
+                    f"{len(mask)} total"
                 )
+            mode = "episodic" if episodic_latent else "persistent"
+            print(f"[DEBUG] Latent mode: {mode}")
 
-            if _profile_enabled:
-                _t2 = time.perf_counter()
-                _time_policy += _t2 - _t1
+    def collection_checkpoint_state(self) -> Dict[str, Any]:
+        """Serialize collector-only state for exact mid-episode continuation."""
 
-            # Only update z in persistent mode; in episodic mode z stays None
-            # so it's reinitialized from (x, y) at every step
-            if not episodic_latent:
-                z = z_new
-            action = dist.sample().squeeze()  # Ensure scalar (0-D) tensor for single-state sampling
-            behavior_log_prob = dist.log_prob(action).detach().cpu().reshape(())
+        self._validate_active_episode_consistency()
+        active_state = None
+        if self._active_episode is not None:
+            active_state = {
+                key: value
+                for key, value in self._active_episode.items()
+                if key != "latent"
+            }
+            active_state = {
+                **active_state,
+                "episode_rewards": list(active_state["episode_rewards"]),
+                "episode_actions": list(active_state["episode_actions"]),
+                "last_info": (
+                    dict(active_state["last_info"])
+                    if active_state["last_info"] is not None
+                    else None
+                ),
+                "latent": self._clone_latent(self._active_episode["latent"]),
+            }
+        return {
+            "schema_version": 1,
+            "completed_episodes_since_update": int(
+                self._completed_episodes_since_update
+            ),
+            "active_episode": active_state,
+        }
 
-            # Track STOP probability for debugging
-            if t == 0 and stop_action_id is not None:
-                probs = dist.probs
-                stop_prob = probs[0, stop_action_id].item() if probs.dim() > 1 else probs[stop_action_id].item()
-                self._debug_stop_probs.append(stop_prob)
-
-                # Debug: on first episode, print full probability info
-                if self.debug_checks and self._next_episode_id == 0:
-                    if probs.dim() > 1:
-                        probs = probs[0]
-                    edit_probs = probs[:-1].sum().item()
-                    print(f"[DEBUG] Step 0 probs: STOP={stop_prob:.6f}, edits={edit_probs:.6f}")
-                    print(f"[DEBUG] Top 5 action probs: {probs.topk(5)}")
-
-            if _profile_enabled:
-                _t3 = time.perf_counter()
-
-            (x_next, y_next), reward, done, info = self.env.step(action.item())
-
-            # Debug: track each step for first few episodes
-            if self.debug_checks and self._next_episode_id < 5 and (t < 5 or t % 20 == 0):
-                print(f"[DEBUG] Episode {self._next_episode_id}, Step {t} complete: action={action.item()}, reward={reward:.4f}, done={done}", flush=True)
-
-            if _profile_enabled:
-                _t4 = time.perf_counter()
-                _time_env_step += _t4 - _t3
-            last_info = info
-            self._env_step_count += 1
-            if remaining_env_steps is not None:
-                remaining_env_steps -= 1
-            
-            # Track for debugging
-            if t == 0 and info.get("phi_old") is not None:
-                initial_score = info["phi_old"]
-            episode_rewards.append(reward)
-            episode_actions.append(action.item())
-            
-            # === NEW: Track plan changes for two-timescale analysis (Assumption 4.3) ===
-            if getattr(self.rl_cfg, "track_plan_change", False):
-                y_tensor = self._prepare_plan(y, batched=False)
-                y_next_tensor = self._prepare_plan(y_next, batched=False)
-                plan_change = estimate_plan_change(y_tensor, y_next_tensor)
-                self._plan_changes.append(plan_change)
-            
-            # === NEW: Track drift for persistent latents (Lemma 4.4) ===
-            if not episodic_latent and getattr(self.rl_cfg, "track_drift_metrics", False) and z is not None:
-                batch_x_next = self._prepare_batch_x(x_next, batched=self._state_is_batched(x_next))
-                batch_y_next = self._prepare_plan(y_next, batched=self._state_is_batched(x_next))
-                drift = estimate_Cdrift(
-                    self.model, batch_x_next, batch_y_next, z, 
-                    n=self.rl_cfg.inner_unroll_n
-                )
-                self._drift_values.append(drift)
-
-            transition = Transition(
-                x=self._clone_state(x),
-                y=self._clone_state(y),
-                action=action.detach().cpu(),
-                reward=torch.as_tensor(reward, dtype=torch.float32).view(1),
-                x_next=self._clone_state(x_next),
-                y_next=self._clone_state(y_next),
-                done=torch.tensor([done], dtype=torch.bool),
-                episode_id=episode_id,
-                timestep=t,
-                latent=self._clone_latent(latent_before),
-                next_latent=self._clone_latent(z_new) if not episodic_latent else None,
-                behavior_log_prob=behavior_log_prob,
+    @staticmethod
+    def _checkpoint_values_equal(left: Any, right: Any) -> bool:
+        if torch.is_tensor(left) and torch.is_tensor(right):
+            return bool(torch.equal(left.cpu(), right.cpu()))
+        if isinstance(left, dict) and isinstance(right, dict):
+            return set(left) == set(right) and all(
+                UPITrmTrainer._checkpoint_values_equal(left[key], right[key])
+                for key in left
             )
-            self.replay.add(transition)
+        if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
+            return len(left) == len(right) and all(
+                UPITrmTrainer._checkpoint_values_equal(a, b)
+                for a, b in zip(left, right)
+            )
+        return bool(left == right)
 
-            x, y = x_next, y_next
-            t += 1
+    def _validate_active_episode_consistency(self) -> None:
+        """Check the replay/environment/latent boundary at a collector pause."""
 
-        # Debug: confirm episode completion
-        if self.debug_checks and self._next_episode_id < 5:
+        active = self._active_episode
+        if active is None:
+            if self.env.x is not None and not self.env.done:
+                raise RuntimeError(
+                    "Live nonterminal environment has no UPI active-episode state."
+                )
+            return
+        if self.env.x is None or self.env.y is None or self.env.done:
+            raise RuntimeError(
+                "UPI active episode requires a live nonterminal environment."
+            )
+        episode_id = int(active["episode_id"])
+        timestep = int(active["timestep"])
+        if episode_id != self._next_episode_id or timestep != self.env.step_count:
+            raise RuntimeError(
+                "UPI active episode disagrees with its episode ID or edit clock."
+            )
+        if len(active["episode_rewards"]) != timestep or len(
+            active["episode_actions"]
+        ) != timestep:
+            raise RuntimeError("UPI active-episode history length is inconsistent.")
+        if timestep == 0:
+            return
+        if not self.replay.storage:
+            raise RuntimeError("UPI active episode has no preceding replay transition.")
+        boundary = self.replay.storage[-1]
+        if (
+            boundary.episode_id != episode_id
+            or boundary.timestep != timestep - 1
+            or bool(boundary.done.reshape(-1)[0].item())
+        ):
+            raise RuntimeError("UPI active replay boundary is not contiguous.")
+        if not self._checkpoint_values_equal(boundary.x_next, self.env.x) or not self._checkpoint_values_equal(
+            boundary.y_next, self.env.y
+        ):
+            raise RuntimeError(
+                "UPI active replay successor does not match the live environment."
+            )
+        if not bool(getattr(self.rl_cfg, "episodic_latent", True)):
+            latent = active.get("latent")
+            if latent is None or boundary.next_latent is None:
+                raise RuntimeError("Persistent UPI replay boundary is missing a latent.")
+            if not torch.equal(boundary.next_latent.z_H, latent.z_H.detach().cpu()):
+                raise RuntimeError("Persistent UPI z_H carry is discontinuous.")
+            if not torch.equal(boundary.next_latent.z_L, latent.z_L.detach().cpu()):
+                raise RuntimeError("Persistent UPI z_L carry is discontinuous.")
+
+    def load_collection_checkpoint_state(self, state: Dict[str, Any]) -> None:
+        """Restore collector state after the environment state has been loaded."""
+
+        if not isinstance(state, dict) or int(state.get("schema_version", 0)) != 1:
+            raise RuntimeError("Unsupported UPI collector checkpoint schema.")
+        completed = int(state.get("completed_episodes_since_update", -1))
+        rollout_target = int(self.rl_cfg.rollout_episodes_per_step)
+        if completed < 0 or completed >= rollout_target:
+            raise RuntimeError(
+                "Invalid completed-episode count in UPI collector checkpoint: "
+                f"{completed}."
+            )
+        self._completed_episodes_since_update = completed
+
+        active_state = state.get("active_episode")
+        if active_state is None:
+            self._active_episode = None
+            self._validate_active_episode_consistency()
+            return
+        if not isinstance(active_state, dict):
+            raise RuntimeError("UPI active-episode checkpoint must be a dictionary.")
+        if self.env.x is None or self.env.y is None or self.env.done:
+            raise RuntimeError(
+                "UPI active-episode checkpoint requires a live nonterminal environment."
+            )
+        episode_id = int(active_state.get("episode_id", -1))
+        timestep = int(active_state.get("timestep", -1))
+        if episode_id != self._next_episode_id:
+            raise RuntimeError(
+                "UPI active episode ID does not match next_episode_id "
+                f"({episode_id} != {self._next_episode_id})."
+            )
+        if timestep != self.env.step_count:
+            raise RuntimeError(
+                "UPI active timestep does not match environment clock "
+                f"({timestep} != {self.env.step_count})."
+            )
+        rewards = list(active_state.get("episode_rewards", []))
+        actions = list(active_state.get("episode_actions", []))
+        if len(rewards) != timestep or len(actions) != timestep:
+            raise RuntimeError(
+                "UPI active-episode history length does not match its timestep."
+            )
+
+        saved_latent = active_state.get("latent")
+        episodic_latent = bool(getattr(self.rl_cfg, "episodic_latent", True))
+        if episodic_latent and saved_latent is not None:
+            raise RuntimeError("Episodic-latent checkpoint contains a carried latent.")
+        if not episodic_latent and not isinstance(saved_latent, ReplayLatent):
+            raise RuntimeError("Persistent-latent checkpoint is missing its latent.")
+        latent = None
+        if saved_latent is not None:
+            latent = TinyRecursiveReasoningModel_ACTV1InnerCarry(
+                z_H=saved_latent.z_H.to(self.device),
+                z_L=saved_latent.z_L.to(self.device),
+            )
+
+        self._active_episode = {
+            "episode_id": episode_id,
+            "timestep": timestep,
+            "latent": latent,
+            "episode_rewards": rewards,
+            "episode_actions": actions,
+            "initial_score": active_state.get("initial_score"),
+            "last_info": (
+                dict(active_state["last_info"])
+                if active_state.get("last_info") is not None
+                else None
+            ),
+            "time_prep": float(active_state.get("time_prep", 0.0)),
+            "time_policy": float(active_state.get("time_policy", 0.0)),
+            "time_env_step": float(active_state.get("time_env_step", 0.0)),
+        }
+        self._validate_active_episode_consistency()
+
+    def _finish_active_episode(self) -> None:
+        """Record statistics after, and only after, a real environment terminal."""
+
+        active = self._active_episode
+        if active is None or not self.env.done:
+            raise RuntimeError("Cannot finish an episode before environment termination.")
+        episode_id = int(active["episode_id"])
+        timestep = int(active["timestep"])
+        last_info = active["last_info"]
+
+        if self.debug_checks and episode_id < 5:
             reason = last_info.get("done_reason", "unknown") if last_info else "unknown"
-            print(f"[DEBUG] Episode {self._next_episode_id} finished: {t} steps, done={done}, reason={reason}", flush=True)
+            print(
+                f"[DEBUG] Episode {episode_id} finished: {timestep} steps, "
+                f"done=True, reason={reason}",
+                flush=True,
+            )
 
-        # Print profiling summary for first few episodes
-        if _profile_enabled and self._next_episode_id < 3:
-            _total = _time_prep + _time_policy + _time_env_step
-            print(f"[PROFILE] Episode {self._next_episode_id} ({t} steps):")
-            print(f"  prep:      {_time_prep*1000:7.1f}ms ({100*_time_prep/_total:5.1f}%)")
-            print(f"  policy:    {_time_policy*1000:7.1f}ms ({100*_time_policy/_total:5.1f}%)")
-            print(f"  env.step:  {_time_env_step*1000:7.1f}ms ({100*_time_env_step/_total:5.1f}%)")
-            print(f"  total:     {_total*1000:7.1f}ms ({_total/t*1000:.2f}ms/step)")
+        if self._profile_rollout and episode_id < 3:
+            prep = float(active["time_prep"])
+            policy = float(active["time_policy"])
+            env_step = float(active["time_env_step"])
+            total = prep + policy + env_step
+            if total > 0.0 and timestep > 0:
+                print(f"[PROFILE] Episode {episode_id} ({timestep} steps):")
+                print(f"  prep:      {prep*1000:7.1f}ms ({100*prep/total:5.1f}%)")
+                print(
+                    f"  policy:    {policy*1000:7.1f}ms "
+                    f"({100*policy/total:5.1f}%)"
+                )
+                print(
+                    f"  env.step:  {env_step*1000:7.1f}ms "
+                    f"({100*env_step/total:5.1f}%)"
+                )
+                print(f"  total:     {total*1000:7.1f}ms ({total/timestep*1000:.2f}ms/step)")
 
-        self._next_episode_id += 1
-        
-        # Track episode stats
-        self._debug_episode_lengths.append(t)
-        self._debug_episode_returns.append(sum(episode_rewards))
+        self._debug_episode_lengths.append(timestep)
+        self._debug_episode_returns.append(sum(active["episode_rewards"]))
         if last_info is not None:
             reason = last_info.get("done_reason")
             if reason in self.term_stats:
                 self.term_stats[reason] += 1
+            initial_score = active["initial_score"]
             final_score = last_info.get("phi_new", initial_score)
             if (
                 isinstance(initial_score, (int, float))
@@ -834,8 +895,188 @@ class UPITrmTrainer:
                 and isinstance(final_score, (int, float))
                 and not isinstance(final_score, bool)
             ):
-                self._debug_score_changes.append(float(final_score) - float(initial_score))
-        return t
+                self._debug_score_changes.append(
+                    float(final_score) - float(initial_score)
+                )
+
+        self._next_episode_id += 1
+        self._active_episode = None
+
+    def collect_episode(self, max_env_steps: Optional[int] = None) -> int:
+        """Continue one episode, pausing without termination at an exact cap.
+
+        ``max_env_steps`` is a collector budget, not an MDP horizon.  When the
+        cap is reached, the plan, edit clock, episode id, and persistent latent
+        remain live for the next call.  The return value counts interactions
+        collected by this call, not the episode's cumulative length.
+        """
+
+        if max_env_steps is not None and max_env_steps < 0:
+            raise ValueError("max_env_steps must be non-negative or None.")
+        if max_env_steps == 0:
+            return 0
+
+        self.model.eval()
+        self.policy_model_old.eval()
+        self.policy_model_candidate.eval()
+        if self._active_episode is None:
+            self._start_episode()
+
+        import time
+
+        steps_collected = 0
+        episodic_latent = bool(getattr(self.rl_cfg, "episodic_latent", True))
+        stop_action_id = self.env.stop_action_id
+        profile_enabled = bool(self._profile_rollout)
+
+        while max_env_steps is None or steps_collected < max_env_steps:
+            active = self._active_episode
+            if active is None:
+                break
+            if self.env.done:
+                raise RuntimeError("Active UPI episode has an already-terminal environment.")
+            if self.env.step_count >= self.env_config.max_edits:
+                raise RuntimeError(
+                    "UPI collector reached max_edits without an environment terminal."
+                )
+
+            x = self.env.x
+            y = self.env.y
+            timestep = int(active["timestep"])
+            start_prep = time.perf_counter() if profile_enabled else 0.0
+            batched = self._state_is_batched(x)
+            batch_x = self._prepare_batch_x(x, batched=batched)
+            batch_y = self._prepare_plan(y, batched=batched)
+            action_mask = self.env.get_action_mask()
+            if action_mask is not None:
+                action_mask = action_mask.to(self.device)
+            start_policy = time.perf_counter() if profile_enabled else 0.0
+            if profile_enabled:
+                active["time_prep"] += start_policy - start_prep
+
+            if self.debug_checks and active["episode_id"] < 5 and (
+                timestep < 5 or timestep % 20 == 0
+            ):
+                print(
+                    f"[DEBUG] Episode {active['episode_id']}, Step {timestep}: "
+                    "calling _mixed_policy_dist",
+                    flush=True,
+                )
+            latent_before = active["latent"]
+            with torch.no_grad():
+                dist, latent_after = self._mixed_policy_dist(
+                    batch_x,
+                    batch_y,
+                    n=self.rl_cfg.inner_unroll_n,
+                    action_mask=action_mask,
+                    z=latent_before,
+                )
+            end_policy = time.perf_counter() if profile_enabled else 0.0
+            if profile_enabled:
+                active["time_policy"] += end_policy - start_policy
+
+            if not episodic_latent:
+                active["latent"] = latent_after
+            action = dist.sample().squeeze()
+            behavior_log_prob = dist.log_prob(action).detach().cpu().reshape(())
+
+            if timestep == 0 and stop_action_id is not None:
+                probs = dist.probs
+                stop_prob = (
+                    probs[0, stop_action_id].item()
+                    if probs.dim() > 1
+                    else probs[stop_action_id].item()
+                )
+                self._debug_stop_probs.append(stop_prob)
+                if self.debug_checks and active["episode_id"] == 0:
+                    flat_probs = probs[0] if probs.dim() > 1 else probs
+                    edit_probs = flat_probs[:-1].sum().item()
+                    print(
+                        f"[DEBUG] Step 0 probs: STOP={stop_prob:.6f}, "
+                        f"edits={edit_probs:.6f}"
+                    )
+                    print(
+                        f"[DEBUG] Top 5 action probs: "
+                        f"{flat_probs.topk(min(5, flat_probs.numel()))}"
+                    )
+
+            start_env = time.perf_counter() if profile_enabled else 0.0
+            (x_next, y_next), reward, done, info = self.env.step(action.item())
+            if profile_enabled:
+                active["time_env_step"] += time.perf_counter() - start_env
+
+            if self.debug_checks and active["episode_id"] < 5 and (
+                timestep < 5 or timestep % 20 == 0
+            ):
+                print(
+                    f"[DEBUG] Episode {active['episode_id']}, Step {timestep} "
+                    f"complete: action={action.item()}, reward={reward:.4f}, "
+                    f"done={done}",
+                    flush=True,
+                )
+
+            self._env_step_count += 1
+            steps_collected += 1
+            active["last_info"] = dict(info)
+            if timestep == 0 and info.get("phi_old") is not None:
+                active["initial_score"] = info["phi_old"]
+            active["episode_rewards"].append(reward)
+            active["episode_actions"].append(action.item())
+
+            if getattr(self.rl_cfg, "track_plan_change", False):
+                y_tensor = self._prepare_plan(y, batched=False)
+                y_next_tensor = self._prepare_plan(y_next, batched=False)
+                self._plan_changes.append(
+                    estimate_plan_change(y_tensor, y_next_tensor)
+                )
+            if (
+                not episodic_latent
+                and getattr(self.rl_cfg, "track_drift_metrics", False)
+                and active["latent"] is not None
+            ):
+                batch_x_next = self._prepare_batch_x(
+                    x_next, batched=self._state_is_batched(x_next)
+                )
+                batch_y_next = self._prepare_plan(
+                    y_next, batched=self._state_is_batched(x_next)
+                )
+                self._drift_values.append(
+                    estimate_Cdrift(
+                        self.model,
+                        batch_x_next,
+                        batch_y_next,
+                        active["latent"],
+                        n=self.rl_cfg.inner_unroll_n,
+                    )
+                )
+
+            self.replay.add(
+                Transition(
+                    x=self._clone_state(x),
+                    y=self._clone_state(y),
+                    action=action.detach().cpu(),
+                    reward=torch.as_tensor(reward, dtype=torch.float32).view(1),
+                    x_next=self._clone_state(x_next),
+                    y_next=self._clone_state(y_next),
+                    done=torch.tensor([done], dtype=torch.bool),
+                    episode_id=int(active["episode_id"]),
+                    timestep=timestep,
+                    latent=self._clone_latent(latent_before),
+                    next_latent=(
+                        self._clone_latent(latent_after)
+                        if not episodic_latent
+                        else None
+                    ),
+                    behavior_log_prob=behavior_log_prob,
+                )
+            )
+            active["timestep"] = timestep + 1
+
+            if done:
+                self._finish_active_episode()
+                break
+
+        return steps_collected
 
     def _prepare_batch_x(self, x: Dict[str, torch.Tensor], batched: bool) -> Dict[str, torch.Tensor]:
         """Delegate to shared batch_utils.prepare_batch_x."""
@@ -1019,11 +1260,18 @@ class UPITrmTrainer:
 
         horizon = self.rl_cfg.K
         candidate_indices = list(range(len(storage)))
-        if getattr(self.rl_cfg, "exact_k_step_targets", False):
+        exact_k_step_targets = bool(
+            getattr(self.rl_cfg, "exact_k_step_targets", False)
+        )
+        if exact_k_step_targets:
             candidate_indices = [
                 start_idx
                 for start_idx in candidate_indices
-                if self._has_complete_k_step_segment(start_idx, horizon)
+                if self.replay.has_complete_segment(
+                    start_idx,
+                    horizon,
+                    require_clock=True,
+                )
             ]
             if not candidate_indices:
                 raise RuntimeError(
@@ -1054,30 +1302,38 @@ class UPITrmTrainer:
             start_plans.append(self._plan_tensor(transition.y))
             start_latents.append(transition.latent)
 
-            last_transition = transition
-            current_idx = start_idx
-            steps = 0
-            while steps < horizon and current_idx < len(storage):
-                current = storage[current_idx]
-                if current.episode_id != transition.episode_id:
-                    break
+            if exact_k_step_targets:
+                segment = self.replay.contiguous_segment(
+                    start_idx,
+                    horizon,
+                    require_complete=True,
+                    require_clock=True,
+                )
+            else:
+                segment = []
+                current_idx = start_idx
+                while len(segment) < horizon and current_idx < len(storage):
+                    current = storage[current_idx]
+                    if current.episode_id != transition.episode_id:
+                        break
+                    segment.append(current)
+                    if bool(current.done.view(-1)[0].item()):
+                        break
+                    current_idx += 1
 
+            last_transition = segment[0]
+            for steps, current in enumerate(segment, start=1):
                 last_transition = current
                 reward_value = float(current.reward.view(-1)[0].item())
                 done_value = bool(current.done.view(-1)[0].item())
 
-                rewards_K[batch_idx, steps] = reward_value
-                dones_K[batch_idx, steps] = done_value
-
-                steps += 1
-                if done_value:
-                    break
-                current_idx += 1
+                rewards_K[batch_idx, steps - 1] = reward_value
+                dones_K[batch_idx, steps - 1] = done_value
 
             end_states.append(last_transition.x_next)
             end_plans.append(self._plan_tensor(last_transition.y_next))
             end_latents.append(last_transition.next_latent)
-            steps_taken[batch_idx] = steps
+            steps_taken[batch_idx] = len(segment)
 
         x_batch = self._stack_state_dicts(start_states)
         y_batch = torch.stack(start_plans, dim=0).to(self.device)
@@ -1102,18 +1358,11 @@ class UPITrmTrainer:
     def _has_complete_k_step_segment(self, start_idx: int, horizon: int) -> bool:
         """Whether a replay start reaches K steps or a terminal transition."""
 
-        storage = self.replay.storage
-        start_episode = storage[start_idx].episode_id
-        for offset in range(horizon):
-            idx = start_idx + offset
-            if idx >= len(storage):
-                return False
-            transition = storage[idx]
-            if transition.episode_id != start_episode:
-                return False
-            if bool(transition.done.view(-1)[0].item()):
-                return True
-        return True
+        return self.replay.has_complete_segment(
+            start_idx,
+            horizon,
+            require_clock=bool(getattr(self.rl_cfg, "exact_k_step_targets", False)),
+        )
 
     def value_update(
         self,
@@ -1134,19 +1383,26 @@ class UPITrmTrainer:
 
         debug_batch: Optional[Tuple[Dict[str, torch.Tensor], torch.Tensor]] = None
         target_stats: Dict[str, float] = {}
+        exact_k_step_targets = bool(
+            getattr(self.rl_cfg, "exact_k_step_targets", False)
+        )
+        bootstrap_model = self.model if exact_k_step_targets else self.target_model
         
         if self.rl_cfg.K == 1:
             transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
+            if exact_k_step_targets:
+                for transition in transitions:
+                    validate_transition(transition, require_clock=True)
             x_batch, y_batch, x_next_batch, y_next_batch, _, rewards, dones = self._stack_batch(transitions)
             z_batch = self._stack_latents(transitions, "latent")
             z_next_batch = self._stack_latents(transitions, "next_latent")
             debug_batch = (x_batch, y_batch)
 
-            self.model.train()
             self.value_opt.zero_grad()
 
+            bootstrap_model.eval()
             with torch.no_grad():
-                v_next, _ = self.target_model.used_value(
+                v_next, _ = bootstrap_model.used_value(
                     x_next_batch,
                     y_next_batch,
                     n=self.rl_cfg.inner_unroll_n,
@@ -1155,6 +1411,7 @@ class UPITrmTrainer:
                 mask = (~dones).float()
                 v_next = v_next * mask
 
+            self.model.train()
             v_s, _ = self.model.used_value(
                 x_batch,
                 y_batch,
@@ -1197,14 +1454,14 @@ class UPITrmTrainer:
             ) = self._sample_k_step_batch(self.rl_cfg.batch_size)
             debug_batch = (x_batch, y_batch)
 
-            self.model.train()
             self.value_opt.zero_grad()
 
+            bootstrap_model.eval()
             with torch.no_grad():
                 gamma = self.rl_cfg.gamma
                 K = self.rl_cfg.K
 
-                v_K, _ = self.target_model.used_value(
+                v_K, _ = bootstrap_model.used_value(
                     xK_batch,
                     yK_batch,
                     n=self.rl_cfg.inner_unroll_n,
@@ -1221,6 +1478,7 @@ class UPITrmTrainer:
                     C_max=getattr(self.rl_cfg, "C_max", None),  # Paper Eq. 12: V(s_abs) = -C_max
                 )
 
+            self.model.train()
             v_s, _ = self.model.used_value(
                 x_batch,
                 y_batch,
@@ -1314,7 +1572,7 @@ class UPITrmTrainer:
 
         with torch.no_grad():
             gamma = self.rl_cfg.gamma
-            old_dist, _ = self.policy_model_old.policy_dist(
+            old_dist, policy_successor_latent = self.policy_model_old.policy_dist(
                 x_batch,
                 y_batch,
                 n=self.rl_cfg.inner_unroll_n,
@@ -1332,14 +1590,7 @@ class UPITrmTrainer:
             # raise an error instead of silently falling back. This prevents accidental
             # misinterpretation of experimental runs as "theory-compatible".
             use_exact_baseline = getattr(self.rl_cfg, "exact_baseline_summation", False)
-            
-            if use_exact_baseline and not getattr(self.rl_cfg, "episodic_latent", True):
-                raise RuntimeError(
-                    "exact_baseline_summation=True is only theory-exact in the reset-latent "
-                    "(episodic_latent=True) regime. In persistent-latent mode it becomes the "
-                    "memoryless approximation from Section 5.4 and Theorem 5.9 no longer strictly applies. "
-                    "Either set episodic_latent=True or disable exact_baseline_summation."
-                )
+            persistent_latent = not getattr(self.rl_cfg, "episodic_latent", True)
             
             if use_exact_baseline:
                 # Validate prerequisites for exact baseline
@@ -1355,14 +1606,10 @@ class UPITrmTrainer:
                         "Got env=None. This indicates a configuration error in UPITrmTrainer."
                     )
                 
-                # Exact advantage: Â(s,a) = Q̂(s,a) - E_{b~π}[Q̂(s,b)]
-                # This satisfies E_{a~π}[Â(s,a)] = 0 EXACTLY (not approximately)
-                #
-                # THEORY NOTE: In persistent-latent mode (episodic_latent=False), the Q-values
-                # computed here use a reset-latent critic (always fresh z_init). This is the
-                # "memoryless" approximation from Section 5.4, and any mismatch from true Q^π
-                # represents the "value of memory" residual (Remark 5.5). See the docstring
-                # of compute_exact_baseline_summation for details.
+                # Exact advantage: Ahat(s,a) = Qhat(s,a) - E_{b~pi}[Qhat(s,b)].
+                # Persistent mode conditions on the complete recorded augmented
+                # state. The same post-unroll carry is passed to every enumerated
+                # edit successor because recurrence precedes action application.
                 
                 # Ensure action_mask is computed to enable the O(A_valid) loop optimization
                 if action_mask is None:
@@ -1389,6 +1636,9 @@ class UPITrmTrainer:
                     checker_fn=self._checker_fn,
                     action_mask=action_mask,
                     policy_probs=old_probs,
+                    successor_latent=(
+                        policy_successor_latent if persistent_latent else None
+                    ),
                 )
                 advantages_all = torch.where(
                     action_mask,
@@ -1653,6 +1903,11 @@ class UPITrmTrainer:
         but we include it explicitly for robustness and clarity.
         """
         
+        if max_env_steps_to_collect is not None and max_env_steps_to_collect < 0:
+            raise ValueError(
+                "max_env_steps_to_collect must be non-negative or None."
+            )
+
         # Ensure candidate backbone is synced before episode collection.
         # This guarantees both policies operate on the same latent representation
         # during _mixed_policy_dist(), which is required for proper CPI mixture semantics.
@@ -1666,13 +1921,48 @@ class UPITrmTrainer:
         remaining_env_steps = max_env_steps_to_collect
         episodes_collected = 0
         env_steps_before = self._env_step_count
-        for _ in range(self.rl_cfg.rollout_episodes_per_step):
+        rollout_target = int(self.rl_cfg.rollout_episodes_per_step)
+        if rollout_target < 1:
+            raise RuntimeError("rollout_episodes_per_step must be at least one.")
+
+        while self._completed_episodes_since_update < rollout_target:
             if remaining_env_steps is not None and remaining_env_steps <= 0:
                 break
+            episode_was_active = self._active_episode is not None
             episode_steps = self.collect_episode(max_env_steps=remaining_env_steps)
-            episodes_collected += 1
             if remaining_env_steps is not None:
                 remaining_env_steps -= episode_steps
+            if self._active_episode is None and (episode_was_active or episode_steps > 0):
+                self._completed_episodes_since_update += 1
+                episodes_collected += 1
+            if episode_steps <= 0:
+                break
+
+        # A collector cap is not an optimization boundary.  Retain the active
+        # episode and any completed-episode quota until the ordinary rollout
+        # target is reached.  This makes logging and checkpoint intervals
+        # observational rather than training hyperparameters.
+        if self._completed_episodes_since_update < rollout_target:
+            metrics = {
+                "loss_value": 0.0,
+                "loss_policy": 0.0,
+                "term_stop": float(self.term_stats["stop"]),
+                "term_solved": float(self.term_stats["solved"]),
+                "term_budget": float(self.term_stats["budget"]),
+                "env_steps_collected": float(
+                    self._env_step_count - env_steps_before
+                ),
+                "env_steps_total": float(self._env_step_count),
+                "episodes_collected": float(episodes_collected),
+                "episodes_pending_update": float(
+                    self._completed_episodes_since_update
+                ),
+                "active_episode": float(self._active_episode is not None),
+                "optimization_performed": 0.0,
+                "train_steps_total": float(self._train_step_count),
+            }
+            metrics.update(self.get_current_lr())
+            return metrics
 
         if _should_log:
             print(f"[DEBUG] train_step {self._train_step_count}: episodes collected, starting value_update", flush=True)
@@ -1743,6 +2033,9 @@ class UPITrmTrainer:
             "env_steps_collected": float(self._env_step_count - env_steps_before),
             "env_steps_total": float(self._env_step_count),
             "episodes_collected": float(episodes_collected),
+            "episodes_pending_update": 0.0,
+            "active_episode": float(self._active_episode is not None),
+            "optimization_performed": 1.0,
         }
         metrics.update(debug_metrics)
         metrics.update(theory_metrics)
@@ -1754,8 +2047,10 @@ class UPITrmTrainer:
         
         # Step learning rate schedulers only if optimization occurred
         self._train_step_count += 1
+        self._completed_episodes_since_update = 0
         if loss_val != 0.0:  # Only step when we actually did an optimizer step
             self._step_lr_schedulers()
+        metrics["train_steps_total"] = float(self._train_step_count)
         metrics.update(self.get_current_lr())
 
         # Reset termination stats for the next logging window

@@ -1,7 +1,7 @@
 from typing import Optional
 import warnings
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RLConfig(BaseModel):
@@ -124,7 +124,12 @@ class RLConfig(BaseModel):
     target_ema_tau: float = 0.995
 
     # CPI / TRPO-style "dials"
-    mixture_alpha: float = 0.1  # mixture weight between old and candidate policy
+    mixture_alpha: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Convex probability-space mixture weight.",
+    )
     trust_region_kl: float = 0.01  # KL divergence threshold for trust-region updates (0 = disabled)
     enable_kl_trust_region: bool = False  # If True, apply KL penalty/early stopping in policy update
 
@@ -287,23 +292,14 @@ class RLConfig(BaseModel):
                 "This gives O(ε_A/(1-γ)) bound instead of O(α·ε_A) from Theorem 5.9. "
                 "For discrete action spaces (Sudoku), enable for tighter bounds."
             )
-        elif not self.reward_shaping:
-            issues.append(
-                "exact_baseline_summation=True but reward_shaping=False. "
-                "The exact baseline implementation assumes shaped rewards and will "
-                "assert at runtime. Set reward_shaping=True."
-            )
-
         if not self.exact_k_step_targets:
             issues.append("exact_k_step_targets=False: fixed-K target protocol is disabled.")
-        if not self.episodic_latent and self.exact_baseline_summation:
-            issues.append(
-                "Exact centering is not implemented on the persistent augmented state."
-            )
         if self.policy_epsilon != 0.0:
             issues.append(
                 "policy_epsilon must be 0 for direct deployment of the stated CPI mixture."
             )
+        if not 0.0 <= self.mixture_alpha <= 1.0:
+            issues.append("mixture_alpha must lie in [0, 1] for a convex policy mixture.")
         
         # Check distillation (Section 6.5)
         if self.distill_mixture_policy:
@@ -352,7 +348,7 @@ class RLConfig(BaseModel):
         """
         Check if configuration matches the paper's frozen one-step protocol.
         
-        Returns True if configuration matches the exact episodic CPI snapshot.
+        Returns True if configuration matches the exact CPI snapshot protocol.
         Projection and contraction are optional specializations of the finite-reference
         result, not prerequisites for exact centering or mixture deployment:
         - Exact K-step targets (Section 5.1)
@@ -365,11 +361,10 @@ class RLConfig(BaseModel):
         """
         return (
             0.0 < self.gamma < 1.0 and
-            self.episodic_latent and
-            self.reward_shaping and
             self.exact_k_step_targets and
             self.exact_baseline_summation and  # THE KEY REQUIREMENT for O(α·ε_A)
             self.theory_exact_mixture and  # Policy-space mixture for CPI guarantee
             not self.distill_mixture_policy and
-            self.policy_epsilon == 0.0
+            self.policy_epsilon == 0.0 and
+            0.0 <= self.mixture_alpha <= 1.0
         )
