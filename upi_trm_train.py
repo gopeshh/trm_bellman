@@ -99,6 +99,13 @@ from utils.run_identity import (
     validate_run_id,
     validate_upi_effective_config,
 )
+from utils.source_identity import (
+    SOURCE_MANIFEST_RELATIVE_PATH,
+    SourceIdentityError,
+    behavior_source_relative_paths,
+    build_producer_source_manifest,
+    validate_producer_source_manifest,
+)
 from utils.evaluation_artifacts import (
     EVALUATION_ARTIFACT_SCHEMA_VERSION,
     RECORD_LOCAL_SEED_SCHEME,
@@ -883,84 +890,34 @@ def _runtime_fingerprint() -> Dict[str, Any]:
 
 
 def _verify_producer_source_matches_runtime(lookup_root: str | Path) -> None:
-    """Reject a clean but unrelated repository passed as the producer root."""
+    """Require producer bytes to match the manifest embedded in this runtime."""
 
     producer_root = Path(lookup_root).expanduser().resolve()
     runtime_root = Path(__file__).resolve().parent
-
-    def source_inventory(root: Path, *, label: str) -> set[str]:
-        inventory = {"upi_trm_train.py", "puzzle_dataset.py"}
-        for root_file in tuple(inventory):
-            if not (root / root_file).is_file():
-                raise RuntimeError(f"{label} is missing source {root_file!r}.")
-        for source_directory in (
-            "dataset",
-            "evaluators",
-            "models",
-            "rl",
-            "utils",
-        ):
-            directory = root / source_directory
-            if not directory.is_dir():
-                raise RuntimeError(
-                    f"{label} is missing source directory {source_directory!r}."
-                )
-            inventory.update(
-                str(path.relative_to(root))
-                for path in directory.rglob("*.py")
-                if "__pycache__" not in path.parts
-            )
-        confirmatory_config_dir = root / "configs" / "iclr_confirmatory"
-        if not confirmatory_config_dir.is_dir():
-            raise RuntimeError(
-                f"{label} is missing confirmatory configuration sources."
-            )
-        inventory.update(
-            str(path.relative_to(root))
-            for path in confirmatory_config_dir.iterdir()
-            if path.is_file() and path.suffix in {".json", ".yaml"}
+    manifest_path = runtime_root / SOURCE_MANIFEST_RELATIVE_PATH
+    try:
+        embedded_manifest = validate_producer_source_manifest(
+            json.loads(manifest_path.read_text(encoding="ascii"))
         )
-        return inventory
-
-    producer_sources = source_inventory(producer_root, label="Producer repository")
-    runtime_sources = source_inventory(runtime_root, label="Runtime source tree")
-    if producer_sources != runtime_sources:
-        missing_from_producer = sorted(runtime_sources - producer_sources)
-        missing_from_runtime = sorted(producer_sources - runtime_sources)
+        producer_manifest = build_producer_source_manifest(producer_root)
+        behavior_sources = behavior_source_relative_paths(producer_root)
+    except (OSError, ValueError, SourceIdentityError) as exc:
         raise RuntimeError(
-            "Producer/runtime source inventories differ: "
-            f"missing_from_producer={missing_from_producer[:8]}, "
-            f"missing_from_runtime={missing_from_runtime[:8]}."
+            "Producer/runtime source manifest cannot be validated."
+        ) from exc
+    if producer_manifest != embedded_manifest:
+        raise RuntimeError(
+            "Producer source bytes differ from the manifest embedded in the runtime."
         )
-    behavior_sources = producer_sources
     try:
         assert_git_files_match_head(
             producer_root,
-            sorted(behavior_sources),
+            [*behavior_sources, SOURCE_MANIFEST_RELATIVE_PATH],
         )
     except RunIdentityError as exc:
         raise RuntimeError(
             "Producer source inventory does not match the recorded Git commit."
         ) from exc
-    for relative_path in sorted(behavior_sources):
-        producer_source = producer_root / relative_path
-        runtime_source = runtime_root / relative_path
-        if not producer_source.is_file() or not runtime_source.is_file():
-            raise RuntimeError(
-                f"Producer repository is missing behavior source {relative_path!r}."
-            )
-        try:
-            producer_sha256 = file_sha256(producer_source)
-            runtime_sha256 = file_sha256(runtime_source)
-        except RunIdentityError as exc:
-            raise RuntimeError(
-                f"Cannot hash behavior source {relative_path!r}."
-            ) from exc
-        if producer_sha256 != runtime_sha256:
-            raise RuntimeError(
-                "Producer repository does not match the executing source for "
-                f"{relative_path!r}."
-            )
 
 
 def _checkpoint_modules(

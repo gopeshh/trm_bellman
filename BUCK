@@ -396,6 +396,7 @@ python_unittest(
         "tests/test_compute_accounting_unittest.py",
         "tests/test_evaluation_artifacts_unittest.py",
         "tests/test_run_identity_unittest.py",
+        "tests/test_source_identity_unittest.py",
     ],
     base_module = "",
     deps = [

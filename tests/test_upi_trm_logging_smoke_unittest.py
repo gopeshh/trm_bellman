@@ -98,7 +98,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             _verify_producer_source_matches_runtime(runtime_root)
         with tempfile.TemporaryDirectory() as directory:
             unrelated_root = Path(directory)
-            with self.assertRaisesRegex(RuntimeError, "missing source"):
+            with self.assertRaisesRegex(RuntimeError, "source manifest"):
                 _verify_producer_source_matches_runtime(unrelated_root)
 
     def test_confirmatory_launch_binds_registered_producer_commit(self):
