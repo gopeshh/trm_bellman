@@ -228,6 +228,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             l_cycles=2,
             l_layers=1,
             puzzle_emb_ndim=0,
+            producer_repo_root=str(root),
         )
         rl_cfg = _resolve_registered_rl_config(
             [config_dir / "bridge_base.yaml", config_dir / "bridge_b0.yaml"]

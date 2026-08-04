@@ -11,6 +11,7 @@ import platform
 import random
 import re
 import tempfile
+import zipfile
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -598,8 +599,9 @@ def _validate_registered_confirmatory_assignment(
 ) -> Dict[str, Any]:
     """Bind a launch to one exact entry in the committed run matrix."""
 
+    producer_root = Path(args.producer_repo_root or os.getcwd()).expanduser().resolve()
     registry_path = (
-        Path(__file__).resolve().parent
+        producer_root
         / "configs"
         / "iclr_confirmatory"
         / "run_matrix.json"
@@ -702,9 +704,7 @@ def _validate_registered_confirmatory_assignment(
     dataset = registry.get("dataset")
     if not isinstance(dataset, dict):
         raise RuntimeError("Registered dataset description is missing.")
-    expected_dataset_root = (
-        Path(__file__).resolve().parent / str(dataset.get("root"))
-    ).resolve()
+    expected_dataset_root = (producer_root / str(dataset.get("root"))).resolve()
     actual_dataset_roots = [
         Path(path).expanduser().resolve() for path in (args.dataset_paths or [])
     ]
@@ -894,10 +894,16 @@ def _verify_producer_source_matches_runtime(lookup_root: str | Path) -> None:
 
     producer_root = Path(lookup_root).expanduser().resolve()
     runtime_root = Path(__file__).resolve().parent
-    manifest_path = runtime_root / SOURCE_MANIFEST_RELATIVE_PATH
     try:
+        if runtime_root.is_file() and zipfile.is_zipfile(runtime_root):
+            with zipfile.ZipFile(runtime_root, "r") as archive:
+                manifest_bytes = archive.read(SOURCE_MANIFEST_RELATIVE_PATH)
+        else:
+            manifest_bytes = (
+                runtime_root / SOURCE_MANIFEST_RELATIVE_PATH
+            ).read_bytes()
         embedded_manifest = validate_producer_source_manifest(
-            json.loads(manifest_path.read_text(encoding="ascii"))
+            json.loads(manifest_bytes.decode("ascii"))
         )
         producer_manifest = build_producer_source_manifest(producer_root)
         behavior_sources = behavior_source_relative_paths(producer_root)
