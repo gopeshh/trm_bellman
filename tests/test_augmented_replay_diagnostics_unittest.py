@@ -241,6 +241,30 @@ class TestFiniteBatchTheoryDiagnostics(unittest.TestCase):
         self.assertEqual(result["support"]["either_direction_state_count"], 1)
         self.assertEqual(result["total_variation"]["maximum"], 1.0)
 
+    def test_policy_gap_renormalizes_rows_after_masking_tolerated_mass(self) -> None:
+        reference = torch.tensor(
+            [[0.5999997, 0.3999998, 0.0000005]], dtype=torch.float64
+        )
+        comparison = torch.tensor(
+            [[0.6000003, 0.4000002, 0.0]], dtype=torch.float64
+        )
+        mask = torch.tensor([[True, True, False]])
+
+        result = summarize_policy_gap(
+            reference,
+            comparison,
+            action_mask=mask,
+            probability_tolerance=1e-6,
+        )
+
+        self.assertLess(result["total_variation"]["maximum"], 1e-14)
+        self.assertLess(
+            result["kl_reference_to_comparison"]["maximum"], 1e-14
+        )
+        self.assertLess(
+            result["kl_comparison_to_reference"]["maximum"], 1e-14
+        )
+
     def test_depth_path_reports_undefined_zero_increment_ratios(self) -> None:
         latent_h = torch.tensor(
             [

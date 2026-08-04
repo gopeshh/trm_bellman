@@ -257,7 +257,7 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
             "debug_checks",
             "config_source_sha256s",
     }
-    if schema_version == 2:
+    if schema_version in {2, 3}:
         expected_fields.update(
             {
                 "registration",
@@ -295,16 +295,19 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
         config["runtime_fingerprint_sha256"],
         path="effective_config.runtime_fingerprint_sha256",
     )
-    if schema_version == 2:
+    if schema_version in {2, 3}:
+        registration_fields = {
+            "cell",
+            "tier",
+            "run_id",
+            "training_seed",
+            "registry_sha256",
+        }
+        if schema_version == 3:
+            registration_fields.add("attempt_index")
         registration = _require_exact_fields(
             config["registration"],
-            expected={
-                "cell",
-                "tier",
-                "run_id",
-                "training_seed",
-                "registry_sha256",
-            },
+            expected=registration_fields,
             path="effective_config.registration",
         )
         _validate_run_id(registration["cell"])
@@ -314,6 +317,11 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
             )
         _validate_run_id(registration["run_id"])
         _validate_training_seed(registration["training_seed"])
+        if schema_version == 3:
+            _require_nonnegative_int(
+                registration["attempt_index"],
+                path="effective_config.registration.attempt_index",
+            )
         _require_sha256(
             registration["registry_sha256"],
             path="effective_config.registration.registry_sha256",
@@ -538,7 +546,7 @@ def validate_run_identity(identity: object) -> dict[str, Any]:
             path="run_identity.initialization.artifact_sha256",
         )
 
-    if effective_config["effective_config_schema_version"] == 2:
+    if effective_config["effective_config_schema_version"] in {2, 3}:
         registration = effective_config["registration"]
         if not isinstance(registration, Mapping):
             raise RunIdentityError("effective_config.registration is invalid.")

@@ -158,12 +158,13 @@ class RunIdentityTest(unittest.TestCase):
             }
             legacy = self._identity(root)
             effective = copy.deepcopy(legacy["effective_config"])
-            effective["effective_config_schema_version"] = 2
+            effective["effective_config_schema_version"] = 3
             effective["registration"] = {
                 "cell": "C2_UPI_TRM",
                 "tier": "confirmatory",
                 "run_id": "confirmatory.seed7",
                 "training_seed": 7,
+                "attempt_index": 0,
                 "registry_sha256": "f" * 64,
             }
             effective["dataset_provenance_sha256"] = canonical_json_sha256(
@@ -187,6 +188,29 @@ class RunIdentityTest(unittest.TestCase):
                 identity["effective_config"]["registration"]["cell"],
                 "C2_UPI_TRM",
             )
+            self.assertEqual(
+                identity["effective_config"]["registration"]["attempt_index"],
+                0,
+            )
+
+            historical_schema_two = copy.deepcopy(effective)
+            historical_schema_two["effective_config_schema_version"] = 2
+            historical_schema_two["registration"].pop("attempt_index")
+            historical_identity = build_run_identity(
+                run_id="confirmatory.seed7",
+                training_seed=7,
+                git_lookup_root=root,
+                effective_config=historical_schema_two,
+                dataset_provenance=provenance,
+                initialization_kind="random",
+                initialization_artifact_sha256=None,
+            )
+            self.assertEqual(
+                historical_identity["effective_config"][
+                    "effective_config_schema_version"
+                ],
+                2,
+            )
 
             wrong_seed = copy.deepcopy(effective)
             wrong_seed["registration"]["training_seed"] = 8
@@ -196,6 +220,19 @@ class RunIdentityTest(unittest.TestCase):
                     training_seed=7,
                     git_lookup_root=root,
                     effective_config=wrong_seed,
+                    dataset_provenance=provenance,
+                    initialization_kind="random",
+                    initialization_artifact_sha256=None,
+                )
+
+            invalid_attempt = copy.deepcopy(effective)
+            invalid_attempt["registration"]["attempt_index"] = -1
+            with self.assertRaisesRegex(RunIdentityError, "attempt_index"):
+                build_run_identity(
+                    run_id="confirmatory.seed7",
+                    training_seed=7,
+                    git_lookup_root=root,
+                    effective_config=invalid_attempt,
                     dataset_provenance=provenance,
                     initialization_kind="random",
                     initialization_artifact_sha256=None,

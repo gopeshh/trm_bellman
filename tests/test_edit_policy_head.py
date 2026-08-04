@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from models.edit_policy import EditPolicyHead
@@ -42,7 +43,7 @@ def test_edit_policy_head_shapes_and_masking():
 
 
 def test_edit_policy_head_all_masked_edge_case():
-    """Test that all-masked rows don't produce NaN (defensive fallback)."""
+    """An invalid environment mask must not become a uniform policy."""
     batch_size = 4
     latent_dim = 8
     x_dim = 16
@@ -66,25 +67,12 @@ def test_edit_policy_head_all_masked_edge_case():
     mask[0, :] = False  # First batch element has all actions masked
     mask[2, :] = False  # Third batch element has all actions masked
 
-    dist = head(z, x_embed, y_embed, action_mask=mask)
-    
-    # Should not have NaN in probabilities
-    probs = dist.probs
-    assert not torch.isnan(probs).any(), "NaN found in probabilities when all actions are masked"
-    
-    # Fully masked rows should have uniform distribution (fallback)
-    assert torch.allclose(probs[0], torch.ones(action_dim) / action_dim), \
-        "Fully masked row should have uniform distribution"
-    assert torch.allclose(probs[2], torch.ones(action_dim) / action_dim), \
-        "Fully masked row should have uniform distribution"
-    
-    # Non-fully-masked rows should have -inf for masked actions
-    assert torch.isinf(dist.logits[1]).sum() == 0, "Row 1 should have no -inf"
-    assert torch.isinf(dist.logits[3]).sum() == 0, "Row 3 should have no -inf"
+    with pytest.raises(RuntimeError, match="no valid action.*0, 2"):
+        head(z, x_embed, y_embed, action_mask=mask)
 
 
 def test_edit_policy_head_1d_all_masked_edge_case():
-    """Test that 1D all-masked mask doesn't produce NaN (defensive fallback)."""
+    """A broadcast all-false mask must fail for every batch row."""
     batch_size = 4
     latent_dim = 8
     x_dim = 16
@@ -106,14 +94,5 @@ def test_edit_policy_head_1d_all_masked_edge_case():
     # Edge case: 1D mask with ALL actions masked (shouldn't happen, but test defensive behavior)
     mask_1d = torch.zeros(action_dim, dtype=torch.bool)  # All False
 
-    dist = head(z, x_embed, y_embed, action_mask=mask_1d)
-    
-    # Should not have NaN in probabilities
-    probs = dist.probs
-    assert not torch.isnan(probs).any(), "NaN found in probabilities when 1D all-masked"
-    
-    # All rows should have uniform distribution (fallback)
-    for i in range(batch_size):
-        assert torch.allclose(probs[i], torch.ones(action_dim) / action_dim), \
-            f"Row {i} should have uniform distribution when 1D mask is all-False"
-
+    with pytest.raises(RuntimeError, match="no valid action.*0, 1, 2, 3"):
+        head(z, x_embed, y_embed, action_mask=mask_1d)

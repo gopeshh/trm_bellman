@@ -60,8 +60,9 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
             if n_step > 1:
                 raise ValueError(
                     f"Sudoku DQN n-step={n_step} is not supported in the in-house wrapper. "
-                    f"The in-house DQNTrainer in this checkout does not implement n-step returns. "
-                    f"Use n_step=1 or run the CleanRL DQN n-step CartPole smoke gate instead."
+                    "DQNTrainer supports n-step returns through DQNConfig.dqn_n_step, "
+                    "but this wrapper does not yet map n_step into that field. Use "
+                    "n_step=1 or run the CleanRL DQN n-step CartPole smoke gate instead."
                 )
             from rl.cleanrl.dqn_inhouse_wrapper import run as dqn_inhouse_run
             return dqn_inhouse_run(config)

@@ -53,7 +53,7 @@ class PPOConfig:
     # Value function
     gamma: float = 0.99  # Discount factor
     gae_lambda: float = 0.95  # GAE lambda
-    normalize_advantages: bool = True  # Normalize advantages per minibatch
+    normalize_advantages: bool = True  # Normalize over the full rollout batch
     clip_vf_loss: bool = False  # Clip value function loss (optional)
 
     # Learning rates

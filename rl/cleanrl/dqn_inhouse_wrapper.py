@@ -9,6 +9,10 @@ as "in-house DQN via benchmark harness," not as CleanRL.
 The CleanRL DQN training loop has an unresolved observation-encoding
 divergence on Sudoku that causes Q-value explosion. This wrapper is the
 fallback path until that is debugged.
+
+The wrapped DQNTrainer supports n-step targets, but this adapter currently
+configures only one-step targets. The dispatcher rejects ``n_step > 1`` until
+the adapter maps that option to ``DQNConfig.dqn_n_step`` and the path is tested.
 """
 
 from __future__ import annotations

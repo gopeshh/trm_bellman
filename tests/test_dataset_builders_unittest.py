@@ -135,6 +135,34 @@ class TestDatasetBuilderDeterminism(unittest.TestCase):
             ):
                 build_iclr_confirmatory_4x4.verify_dataset(root)
 
+    def test_committed_confirmatory_completion_coverage(self):
+        corpus = (
+            Path(__file__).resolve().parents[1]
+            / "data"
+            / "iclr-confirmatory-sudoku4x4-v1"
+        )
+        self.assertEqual(
+            build_iclr_confirmatory_4x4.verify_dataset(corpus)[
+                "solution_grid_audit"
+            ],
+            {
+                "all_valid_completion_count": 288,
+                "corpus_unique_completion_count": 283,
+                "pairwise_distinct_completion_overlap_counts": {
+                    "train/validation": 154,
+                    "train/test": 219,
+                    "validation/test": 135,
+                },
+                "split_unique_completion_counts": {
+                    "train": 274,
+                    "validation": 161,
+                    "test": 226,
+                },
+                "test_record_count": 512,
+                "test_records_sharing_train_completion": 494,
+            },
+        )
+
     def test_confirmatory_builder_binds_running_source_to_producer(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

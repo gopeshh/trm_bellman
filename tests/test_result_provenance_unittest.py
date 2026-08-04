@@ -1,6 +1,7 @@
 import csv
 import copy
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -262,6 +263,156 @@ class TestResultProvenance(unittest.TestCase):
                 cwd=tmp_path,
                 check=True,
             )
+
+    @staticmethod
+    def _archive_fixture(tmp_path: Path, payload: str):
+        source_root = Path(__file__).resolve().parents[1]
+        project_root = tmp_path / "project"
+        scripts_dir = project_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        source_script = source_root / "scripts" / "build_artifact_zip.sh"
+        staged_script = scripts_dir / "build_artifact_zip.sh"
+        staged_script.write_bytes(source_script.read_bytes())
+
+        (project_root / "payload.txt").write_text(payload, encoding="utf-8")
+        file_list = tmp_path / "files.txt"
+        file_list.write_text("payload.txt\n", encoding="utf-8")
+        output_zip = tmp_path / "bundle.zip"
+        env = dict(os.environ)
+        env["UPI_TRM_ARCHIVE_FILE_LIST"] = str(file_list)
+        env["UPI_TRM_ARCHIVE_OUTPUT"] = str(output_zip)
+        return project_root, output_zip, env
+
+    def test_repository_zip_builder_scrubs_affiliation_and_build_paths(self):
+        internal_host = "internal" + "fb"
+        build_source = "fb" + "source"
+        build_code = "fb" + "code"
+        affiliation = "face" + "book"
+        organization = "M" + "eta"
+        prior_venue = "IC" + "ML"
+        organization_email = "@" + "meta.com"
+        payload = "\n".join(
+            [
+                f"{internal_host}.com/buck2/tool",
+                f"/data/repos/{build_source}/{build_code}/buck-out/example",
+                f"{affiliation}$remote_execution$worker",
+                organization,
+                prior_venue,
+                f"reviewer{organization_email}",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root, output_zip, env = self._archive_fixture(Path(tmp), payload)
+            subprocess.run(
+                ["bash", "scripts/build_artifact_zip.sh"],
+                cwd=project_root,
+                env=env,
+                check=True,
+            )
+            with zipfile.ZipFile(output_zip) as archive:
+                archived = archive.read("payload.txt").decode("utf-8")
+
+        for token in (
+            internal_host,
+            build_source,
+            build_code,
+            affiliation,
+            organization,
+            prior_venue,
+            organization_email,
+        ):
+            self.assertNotIn(token, archived)
+        self.assertIn("<BUILD_ROOT>/buck-out/example", archived)
+        self.assertIn("<INTERNAL_HOST>.com", archived)
+        self.assertIn("<ORGANIZATION>", archived)
+        self.assertIn("prior venue", archived)
+        self.assertIn("@example.invalid", archived)
+
+    def test_repository_zip_builder_fails_when_discovery_scanner_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project_root, output_zip, env = self._archive_fixture(tmp_path, "clean\n")
+            fake_bin = tmp_path / "bin"
+            fake_bin.mkdir()
+            fake_rg = fake_bin / "rg"
+            fake_rg.write_text("#!/usr/bin/env bash\nexit 2\n", encoding="utf-8")
+            fake_rg.chmod(0o755)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+
+            result = subprocess.run(
+                ["bash", "scripts/build_artifact_zip.sh"],
+                cwd=project_root,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("content discovery scan failed", result.stderr)
+            self.assertFalse(output_zip.exists())
+
+    def test_repository_zip_builder_fails_when_final_scanner_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project_root, output_zip, env = self._archive_fixture(tmp_path, "clean\n")
+            real_rg = shutil.which("rg", path=env["PATH"])
+            self.assertIsNotNone(real_rg)
+            fake_bin = tmp_path / "bin"
+            fake_bin.mkdir()
+            fake_rg = fake_bin / "rg"
+            fake_rg.write_text(
+                """#!/usr/bin/env bash
+if [[ ! -e "${FAKE_RG_COUNTER:?}" ]]; then
+    : > "${FAKE_RG_COUNTER}"
+    exec "${REAL_RG:?}" "$@"
+fi
+exit 2
+""",
+                encoding="utf-8",
+            )
+            fake_rg.chmod(0o755)
+            env["FAKE_RG_COUNTER"] = str(tmp_path / "rg-counter")
+            env["REAL_RG"] = str(real_rg)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+
+            result = subprocess.run(
+                ["bash", "scripts/build_artifact_zip.sh"],
+                cwd=project_root,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("content anonymization scan failed", result.stderr)
+            self.assertFalse(output_zip.exists())
+
+    def test_repository_zip_builder_fails_when_filename_scanner_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project_root, output_zip, env = self._archive_fixture(tmp_path, "clean\n")
+            fake_bin = tmp_path / "bin"
+            fake_bin.mkdir()
+            fake_grep = fake_bin / "grep"
+            fake_grep.write_text("#!/usr/bin/env bash\nexit 2\n", encoding="utf-8")
+            fake_grep.chmod(0o755)
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+
+            result = subprocess.run(
+                ["bash", "scripts/build_artifact_zip.sh"],
+                cwd=project_root,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("filename anonymization scan failed", result.stderr)
+            self.assertFalse(output_zip.exists())
 
 
 if __name__ == "__main__":

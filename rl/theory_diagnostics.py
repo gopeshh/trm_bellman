@@ -132,6 +132,8 @@ def _prepare_probabilities(
         raise ValueError(f"{label} assigns probability to an invalid action.")
     probs = torch.where(action_mask, probs, torch.zeros_like(probs))
     row_sums = probs.sum(dim=-1)
+    if bool((row_sums <= 0).any().item()):
+        raise ValueError(f"{label} has no probability mass on valid actions.")
     if not torch.allclose(
         row_sums,
         torch.ones_like(row_sums),
@@ -139,7 +141,10 @@ def _prepare_probabilities(
         rtol=0.0,
     ):
         raise ValueError(f"{label} rows must sum to one on valid actions.")
-    return probs
+    # Removing tolerated masked mass can leave a row slightly subnormalized.
+    # Renormalize before expectations, TV, or KL so the diagnostic is defined
+    # on probability distributions, not on finite-precision masses.
+    return probs / row_sums.unsqueeze(-1)
 
 
 def summarize_centering_defect(

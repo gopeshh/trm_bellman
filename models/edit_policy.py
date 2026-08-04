@@ -65,15 +65,15 @@ class EditPolicyHead(nn.Module):
             if action_mask.dim() == 1:
                 # 1D mask [action_dim] -> broadcast to [B, action_dim]
                 action_mask = action_mask.unsqueeze(0).expand_as(logits)
-            
+
+            invalid_rows = ~action_mask.any(dim=-1)
+            if invalid_rows.any():
+                row_indices = invalid_rows.nonzero(as_tuple=False).flatten().tolist()
+                raise RuntimeError(
+                    "Edit policy action mask has no valid action for batch rows "
+                    f"{row_indices}."
+                )
+
             # mask out invalid actions
             logits = logits.masked_fill(~action_mask, float("-inf"))
-            
-            # Defensive check: if ALL actions are masked (shouldn't happen in practice
-            # because STOP is always available), fall back to uniform to avoid NaN.
-            # This prevents softmax([-inf, -inf, ...]) = NaN.
-            all_masked = ~action_mask.any(dim=-1, keepdim=True)  # [B, 1]
-            if all_masked.any():
-                # Replace with uniform logits (zeros) for fully-masked rows
-                logits = torch.where(all_masked.expand_as(logits), torch.zeros_like(logits), logits)
         return Categorical(logits=logits)

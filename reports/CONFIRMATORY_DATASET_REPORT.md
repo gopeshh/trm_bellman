@@ -20,6 +20,15 @@ authorize a confirmatory training run.
 - unique inputs and input/solution records within every split;
 - zero input and record overlap across splits.
 
+These disjointness checks apply to puzzle inputs and complete input/solution
+records, not to solution grids alone. A 4 by 4 Sudoku has only 288 valid
+completed grids. This corpus contains 283 of them: 274 in train, 161 in
+validation, and 226 in test. The splits share 154, 219, and 135 distinct
+completions for train/validation, train/test, and validation/test respectively.
+In record terms, 494 of 512 test puzzles (96.5%) have the same completion as at
+least one training puzzle. The test split therefore measures constraint
+satisfaction on unseen givens, not generalization to unseen solution grids.
+
 The validation split is reserved for debug-seed pipeline checks and
 implementation diagnostics. It is not used for confirmatory checkpoint,
 hyperparameter, stopping, or test-result selection.

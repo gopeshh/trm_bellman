@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import errno
+import functools
 import hashlib
 import json
 import os
@@ -15,7 +16,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -242,6 +243,90 @@ def _is_valid_solution(solution: np.ndarray) -> bool:
             ):
                 return False
     return True
+
+
+@functools.lru_cache(maxsize=1)
+def _valid_solution_grid_keys() -> frozenset[tuple[int, ...]]:
+    """Enumerate every valid 4x4 completion deterministically."""
+
+    grid = np.zeros((4, 4), dtype=np.int32)
+    solutions: set[tuple[int, ...]] = set()
+
+    def search(position: int) -> None:
+        if position == grid.size:
+            solutions.add(tuple(int(value) for value in grid.flat))
+            return
+        row, col = divmod(position, 4)
+        for value in _candidate_values(grid, row, col):
+            grid[row, col] = value
+            search(position + 1)
+        grid[row, col] = 0
+
+    search(0)
+    return frozenset(solutions)
+
+
+def audit_solution_grid_coverage(
+    encoded_solutions_by_split: Mapping[str, np.ndarray],
+) -> dict[str, object]:
+    """Measure completion-grid coverage and reuse without inspecting givens."""
+
+    if not encoded_solutions_by_split:
+        raise DatasetBuildError("Solution-grid audit requires at least one split.")
+
+    valid_solutions = _valid_solution_grid_keys()
+    solution_keys: dict[str, list[tuple[int, ...]]] = {}
+    for split_name, raw_solutions in encoded_solutions_by_split.items():
+        solutions = np.asarray(raw_solutions)
+        if (
+            not isinstance(split_name, str)
+            or not split_name
+            or solutions.ndim != 2
+            or solutions.shape[1] != 16
+            or not np.issubdtype(solutions.dtype, np.integer)
+        ):
+            raise DatasetBuildError("Solution-grid audit input is malformed.")
+        keys = [
+            tuple(int(value) - 1 for value in encoded_solution)
+            for encoded_solution in solutions
+        ]
+        if any(key not in valid_solutions for key in keys):
+            raise DatasetBuildError(
+                f"Solution-grid audit found an invalid completion in {split_name}."
+            )
+        solution_keys[split_name] = keys
+
+    unique_by_split = {
+        split_name: set(keys) for split_name, keys in solution_keys.items()
+    }
+    split_names = list(solution_keys)
+    pairwise_overlap_counts = {
+        f"{left}/{right}": len(unique_by_split[left] & unique_by_split[right])
+        for left_index, left in enumerate(split_names)
+        for right in split_names[left_index + 1 :]
+    }
+    result: dict[str, object] = {
+        "all_valid_completion_count": len(valid_solutions),
+        "corpus_unique_completion_count": len(
+            set().union(*unique_by_split.values())
+        ),
+        "pairwise_distinct_completion_overlap_counts": pairwise_overlap_counts,
+        "split_unique_completion_counts": {
+            split_name: len(unique_by_split[split_name])
+            for split_name in split_names
+        },
+    }
+    if "train" in solution_keys and "test" in solution_keys:
+        result.update(
+            {
+                "test_record_count": len(solution_keys["test"]),
+                "test_records_sharing_train_completion": sum(
+                    key in unique_by_split["train"]
+                    for key in solution_keys["test"]
+                ),
+            }
+        )
+    return result
 
 
 def _encode_record(
@@ -471,7 +556,7 @@ def _publish_directory_no_replace(stage: Path, output: Path) -> None:
     )
 
 
-def build_dataset(output_dir: str | Path, spec: BuildSpec) -> dict[str, str]:
+def build_dataset(output_dir: str | Path, spec: BuildSpec) -> dict[str, object]:
     """Generate, verify, and atomically publish one immutable dataset tree."""
 
     output = Path(output_dir).expanduser().resolve()
@@ -569,7 +654,7 @@ def _verify_checksums(root: Path) -> None:
         raise DatasetBuildError("CHECKSUMS.sha256 does not match the dataset tree.")
 
 
-def verify_dataset(root_dir: str | Path) -> dict[str, str]:
+def verify_dataset(root_dir: str | Path) -> dict[str, object]:
     """Verify file hashes, record semantics, order, and cross-split disjointness."""
 
     root = Path(root_dir).expanduser().resolve()
@@ -641,6 +726,7 @@ def verify_dataset(root_dir: str | Path) -> dict[str, str]:
 
     all_input_hashes: set[str] = set()
     all_record_hashes: set[str] = set()
+    encoded_solutions_by_split: dict[str, np.ndarray] = {}
     verified_split_hashes: dict[str, str] = {}
     for split_name in split_order:
         if not isinstance(split_name, str) or split_name not in splits:
@@ -747,6 +833,7 @@ def verify_dataset(root_dir: str | Path) -> dict[str, str]:
             raise DatasetBuildError(f"Split {split_name} overlaps an earlier record set.")
         all_input_hashes.update(input_hashes)
         all_record_hashes.update(record_hashes)
+        encoded_solutions_by_split[split_name] = labels
         verified_split_hashes[split_name] = manifest_sha256
 
     if set(split_order) != set(splits):
@@ -761,6 +848,9 @@ def verify_dataset(root_dir: str | Path) -> dict[str, str]:
     return {
         "build_config_sha256": _file_sha256(config_path),
         "corpus_manifest_sha256": _file_sha256(root / "corpus_manifest.json"),
+        "solution_grid_audit": audit_solution_grid_coverage(
+            encoded_solutions_by_split
+        ),
         **{
             f"{name}_manifest_sha256": digest
             for name, digest in verified_split_hashes.items()

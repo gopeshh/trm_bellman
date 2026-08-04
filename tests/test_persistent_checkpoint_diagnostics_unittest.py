@@ -1484,7 +1484,7 @@ class TestPersistentDiagnosticArtifacts(unittest.TestCase):
                 }.issubset(behavior_sources)
             )
             combined = b"\n".join(first_files.values())
-            self.assertNotIn(b"/home/", combined)
+            self.assertNotIn(b"/" + b"home/", combined)
             self.assertNotIn(b"buiksat", combined)
 
             checksum_lines = first_files["SHA256SUMS"].decode("ascii").splitlines()

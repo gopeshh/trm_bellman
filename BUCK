@@ -724,6 +724,9 @@ python_unittest(
         "tests/test_dataset_builders_unittest.py",
     ],
     base_module = "",
+    resources = glob([
+        "data/iclr-confirmatory-sudoku4x4-v1/**",
+    ]),
     deps = [
         ":dataset",
     ],

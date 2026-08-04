@@ -9,6 +9,7 @@ import json
 import random
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -29,8 +30,10 @@ from rl.upi_trm_trainer import UPITrmTrainer
 import upi_trm_train
 from upi_trm_train import (
     _capture_rng_state,
+    _claim_confirmatory_attempt_paths,
     _config_dict,
     _fixed_base_effective_config,
+    _remember_latest_optimization_metrics,
     _reject_confirmatory_resume,
     _resolve_train_pool_size,
     _resolve_registered_rl_config,
@@ -39,6 +42,7 @@ from upi_trm_train import (
     _validate_registered_confirmatory_assignment,
     _validate_materialized_split_manifest,
     _validate_evidence_identity,
+    _validate_confirmatory_attempt_index,
     _validate_expected_producer_commit,
     _verify_producer_source_matches_runtime,
     resume_from_checkpoint,
@@ -52,6 +56,10 @@ from utils.run_identity import (
     build_checkpoint_lineage,
     canonical_json_sha256,
     file_sha256,
+)
+from utils.source_identity import (
+    SOURCE_MANIFEST_RELATIVE_PATH,
+    build_producer_source_manifest,
 )
 
 
@@ -101,6 +109,67 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "source manifest"):
                 _verify_producer_source_matches_runtime(unrelated_root)
 
+    def test_standalone_runtime_rejects_tampered_archive_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            producer_root = Path(directory) / "producer"
+            for relative_path in ("upi_trm_train.py", "puzzle_dataset.py"):
+                destination = producer_root / relative_path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(f"# {relative_path}\n", encoding="ascii")
+            for source_directory in (
+                "dataset",
+                "evaluators",
+                "models",
+                "rl",
+                "utils",
+            ):
+                destination = producer_root / source_directory / "module.py"
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(
+                    f"# {source_directory}\n",
+                    encoding="ascii",
+                )
+            config_root = producer_root / "configs" / "iclr_confirmatory"
+            config_root.mkdir(parents=True)
+            (config_root / "cell.yaml").write_text(
+                "gamma: 0.9\n",
+                encoding="ascii",
+            )
+
+            manifest = build_producer_source_manifest(producer_root)
+            manifest_bytes = json.dumps(manifest, sort_keys=True).encode("ascii")
+            archive_path = Path(directory) / "runtime.par"
+
+            def write_archive(*, tamper: bool) -> None:
+                with zipfile.ZipFile(archive_path, "w") as archive:
+                    for relative_path in manifest["sources"]:
+                        if not relative_path.endswith(".py"):
+                            continue
+                        source_bytes = (producer_root / relative_path).read_bytes()
+                        if tamper and relative_path == "rl/module.py":
+                            source_bytes += b"# tampered\n"
+                        archive.writestr(relative_path, source_bytes)
+                    archive.writestr(
+                        SOURCE_MANIFEST_RELATIVE_PATH,
+                        manifest_bytes,
+                    )
+
+            runtime_module_path = archive_path / "upi_trm_train.py"
+            write_archive(tamper=False)
+            with (
+                patch.object(upi_trm_train, "__file__", str(runtime_module_path)),
+                patch("upi_trm_train.assert_git_files_match_head"),
+            ):
+                _verify_producer_source_matches_runtime(producer_root)
+
+            write_archive(tamper=True)
+            with (
+                patch.object(upi_trm_train, "__file__", str(runtime_module_path)),
+                patch("upi_trm_train.assert_git_files_match_head"),
+                self.assertRaisesRegex(RuntimeError, "source manifest"),
+            ):
+                _verify_producer_source_matches_runtime(producer_root)
+
     def test_confirmatory_launch_binds_registered_producer_commit(self):
         identity = {"git_commit": "a" * 40, "git_clean": True}
         self.assertEqual(
@@ -135,6 +204,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             config=[],
             confirmatory_cell="C2_UPI_TRM",
             confirmatory_tier="confirmatory",
+            attempt_index=0,
             run_id="c2-upi-seed101",
             seed=101,
             backbone="trm",
@@ -173,13 +243,17 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 dataset_provenance=(dataset_provenance or provenance),
                 initialization_kind=initialization.get("kind", "random"),
                 initialization_artifact_sha256=initialization.get("sha256"),
-                registered_assignment={"registry_sha256": "f" * 64},
+                registered_assignment={
+                    "attempt_index": local_args.attempt_index,
+                    "registry_sha256": "f" * 64,
+                },
             )
 
         base = build()
         variants = (
             build(args_overrides={"seed": 102, "run_id": "c2-upi-seed102"}),
             build(args_overrides={"confirmatory_cell": "C2_TRM_PPO"}),
+            build(args_overrides={"attempt_index": 1}),
             build(
                 dataset_provenance={
                     "ordered_records": {"train": ["x"], "eval": ["b"]}
@@ -199,6 +273,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         args = SimpleNamespace(
             confirmatory_cell="B0_I00",
             confirmatory_tier="confirmatory",
+            attempt_index=0,
             prepare_confirmatory_lock=True,
             seed=101,
             run_id="b0_i00-seed101",
@@ -724,6 +799,67 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         _reject_confirmatory_resume(None)
         with self.assertRaisesRegex(RuntimeError, "Restart.*from scratch"):
             _reject_confirmatory_resume("checkpoint_step_10000.pt")
+
+    def test_confirmatory_attempt_paths_are_fresh_and_attempt_indexed(self):
+        self.assertEqual(_validate_confirmatory_attempt_index(0), 0)
+        for invalid in (None, True, -1, 1.5, "1"):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                RuntimeError, "attempt-index"
+            ):
+                _validate_confirmatory_attempt_index(invalid)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            checkpoint_0, evaluation_0 = _claim_confirmatory_attempt_paths(
+                checkpoint_root=root / "checkpoints" / "b0-seed101",
+                evaluation_root=root / "evaluations",
+                run_id="b0-seed101",
+                attempt_index=0,
+            )
+            self.assertEqual(checkpoint_0.name, "attempt_0000")
+            self.assertEqual(
+                evaluation_0.relative_to(root / "evaluations").as_posix(),
+                "b0-seed101/attempt_0000",
+            )
+            with self.assertRaisesRegex(RuntimeError, "already exists"):
+                _claim_confirmatory_attempt_paths(
+                    checkpoint_root=root / "checkpoints" / "b0-seed101",
+                    evaluation_root=root / "evaluations",
+                    run_id="b0-seed101",
+                    attempt_index=0,
+                )
+
+            checkpoint_1, evaluation_1 = _claim_confirmatory_attempt_paths(
+                checkpoint_root=root / "checkpoints" / "b0-seed101",
+                evaluation_root=root / "evaluations",
+                run_id="b0-seed101",
+                attempt_index=1,
+            )
+            self.assertTrue(checkpoint_0.is_dir())
+            self.assertTrue(evaluation_0.is_dir())
+            self.assertEqual(checkpoint_1.name, "attempt_0001")
+            self.assertEqual(evaluation_1.name, "attempt_0001")
+
+    def test_environment_logging_retains_latest_real_update(self):
+        first_update = {
+            "optimization_performed": 1.0,
+            "loss_value": 2.5,
+            "env_steps_total": 9_992.0,
+        }
+        pending = _remember_latest_optimization_metrics(None, first_update)
+        self.assertEqual(pending, first_update)
+        self.assertIsNot(pending, first_update)
+
+        cap_only = {
+            "optimization_performed": 0.0,
+            "loss_value": 0.0,
+            "env_steps_total": 10_000.0,
+        }
+        self.assertEqual(
+            _remember_latest_optimization_metrics(pending, cap_only),
+            first_update,
+        )
+        self.assertIsNone(_remember_latest_optimization_metrics(None, cap_only))
 
     def test_config_dict_supports_ppo_dataclass(self):
         config = upi_trm_train.PPOConfig(num_steps=80, num_minibatches=4)

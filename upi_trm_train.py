@@ -103,6 +103,7 @@ from utils.run_identity import (
 from utils.source_identity import (
     SOURCE_MANIFEST_RELATIVE_PATH,
     SourceIdentityError,
+    assert_runtime_archive_sources_match_manifest,
     behavior_source_relative_paths,
     build_producer_source_manifest,
     validate_producer_source_manifest,
@@ -564,6 +565,62 @@ def _validate_expected_sha256(value: object, *, field: str) -> str:
     return value
 
 
+def _validate_confirmatory_attempt_index(value: object) -> int:
+    """Return a path-safe, explicit attempt index for immutable evidence."""
+
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RuntimeError(
+            "Confirmatory execution requires a non-negative integer "
+            "--attempt-index."
+        )
+    return value
+
+
+def _claim_confirmatory_attempt_paths(
+    *,
+    checkpoint_root: str | Path,
+    evaluation_root: str | Path,
+    run_id: str,
+    attempt_index: int,
+) -> Tuple[Path, Path]:
+    """Atomically reserve fresh checkpoint and evaluation directories."""
+
+    canonical_run_id = validate_run_id(run_id)
+    canonical_attempt = _validate_confirmatory_attempt_index(attempt_index)
+    attempt_name = f"attempt_{canonical_attempt:04d}"
+    checkpoint_path = Path(checkpoint_root).expanduser().resolve() / attempt_name
+    evaluation_path = (
+        Path(evaluation_root).expanduser().resolve()
+        / canonical_run_id
+        / attempt_name
+    )
+    if checkpoint_path == evaluation_path:
+        raise RuntimeError(
+            "Confirmatory checkpoint and evaluation attempt directories must differ."
+        )
+
+    claimed: List[Path] = []
+    try:
+        for path in (checkpoint_path, evaluation_path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                path.mkdir()
+            except FileExistsError as exc:
+                raise RuntimeError(
+                    "Confirmatory attempt evidence path already exists; choose a "
+                    f"new --attempt-index instead of deleting {path}."
+                ) from exc
+            claimed.append(path)
+    except Exception:
+        for path in reversed(claimed):
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+        raise
+    return checkpoint_path, evaluation_path
+
+
 def _resolve_registered_rl_config(config_paths: List[Path]) -> RLConfig:
     import yaml
 
@@ -616,6 +673,7 @@ def _validate_registered_confirmatory_assignment(
 
     cell = args.confirmatory_cell
     tier = args.confirmatory_tier
+    attempt_index = _validate_confirmatory_attempt_index(args.attempt_index)
     if tier not in {"confirmatory", "debug"}:
         raise RuntimeError("Confirmatory execution requires --confirmatory-tier.")
     bridge_cells = registry.get("bridge_cells")
@@ -763,6 +821,7 @@ def _validate_registered_confirmatory_assignment(
         "tier": tier,
         "cell": cell,
         "run_id": expected_run_id,
+        "attempt_index": attempt_index,
         "config_layer_sha256s": [file_sha256(path) for path in expected_paths],
     }
 
@@ -898,16 +957,29 @@ def _verify_producer_source_matches_runtime(lookup_root: str | Path) -> None:
         if runtime_root.is_file() and zipfile.is_zipfile(runtime_root):
             with zipfile.ZipFile(runtime_root, "r") as archive:
                 manifest_bytes = archive.read(SOURCE_MANIFEST_RELATIVE_PATH)
+                embedded_manifest = validate_producer_source_manifest(
+                    json.loads(manifest_bytes.decode("ascii"))
+                )
+                assert_runtime_archive_sources_match_manifest(
+                    archive,
+                    embedded_manifest,
+                )
         else:
             manifest_bytes = (
                 runtime_root / SOURCE_MANIFEST_RELATIVE_PATH
             ).read_bytes()
-        embedded_manifest = validate_producer_source_manifest(
-            json.loads(manifest_bytes.decode("ascii"))
-        )
+            embedded_manifest = validate_producer_source_manifest(
+                json.loads(manifest_bytes.decode("ascii"))
+            )
         producer_manifest = build_producer_source_manifest(producer_root)
         behavior_sources = behavior_source_relative_paths(producer_root)
-    except (OSError, ValueError, SourceIdentityError) as exc:
+    except (
+        KeyError,
+        OSError,
+        ValueError,
+        SourceIdentityError,
+        zipfile.BadZipFile,
+    ) as exc:
         raise RuntimeError(
             "Producer/runtime source manifest cannot be validated."
         ) from exc
@@ -1281,7 +1353,7 @@ def _fixed_base_effective_config(
 
     config_source_sha256s = [file_sha256(path) for path in (args.config or [])]
     return {
-        "effective_config_schema_version": 2,
+        "effective_config_schema_version": 3,
         "algorithm": "upi_trm",
         "training_protocol": "fixed_base_exact",
         "registration": {
@@ -1289,6 +1361,7 @@ def _fixed_base_effective_config(
             "tier": args.confirmatory_tier,
             "run_id": args.run_id,
             "training_seed": args.seed,
+            "attempt_index": registered_assignment["attempt_index"],
             "registry_sha256": registered_assignment["registry_sha256"],
         },
         "backbone": args.backbone,
@@ -2835,6 +2908,15 @@ def parse_args():
         help="Stable registered run identifier (required for fixed_base_exact).",
     )
     parser.add_argument(
+        "--attempt-index",
+        type=int,
+        default=None,
+        help=(
+            "Zero-based execution attempt. Required for confirmatory runs so a "
+            "restart preserves prior checkpoint and evaluation evidence."
+        ),
+    )
+    parser.add_argument(
         "--confirmatory",
         action="store_true",
         help="Enable fail-closed confirmatory provenance and evaluation artifacts.",
@@ -3077,6 +3159,17 @@ def _step_prefix(progress_step: int, outer_step: int) -> str:
     if progress_step != outer_step:
         prefix += f" [update {outer_step:05d}]"
     return prefix
+
+
+def _remember_latest_optimization_metrics(
+    pending: Optional[Dict[str, float]],
+    current: Dict[str, float],
+) -> Optional[Dict[str, float]]:
+    """Keep the latest real update across collection-only scheduler calls."""
+
+    if current.get("optimization_performed", 0.0) > 0.0:
+        return copy.deepcopy(current)
+    return pending
 
 
 def _log_training_metrics(
@@ -4239,12 +4332,13 @@ def main():
                     ) from exc
             runtime_fingerprint = _runtime_fingerprint()
             evidence_effective_config = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "registration": {
                     "cell": args.confirmatory_cell,
                     "tier": args.confirmatory_tier,
                     "run_id": args.run_id,
                     "training_seed": args.seed,
+                    "attempt_index": registered_assignment["attempt_index"],
                     "registry_sha256": registered_assignment[
                         "registry_sha256"
                     ],
@@ -4316,11 +4410,12 @@ def main():
         }
         if args.prepare_confirmatory_lock:
             lock = {
-                "lock_schema_version": 2,
+                "lock_schema_version": 3,
                 "confirmatory_cell": args.confirmatory_cell,
                 "confirmatory_tier": args.confirmatory_tier,
                 "run_id": args.run_id,
                 "training_seed": args.seed,
+                "attempt_index": registered_assignment["attempt_index"],
                 "registry_sha256": registered_assignment["registry_sha256"],
                 "producer_git_commit": initial_producer_identity["git_commit"],
                 "effective_config_sha256": evidence_effective_config_sha256,
@@ -4354,6 +4449,7 @@ def main():
     # === Setup checkpoint directory ===
     # Note: dataset_name is already set in the provenance logging section above
     checkpoint_dir = args.checkpoint_dir
+    confirmatory_evaluation_attempt_dir: Optional[Path] = None
     checkpointing_enabled = args.save_interval > 0 or (
         env_step_budget is not None
         and args.save_env_interval is not None
@@ -4362,6 +4458,26 @@ def main():
     if checkpoint_dir is None and checkpointing_enabled:
         checkpoint_dir = os.path.join("checkpoints", f"rl_{dataset_name}_seed{args.seed or 0}")
         print(f"[INFO] Checkpoint directory: {checkpoint_dir}")
+    if confirmatory_run:
+        assert checkpoint_dir is not None
+        assert args.evaluation_artifact_dir is not None
+        assert args.run_id is not None
+        assert registered_assignment is not None
+        checkpoint_attempt_dir, confirmatory_evaluation_attempt_dir = (
+            _claim_confirmatory_attempt_paths(
+                checkpoint_root=checkpoint_dir,
+                evaluation_root=args.evaluation_artifact_dir,
+                run_id=args.run_id,
+                attempt_index=registered_assignment["attempt_index"],
+            )
+        )
+        checkpoint_dir = str(checkpoint_attempt_dir)
+        print(
+            "[ATTEMPT] "
+            f"index={registered_assignment['attempt_index']} "
+            f"checkpoint_dir={checkpoint_attempt_dir} "
+            f"evaluation_dir={confirmatory_evaluation_attempt_dir}"
+        )
 
     def revalidate_producer_source(context: str) -> None:
         if not strict_evidence_run:
@@ -4492,10 +4608,11 @@ def main():
                 "record_count": eval_records["count"],
             },
         }
-        artifact_root = Path(args.evaluation_artifact_dir).expanduser().resolve()
+        if confirmatory_evaluation_attempt_dir is None:
+            raise RuntimeError("Confirmatory evaluation attempt was not reserved.")
+        artifact_root = confirmatory_evaluation_attempt_dir
         resolved_output = (
             artifact_root
-            / evidence_identity["run_id"]
             / f"env_steps_{progress_step:012d}"
         ).resolve()
         if artifact_root not in resolved_output.parents:
@@ -4758,6 +4875,7 @@ def main():
         next_save_env = next_strict_multiple(save_env_interval)
         outer_step = int(getattr(trainer, "_train_step_count", start_step))
         step_iter = None
+        pending_optimization_metrics: Optional[Dict[str, float]] = None
 
         while trainer.get_env_step_count() < env_step_budget:
             current_env_step = trainer.get_env_step_count()
@@ -4784,6 +4902,10 @@ def main():
             outer_step = int(
                 metrics.get("train_steps_total", trainer._train_step_count)
             )
+            pending_optimization_metrics = _remember_latest_optimization_metrics(
+                pending_optimization_metrics,
+                metrics,
+            )
 
             if (
                 puzzle_emb_optimizer is not None
@@ -4797,15 +4919,24 @@ def main():
             progress_step = current_env_step
 
             if next_log_env is not None and current_env_step >= next_log_env:
-                _log_training_metrics(
-                    progress_step=progress_step,
-                    outer_step=outer_step,
-                    metrics=metrics,
-                    selected_baseline=selected_baseline,
-                    trainer=trainer,
-                    step_iter=step_iter,
-                    use_wandb=use_wandb,
-                )
+                if pending_optimization_metrics is not None:
+                    _log_training_metrics(
+                        progress_step=progress_step,
+                        outer_step=outer_step,
+                        metrics=pending_optimization_metrics,
+                        selected_baseline=selected_baseline,
+                        trainer=trainer,
+                        step_iter=step_iter,
+                        use_wandb=use_wandb,
+                    )
+                    pending_optimization_metrics = None
+                else:
+                    _write_progress(
+                        step_iter,
+                        f"{_step_prefix(progress_step, outer_step)} "
+                        "training metrics deferred: no optimizer update completed "
+                        "in this logging interval",
+                    )
                 while next_log_env is not None and current_env_step >= next_log_env:
                     next_log_env += log_env_interval
 

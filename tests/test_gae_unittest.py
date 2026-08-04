@@ -91,17 +91,18 @@ class TestGAE(unittest.TestCase):
 
     def test_gae_trajectory_with_early_terminal(self):
         """Test GAE trajectory with early termination."""
-        rewards = torch.tensor([1.0, 1.0, 1.0])
-        values = torch.zeros(3)
+        rewards = torch.tensor([1.0, 2.0, 3.0])
+        values = torch.tensor([0.5, 1.5, 4.0])
         dones = torch.tensor([False, True, False])  # Terminal at step 1
-        gamma = 0.99
-        gae_lambda = 0.95
-        last_value = 0.0
+        gamma = 0.9
+        gae_lambda = 0.8
+        last_value = 5.0
 
         gae = compute_gae_trajectory(rewards, values, dones, gamma, gae_lambda, last_value)
 
-        # After terminal, GAE should reset
-        self.assertEqual(gae.shape, (3,))
+        # The terminal step neither bootstraps V(s') nor carries A_{t+1}.
+        expected = torch.tensor([2.21, 0.5, 3.5])
+        torch.testing.assert_close(gae, expected, rtol=0.0, atol=1e-6)
 
     def test_gae_lambda_zero_equals_td(self):
         """Test that λ=0 GAE equals pure TD error."""

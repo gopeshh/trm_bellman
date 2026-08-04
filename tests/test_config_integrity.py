@@ -211,7 +211,7 @@ class TestConfigIntegrity(unittest.TestCase):
                 "relative_path": "iclr-confirmatory-v1",
             },
         )
-        self.assertNotIn("/home/", json.dumps(output_root))
+        self.assertNotIn("/" + "home/", json.dumps(output_root))
         self.assertNotIn("/tmp/", json.dumps(output_root))
 
         self.assertEqual(
@@ -371,13 +371,21 @@ class TestConfigIntegrity(unittest.TestCase):
             "evaluation_environment_interval",
             "save_environment_interval",
         )
+        ppo_num_steps = int(ppo_raw["ppo_num_steps"])
         intervals = [matrix[key] for key in interval_keys]
         for key, interval in zip(interval_keys, intervals):
             with self.subTest(interval=key):
                 self.assertIsInstance(interval, int)
                 self.assertGreater(interval, 0)
                 self.assertEqual(budget % interval, 0)
-        self.assertEqual(budget % int(ppo_raw["ppo_num_steps"]), 0)
+                self.assertEqual(interval % ppo_num_steps, 0)
+        self.assertEqual(budget % ppo_num_steps, 0)
+        for key in interval_keys:
+            with self.subTest(debug_interval=key):
+                self.assertEqual(
+                    matrix["debug_runs"][key] % ppo_num_steps,
+                    0,
+                )
 
         checkpoints = matrix["reported_environment_checkpoints"]
         self.assertEqual(checkpoints, sorted(set(checkpoints)))

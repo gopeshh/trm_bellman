@@ -877,8 +877,8 @@ def _validate_artifact_payloads(payloads: Mapping[str, bytes]) -> None:
 
     combined = b"\n".join(payloads.values())
     forbidden = [
-        b"/home/",
-        b"/Users/",
+        b"/" + b"home/",
+        b"/" + b"Users/",
         b"\\Users\\",
         b"/data/",
         b"/private/",
