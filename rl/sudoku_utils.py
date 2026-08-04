@@ -29,10 +29,9 @@ def _grid_to_digits(grid: torch.Tensor, grid_size: int) -> torch.Tensor:
     Returns:
         Grid in digit space (0 = empty, 1..N = digits)
     """
-    digits = grid.clone()
-    digits[digits == 1] = 0  # Empty cells
-    digits = digits - 1  # Shift: token 2 -> digit 1, etc.
-    digits = torch.clamp(digits, min=0)  # Ensure non-negative
+    digits = torch.zeros_like(grid)
+    legal = (grid >= 2) & (grid <= grid_size + 1)
+    digits[legal] = grid[legal] - 1
     return digits
 
 
@@ -143,7 +142,16 @@ def sudoku_filled_cells(grid: torch.Tensor, empty_token: int = 1) -> int:
     Returns:
         Number of filled cells
     """
-    return int((grid != empty_token).sum().item())
+    total_cells = grid.numel()
+    if total_cells == 16:
+        largest_digit_token = 5
+    elif total_cells == 81:
+        largest_digit_token = 10
+    else:
+        # Retain the historical fallback for non-Sudoku smoke fixtures.
+        return int((grid != empty_token).sum().item())
+    legal_digit = (grid >= 2) & (grid <= largest_digit_token)
+    return int(legal_digit.sum().item())
 
 
 def _get_candidates_4x4(digits: torch.Tensor, row: int, col: int) -> Set[int]:
@@ -331,20 +339,24 @@ def sudoku_is_solved(grid: torch.Tensor, empty_token: int = 1) -> bool:
         True if grid is solved, False otherwise
     """
     total_cells = grid.numel()
-
-    # Check all cells are filled
-    filled = sudoku_filled_cells(grid, empty_token)
-    if filled != total_cells:
-        return False
-
-    # Check no violations
     if total_cells == 16:
-        violations = count_sudoku_violations_4x4(grid)
+        grid_size = 4
     elif total_cells == 81:
-        violations = count_sudoku_violations_9x9(grid)
+        grid_size = 9
     else:
-        # Unknown grid size - cannot verify
+        # Unknown grid size - cannot verify.
         return False
+
+    # A solved grid must contain only encoded digits. In particular, padding
+    # token 0 is neither an empty cell nor a legal Sudoku digit.
+    valid_digit_tokens = (grid >= 2) & (grid <= grid_size + 1)
+    if not bool(valid_digit_tokens.all().item()):
+        return False
+
+    if grid_size == 4:
+        violations = count_sudoku_violations_4x4(grid)
+    else:
+        violations = count_sudoku_violations_9x9(grid)
 
     return violations == 0
 

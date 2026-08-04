@@ -84,6 +84,25 @@ class TestSudokuUtils(unittest.TestCase):
         filled = sudoku_filled_cells(y, empty_token=1)
         self.assertEqual(filled, 16)
 
+    def test_padding_and_out_of_domain_tokens_are_not_filled(self):
+        """Only legal Sudoku digit tokens contribute fill progress."""
+        y = torch.ones(16, dtype=torch.long)
+        y[0] = 0
+        y[1] = 6
+        y[2] = 2
+        self.assertEqual(sudoku_filled_cells(y, empty_token=1), 1)
+
+    def test_padding_write_does_not_increase_shaped_score(self):
+        """PAD writes cannot earn progress reward."""
+        x = {"inputs": torch.ones(16, dtype=torch.long)}
+        empty = torch.ones(16, dtype=torch.long)
+        padded = empty.clone()
+        padded[0] = 0
+        self.assertEqual(sudoku_progress_checker(x, empty), 0.0)
+        self.assertEqual(sudoku_progress_checker(x, padded), 0.0)
+        self.assertEqual(sudoku_feasibility_checker(x, empty), 0.0)
+        self.assertEqual(sudoku_feasibility_checker(x, padded), 0.0)
+
 
 class TestZeroCandidateCells(unittest.TestCase):
     """Tests for zero-candidate cell detection."""
@@ -202,6 +221,31 @@ class TestSudokuIsSolved(unittest.TestCase):
         """Full grid with violations is not solved."""
         # All cells filled with same digit -> many violations
         y = torch.full((16,), 2, dtype=torch.long)  # All 1s
+        self.assertFalse(sudoku_is_solved(y))
+
+    def test_padding_token_is_not_a_filled_digit(self):
+        """Padding token 0 must not pass the exact verifier."""
+        y = torch.tensor([
+            2, 3, 4, 5,
+            4, 5, 2, 3,
+            3, 2, 5, 4,
+            5, 4, 3, 0,
+        ], dtype=torch.long)
+        self.assertFalse(sudoku_is_solved(y))
+
+    def test_out_of_domain_4x4_token_is_not_solved(self):
+        """A token above the 4x4 digit vocabulary must fail closed."""
+        y = torch.tensor([
+            2, 3, 4, 5,
+            4, 5, 2, 3,
+            3, 2, 5, 4,
+            5, 4, 3, 6,
+        ], dtype=torch.long)
+        self.assertFalse(sudoku_is_solved(y))
+
+    def test_out_of_domain_9x9_token_is_not_solved(self):
+        """Malformed 9x9 tokens must fail before one-hot indexing."""
+        y = torch.full((81,), 11, dtype=torch.long)
         self.assertFalse(sudoku_is_solved(y))
 
     def test_valid_solved_grid(self):

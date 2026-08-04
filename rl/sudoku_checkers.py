@@ -72,10 +72,10 @@ def sudoku_progress_checker(x: dict[str, Any], y: Any, violation_penalty: float 
     total_cells = plan.numel()
 
     if total_cells == 16:
-        filled_cells = (plan != 1).sum().item()
+        filled_cells = sudoku_filled_cells(plan, empty_token=1)
         violations = count_sudoku_violations_4x4(plan)
     elif total_cells == 81:
-        filled_cells = (plan != 1).sum().item()
+        filled_cells = sudoku_filled_cells(plan, empty_token=1)
         violations = count_sudoku_violations_9x9(plan)
     else:
         return sudoku_solution_checker(x, y)
