@@ -20,6 +20,7 @@ from utils.lipschitz import (
     enforce_global_contraction_on_value_head,
     apply_opnorm_clamp_to_trm,
 )
+from utils.compute_accounting import ModelComputeCounters, validate_model_counters
 
 IGNORE_LABEL_ID = -100
 
@@ -412,6 +413,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         super().__init__()
         self.config = TinyRecursiveReasoningModel_ACTV1Config(**config_dict)
         self.inner = TinyRecursiveReasoningModel_ACTV1_Inner(self.config)
+        self._compute_counters = ModelComputeCounters()
         
         seq_len = self.config.seq_len
         hidden_size = self.config.hidden_size
@@ -535,6 +537,31 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
     @property
     def puzzle_emb(self):
         return self.inner.puzzle_emb
+
+    def compute_counter_snapshot(self) -> Dict[str, int]:
+        return self._compute_counters.snapshot()
+
+    def restore_compute_counters(self, counters: object) -> None:
+        self._compute_counters.restore(
+            validate_model_counters(counters, name="model_compute_counters")
+        )
+
+    def reset_compute_counters(self) -> None:
+        self._compute_counters.restore(ModelComputeCounters().snapshot())
+
+    def record_action_value_evaluations(self, count: int) -> None:
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError("Action-value evaluation count must be nonnegative.")
+        self._compute_counters.action_values_evaluated += count
+
+    def _record_recurrent_latent_update(
+        self,
+        carry: TinyRecursiveReasoningModel_ACTV1InnerCarry,
+    ) -> None:
+        self._compute_counters.recurrent_latent_update_calls += 1
+        self._compute_counters.recurrent_latent_state_updates += int(
+            carry.z_H.shape[0]
+        )
 
     def initial_carry(self, batch: Dict[str, torch.Tensor]):
         batch_size = batch["inputs"].shape[0]
@@ -672,10 +699,13 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             if R > 0.0:
                 z_H, z_L = self.inner._project_carry_to_ball(z_H, z_L, R)
 
-            return TinyRecursiveReasoningModel_ACTV1InnerCarry(
+            result = TinyRecursiveReasoningModel_ACTV1InnerCarry(
                 z_H=z_H,
                 z_L=z_L,
             )
+            self._compute_counters.latent_initialization_calls += 1
+            self._compute_counters.latent_states_initialized += batch_size
+            return result
         else:
             # Use global initialization
             empty_carry = self.inner.empty_carry(batch_size, device=device)
@@ -691,6 +721,8 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
                     z_H=z_H,
                     z_L=z_L,
                 )
+            self._compute_counters.latent_initialization_calls += 1
+            self._compute_counters.latent_states_initialized += batch_size
             return z
 
     def update_latent(
@@ -705,7 +737,9 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         batch = self._standardize_latent_batch(x, y)
         context = self._resolve_latent_context(batch)
         input_embeds = context["input_embeddings_with_plan"]
-        return self.inner.latent_step(z, input_embeds, context["seq_info"])
+        result = self.inner.latent_step(z, input_embeds, context["seq_info"])
+        self._record_recurrent_latent_update(result)
+        return result
 
     def update_latent_with_projection_info(
         self,
@@ -722,11 +756,13 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         batch = self._standardize_latent_batch(x, y)
         context = self._resolve_latent_context(batch)
         input_embeds = context["input_embeddings_with_plan"]
-        return self.inner.latent_step_with_projection_info(
+        result = self.inner.latent_step_with_projection_info(
             z,
             input_embeds,
             context["seq_info"],
         )
+        self._record_recurrent_latent_update(result[0])
+        return result
 
     def unroll_latent(
         self,
@@ -751,6 +787,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             context = self._resolve_latent_context(batch)
             input_embeds = context["input_embeddings_with_plan"]
             z = self.inner.latent_step(z, input_embeds, context["seq_info"])
+            self._record_recurrent_latent_update(z)
             zs.append(z)
         return z, zs
 
@@ -778,6 +815,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             context = self._resolve_latent_context(batch)
             input_embeds = context["input_embeddings_with_plan"]
             z = self.inner.latent_step(z, input_embeds, context["seq_info"])
+            self._record_recurrent_latent_update(z)
             zs.append(z)
         return z, zs
 
@@ -828,6 +866,9 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         # 3) Apply value head and return both value and updated z
         
         value = self.value_head(z_vec, combined_embed)
+        self._compute_counters.value_api_calls += 1
+        self._compute_counters.value_state_evaluations += int(z_n.z_H.shape[0])
+        self._compute_counters.state_values_evaluated += int(value.numel())
         return value, z_n
 
     def policy_dist(
@@ -882,6 +923,9 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         y_embed = plan_embeddings.view(plan_embeddings.shape[0], -1)    # [B, total_seq_len * hidden_dim]
 
         dist = self.edit_policy(z_vec, x_embed, y_embed, action_mask=action_mask)
+        self._compute_counters.policy_api_calls += 1
+        self._compute_counters.policy_state_evaluations += int(z_n.z_H.shape[0])
+        self._compute_counters.action_logits_evaluated += int(dist.logits.numel())
         return dist, z_n
 
     def forward(self, carry: TinyRecursiveReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:

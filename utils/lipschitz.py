@@ -831,6 +831,11 @@ def compute_exact_baseline_summation(
                     z=successor_latent,
                 )
             q_values[:, a] = rewards + gamma * v_next * (~terminal_batch).to(v_next.dtype)
+            record_action_values = getattr(
+                model, "record_action_value_evaluations", None
+            )
+            if callable(record_action_values):
+                record_action_values(batch_size)
         
         # Apply action mask if provided (invalid actions get -inf Q-value)
         if action_mask is not None:

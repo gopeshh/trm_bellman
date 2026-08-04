@@ -1,0 +1,3 @@
+# Debug-only validation evaluation overlay. Never use this layer in a
+# confirmatory bridge or matched-comparison cell.
+eval_num_episodes: 256

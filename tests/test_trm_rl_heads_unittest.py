@@ -47,6 +47,57 @@ def _tiny_trm_cfg(batch_size: int, seq_len: int, vocab_size: int, num_identifier
 class TestTRMRLHeads(unittest.TestCase):
     """Tests for TRM RL heads (value and policy)."""
 
+    def test_compute_counters_measure_exact_model_work(self):
+        batch_size = 3
+        seq_len = 4
+        vocab_size = 6
+        cfg = _tiny_trm_cfg(batch_size, seq_len, vocab_size, 3)
+        model = TinyRecursiveReasoningModel_ACTV1(cfg)
+        x_batch = {
+            "inputs": torch.randint(0, vocab_size, (batch_size, seq_len)),
+            "puzzle_identifiers": torch.arange(batch_size),
+        }
+        y_batch = torch.zeros_like(x_batch["inputs"])
+
+        model.reset_compute_counters()
+        model.record_action_value_evaluations(7)
+        _, z = model.policy_dist(x_batch, y_batch, n=2)
+        after_policy = model.compute_counter_snapshot()
+        self.assertEqual(after_policy["action_values_evaluated"], 7)
+        self.assertEqual(after_policy["latent_initialization_calls"], 1)
+        self.assertEqual(after_policy["latent_states_initialized"], batch_size)
+        self.assertEqual(after_policy["policy_api_calls"], 1)
+        self.assertEqual(after_policy["policy_state_evaluations"], batch_size)
+        self.assertEqual(after_policy["recurrent_latent_update_calls"], 2)
+        self.assertEqual(
+            after_policy["recurrent_latent_state_updates"], 2 * batch_size
+        )
+        self.assertEqual(
+            after_policy["action_logits_evaluated"],
+            batch_size * cfg["rl_num_actions"],
+        )
+
+        # A direct exact-mixture candidate at n=0 still evaluates its action
+        # head, but it performs no recurrent transition and no initialization.
+        model.policy_dist(x_batch, y_batch, n=0, z=z)
+        after_zero_depth = model.compute_counter_snapshot()
+        self.assertEqual(after_zero_depth["policy_api_calls"], 2)
+        self.assertEqual(
+            after_zero_depth["action_logits_evaluated"],
+            2 * batch_size * cfg["rl_num_actions"],
+        )
+        self.assertEqual(after_zero_depth["recurrent_latent_update_calls"], 2)
+        self.assertEqual(after_zero_depth["latent_initialization_calls"], 1)
+
+        values, _ = model.used_value(x_batch, y_batch, n=1)
+        final = model.compute_counter_snapshot()
+        self.assertEqual(final["value_api_calls"], 1)
+        self.assertEqual(final["value_state_evaluations"], batch_size)
+        self.assertEqual(final["state_values_evaluated"], values.numel())
+        self.assertEqual(final["recurrent_latent_update_calls"], 3)
+        self.assertEqual(final["recurrent_latent_state_updates"], 3 * batch_size)
+        self.assertEqual(final["latent_initialization_calls"], 2)
+
     def test_trm_rl_heads_used_value_and_policy_dist_shapes(self):
         """Test used_value and policy_dist shapes."""
         torch.manual_seed(0)

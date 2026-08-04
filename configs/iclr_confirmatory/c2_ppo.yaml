@@ -1,0 +1,52 @@
+# C2 architecture-matched TRM+PPO endpoint. PPO retains episodic latent semantics.
+algorithm: ppo
+ppo_clip_eps: 0.2
+ppo_epochs: 4
+ppo_num_steps: 80
+ppo_num_minibatches: 4
+vf_coef: 0.5
+normalize_advantages: true
+clip_vf_loss: false
+gae_lambda: 0.95
+
+gamma: 0.99
+inner_unroll_n: 2
+max_edits: 16
+num_train_steps: 20000
+batch_size: 32
+rollout_episodes_per_step: 4
+
+policy_lr: 0.0001
+value_lr: 0.0003
+backbone_lr: 0.0003
+entropy_coef: 0.05
+max_grad_norm: 0.5
+lr_schedule: constant
+lr_warmup_steps: 0
+lr_min_factor: 1.0
+
+enable_contraction: false
+target_Lz: 0.9
+target_Lv: 1.0
+latent_ball_radius: 10.0
+opnorm_clamp_interval: 0
+episodic_latent: true
+
+use_feasibility_checker: true
+feasibility_violation_weight: 2.0
+feasibility_zerocand_weight: 5.0
+disable_constraint_masking: true
+reward_shaping: true
+solve_terminal_reward: 1.0
+fail_terminal_reward: -16.0
+stop_action_mode: disabled
+C_max: 16.0
+solved_threshold: null
+
+log_interval: 50
+eval_interval: 100
+eval_num_episodes: 512
+eval_seed: 26080311
+use_tqdm: false
+track_theory_metrics: false
+task_name: sudoku

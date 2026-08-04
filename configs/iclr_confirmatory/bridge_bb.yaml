@@ -1,0 +1,2 @@
+# C1 Bb: only the action-summed baseline factor differs from B0.
+exact_baseline_summation: true

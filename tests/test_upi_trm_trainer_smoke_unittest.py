@@ -8,7 +8,10 @@ import unittest
 from unittest.mock import patch
 import torch
 
-from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+from models.recursive_reasoning.trm import (
+    TinyRecursiveReasoningModel_ACTV1,
+    TinyRecursiveReasoningModel_ACTV1InnerCarry,
+)
 from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.sudoku_checkers import dummy_checker
@@ -19,6 +22,8 @@ from rl.upi_trm_trainer import (
     _clip_and_recenter_advantages,
     _mean_categorical_kl,
 )
+from utils.dataset_provenance import sample_sha256
+from utils.evaluation_artifacts import record_local_evaluation_seed
 
 
 def _num_actions(seq_len: int, vocab_size: int) -> int:
@@ -145,6 +150,9 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
         training_protocol="legacy",
         enable_contraction=True,
         opnorm_clamp_interval=100,
+        capture_preinterpolation_policy_pair=False,
+        evaluation_policy_mode="configured",
+        policy_epsilon=0.0,
     ):
         dataset = DummyPuzzleDataset(num_instances=6, seq_len=8, vocab_size=12)
         env_cfg = PlanEditEnvConfig(
@@ -174,6 +182,11 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
             training_protocol=training_protocol,
             enable_contraction=enable_contraction,
             opnorm_clamp_interval=opnorm_clamp_interval,
+            capture_preinterpolation_policy_pair=(
+                capture_preinterpolation_policy_pair
+            ),
+            evaluation_policy_mode=evaluation_policy_mode,
+            policy_epsilon=policy_epsilon,
         )
         model = TinyRecursiveReasoningModel_ACTV1(
             _tiny_trm_cfg(
@@ -231,14 +244,9 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
     def test_exact_mixture_evaluation_uses_deployed_policy_callback(self):
         trainer, dataset = self._make_fixed_base_trainer()
 
-        def consume_evaluation_rng(*args, **kwargs):
-            torch.rand(3)
-            return 0.0, 0.0, {}
-
-        rng_before = torch.random.get_rng_state().clone()
         with patch(
             "rl.evaluator.evaluate_plan_policy_with_scores",
-            side_effect=consume_evaluation_rng,
+            return_value=(0.0, 0.0, {}),
         ) as evaluate:
             metrics = trainer.evaluate_policy_metrics(
                 trainer.env_config,
@@ -248,11 +256,228 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
 
         self.assertEqual(metrics["eval_policy_mode"], "stochastic_exact_mixture")
         self.assertEqual(metrics["eval_seed"], trainer.rl_cfg.eval_seed)
-        torch.testing.assert_close(torch.random.get_rng_state(), rng_before)
         self.assertFalse(evaluate.call_args.kwargs["greedy"])
+        self.assertTrue(evaluate.call_args.kwargs["record_local_seeding"])
+        self.assertEqual(
+            evaluate.call_args.kwargs["additional_models"],
+            (trainer.policy_model_candidate,),
+        )
         callback = evaluate.call_args.kwargs["policy_dist_fn"]
         self.assertIs(callback.__self__, trainer)
         self.assertIs(callback.__func__, trainer._mixed_policy_dist.__func__)
+
+    def test_preinterpolation_evaluator_uses_captured_pair_only(self):
+        trainer, dataset = self._make_trainer(
+            capture_preinterpolation_policy_pair=True,
+            evaluation_policy_mode="preinterpolation_exact_mixture",
+        )
+        self.assertIsNotNone(trainer.preinterpolation_policy_base)
+        self.assertIsNotNone(trainer.preinterpolation_policy_candidate)
+
+        with torch.no_grad():
+            candidate_parameter = next(
+                trainer.policy_model_candidate.edit_policy.parameters()
+            )
+            candidate_parameter.add_(0.25)
+        trainer._capture_current_preinterpolation_pair()
+        captured_candidate = next(
+            trainer.preinterpolation_policy_candidate.edit_policy.parameters()
+        ).detach().clone()
+        trainer._sync_policy_old_towards_candidate()
+        trainer._sync_candidate_policy_from_old()
+        current_candidate = next(
+            trainer.policy_model_candidate.edit_policy.parameters()
+        ).detach()
+        self.assertFalse(torch.equal(captured_candidate, current_candidate))
+
+        with patch(
+            "rl.evaluator.evaluate_plan_policy_with_scores",
+            return_value=(0.0, 0.0, {}),
+        ) as evaluate:
+            metrics = trainer.evaluate_policy_metrics(
+                trainer.env_config,
+                dataset,
+                dummy_checker,
+            )
+
+        kwargs = evaluate.call_args.kwargs
+        self.assertIs(kwargs["model"], trainer.preinterpolation_policy_base)
+        self.assertEqual(
+            kwargs["additional_models"],
+            (trainer.preinterpolation_policy_candidate,),
+        )
+        callback = kwargs["policy_dist_fn"]
+        self.assertIs(callback.__self__, trainer)
+        self.assertIs(
+            callback.__func__,
+            trainer._preinterpolation_mixed_policy_dist.__func__,
+        )
+        self.assertFalse(kwargs["greedy"])
+        self.assertEqual(
+            metrics["eval_policy_mode"],
+            "stochastic_preinterpolation_exact_mixture",
+        )
+
+    def test_bridge_control_samples_deployed_actor_with_record_local_seed(self):
+        trainer, dataset = self._make_trainer(
+            capture_preinterpolation_policy_pair=True,
+            evaluation_policy_mode="stochastic_deployed",
+        )
+        with patch(
+            "rl.evaluator.evaluate_plan_policy_with_scores",
+            return_value=(0.0, 0.0, {}),
+        ) as evaluate:
+            metrics = trainer.evaluate_policy_metrics(
+                trainer.env_config,
+                dataset,
+                dummy_checker,
+            )
+
+        kwargs = evaluate.call_args.kwargs
+        self.assertIs(kwargs["model"], trainer.policy_model_old)
+        self.assertIsNone(kwargs["policy_dist_fn"])
+        self.assertEqual(kwargs["additional_models"], ())
+        self.assertFalse(kwargs["greedy"])
+        self.assertTrue(kwargs["record_local_seeding"])
+        self.assertEqual(
+            metrics["eval_policy_mode"],
+            "stochastic_deployed_policy",
+        )
+
+    def test_preinterpolation_evaluator_requires_pair_capture(self):
+        with self.assertRaisesRegex(ValueError, "requires.*capture"):
+            self._make_trainer(
+                evaluation_policy_mode="preinterpolation_exact_mixture",
+            )
+
+        with self.assertRaisesRegex(ValueError, "policy_epsilon=0"):
+            self._make_trainer(
+                capture_preinterpolation_policy_pair=True,
+                evaluation_policy_mode="preinterpolation_exact_mixture",
+                policy_epsilon=0.1,
+            )
+
+    def test_persistent_exact_mixture_evaluation_carries_old_latent_and_clock(self):
+        trainer, dataset = self._make_fixed_base_trainer(episodic_latent=False)
+        trainer.rl_cfg.eval_num_episodes = 1
+        trainer.rl_cfg.mixture_alpha = 0.75
+
+        sample = dataset.samples[0]
+        sample["inputs"] = torch.ones(dataset.seq_len, dtype=torch.long)
+        sample["initial_plan"] = torch.zeros(dataset.seq_len, dtype=torch.long)
+        sample["solution"] = torch.full(
+            (dataset.seq_len,), dataset.vocab_size - 1, dtype=torch.long
+        )
+
+        action_old = 2
+        action_candidate = 3
+        action_dim = trainer.policy_model_old.config.rl_num_actions
+        old_probs = torch.zeros(1, action_dim)
+        candidate_probs = torch.zeros(1, action_dim)
+        old_probs[0, action_old] = 1.0
+        candidate_probs[0, action_candidate] = 1.0
+
+        record_sha = sample_sha256(sample["inputs"], sample["solution"])
+        mixture_probs = (
+            (1.0 - trainer.rl_cfg.mixture_alpha) * old_probs
+            + trainer.rl_cfg.mixture_alpha * candidate_probs
+        )
+        for base_seed in range(10_000):
+            episode_seed = record_local_evaluation_seed(base_seed, record_sha)
+            with torch.random.fork_rng():
+                torch.manual_seed(episode_seed)
+                sampled_action = int(
+                    torch.distributions.Categorical(probs=mixture_probs).sample().item()
+                )
+            if sampled_action == action_candidate:
+                trainer.rl_cfg.eval_seed = base_seed
+                break
+        else:
+            self.fail(
+                "Could not find a deterministic seed that samples the candidate action."
+            )
+
+        def carry(tag):
+            tensor = torch.tensor([[[float(tag)]]])
+            return TinyRecursiveReasoningModel_ACTV1InnerCarry(
+                z_H=tensor,
+                z_L=tensor.clone(),
+            )
+
+        initial_carry = carry(0)
+        old_output_carries = [carry(1), carry(2), carry(3)]
+        old_calls = []
+        candidate_calls = []
+
+        def init_latent(_x_batch, _plan):
+            return initial_carry
+
+        def old_policy_dist(x_batch, _y_batch, *, n, action_mask, z):
+            call_index = len(old_calls)
+            old_calls.append(
+                {
+                    "n": n,
+                    "z": z,
+                    "remaining_edits": int(x_batch["remaining_edits"].item()),
+                }
+            )
+            return (
+                torch.distributions.Categorical(probs=old_probs),
+                old_output_carries[call_index],
+            )
+
+        def candidate_policy_dist(x_batch, _y_batch, *, n, action_mask, z):
+            candidate_calls.append(
+                {
+                    "n": n,
+                    "z": z,
+                    "remaining_edits": int(x_batch["remaining_edits"].item()),
+                }
+            )
+            return torch.distributions.Categorical(probs=candidate_probs), z
+
+        with patch.object(
+            trainer.policy_model_old,
+            "init_latent",
+            side_effect=init_latent,
+        ), patch.object(
+            trainer.policy_model_old,
+            "policy_dist",
+            side_effect=old_policy_dist,
+        ), patch.object(
+            trainer.policy_model_candidate,
+            "policy_dist",
+            side_effect=candidate_policy_dist,
+        ):
+            metrics = trainer.evaluate_policy_metrics(
+                trainer.env_config,
+                dataset,
+                dummy_checker,
+            )
+
+        self.assertEqual(
+            [call["n"] for call in old_calls],
+            [trainer.rl_cfg.inner_unroll_n] * 3,
+        )
+        self.assertEqual([call["n"] for call in candidate_calls], [0, 0, 0])
+        self.assertEqual([call["remaining_edits"] for call in old_calls], [3, 2, 1])
+        self.assertEqual(
+            [call["remaining_edits"] for call in candidate_calls],
+            [3, 2, 1],
+        )
+        self.assertIs(old_calls[0]["z"], initial_carry)
+        self.assertIs(old_calls[1]["z"], old_output_carries[0])
+        self.assertIs(old_calls[2]["z"], old_output_carries[1])
+        for call, expected_carry in zip(candidate_calls, old_output_carries):
+            self.assertIs(call["z"], expected_carry)
+
+        record = metrics["per_instance"][0]
+        actions = record["actions"]
+        self.assertEqual(record["environment_interactions"], 3)
+        self.assertEqual(record["invalid_action_count"], 0)
+        self.assertEqual(len(actions), 3)
+        self.assertEqual(actions[0], action_candidate)
+        self.assertNotEqual(actions[0], action_old)
 
     def test_legacy_exact_actor_is_insulated_until_post_value_snapshot_sync(self):
         trainer, _ = self._make_trainer(theory_exact_mixture=True)

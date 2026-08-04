@@ -2,7 +2,7 @@
 import unittest
 import torch
 import torch.nn as nn
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from utils.lipschitz import compute_exact_baseline_summation
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
@@ -72,6 +72,7 @@ class TestOptimizedExactBaseline(unittest.TestCase):
         
         # Reset model call count
         self.model.used_value.reset_mock()
+        self.model.record_action_value_evaluations.reset_mock()
         
         # Run computation
         exact_baseline, q_all = compute_exact_baseline_summation(
@@ -97,6 +98,10 @@ class TestOptimizedExactBaseline(unittest.TestCase):
         # If optimization fails, it would be 10 calls.
         self.assertEqual(self.model.used_value.call_count, 2, 
                          f"Expected 2 calls (optimized), got {self.model.used_value.call_count}")
+        self.assertEqual(
+            self.model.record_action_value_evaluations.call_args_list,
+            [call(self.batch_size), call(self.batch_size)],
+        )
         
         # Verify masked values are -inf
         self.assertTrue(torch.isneginf(q_all[:, 1]).all())

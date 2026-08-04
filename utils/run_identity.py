@@ -192,6 +192,12 @@ def _validate_run_id(value: object) -> str:
     return value
 
 
+def validate_run_id(value: object) -> str:
+    """Validate a path-safe run identifier without constructing a full identity."""
+
+    return _validate_run_id(value)
+
+
 def _validate_training_seed(value: object) -> int:
     if (
         isinstance(value, bool)
@@ -229,9 +235,10 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
     """Validate the exact path-free configuration schema used by UPI runs."""
 
     canonical_value = _canonical_json_value(value, path="effective_config")
-    config = _require_exact_fields(
-        canonical_value,
-        expected={
+    if not isinstance(canonical_value, Mapping):
+        raise RunIdentityError("effective_config must be a string-keyed mapping.")
+    schema_version = canonical_value.get("effective_config_schema_version")
+    expected_fields = {
             "effective_config_schema_version",
             "algorithm",
             "training_protocol",
@@ -249,11 +256,22 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
             "external_logging",
             "debug_checks",
             "config_source_sha256s",
-        },
+    }
+    if schema_version == 2:
+        expected_fields.update(
+            {
+                "registration",
+                "dataset_provenance_sha256",
+                "initialization",
+            }
+        )
+    elif schema_version != 1:
+        raise RunIdentityError("Unsupported effective configuration schema.")
+    config = _require_exact_fields(
+        canonical_value,
+        expected=expected_fields,
         path="effective_config",
     )
-    if config["effective_config_schema_version"] != 1:
-        raise RunIdentityError("Unsupported effective configuration schema.")
     if config["algorithm"] != "upi_trm":
         raise RunIdentityError("effective_config.algorithm must be 'upi_trm'.")
     if config["training_protocol"] != "fixed_base_exact":
@@ -277,6 +295,53 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
         config["runtime_fingerprint_sha256"],
         path="effective_config.runtime_fingerprint_sha256",
     )
+    if schema_version == 2:
+        registration = _require_exact_fields(
+            config["registration"],
+            expected={
+                "cell",
+                "tier",
+                "run_id",
+                "training_seed",
+                "registry_sha256",
+            },
+            path="effective_config.registration",
+        )
+        _validate_run_id(registration["cell"])
+        if registration["tier"] not in {"confirmatory", "debug"}:
+            raise RunIdentityError(
+                "effective_config.registration.tier is unsupported."
+            )
+        _validate_run_id(registration["run_id"])
+        _validate_training_seed(registration["training_seed"])
+        _require_sha256(
+            registration["registry_sha256"],
+            path="effective_config.registration.registry_sha256",
+        )
+        _require_sha256(
+            config["dataset_provenance_sha256"],
+            path="effective_config.dataset_provenance_sha256",
+        )
+        initialization = _require_exact_fields(
+            config["initialization"],
+            expected={"kind", "artifact_sha256"},
+            path="effective_config.initialization",
+        )
+        kind = initialization["kind"]
+        if kind not in _INITIALIZATION_KINDS:
+            raise RunIdentityError(
+                "effective_config.initialization.kind is unsupported."
+            )
+        if kind == "random":
+            if initialization["artifact_sha256"] is not None:
+                raise RunIdentityError(
+                    "Random effective initialization must not name an artifact."
+                )
+        else:
+            _require_sha256(
+                initialization["artifact_sha256"],
+                path="effective_config.initialization.artifact_sha256",
+            )
 
     dataset = _require_exact_fields(
         config["dataset"],
@@ -472,6 +537,33 @@ def validate_run_identity(identity: object) -> dict[str, Any]:
             artifact_sha256,
             path="run_identity.initialization.artifact_sha256",
         )
+
+    if effective_config["effective_config_schema_version"] == 2:
+        registration = effective_config["registration"]
+        if not isinstance(registration, Mapping):
+            raise RunIdentityError("effective_config.registration is invalid.")
+        if registration["run_id"] != run_id:
+            raise RunIdentityError(
+                "Effective configuration run_id differs from run identity."
+            )
+        if registration["training_seed"] != training_seed:
+            raise RunIdentityError(
+                "Effective configuration seed differs from run identity."
+            )
+        if (
+            effective_config["dataset_provenance_sha256"]
+            != dataset_provenance_sha256
+        ):
+            raise RunIdentityError(
+                "Effective configuration dataset identity differs from run identity."
+            )
+        if effective_config["initialization"] != {
+            "kind": initialization_kind,
+            "artifact_sha256": artifact_sha256,
+        }:
+            raise RunIdentityError(
+                "Effective configuration initialization differs from run identity."
+            )
 
     canonical: dict[str, Any] = {
         "run_identity_schema_version": RUN_IDENTITY_SCHEMA_VERSION,

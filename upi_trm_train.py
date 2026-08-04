@@ -3,12 +3,15 @@ import argparse
 import copy
 import hashlib
 import importlib.metadata
+import json
 import logging
 import math
 import os
 import platform
 import random
+import re
 import tempfile
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -87,12 +90,19 @@ from utils.run_identity import (
     assert_matching_run_identity,
     build_checkpoint_lineage,
     build_run_identity,
+    canonical_json_bytes,
     canonical_json_sha256,
     discover_clean_git_source,
     file_sha256,
     validate_run_identity,
     validate_checkpoint_lineage,
+    validate_run_id,
     validate_upi_effective_config,
+)
+from utils.evaluation_artifacts import (
+    EVALUATION_ARTIFACT_SCHEMA_VERSION,
+    RECORD_LOCAL_SEED_SCHEME,
+    write_evaluation_artifact,
 )
 
 __all__ = [
@@ -296,6 +306,7 @@ def build_trainer(
             eval_interval=rl_cfg.eval_interval,
             num_train_steps=rl_cfg.num_train_steps,
             eval_num_episodes=rl_cfg.eval_num_episodes,
+            eval_seed=rl_cfg.eval_seed,
         )
         trainer = PPOTrainer(model=model, env=env, config=ppo_cfg, device=device)
         if verbose:
@@ -510,7 +521,290 @@ def _config_dict(config: Any) -> Dict[str, Any]:
         return config.dict()
     if isinstance(config, dict):
         return dict(config)
-    raise TypeError("Checkpoint configuration must be a Pydantic model or dictionary.")
+    if not isinstance(config, type) and is_dataclass(config):
+        return asdict(config)
+    raise TypeError(
+        "Checkpoint configuration must be a Pydantic model, dataclass instance, "
+        "or dictionary."
+    )
+
+
+def _validate_expected_producer_commit(
+    expected_commit: object,
+    producer_identity: Dict[str, Any],
+) -> str:
+    """Bind a confirmatory launch to the commit recorded before execution."""
+
+    if not isinstance(expected_commit, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", expected_commit
+    ):
+        raise RuntimeError(
+            "Confirmatory execution requires a registered 40-character lowercase "
+            "producer Git commit."
+        )
+    actual_commit = producer_identity.get("git_commit")
+    if actual_commit != expected_commit:
+        raise RuntimeError(
+            "Active producer Git commit differs from the pre-registered commit."
+        )
+    return expected_commit
+
+
+def _validate_expected_sha256(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise RuntimeError(f"{field} must be 64 lowercase hex characters.")
+    return value
+
+
+def _resolve_registered_rl_config(config_paths: List[Path]) -> RLConfig:
+    import yaml
+
+    expected = RLConfig(
+        batch_size=32,
+        num_train_steps=200,
+        rollout_episodes_per_step=1,
+        max_edits=8,
+        log_interval=10,
+        eval_interval=50,
+        eval_num_episodes=50,
+        eval_seed=1729,
+        use_tqdm=False,
+        debug_checks=False,
+    )
+    merged = _config_dict(expected)
+    for config_path in config_paths:
+        try:
+            parsed = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise RuntimeError("Registered YAML config cannot be parsed.") from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError("Registered YAML config must contain a mapping.")
+        merged = {**merged, **parsed}
+    return RLConfig(**merged)
+
+
+def _validate_registered_confirmatory_assignment(
+    *,
+    args: argparse.Namespace,
+    selected_baseline: Optional[str],
+    rl_cfg: RLConfig,
+) -> Dict[str, Any]:
+    """Bind a launch to one exact entry in the committed run matrix."""
+
+    registry_path = (
+        Path(__file__).resolve().parent
+        / "configs"
+        / "iclr_confirmatory"
+        / "run_matrix.json"
+    )
+    try:
+        registry = json.loads(registry_path.read_text(encoding="ascii"))
+        registry_sha256 = file_sha256(registry_path)
+    except (OSError, ValueError, RunIdentityError) as exc:
+        raise RuntimeError("Confirmatory run matrix cannot be read or hashed.") from exc
+    if not isinstance(registry, dict):
+        raise RuntimeError("Confirmatory run matrix must be a JSON object.")
+
+    cell = args.confirmatory_cell
+    tier = args.confirmatory_tier
+    if tier not in {"confirmatory", "debug"}:
+        raise RuntimeError("Confirmatory execution requires --confirmatory-tier.")
+    bridge_cells = registry.get("bridge_cells")
+    matched_cells = registry.get("matched_cells")
+    if not isinstance(bridge_cells, dict) or not isinstance(matched_cells, dict):
+        raise RuntimeError("Confirmatory run matrix has no cell registry.")
+    if cell in bridge_cells:
+        expected_layers = bridge_cells[cell]
+        expected_baseline = None
+    elif cell == "UPI_TRM" and cell in matched_cells:
+        expected_layers = matched_cells[cell]
+        expected_baseline = None
+    elif cell == "TRM_PPO" and cell in matched_cells:
+        expected_layers = matched_cells[cell]
+        expected_baseline = "ppo"
+    else:
+        raise RuntimeError(f"Unknown registered confirmatory cell {cell!r}.")
+    if selected_baseline != expected_baseline:
+        raise RuntimeError(
+            "Selected algorithm differs from the registered confirmatory cell."
+        )
+    if not isinstance(expected_layers, list) or not all(
+        isinstance(layer, str) and Path(layer).name == layer
+        for layer in expected_layers
+    ):
+        raise RuntimeError("Registered confirmatory config layers are invalid.")
+
+    if tier == "debug":
+        tier_config = registry.get("debug_runs")
+        if not isinstance(tier_config, dict):
+            raise RuntimeError("Debug run registry is missing.")
+        debug_layers = tier_config.get("config_layers")
+        if not isinstance(debug_layers, list) or not all(
+            isinstance(layer, str) and Path(layer).name == layer
+            for layer in debug_layers
+        ):
+            raise RuntimeError("Registered debug config layers are invalid.")
+        expected_layers = [*expected_layers, *debug_layers]
+        expected_seeds = tier_config.get("seeds")
+        eval_split_key = "validation"
+        budget_source = tier_config
+    else:
+        expected_seeds = registry.get("confirmatory_seeds")
+        eval_split_key = "test"
+        budget_source = registry
+        if not args.prepare_confirmatory_lock and registry.get("status") != "authorized":
+            raise RuntimeError(
+                "Confirmatory matrix execution is not authorized; lock preparation "
+                "is allowed, but training is blocked."
+            )
+    if not isinstance(expected_seeds, list) or args.seed not in expected_seeds:
+        raise RuntimeError("Training seed is not registered for the selected tier.")
+
+    templates = registry.get("run_id_templates")
+    if not isinstance(templates, dict) or not isinstance(templates.get(tier), str):
+        raise RuntimeError("Confirmatory run ID template is missing.")
+    expected_run_id = templates[tier].format(
+        cell_lower=str(cell).lower(), seed=args.seed
+    )
+    if args.run_id != expected_run_id:
+        raise RuntimeError(
+            f"Run ID must match the registered template: {expected_run_id!r}."
+        )
+
+    config_dir = registry_path.parent
+    expected_paths = [(config_dir / layer).resolve() for layer in expected_layers]
+    actual_paths = [Path(path).expanduser().resolve() for path in (args.config or [])]
+    if actual_paths != expected_paths:
+        raise RuntimeError(
+            "Ordered YAML config layers differ from the registered cell."
+        )
+    expected_rl_cfg = _resolve_registered_rl_config(expected_paths)
+    actual_rl_config = _config_dict(rl_cfg)
+    expected_rl_config = _config_dict(expected_rl_cfg)
+    if actual_rl_config != expected_rl_config:
+        changed_fields = sorted(
+            field
+            for field in set(actual_rl_config).union(expected_rl_config)
+            if actual_rl_config.get(field) != expected_rl_config.get(field)
+        )
+        raise RuntimeError(
+            "Resolved RLConfig differs from the registered layers: "
+            f"{changed_fields}."
+        )
+
+    dataset = registry.get("dataset")
+    if not isinstance(dataset, dict):
+        raise RuntimeError("Registered dataset description is missing.")
+    expected_dataset_root = (
+        Path(__file__).resolve().parent / str(dataset.get("root"))
+    ).resolve()
+    actual_dataset_roots = [
+        Path(path).expanduser().resolve() for path in (args.dataset_paths or [])
+    ]
+    if actual_dataset_roots != [expected_dataset_root]:
+        raise RuntimeError("Dataset root differs from the registered corpus.")
+    expected_eval_split = dataset.get(f"{eval_split_key}_split")
+    expected_eval_count = dataset.get(f"{eval_split_key}_count")
+    expected_eval_manifest = dataset.get(
+        f"{eval_split_key}_manifest_sha256"
+    )
+    if (
+        args.train_split != dataset.get("train_split")
+        or args.eval_split != expected_eval_split
+        or args.train_pool_size != dataset.get("train_count")
+        or args.eval_pool_size != expected_eval_count
+        or rl_cfg.eval_num_episodes != expected_eval_count
+        or args.train_manifest_sha256 != dataset.get("train_manifest_sha256")
+        or args.eval_manifest_sha256 != expected_eval_manifest
+    ):
+        raise RuntimeError(
+            "Dataset split, population, or manifest differs from the registry."
+        )
+
+    schedule_fields = {
+        "environment_interactions": args.env_step_budget,
+        "log_environment_interval": args.log_env_interval,
+        "evaluation_environment_interval": args.eval_env_interval,
+        "save_environment_interval": args.save_env_interval,
+    }
+    for name, actual in schedule_fields.items():
+        if actual != budget_source.get(name):
+            raise RuntimeError(
+                f"{name} differs from the registered {tier} schedule."
+            )
+    if args.save_interval != budget_source.get("save_outer_interval"):
+        raise RuntimeError(
+            f"save_outer_interval differs from the registered {tier} schedule."
+        )
+
+    architecture = registry.get("architecture_cli")
+    if not isinstance(architecture, dict):
+        raise RuntimeError("Registered architecture is missing.")
+    actual_architecture = {
+        "backbone": args.backbone,
+        "hidden_size": args.hidden_size,
+        "h_cycles": args.h_cycles,
+        "l_cycles": args.l_cycles,
+        "l_layers": args.l_layers,
+        "puzzle_emb_ndim": args.puzzle_emb_ndim,
+    }
+    if actual_architecture != architecture:
+        raise RuntimeError("CLI architecture differs from the registered architecture.")
+
+    return {
+        "registry_sha256": registry_sha256,
+        "tier": tier,
+        "cell": cell,
+        "run_id": expected_run_id,
+        "config_layer_sha256s": [file_sha256(path) for path in expected_paths],
+    }
+
+
+def _validate_evidence_identity(value: object) -> Dict[str, Any]:
+    """Validate the checkpoint-visible identity for every confirmatory method."""
+
+    required = {
+        "schema_version",
+        "run_id",
+        "algorithm",
+        "training_seed",
+        "producer_git_commit",
+        "effective_config_sha256",
+        "effective_config",
+        "dataset_provenance_sha256",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise RuntimeError("Confirmatory evidence identity has an invalid field inventory.")
+    if value["schema_version"] != 1:
+        raise RuntimeError("Unsupported confirmatory evidence identity schema.")
+    try:
+        validate_run_id(value["run_id"])
+    except RunIdentityError as exc:
+        raise RuntimeError("Confirmatory evidence identity has an invalid run ID.") from exc
+    algorithm = value["algorithm"]
+    if not isinstance(algorithm, str) or not algorithm or not algorithm.isascii():
+        raise RuntimeError("Confirmatory evidence identity has an invalid algorithm.")
+    seed = value["training_seed"]
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise RuntimeError("Confirmatory evidence identity has an invalid training seed.")
+    producer_commit = value["producer_git_commit"]
+    if not isinstance(producer_commit, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", producer_commit
+    ):
+        raise RuntimeError("Confirmatory evidence identity has an invalid producer commit.")
+    config_sha256 = _validate_expected_sha256(
+        value["effective_config_sha256"],
+        field="evidence_identity.effective_config_sha256",
+    )
+    _validate_expected_sha256(
+        value["dataset_provenance_sha256"],
+        field="evidence_identity.dataset_provenance_sha256",
+    )
+    if canonical_json_sha256(value["effective_config"]) != config_sha256:
+        raise RuntimeError(
+            "Confirmatory evidence identity effective configuration hash is inconsistent."
+        )
+    return copy.deepcopy(value)
 
 
 def _canonical_device(device: Any) -> str:
@@ -616,6 +910,16 @@ def _verify_producer_source_matches_runtime(lookup_root: str | Path) -> None:
                 for path in directory.rglob("*.py")
                 if "__pycache__" not in path.parts
             )
+        confirmatory_config_dir = root / "configs" / "iclr_confirmatory"
+        if not confirmatory_config_dir.is_dir():
+            raise RuntimeError(
+                f"{label} is missing confirmatory configuration sources."
+            )
+        inventory.update(
+            str(path.relative_to(root))
+            for path in confirmatory_config_dir.iterdir()
+            if path.is_file() and path.suffix in {".json", ".yaml"}
+        )
         return inventory
 
     producer_sources = source_inventory(producer_root, label="Producer repository")
@@ -1005,14 +1309,25 @@ def _fixed_base_effective_config(
     execution_device: str,
     train_record_count: int,
     eval_record_count: int,
+    dataset_provenance: Dict[str, Any],
+    initialization_kind: str,
+    initialization_artifact_sha256: Optional[str],
+    registered_assignment: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build path-free behavior and schedule identity for one registered run."""
 
     config_source_sha256s = [file_sha256(path) for path in (args.config or [])]
     return {
-        "effective_config_schema_version": 1,
+        "effective_config_schema_version": 2,
         "algorithm": "upi_trm",
         "training_protocol": "fixed_base_exact",
+        "registration": {
+            "cell": args.confirmatory_cell,
+            "tier": args.confirmatory_tier,
+            "run_id": args.run_id,
+            "training_seed": args.seed,
+            "registry_sha256": registered_assignment["registry_sha256"],
+        },
         "backbone": args.backbone,
         "rl_config": rl_config,
         "model_config": model_config,
@@ -1025,6 +1340,13 @@ def _fixed_base_effective_config(
             "eval_split": args.eval_split,
             "train_record_count": train_record_count,
             "eval_record_count": eval_record_count,
+        },
+        "dataset_provenance_sha256": canonical_json_sha256(
+            dataset_provenance
+        ),
+        "initialization": {
+            "kind": initialization_kind,
+            "artifact_sha256": initialization_artifact_sha256,
         },
         "budget": {
             "outer_train_steps": rl_config["num_train_steps"],
@@ -1285,6 +1607,7 @@ def save_checkpoint(
     dataset_provenance: Optional[Dict[str, Any]] = None,
     run_identity: Optional[Dict[str, Any]] = None,
     checkpoint_lineage: Optional[Dict[str, Any]] = None,
+    evidence_identity: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Save full training state for resumable RL training.
@@ -1303,6 +1626,11 @@ def save_checkpoint(
     Returns:
         Path to saved checkpoint
     """
+    canonical_evidence_identity = (
+        _validate_evidence_identity(evidence_identity)
+        if evidence_identity is not None
+        else None
+    )
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     is_upi_checkpoint = isinstance(trainer, UPITrmTrainer)
@@ -1339,6 +1667,14 @@ def save_checkpoint(
         if is_upi_checkpoint
         else "weights_only"
     )
+    pair_deployed_policy = bool(
+        is_upi_checkpoint
+        and (
+            getattr(effective_rl_cfg, "theory_exact_mixture", False)
+            or getattr(effective_rl_cfg, "evaluation_policy_mode", "configured")
+            == "preinterpolation_exact_mixture"
+        )
+    )
     if training_protocol == "fixed_base_exact" and bool(
         getattr(trainer, "_train_step_active", False)
     ):
@@ -1352,13 +1688,13 @@ def save_checkpoint(
         for name in os.listdir(checkpoint_dir)
         if name.startswith("model_step_") and name.endswith(".pt")
     )
-    if training_protocol == "fixed_base_exact" and stale_model_paths:
+    if pair_deployed_policy and stale_model_paths:
         raise RuntimeError(
-            "Refusing fixed-base checkpoint save because stale single-model "
+            "Refusing policy-pair checkpoint save because stale single-model "
             f"artifacts exist: {stale_model_paths}"
         )
     intended_outputs = [path]
-    if training_protocol != "fixed_base_exact":
+    if not pair_deployed_policy:
         intended_outputs.append(model_path)
     existing_outputs = [
         output for output in intended_outputs if os.path.exists(output)
@@ -1446,6 +1782,13 @@ def save_checkpoint(
         progress = {
             "env_steps": int(getattr(trainer, "_env_step_count", 0)),
             "optimizer_updates": int(getattr(trainer, "_train_step_count", 0)),
+            "optimizer_steps": int(
+                getattr(
+                    trainer,
+                    "_optimizer_step_count",
+                    getattr(trainer, "_train_step_count", 0),
+                )
+            ),
         }
     if checkpoint_schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
         assert canonical_run_identity is not None
@@ -1541,15 +1884,36 @@ def save_checkpoint(
             for name, module in modules.items()
         }
         checkpoint["checkpoint_phase"] = "idle_between_training_calls"
+    if canonical_evidence_identity is not None:
+        checkpoint["evidence_identity"] = canonical_evidence_identity
     if canonical_dataset_provenance is not None:
         checkpoint["dataset_provenance"] = canonical_dataset_provenance
     checkpoint["model_config"] = model_config
+    trainer_config = getattr(trainer, "config", None)
+    if trainer_config is not None:
+        checkpoint["trainer_config"] = _config_dict(trainer_config)
 
     # Preserve the old/candidate policy pair for post-candidate diagnostics.
     if hasattr(trainer, "policy_model_old") and trainer.policy_model_old is not None:
         checkpoint["policy_model_old_state_dict"] = trainer.policy_model_old.state_dict()
     if hasattr(trainer, "policy_model_candidate") and trainer.policy_model_candidate is not None:
         checkpoint["policy_model_candidate_state_dict"] = trainer.policy_model_candidate.state_dict()
+    preinterpolation_base = getattr(
+        trainer, "preinterpolation_policy_base", None
+    )
+    preinterpolation_candidate = getattr(
+        trainer, "preinterpolation_policy_candidate", None
+    )
+    if preinterpolation_base is not None and preinterpolation_candidate is not None:
+        checkpoint["preinterpolation_policy_base_state_dict"] = (
+            preinterpolation_base.state_dict()
+        )
+        checkpoint["preinterpolation_policy_candidate_state_dict"] = (
+            preinterpolation_candidate.state_dict()
+        )
+        checkpoint["preinterpolation_pair_generation"] = int(
+            getattr(trainer, "_preinterpolation_pair_generation", 0)
+        )
     if hasattr(trainer, "target_model") and trainer.target_model is not None:
         checkpoint["target_model_state_dict"] = trainer.target_model.state_dict()
 
@@ -1581,6 +1945,13 @@ def save_checkpoint(
         "next_episode_id": int(getattr(trainer, "_next_episode_id", 0)),
         "train_step_count": int(getattr(trainer, "_train_step_count", 0)),
         "env_step_count": int(getattr(trainer, "_env_step_count", 0)),
+        "optimizer_step_count": int(
+            getattr(
+                trainer,
+                "_optimizer_step_count",
+                getattr(trainer, "_train_step_count", 0),
+            )
+        ),
         "value_optimizer_step_count": int(
             getattr(trainer, "_value_optimizer_step_count", 0)
         ),
@@ -1612,6 +1983,24 @@ def save_checkpoint(
             getattr(trainer, "_opnorm_clamp_warned", False)
         ),
     }
+    compute_checkpoint_state_fn = getattr(
+        trainer, "compute_accounting_checkpoint_state", None
+    )
+    if callable(compute_checkpoint_state_fn):
+        try:
+            checkpoint["trainer_state"]["compute_accounting_state"] = (
+                compute_checkpoint_state_fn()
+            )
+        except RuntimeError:
+            if (
+                checkpoint_schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION
+                or canonical_evidence_identity is not None
+            ):
+                raise
+            print(
+                "[Checkpoint] Legacy trainer compute accounting is incomplete; "
+                "omitting compute state from this non-confirmatory checkpoint."
+            )
     if is_upi_checkpoint:
         checkpoint["trainer_state"].update(
             {
@@ -1622,7 +2011,7 @@ def save_checkpoint(
     else:
         print(
             "[Checkpoint] Baseline trainer checkpoint is weights-only for future "
-            "warm starts; exact resume requires the schema-v4 UPI path."
+            "warm starts; exact resume requires the schema-v5 UPI path."
         )
 
     # Replay is required for a semantic resume. It can make checkpoints large,
@@ -1639,7 +2028,7 @@ def save_checkpoint(
         # A single state dict cannot represent an exact old/candidate mixture.
         # Keep the convenient weights-only artifact only for protocols whose
         # deployed policy is a single model.
-        if training_protocol != "fixed_base_exact":
+        if not pair_deployed_policy:
             _atomic_torch_save(model.state_dict(), model_path)
     finally:
         # Checkpointing must not perturb an uninterrupted stochastic run.
@@ -1892,6 +2281,31 @@ def resume_from_checkpoint(
         raise RuntimeError(
             f"Schema-v{schema_version} checkpoint is missing live environment or collector state."
         )
+    saved_compute_accounting_state = trainer_state.get(
+        "compute_accounting_state"
+    )
+    if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+        if saved_compute_accounting_state is None:
+            raise RuntimeError(
+                "Schema-v5 checkpoint is missing compute accounting state."
+            )
+        try:
+            trainer.restore_compute_accounting_checkpoint_state(
+                saved_compute_accounting_state,
+                validate_only=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "Schema-v5 compute accounting state is invalid."
+            ) from exc
+    elif saved_compute_accounting_state is not None:
+        try:
+            trainer.restore_compute_accounting_checkpoint_state(
+                saved_compute_accounting_state,
+                validate_only=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("Checkpoint compute accounting state is invalid.") from exc
     if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
         saved_next_episode_id = _strict_checkpoint_int(
             trainer_state.get("next_episode_id"),
@@ -2228,6 +2642,48 @@ def resume_from_checkpoint(
                 f"Checkpoint {name} state failed preflight; state was not restored."
             ) from exc
 
+    snapshot_pairs = (
+        (
+            getattr(trainer, "preinterpolation_policy_base", None),
+            "preinterpolation_policy_base_state_dict",
+        ),
+        (
+            getattr(trainer, "preinterpolation_policy_candidate", None),
+            "preinterpolation_policy_candidate_state_dict",
+        ),
+    )
+    snapshot_modules_present = [module is not None for module, _ in snapshot_pairs]
+    if any(snapshot_modules_present) != all(snapshot_modules_present):
+        raise RuntimeError("Pre-interpolation snapshot module inventory is incomplete.")
+    if all(snapshot_modules_present):
+        for snapshot_module, field in snapshot_pairs:
+            if field not in checkpoint:
+                raise RuntimeError(f"Checkpoint is missing {field}.")
+            assert snapshot_module is not None
+            snapshot_probe = copy.deepcopy(snapshot_module)
+            try:
+                snapshot_probe.load_state_dict(checkpoint[field], strict=True)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Checkpoint {field} failed preflight; state was not restored."
+                ) from exc
+        snapshot_generation = checkpoint.get("preinterpolation_pair_generation")
+        if (
+            isinstance(snapshot_generation, bool)
+            or not isinstance(snapshot_generation, int)
+            or snapshot_generation < 0
+        ):
+            raise RuntimeError(
+                "Checkpoint preinterpolation_pair_generation is invalid."
+            )
+    elif (
+        any(field in checkpoint for _, field in snapshot_pairs)
+        or "preinterpolation_pair_generation" in checkpoint
+    ):
+        raise RuntimeError(
+            "Checkpoint contains pre-interpolation snapshots for an incompatible trainer."
+        )
+
     optimizer_state_pairs = (
         (trainer.value_opt, "value_optimizer_state_dict"),
         (trainer.policy_opt, "policy_optimizer_state_dict"),
@@ -2279,6 +2735,14 @@ def resume_from_checkpoint(
         checkpoint["policy_model_candidate_state_dict"]
     )
     trainer.target_model.load_state_dict(checkpoint["target_model_state_dict"])
+    if all(snapshot_modules_present):
+        for snapshot_module, field in snapshot_pairs:
+            assert snapshot_module is not None
+            snapshot_module.load_state_dict(checkpoint[field])
+            snapshot_module.eval()
+        trainer._preinterpolation_pair_generation = int(
+            checkpoint["preinterpolation_pair_generation"]
+        )
     trainer.value_opt.load_state_dict(checkpoint["value_optimizer_state_dict"])
     trainer.policy_opt.load_state_dict(checkpoint["policy_optimizer_state_dict"])
     if (
@@ -2331,6 +2795,10 @@ def resume_from_checkpoint(
     trainer._plan_changes = saved_plan_changes
     trainer._value_of_memory = saved_value_of_memory
     trainer._opnorm_clamp_warned = saved_opnorm_warning
+    if saved_compute_accounting_state is not None:
+        trainer.restore_compute_accounting_checkpoint_state(
+            saved_compute_accounting_state
+        )
 
     trainer.replay.clear()
     for transition in replay_transitions:
@@ -2402,6 +2870,61 @@ def parse_args():
         type=str,
         default=None,
         help="Stable registered run identifier (required for fixed_base_exact).",
+    )
+    parser.add_argument(
+        "--confirmatory",
+        action="store_true",
+        help="Enable fail-closed confirmatory provenance and evaluation artifacts.",
+    )
+    parser.add_argument(
+        "--confirmatory-cell",
+        type=str,
+        default=None,
+        help="Registered experiment cell bound into the confirmatory lock.",
+    )
+    parser.add_argument(
+        "--confirmatory-tier",
+        choices=["confirmatory", "debug"],
+        default=None,
+        help="Select the registered confirmatory or debug-only seed/budget tier.",
+    )
+    parser.add_argument(
+        "--evaluation-artifact-dir",
+        type=str,
+        default=None,
+        help="Root directory for immutable per-checkpoint evaluation artifacts.",
+    )
+    parser.add_argument(
+        "--expected-effective-config-sha256",
+        type=str,
+        default=None,
+        help="Pre-registered effective-configuration SHA-256 for confirmatory runs.",
+    )
+    parser.add_argument(
+        "--expected-producer-git-commit",
+        type=str,
+        default=None,
+        help="Pre-registered producer commit required for confirmatory execution.",
+    )
+    parser.add_argument(
+        "--prepare-confirmatory-lock",
+        action="store_true",
+        help=(
+            "Construct and print the confirmatory effective-config lock, then exit "
+            "before checkpoint restoration or training."
+        ),
+    )
+    parser.add_argument(
+        "--train-manifest-sha256",
+        type=str,
+        default=None,
+        help="Registered SHA-256 of the materialized training split manifest.",
+    )
+    parser.add_argument(
+        "--eval-manifest-sha256",
+        type=str,
+        default=None,
+        help="Registered SHA-256 of the materialized held-out split manifest.",
     )
     parser.add_argument(
         "--producer-repo-root",
@@ -2694,8 +3217,14 @@ def _run_eval_and_log(
     checker_fn: Any,
     step_iter: Any,
     use_wandb: bool,
+    strict: bool = False,
+    artifact_output_dir: Optional[str] = None,
+    artifact_metadata: Optional[Dict[str, Any]] = None,
+    source_revalidation_fn: Optional[Any] = None,
 ) -> None:
     eval_metrics = None
+    if source_revalidation_fn is not None:
+        source_revalidation_fn("before evaluation")
     try:
         eval_metrics = trainer.evaluate_policy_metrics(
             env_cfg=env_cfg,
@@ -2703,8 +3232,11 @@ def _run_eval_and_log(
             checker=checker_fn,
         )
     except AttributeError:
-        pass
+        if strict:
+            raise
     except Exception as e:
+        if strict:
+            raise
         print(f"[WARN] evaluate_policy_metrics error: {type(e).__name__}: {e}")
 
     prefix = _step_prefix(progress_step, outer_step)
@@ -2722,6 +3254,63 @@ def _run_eval_and_log(
         filled_mean = eval_metrics.get("final_filled_mean")
         violations_mean = eval_metrics.get("final_violations_mean")
         zero_cand_mean = eval_metrics.get("final_zero_cand_mean")
+
+        if artifact_output_dir is not None:
+            if artifact_metadata is None:
+                raise RuntimeError(
+                    "Evaluation artifact output requires complete metadata."
+                )
+            expected_policy_mode = artifact_metadata.get("policy_mode")
+            if eval_policy_mode != expected_policy_mode:
+                raise RuntimeError(
+                    "Evaluated policy mode differs from artifact metadata."
+                )
+            per_instance = eval_metrics.get("per_instance")
+            if not isinstance(per_instance, list):
+                raise RuntimeError(
+                    "Evaluation did not return ordered per-instance records."
+                )
+            compute_snapshot_fn = getattr(
+                trainer, "compute_accounting_snapshot", None
+            )
+            if not callable(compute_snapshot_fn):
+                raise RuntimeError(
+                    "Confirmatory evaluation requires compute accounting."
+                )
+            compute_snapshot_value = compute_snapshot_fn()
+            if not isinstance(compute_snapshot_value, dict):
+                raise RuntimeError(
+                    "Confirmatory compute accounting returned an invalid snapshot."
+                )
+            compute_snapshot: Dict[str, Any] = dict(compute_snapshot_value)
+            model_work = compute_snapshot.get("model_work")
+            if not isinstance(model_work, dict):
+                raise RuntimeError(
+                    "Confirmatory compute accounting has invalid model work."
+                )
+            uninstrumented = model_work.get("uninstrumented_roles")
+            if uninstrumented:
+                raise RuntimeError(
+                    "Confirmatory evaluation has uninstrumented model roles: "
+                    f"{uninstrumented}."
+                )
+            if source_revalidation_fn is not None:
+                source_revalidation_fn("before evaluation artifact publication")
+            artifact = write_evaluation_artifact(
+                artifact_output_dir,
+                metadata=artifact_metadata,
+                rows=per_instance,
+                compute_snapshot=compute_snapshot,
+                reported_metrics=eval_metrics,
+            )
+            if source_revalidation_fn is not None:
+                source_revalidation_fn("after evaluation artifact publication")
+            print(
+                "[EVALUATION_ARTIFACT] "
+                f"output={artifact_output_dir} "
+                f"summary_sha256={artifact['summary_sha256']} "
+                f"per_instance_sha256={artifact['per_instance_sha256']}"
+            )
 
         eval_msg = (
             f"{prefix} "
@@ -2790,6 +3379,143 @@ def _run_eval_and_log(
 
     if hasattr(trainer, "clear_debug_stats"):
         trainer.clear_debug_stats()
+
+
+def _validate_ppo_exact_budget_schedule(
+    *,
+    env_step_budget: int,
+    restored_env_steps: int,
+    rollout_steps: int,
+    log_env_interval: Optional[int],
+    eval_env_interval: Optional[int],
+    save_env_interval: Optional[int],
+) -> None:
+    """Reject PPO schedules that would require a shortened rollout."""
+
+    integer_fields = {
+        "rollout length": rollout_steps,
+        "environment-step budget": env_step_budget,
+        "restored environment steps": restored_env_steps,
+    }
+    for label, value in integer_fields.items():
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"PPO {label} must be an integer.")
+    if rollout_steps <= 0:
+        raise ValueError("PPO rollout length must be positive.")
+    if env_step_budget <= 0:
+        raise ValueError("PPO environment-step budget must be positive.")
+    if restored_env_steps < 0:
+        raise ValueError("PPO restored environment steps cannot be negative.")
+    if restored_env_steps > env_step_budget:
+        raise ValueError("PPO restored environment steps exceed the requested budget.")
+
+    divisible_fields = {
+        "restored environment steps": restored_env_steps,
+        "environment-step budget": env_step_budget,
+    }
+    intervals = {
+        "log environment interval": log_env_interval,
+        "evaluation environment interval": eval_env_interval,
+        "checkpoint environment interval": save_env_interval,
+    }
+    for label, value in intervals.items():
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"PPO {label} must be an integer or None.")
+        if value < 0:
+            raise ValueError(f"PPO {label} cannot be negative.")
+        if value == 0:
+            continue
+        divisible_fields[label] = value
+
+    for label, value in divisible_fields.items():
+        if value % rollout_steps != 0:
+            raise ValueError(
+                f"PPO {label}={value} must be divisible by the registered "
+                f"rollout length {rollout_steps}."
+            )
+    if eval_env_interval not in (None, 0):
+        assert isinstance(eval_env_interval, int)
+        if env_step_budget % eval_env_interval != 0:
+            raise ValueError(
+                "PPO evaluation interval must divide the environment-step budget "
+                "so the registered final endpoint is evaluated."
+            )
+
+
+def _reject_confirmatory_resume(resume_checkpoint: Optional[str]) -> None:
+    """Fail closed until checkpoint and evaluation publication is transactional."""
+
+    if resume_checkpoint is not None:
+        raise RuntimeError(
+            "Confirmatory resume is disabled: checkpoints are published before "
+            "held-out evaluation and do not contain that evaluation's compute "
+            "counters or wall time. Restart the failed confirmatory seed from "
+            "scratch."
+        )
+
+
+def _validate_materialized_split_manifest(
+    *,
+    dataset_root: str | Path,
+    split: str,
+    registered_sha256: str,
+    dataset: Any,
+) -> Dict[str, Any]:
+    """Bind a registered source manifest to the exact materialized record pool."""
+
+    root = Path(dataset_root).expanduser().resolve()
+    manifest_path = root / "manifests" / f"{split}.json"
+    if not manifest_path.is_file():
+        raise RuntimeError(f"Registered split manifest is absent for {split!r}.")
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+        observed_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Registered split manifest is unreadable for {split!r}.") from exc
+    if observed_sha256 != registered_sha256:
+        raise RuntimeError(
+            f"Materialized {split!r} manifest differs from the registered hash."
+        )
+    if not isinstance(manifest, dict):
+        raise RuntimeError(f"Registered split manifest is malformed for {split!r}.")
+
+    record_hashes = dataset_sample_sha256s(dataset)
+    input_hashes = dataset_input_sha256s(dataset)
+    expected_ordered_hash = ordered_record_sha256(record_hashes)
+    if (
+        manifest.get("generated_count") != len(dataset)
+        or manifest.get("record_sha256s") != record_hashes
+        or manifest.get("input_sha256s") != input_hashes
+        or manifest.get("ordered_record_sha256") != expected_ordered_hash
+    ):
+        raise RuntimeError(
+            f"Loaded {split!r} pool differs from its registered source manifest."
+        )
+
+    files = manifest.get("files")
+    if not isinstance(files, dict) or not files:
+        raise RuntimeError(f"Registered split manifest has no file inventory for {split!r}.")
+    for relative_name, entry in files.items():
+        if not isinstance(relative_name, str) or not isinstance(entry, dict):
+            raise RuntimeError("Registered split file inventory is malformed.")
+        source_path = (root / relative_name).resolve()
+        if root not in source_path.parents or not source_path.is_file():
+            raise RuntimeError("Registered split file path escapes or is absent.")
+        if entry.get("bytes") != source_path.stat().st_size:
+            raise RuntimeError("Registered split file size differs from the manifest.")
+        try:
+            source_sha256 = file_sha256(source_path)
+        except RunIdentityError as exc:
+            raise RuntimeError("Registered split file cannot be hashed.") from exc
+        if entry.get("sha256") != source_sha256:
+            raise RuntimeError("Registered split file differs from the manifest.")
+
+    if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != observed_sha256:
+        raise RuntimeError("Registered split manifest changed during validation.")
+    return manifest
 
 
 def _resolve_train_pool_size(
@@ -2887,17 +3613,41 @@ def main():
         selected_baseline is None
         and rl_cfg.training_protocol == "fixed_base_exact"
     )
+    confirmatory_run = bool(args.confirmatory)
+    if confirmatory_fixed_base and not confirmatory_run:
+        raise RuntimeError(
+            "fixed_base_exact CLI execution requires --confirmatory and a "
+            "registered run-matrix assignment."
+        )
+    strict_evidence_run = confirmatory_fixed_base or confirmatory_run
+    if args.prepare_confirmatory_lock and not confirmatory_run:
+        raise RuntimeError("--prepare-confirmatory-lock requires --confirmatory.")
     producer_repo_root = args.producer_repo_root or os.getcwd()
     initial_producer_identity: Optional[Dict[str, Any]] = None
-    if confirmatory_fixed_base:
+    registered_assignment: Optional[Dict[str, Any]] = None
+    if strict_evidence_run:
         if args.seed is None:
             raise RuntimeError(
-                "fixed_base_exact requires an explicit --seed for schema-v5 identity."
+                "Confirmatory execution requires an explicit --seed."
             )
         if args.run_id is None:
             raise RuntimeError(
-                "fixed_base_exact requires an explicit --run-id for schema-v5 identity."
+                "Confirmatory execution requires an explicit --run-id."
             )
+        try:
+            args.run_id = validate_run_id(args.run_id)
+        except RunIdentityError as exc:
+            raise RuntimeError(f"Invalid confirmatory run identifier: {exc}") from exc
+        if args.confirmatory_cell is None:
+            raise RuntimeError(
+                "Confirmatory execution requires an explicit --confirmatory-cell."
+            )
+        try:
+            args.confirmatory_cell = validate_run_id(args.confirmatory_cell)
+        except RunIdentityError as exc:
+            raise RuntimeError(
+                f"Invalid confirmatory cell identifier: {exc}"
+            ) from exc
         if args.imitation_pretrain:
             raise RuntimeError(
                 "Schema-v5 fixed-base runs currently reject imitation pretraining "
@@ -2919,7 +3669,7 @@ def main():
             )
         if args.train_pool_size is None:
             raise RuntimeError(
-                "fixed_base_exact requires an explicit --train-pool-size; "
+                "Confirmatory execution requires an explicit --train-pool-size; "
                 "optimizer batch size must not define the training population."
             )
         try:
@@ -2929,8 +3679,105 @@ def main():
             _verify_producer_source_matches_runtime(producer_repo_root)
         except RunIdentityError as exc:
             raise RuntimeError(
-                f"fixed_base_exact requires a clean producer Git tree: {exc}"
+                f"Confirmatory execution requires a clean producer Git tree: {exc}"
             ) from exc
+
+    if confirmatory_run:
+        assert initial_producer_identity is not None
+        _reject_confirmatory_resume(args.resume_checkpoint)
+        if args.load_checkpoint is not None:
+            raise RuntimeError(
+                "Registered confirmatory runs use random initialization paired by "
+                "training seed and reject --load-checkpoint."
+            )
+        _validate_expected_producer_commit(
+            args.expected_producer_git_commit,
+            initial_producer_identity,
+        )
+        if selected_baseline not in (None, "ppo"):
+            raise RuntimeError(
+                "Confirmatory execution currently supports UPI-TRM and PPO only."
+            )
+        if args.env_step_budget is None or args.env_step_budget <= 0:
+            raise RuntimeError(
+                "Confirmatory execution requires a positive --env-step-budget."
+            )
+        if args.eval_env_interval is None or args.eval_env_interval <= 0:
+            raise RuntimeError(
+                "Confirmatory execution requires a positive --eval-env-interval."
+            )
+        if args.save_env_interval is None or args.save_env_interval <= 0:
+            raise RuntimeError(
+                "Confirmatory execution requires a positive --save-env-interval."
+            )
+        if args.eval_env_interval % args.save_env_interval != 0:
+            raise RuntimeError(
+                "Every confirmatory evaluation must coincide with a checkpoint."
+            )
+        if args.env_step_budget % args.eval_env_interval != 0:
+            raise RuntimeError(
+                "The confirmatory final interaction budget must be an evaluation milestone."
+            )
+        if args.checkpoint_dir is None or args.evaluation_artifact_dir is None:
+            raise RuntimeError(
+                "Confirmatory execution requires explicit checkpoint and evaluation "
+                "artifact directories."
+            )
+        if args.eval_manifest_sha256 is None:
+            raise RuntimeError(
+                "Confirmatory execution requires --eval-manifest-sha256."
+            )
+        if args.train_manifest_sha256 is None:
+            raise RuntimeError(
+                "Confirmatory execution requires --train-manifest-sha256."
+            )
+        if (
+            args.expected_effective_config_sha256 is None
+            and not args.prepare_confirmatory_lock
+        ):
+            raise RuntimeError(
+                "Confirmatory execution requires a pre-registered effective-config hash."
+            )
+        if args.expected_effective_config_sha256 is not None:
+            _validate_expected_sha256(
+                args.expected_effective_config_sha256,
+                field="--expected-effective-config-sha256",
+            )
+        if args.eval_pool_size is None or args.eval_pool_size != rl_cfg.eval_num_episodes:
+            raise RuntimeError(
+                "Confirmatory evaluation pool size must be explicit and equal the "
+                "registered episode count."
+            )
+        if args.dataset_paths is None or len(args.dataset_paths) != 1:
+            raise RuntimeError(
+                "Confirmatory execution currently requires exactly one dataset root."
+            )
+        if args.backbone != "trm":
+            raise RuntimeError("Registered confirmatory cells require the TRM backbone.")
+        if args.puzzle_emb_ndim != 0:
+            raise RuntimeError(
+                "Registered confirmatory cells disable per-puzzle embeddings."
+            )
+        if not rl_cfg.reward_shaping:
+            raise RuntimeError(
+                "Registered confirmatory cells require shaped environment rewards."
+            )
+        if rl_cfg.theory_exact_mixture and rl_cfg.policy_epsilon != 0.0:
+            raise RuntimeError(
+                "Direct exact-mixture evaluation requires policy_epsilon=0."
+            )
+        producer_root = Path(producer_repo_root).expanduser().resolve()
+        artifact_root = Path(args.evaluation_artifact_dir).expanduser().resolve()
+        if artifact_root == producer_root or producer_root in artifact_root.parents:
+            raise RuntimeError(
+                "Confirmatory evaluation artifacts must be written outside the "
+                "producer repository."
+            )
+        registered_assignment = _validate_registered_confirmatory_assignment(
+            args=args,
+            selected_baseline=selected_baseline,
+            rl_cfg=rl_cfg,
+        )
 
     if args.dataset_paths and args.train_split == args.eval_split:
         raise RuntimeError(
@@ -2941,7 +3788,7 @@ def main():
     train_pool_size = _resolve_train_pool_size(
         requested_size=args.train_pool_size,
         batch_size=rl_cfg.batch_size,
-        require_explicit=confirmatory_fixed_base,
+        require_explicit=strict_evidence_run,
     )
     dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
         dataset_paths=args.dataset_paths,
@@ -2981,7 +3828,7 @@ def main():
                 "Training and evaluation pools overlap; refusing an in-sample "
                 f"evaluation ({len(overlap)} duplicate records)."
             )
-        if confirmatory_fixed_base:
+        if strict_evidence_run:
             if len(set(train_input_hashes)) != len(train_input_hashes):
                 raise RuntimeError(
                     "Schema-v5 training pool contains duplicate inputs."
@@ -2993,6 +3840,23 @@ def main():
         num_identifiers = eval_num_identifiers
     else:
         eval_dataset = dataset
+
+    if confirmatory_run:
+        assert args.dataset_paths is not None
+        assert args.train_manifest_sha256 is not None
+        assert args.eval_manifest_sha256 is not None
+        _validate_materialized_split_manifest(
+            dataset_root=args.dataset_paths[0],
+            split=args.train_split,
+            registered_sha256=args.train_manifest_sha256,
+            dataset=dataset,
+        )
+        _validate_materialized_split_manifest(
+            dataset_root=args.dataset_paths[0],
+            split=args.eval_split,
+            registered_sha256=args.eval_manifest_sha256,
+            dataset=eval_dataset,
+        )
 
     # === DATASET PROVENANCE LOGGING (for audit/reproducibility) ===
     # These lines are grep-friendly for verifying which dataset was used
@@ -3015,7 +3879,7 @@ def main():
             f"eval_puzzle_id_offset={train_identifier_count}"
         )
         source_build_metadata = dataset_source_build_metadata(args.dataset_paths)
-        if confirmatory_fixed_base:
+        if strict_evidence_run:
             incomplete_sources = [
                 source["source_name"]
                 for source in source_build_metadata
@@ -3262,7 +4126,7 @@ def main():
         initialization_artifact_sha256 = saved_identity["initialization"][
             "artifact_sha256"
         ]
-    elif confirmatory_fixed_base and args.load_checkpoint is not None:
+    elif strict_evidence_run and args.load_checkpoint is not None:
         initialization_kind = "weights_checkpoint"
         try:
             initialization_artifact_sha256 = file_sha256(args.load_checkpoint)
@@ -3280,7 +4144,7 @@ def main():
             strict=False,
             expected_sha256=(
                 initialization_artifact_sha256
-                if confirmatory_fixed_base
+                if strict_evidence_run
                 else None
             ),
         )
@@ -3340,6 +4204,7 @@ def main():
     if confirmatory_fixed_base:
         assert args.seed is not None
         assert args.run_id is not None
+        assert registered_assignment is not None
         effective_config = _fixed_base_effective_config(
             args=args,
             rl_config=_config_dict(rl_cfg),
@@ -3347,6 +4212,10 @@ def main():
             execution_device=_canonical_device(device),
             train_record_count=len(dataset),
             eval_record_count=len(eval_dataset),
+            dataset_provenance=dataset_provenance,
+            initialization_kind=initialization_kind,
+            initialization_artifact_sha256=initialization_artifact_sha256,
+            registered_assignment=registered_assignment,
         )
         try:
             producer_before_identity = discover_clean_git_source(
@@ -3384,6 +4253,121 @@ def main():
             f"commit={run_identity['producer']['git_commit']} "
             f"config_sha256={run_identity['effective_config_sha256']}"
         )
+
+    evidence_identity: Optional[Dict[str, Any]] = None
+    if confirmatory_run:
+        assert args.seed is not None
+        assert args.run_id is not None
+        assert initial_producer_identity is not None
+        assert registered_assignment is not None
+        if run_identity is not None:
+            evidence_effective_config = run_identity["effective_config"]
+            evidence_effective_config_sha256 = run_identity[
+                "effective_config_sha256"
+            ]
+        else:
+            config_source_sha256s = []
+            for config_path in args.config or []:
+                try:
+                    config_source_sha256s.append(file_sha256(config_path))
+                except RunIdentityError as exc:
+                    raise RuntimeError(
+                        "A confirmatory configuration file cannot be hashed."
+                    ) from exc
+            runtime_fingerprint = _runtime_fingerprint()
+            evidence_effective_config = {
+                "schema_version": 2,
+                "registration": {
+                    "cell": args.confirmatory_cell,
+                    "tier": args.confirmatory_tier,
+                    "run_id": args.run_id,
+                    "training_seed": args.seed,
+                    "registry_sha256": registered_assignment[
+                        "registry_sha256"
+                    ],
+                },
+                "algorithm": (
+                    f"trm_{selected_baseline}"
+                    if selected_baseline is not None
+                    else "upi_trm"
+                ),
+                "rl_config": _config_dict(rl_cfg),
+                "trainer_config": (
+                    _config_dict(trainer.config)
+                    if getattr(trainer, "config", None) is not None
+                    else None
+                ),
+                "model_config": _config_dict(model.config),
+                "environment_config": dict(vars(env_cfg)),
+                "dataset_provenance_sha256": canonical_json_sha256(
+                    dataset_provenance
+                ),
+                "execution_device": _canonical_device(device),
+                "runtime_fingerprint": runtime_fingerprint,
+                "runtime_fingerprint_sha256": canonical_json_sha256(
+                    runtime_fingerprint
+                ),
+                "initialization": {
+                    "kind": initialization_kind,
+                    "artifact_sha256": initialization_artifact_sha256,
+                },
+                "schedule": {
+                    "environment_interactions": args.env_step_budget,
+                    "save_outer_interval": args.save_interval,
+                    "log_environment_interval": args.log_env_interval,
+                    "evaluation_environment_interval": args.eval_env_interval,
+                    "save_environment_interval": args.save_env_interval,
+                },
+                "config_source_sha256s": config_source_sha256s,
+            }
+            evidence_effective_config_sha256 = canonical_json_sha256(
+                evidence_effective_config
+            )
+        if (
+            args.expected_effective_config_sha256 is not None
+            and evidence_effective_config_sha256
+            != args.expected_effective_config_sha256
+        ):
+            raise RuntimeError(
+                "Active effective configuration differs from the pre-registered hash."
+            )
+        if canonical_json_sha256(evidence_effective_config) != (
+            evidence_effective_config_sha256
+        ):
+            raise RuntimeError("Effective configuration hash is internally inconsistent.")
+        evidence_identity = {
+            "schema_version": 1,
+            "run_id": args.run_id,
+            "algorithm": (
+                f"trm_{selected_baseline}"
+                if selected_baseline is not None
+                else "upi_trm"
+            ),
+            "training_seed": args.seed,
+            "producer_git_commit": initial_producer_identity["git_commit"],
+            "effective_config_sha256": evidence_effective_config_sha256,
+            "effective_config": evidence_effective_config,
+            "dataset_provenance_sha256": canonical_json_sha256(
+                dataset_provenance
+            ),
+        }
+        if args.prepare_confirmatory_lock:
+            lock = {
+                "lock_schema_version": 2,
+                "confirmatory_cell": args.confirmatory_cell,
+                "confirmatory_tier": args.confirmatory_tier,
+                "run_id": args.run_id,
+                "training_seed": args.seed,
+                "registry_sha256": registered_assignment["registry_sha256"],
+                "producer_git_commit": initial_producer_identity["git_commit"],
+                "effective_config_sha256": evidence_effective_config_sha256,
+                "effective_config": evidence_effective_config,
+            }
+            print(
+                "[CONFIRMATORY_LOCK] "
+                + canonical_json_bytes(lock).decode("ascii").rstrip("\n")
+            )
+            return
     
     # === Resume from RL checkpoint if provided ===
     start_step = 0
@@ -3416,33 +4400,37 @@ def main():
         checkpoint_dir = os.path.join("checkpoints", f"rl_{dataset_name}_seed{args.seed or 0}")
         print(f"[INFO] Checkpoint directory: {checkpoint_dir}")
 
+    def revalidate_producer_source(context: str) -> None:
+        if not strict_evidence_run:
+            return
+        assert initial_producer_identity is not None
+        try:
+            producer_identity_before_hash = discover_clean_git_source(
+                producer_repo_root
+            )
+            _verify_producer_source_matches_runtime(producer_repo_root)
+            producer_identity_after_hash = discover_clean_git_source(
+                producer_repo_root
+            )
+        except RunIdentityError as exc:
+            raise RuntimeError(
+                f"Cannot revalidate producer source {context}: {exc}"
+            ) from exc
+        if (
+            producer_identity_before_hash != initial_producer_identity
+            or producer_identity_after_hash != initial_producer_identity
+        ):
+            raise RuntimeError(f"Producer Git identity changed {context}.")
+
     def save_training_checkpoint(progress_step: int) -> str:
         nonlocal checkpoint_lineage
         if checkpoint_dir is None:
             raise RuntimeError("Checkpoint directory is not configured.")
         lineage_for_save: Optional[Dict[str, Any]] = None
-        if confirmatory_fixed_base:
-            assert initial_producer_identity is not None
-            try:
-                producer_identity_before_hash = discover_clean_git_source(
-                    producer_repo_root
-                )
-                _verify_producer_source_matches_runtime(producer_repo_root)
-                producer_identity_after_hash = discover_clean_git_source(
-                    producer_repo_root
-                )
-            except RunIdentityError as exc:
-                raise RuntimeError(
-                    f"Cannot revalidate producer source before checkpoint: {exc}"
-                ) from exc
-            if (
-                producer_identity_before_hash != initial_producer_identity
-                or producer_identity_after_hash != initial_producer_identity
-            ):
-                raise RuntimeError(
-                    "Producer Git identity changed before checkpoint publication."
-                )
-            lineage_for_save = checkpoint_lineage
+        if strict_evidence_run:
+            revalidate_producer_source("before checkpoint publication")
+            if confirmatory_fixed_base:
+                lineage_for_save = checkpoint_lineage
         saved_path = save_checkpoint(
             model,
             trainer,
@@ -3453,6 +4441,7 @@ def main():
             dataset_provenance,
             run_identity,
             lineage_for_save,
+            evidence_identity,
         )
         if confirmatory_fixed_base:
             try:
@@ -3466,6 +4455,90 @@ def main():
                     "Published checkpoint cannot be linked into the run lineage."
                 ) from exc
         return saved_path
+
+    def evaluation_artifact_binding(
+        *,
+        progress_step: int,
+        outer_step: int,
+        checkpoint_path: str,
+    ) -> Tuple[str, Dict[str, Any]]:
+        if not confirmatory_run or evidence_identity is None:
+            raise RuntimeError("Evaluation artifact binding requires confirmatory mode.")
+        assert args.evaluation_artifact_dir is not None
+        assert args.eval_manifest_sha256 is not None
+        try:
+            checkpoint_sha256 = file_sha256(checkpoint_path)
+        except RunIdentityError as exc:
+            raise RuntimeError(
+                "Published checkpoint cannot be hashed for evaluation evidence."
+            ) from exc
+        eval_records = dataset_provenance["ordered_records"]["eval"]
+        if (
+            isinstance(trainer, UPITrmTrainer)
+            and getattr(rl_cfg, "evaluation_policy_mode", "configured")
+            == "preinterpolation_exact_mixture"
+        ):
+            policy_mode = "stochastic_preinterpolation_exact_mixture"
+        elif (
+            isinstance(trainer, UPITrmTrainer)
+            and getattr(rl_cfg, "evaluation_policy_mode", "configured")
+            == "stochastic_deployed"
+        ):
+            policy_mode = "stochastic_deployed_policy"
+        elif isinstance(trainer, UPITrmTrainer) and bool(
+            getattr(rl_cfg, "theory_exact_mixture", False)
+        ):
+            policy_mode = "stochastic_exact_mixture"
+        else:
+            policy_mode = "greedy"
+        metadata = {
+            "artifact_schema_version": EVALUATION_ARTIFACT_SCHEMA_VERSION,
+            "run_id": evidence_identity["run_id"],
+            "algorithm": evidence_identity["algorithm"],
+            "training_seed": evidence_identity["training_seed"],
+            "producer_git_commit": evidence_identity["producer_git_commit"],
+            "effective_config_sha256": evidence_identity[
+                "effective_config_sha256"
+            ],
+            "dataset_provenance_sha256": evidence_identity[
+                "dataset_provenance_sha256"
+            ],
+            "checkpoint_sha256": checkpoint_sha256,
+            "checkpoint_environment_steps": progress_step,
+            "checkpoint_outer_steps": outer_step,
+            "evaluation_seed": int(rl_cfg.eval_seed),
+            "evaluation_seed_scheme": RECORD_LOCAL_SEED_SCHEME,
+            "policy_mode": policy_mode,
+            "reward_definition": (
+                "undiscounted_sum_of_shaped_environment_rewards"
+            ),
+            "environment": {
+                "action_count": rl_num_actions,
+                "plan_length": seq_len,
+                "vocab_size": vocab_size,
+                "max_edits": int(rl_cfg.max_edits),
+                "stop_action_id": int(env.stop_action_id),
+                "stop_action_mode": str(rl_cfg.stop_action_mode),
+                "task_name": str(rl_cfg.task_name),
+                "undo_enabled": bool(getattr(env, "_enable_undo", False)),
+            },
+            "dataset": {
+                "split": args.eval_split,
+                "manifest_sha256": args.eval_manifest_sha256,
+                "ordered_record_sha256": eval_records["ordered_sha256"],
+                "record_count": eval_records["count"],
+            },
+        }
+        artifact_root = Path(args.evaluation_artifact_dir).expanduser().resolve()
+        resolved_output = (
+            artifact_root
+            / evidence_identity["run_id"]
+            / f"env_steps_{progress_step:012d}"
+        ).resolve()
+        if artifact_root not in resolved_output.parents:
+            raise RuntimeError("Evaluation artifact path escapes its registered root.")
+        output_dir = str(resolved_output)
+        return output_dir, metadata
 
     # === Set checker function for exact baseline computation (Theorem 5.9) ===
     # Only applies to UPI-TRM trainer
@@ -3686,10 +4759,10 @@ def main():
 
         final_progress_step = total_steps
     else:
-        if not isinstance(trainer, UPITrmTrainer):
+        if not isinstance(trainer, (UPITrmTrainer, PPOTrainer)):
             raise ValueError(
-                "Exact --env-step-budget collection currently requires "
-                "UPITrmTrainer; baseline trainers must not fall back to nominal "
+                "Exact --env-step-budget collection currently requires UPI-TRM "
+                "or PPO; unsupported trainers must not fall back to nominal "
                 "outer-step accounting."
             )
         restored_env_steps = trainer.get_env_step_count()
@@ -3702,6 +4775,15 @@ def main():
         log_env_interval = args.log_env_interval
         eval_env_interval = args.eval_env_interval
         save_env_interval = args.save_env_interval
+        if isinstance(trainer, PPOTrainer):
+            _validate_ppo_exact_budget_schedule(
+                env_step_budget=env_step_budget,
+                restored_env_steps=restored_env_steps,
+                rollout_steps=trainer.config.num_steps,
+                log_env_interval=log_env_interval,
+                eval_env_interval=eval_env_interval,
+                save_env_interval=save_env_interval,
+            )
 
         def next_strict_multiple(interval: Optional[int]) -> Optional[int]:
             if interval is None or interval <= 0:
@@ -3764,7 +4846,38 @@ def main():
                 while next_log_env is not None and current_env_step >= next_log_env:
                     next_log_env += log_env_interval
 
-            if next_eval_env is not None and current_env_step >= next_eval_env:
+            evaluation_due = (
+                next_eval_env is not None and current_env_step >= next_eval_env
+            )
+            checkpoint_due = (
+                next_save_env is not None and current_env_step >= next_save_env
+            )
+            published_checkpoint: Optional[str] = None
+            if checkpoint_due:
+                if checkpoint_dir is None:
+                    raise RuntimeError(
+                        "The exact-budget schedule reached a checkpoint milestone "
+                        "without a checkpoint directory."
+                    )
+                published_checkpoint = save_training_checkpoint(progress_step)
+                last_saved_progress_step = progress_step
+                while next_save_env is not None and current_env_step >= next_save_env:
+                    next_save_env += save_env_interval
+
+            if evaluation_due:
+                artifact_output_dir = None
+                artifact_metadata = None
+                if confirmatory_run:
+                    if published_checkpoint is None:
+                        raise RuntimeError(
+                            "Confirmatory evaluation has no checkpoint at the same "
+                            "interaction milestone."
+                        )
+                    artifact_output_dir, artifact_metadata = evaluation_artifact_binding(
+                        progress_step=progress_step,
+                        outer_step=outer_step,
+                        checkpoint_path=published_checkpoint,
+                    )
                 _run_eval_and_log(
                     progress_step=progress_step,
                     outer_step=outer_step,
@@ -3774,15 +4887,15 @@ def main():
                     checker_fn=checker_fn,
                     step_iter=step_iter,
                     use_wandb=use_wandb,
+                    strict=confirmatory_run,
+                    artifact_output_dir=artifact_output_dir,
+                    artifact_metadata=artifact_metadata,
+                    source_revalidation_fn=(
+                        revalidate_producer_source if confirmatory_run else None
+                    ),
                 )
                 while next_eval_env is not None and current_env_step >= next_eval_env:
                     next_eval_env += eval_env_interval
-
-            if next_save_env is not None and checkpoint_dir is not None and current_env_step >= next_save_env:
-                save_training_checkpoint(progress_step)
-                last_saved_progress_step = progress_step
-                while next_save_env is not None and current_env_step >= next_save_env:
-                    next_save_env += save_env_interval
 
         final_progress_step = trainer.get_env_step_count()
 

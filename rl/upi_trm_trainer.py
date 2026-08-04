@@ -1,5 +1,7 @@
+import copy
 import logging
 import math
+import time
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
@@ -97,6 +99,22 @@ from utils.lipschitz import (
     # Periodic operator-norm clamping for contraction enforcement
     apply_opnorm_clamp_periodically,
 )
+from utils.compute_accounting import (
+    COMPUTE_SNAPSHOT_SCHEMA_VERSION,
+    MODEL_COUNTER_DEFINITIONS,
+    OPTIMIZER_STEP_FIELDS,
+    add_model_counters,
+    aggregate_model_compute,
+    capture_model_compute_state,
+    current_cuda_memory_peaks,
+    process_peak_rss_bytes,
+    restore_model_compute_state,
+    subtract_model_counters,
+    validate_compute_snapshot,
+    validate_model_compute_state,
+    validate_model_counters,
+    zero_model_counters,
+)
 
 
 class UPITrmTrainer:
@@ -119,6 +137,36 @@ class UPITrmTrainer:
             getattr(self.rl_cfg, "training_protocol", "legacy")
             == "fixed_base_exact"
         )
+        self._capture_preinterpolation_pair = bool(
+            getattr(self.rl_cfg, "capture_preinterpolation_policy_pair", False)
+        )
+        self._evaluation_policy_mode = str(
+            getattr(self.rl_cfg, "evaluation_policy_mode", "configured")
+        )
+        if self._evaluation_policy_mode == "preinterpolation_exact_mixture":
+            if not self._capture_preinterpolation_pair:
+                raise ValueError(
+                    "preinterpolation_exact_mixture evaluation requires "
+                    "capture_preinterpolation_policy_pair=True."
+                )
+            if self._fixed_base_exact or self.rl_cfg.theory_exact_mixture:
+                raise ValueError(
+                    "preinterpolation_exact_mixture is a legacy parameter-"
+                    "interpolation bridge evaluator, not a fixed-base training mode."
+                )
+            if self.rl_cfg.policy_epsilon != 0.0:
+                raise ValueError(
+                    "preinterpolation_exact_mixture requires policy_epsilon=0."
+                )
+        if self._capture_preinterpolation_pair and (
+            self._fixed_base_exact
+            or self.rl_cfg.theory_exact_mixture
+            or self.rl_cfg.distill_mixture_policy
+        ):
+            raise ValueError(
+                "Pre-interpolation pair capture requires legacy parameter "
+                "interpolation training."
+            )
         if self._fixed_base_exact and not self.rl_cfg.is_fixed_base_proposal_exact():
             raise ValueError(
                 "training_protocol='fixed_base_exact' requires exact K-step "
@@ -207,6 +255,28 @@ class UPITrmTrainer:
         self._freeze_policy_backbone()
         self._sync_candidate_backbone_from_model()
 
+        self.preinterpolation_policy_base: Optional[
+            TinyRecursiveReasoningModel_ACTV1
+        ] = None
+        self.preinterpolation_policy_candidate: Optional[
+            TinyRecursiveReasoningModel_ACTV1
+        ] = None
+        self._preinterpolation_pair_generation = 0
+        if self._capture_preinterpolation_pair:
+            self.preinterpolation_policy_base = copy.deepcopy(
+                self.policy_model_old
+            ).to(device)
+            self.preinterpolation_policy_candidate = copy.deepcopy(
+                self.policy_model_candidate
+            ).to(device)
+            for snapshot in (
+                self.preinterpolation_policy_base,
+                self.preinterpolation_policy_candidate,
+            ):
+                snapshot.eval()
+                for parameter in snapshot.parameters():
+                    parameter.requires_grad_(False)
+
         policy_params: List[nn.Parameter] = []
         for name, param in self.policy_model_candidate.named_parameters():
             if not param.requires_grad:
@@ -237,6 +307,14 @@ class UPITrmTrainer:
         self._policy_optimizer_step_count: int = 0
         self._distill_optimizer_step_count: int = 0
         self._puzzle_optimizer_step_count: int = 0
+        self._training_wall_time_seconds = 0.0
+        self._evaluation_wall_time_seconds = 0.0
+        self._training_model_work = zero_model_counters()
+        self._evaluation_model_work = zero_model_counters()
+        self._peak_process_rss_bytes = process_peak_rss_bytes()
+        cuda_allocated, cuda_reserved = current_cuda_memory_peaks(self.device)
+        self._peak_cuda_allocated_bytes = cuda_allocated
+        self._peak_cuda_reserved_bytes = cuda_reserved
         # Exact-budget collection may pause in the middle of an episode.  Keep
         # all transition-relevant collector state until a real environment
         # terminal is observed; a logging/checkpoint boundary is not terminal.
@@ -395,7 +473,16 @@ class UPITrmTrainer:
                 )
                 self._opnorm_clamp_warned = True
 
-    def _mixed_policy_dist(self, x_batch, y_batch, n: int, action_mask: Optional[torch.Tensor] = None, z=None):
+    def _probability_mixture_dist(
+        self,
+        base_model: TinyRecursiveReasoningModel_ACTV1,
+        candidate_model: TinyRecursiveReasoningModel_ACTV1,
+        x_batch,
+        y_batch,
+        n: int,
+        action_mask: Optional[torch.Tensor] = None,
+        z=None,
+    ):
         """
         Return the exact deployed proposal distribution.
 
@@ -424,19 +511,25 @@ class UPITrmTrainer:
         """
 
         alpha = self.rl_cfg.mixture_alpha
-        dist_old, z_old = self.policy_model_old.policy_dist(x_batch, y_batch, n=n, action_mask=action_mask, z=z)
+        dist_old, z_old = base_model.policy_dist(
+            x_batch, y_batch, n=n, action_mask=action_mask, z=z
+        )
         
         if z is not None:
             # Persistent mode: evaluate candidate at the same final latent state z_old
             # to ensure both policies produce distributions at the same state for proper
             # mixture semantics. Use n=0 to avoid running additional latent steps.
-            dist_new, _ = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=0, action_mask=action_mask, z=z_old)
+            dist_new, _ = candidate_model.policy_dist(
+                x_batch, y_batch, n=0, action_mask=action_mask, z=z_old
+            )
             # Use z_old as the updated latent (follows old policy's trajectory which
             # dominates the mixture with weight 1-alpha)
             z_new = z_old
         else:
             # Episodic mode: both models initialize fresh (no shared latent trajectory)
-            dist_new, z_new = self.policy_model_candidate.policy_dist(x_batch, y_batch, n=n, action_mask=action_mask, z=z)
+            dist_new, z_new = candidate_model.policy_dist(
+                x_batch, y_batch, n=n, action_mask=action_mask, z=z
+            )
 
         probs_old = dist_old.probs
         probs_new = dist_new.probs
@@ -459,6 +552,67 @@ class UPITrmTrainer:
 
         # Return both distribution and updated z (use candidate's z for persistent mode)
         return torch.distributions.Categorical(probs=probs_mix), z_new
+
+    def _mixed_policy_dist(
+        self,
+        x_batch,
+        y_batch,
+        n: int,
+        action_mask: Optional[torch.Tensor] = None,
+        z=None,
+    ):
+        return UPITrmTrainer._probability_mixture_dist(
+            self,
+            self.policy_model_old,
+            self.policy_model_candidate,
+            x_batch,
+            y_batch,
+            n=n,
+            action_mask=action_mask,
+            z=z,
+        )
+
+    def _preinterpolation_mixed_policy_dist(
+        self,
+        x_batch,
+        y_batch,
+        n: int,
+        action_mask: Optional[torch.Tensor] = None,
+        z=None,
+    ):
+        if (
+            self.preinterpolation_policy_base is None
+            or self.preinterpolation_policy_candidate is None
+        ):
+            raise RuntimeError("No pre-interpolation policy pair was captured.")
+        return UPITrmTrainer._probability_mixture_dist(
+            self,
+            self.preinterpolation_policy_base,
+            self.preinterpolation_policy_candidate,
+            x_batch,
+            y_batch,
+            n=n,
+            action_mask=action_mask,
+            z=z,
+        )
+
+    def _capture_current_preinterpolation_pair(self) -> None:
+        if not self._capture_preinterpolation_pair:
+            return
+        if (
+            self.preinterpolation_policy_base is None
+            or self.preinterpolation_policy_candidate is None
+        ):
+            raise RuntimeError("Pre-interpolation policy snapshots are unavailable.")
+        self.preinterpolation_policy_base.load_state_dict(
+            self.policy_model_old.state_dict()
+        )
+        self.preinterpolation_policy_candidate.load_state_dict(
+            self.policy_model_candidate.state_dict()
+        )
+        self.preinterpolation_policy_base.eval()
+        self.preinterpolation_policy_candidate.eval()
+        self._preinterpolation_pair_generation += 1
 
     def _collection_policy_dist(
         self,
@@ -991,6 +1145,21 @@ class UPITrmTrainer:
         self._active_episode = None
 
     def collect_episode(self, max_env_steps: Optional[int] = None) -> int:
+        if self._train_step_active:
+            return self._collect_episode_impl(max_env_steps)
+        before, _, _ = aggregate_model_compute(self._model_roles())
+        started = time.perf_counter()
+        try:
+            return self._collect_episode_impl(max_env_steps)
+        finally:
+            self._training_wall_time_seconds += time.perf_counter() - started
+            after, _, _ = aggregate_model_compute(self._model_roles())
+            self._training_model_work = add_model_counters(
+                self._training_model_work,
+                subtract_model_counters(after, before),
+            )
+
+    def _collect_episode_impl(self, max_env_steps: Optional[int] = None) -> int:
         """Continue one episode, pausing without termination at an exact cap.
 
         ``max_env_steps`` is a collector budget, not an MDP horizon.  When the
@@ -1009,8 +1178,6 @@ class UPITrmTrainer:
         self.policy_model_candidate.eval()
         if self._active_episode is None:
             self._start_episode()
-
-        import time
 
         steps_collected = 0
         episodic_latent = bool(getattr(self.rl_cfg, "episodic_latent", True))
@@ -1975,6 +2142,7 @@ class UPITrmTrainer:
             # Mode 3: Parameter-space interpolation (heuristic, not theory-exact)
             # NOTE: This does NOT satisfy the CPI improvement guarantee because
             # interpolating logits is not equivalent to mixing probabilities.
+            self._capture_current_preinterpolation_pair()
             self._sync_policy_old_towards_candidate()
             self._sync_candidate_policy_from_old()
 
@@ -1996,9 +2164,17 @@ class UPITrmTrainer:
         if self._train_step_active:
             raise RuntimeError("UPI train_step is already active.")
         self._train_step_active = True
+        before, _, _ = aggregate_model_compute(self._model_roles())
+        started = time.perf_counter()
         try:
             return self._train_step_impl(max_env_steps_to_collect)
         finally:
+            self._training_wall_time_seconds += time.perf_counter() - started
+            after, _, _ = aggregate_model_compute(self._model_roles())
+            self._training_model_work = add_model_counters(
+                self._training_model_work,
+                subtract_model_counters(after, before),
+            )
             self._train_step_active = False
 
     def _train_step_impl(
@@ -2195,6 +2371,216 @@ class UPITrmTrainer:
 
     def get_env_step_count(self) -> int:
         return int(self._env_step_count)
+
+    def _model_roles(self) -> Dict[str, nn.Module]:
+        roles = {
+            "model": self.model,
+            "policy_model_candidate": self.policy_model_candidate,
+            "policy_model_old": self.policy_model_old,
+            "target_model": self.target_model,
+        }
+        if self.preinterpolation_policy_base is not None:
+            roles["preinterpolation_policy_base"] = (
+                self.preinterpolation_policy_base
+            )
+        if self.preinterpolation_policy_candidate is not None:
+            roles["preinterpolation_policy_candidate"] = (
+                self.preinterpolation_policy_candidate
+            )
+        return roles
+
+    def _record_memory_peaks(self) -> None:
+        self._peak_process_rss_bytes = max(
+            self._peak_process_rss_bytes,
+            process_peak_rss_bytes(),
+        )
+        allocated, reserved = current_cuda_memory_peaks(self.device)
+        if allocated is not None:
+            self._peak_cuda_allocated_bytes = max(
+                self._peak_cuda_allocated_bytes or 0,
+                allocated,
+            )
+            self._peak_cuda_reserved_bytes = max(
+                self._peak_cuda_reserved_bytes or 0,
+                reserved or 0,
+            )
+
+    def compute_accounting_snapshot(self) -> Dict[str, object]:
+        live_total, role_groups, uninstrumented = aggregate_model_compute(
+            self._model_roles()
+        )
+        total = add_model_counters(
+            self._training_model_work,
+            self._evaluation_model_work,
+        )
+        if live_total != total:
+            raise RuntimeError(
+                "Model compute occurred outside UPI train/evaluation accounting."
+            )
+        self._record_memory_peaks()
+        optimizer_steps = {field: 0 for field in OPTIMIZER_STEP_FIELDS}
+        optimizer_steps.update(
+            {
+                "value": int(self._value_optimizer_step_count),
+                "policy": int(self._policy_optimizer_step_count),
+                "distillation": int(self._distill_optimizer_step_count),
+                "puzzle_embedding": int(self._puzzle_optimizer_step_count),
+            }
+        )
+        optimizer_total = sum(optimizer_steps.values())
+        snapshot: Dict[str, object] = {
+            "compute_schema_version": COMPUTE_SNAPSHOT_SCHEMA_VERSION,
+            "model_work": {
+                "total": total,
+                "training": dict(self._training_model_work),
+                "evaluation": dict(self._evaluation_model_work),
+                "counter_definitions": dict(MODEL_COUNTER_DEFINITIONS),
+                "role_groups": role_groups,
+                "uninstrumented_roles": uninstrumented,
+            },
+            "progress": {
+                "environment_interactions": int(self._env_step_count),
+                "outer_updates": int(self._train_step_count),
+                "optimizer_steps_total": optimizer_total,
+                "optimizer_steps_by_kind": optimizer_steps,
+            },
+            "wall_time_seconds": {
+                "training": float(self._training_wall_time_seconds),
+                "evaluation": float(self._evaluation_wall_time_seconds),
+            },
+            "peak_memory_bytes": {
+                "cuda_allocated": self._peak_cuda_allocated_bytes,
+                "cuda_reserved": self._peak_cuda_reserved_bytes,
+                "process_rss": int(self._peak_process_rss_bytes),
+            },
+        }
+        return validate_compute_snapshot(snapshot)
+
+    def compute_accounting_checkpoint_state(self) -> Dict[str, object]:
+        """Return resumable compute state, including each unique model once."""
+
+        live_total, _, uninstrumented = aggregate_model_compute(
+            self._model_roles()
+        )
+        accounted = add_model_counters(
+            self._training_model_work,
+            self._evaluation_model_work,
+        )
+        if uninstrumented or live_total != accounted:
+            raise RuntimeError(
+                "UPI checkpoint compute accounting is incomplete."
+            )
+        self._record_memory_peaks()
+        return {
+            "schema_version": 1,
+            "model_compute_state": capture_model_compute_state(
+                self._model_roles()
+            ),
+            "training_model_work": dict(self._training_model_work),
+            "evaluation_model_work": dict(self._evaluation_model_work),
+            "training_wall_time_seconds": float(
+                self._training_wall_time_seconds
+            ),
+            "evaluation_wall_time_seconds": float(
+                self._evaluation_wall_time_seconds
+            ),
+            "peak_process_rss_bytes": int(self._peak_process_rss_bytes),
+            "peak_cuda_allocated_bytes": self._peak_cuda_allocated_bytes,
+            "peak_cuda_reserved_bytes": self._peak_cuda_reserved_bytes,
+        }
+
+    def restore_compute_accounting_checkpoint_state(
+        self, state: object, *, validate_only: bool = False
+    ) -> None:
+        expected = {
+            "schema_version",
+            "model_compute_state",
+            "training_model_work",
+            "evaluation_model_work",
+            "training_wall_time_seconds",
+            "evaluation_wall_time_seconds",
+            "peak_process_rss_bytes",
+            "peak_cuda_allocated_bytes",
+            "peak_cuda_reserved_bytes",
+        }
+        if not isinstance(state, dict) or set(state) != expected:
+            raise ValueError("compute accounting checkpoint state has an invalid inventory")
+        if state["schema_version"] != 1:
+            raise ValueError("unsupported compute accounting checkpoint schema")
+        training = validate_model_counters(
+            state["training_model_work"], name="training_model_work"
+        )
+        evaluation = validate_model_counters(
+            state["evaluation_model_work"], name="evaluation_model_work"
+        )
+        wall_values: list[float] = []
+        for field in (
+            "training_wall_time_seconds",
+            "evaluation_wall_time_seconds",
+        ):
+            value = state[field]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or float(value) < 0.0
+            ):
+                raise ValueError(f"{field} must be a nonnegative finite number")
+            wall_values.append(float(value))
+        peak_rss = state["peak_process_rss_bytes"]
+        if isinstance(peak_rss, bool) or not isinstance(peak_rss, int) or peak_rss < 0:
+            raise ValueError("peak_process_rss_bytes must be a nonnegative integer")
+        cuda_peaks: list[Optional[int]] = []
+        for field in ("peak_cuda_allocated_bytes", "peak_cuda_reserved_bytes"):
+            value = state[field]
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
+                raise ValueError(f"{field} must be null or a nonnegative integer")
+            cuda_peaks.append(value)
+        if self.device.type == "cpu" and cuda_peaks != [None, None]:
+            raise ValueError("CPU compute accounting must store null CUDA peaks")
+        if self.device.type == "cuda" and any(value is None for value in cuda_peaks):
+            raise ValueError("CUDA compute accounting is missing CUDA peaks")
+
+        accounted = add_model_counters(training, evaluation)
+        raw_total = zero_model_counters()
+        raw_model_state = validate_model_compute_state(
+            self._model_roles(), state["model_compute_state"]
+        )
+        for index, item in enumerate(raw_model_state):
+            raw_total = add_model_counters(
+                raw_total,
+                validate_model_counters(
+                    item["counters"], name=f"model_compute_state[{index}].counters"
+                ),
+            )
+        if accounted != raw_total:
+            raise ValueError(
+                "phase accounting does not equal the raw unique-model counters"
+            )
+
+        if validate_only:
+            return
+
+        restore_model_compute_state(self._model_roles(), raw_model_state)
+
+        self._training_model_work = training
+        self._evaluation_model_work = evaluation
+        self._training_wall_time_seconds = wall_values[0]
+        self._evaluation_wall_time_seconds = wall_values[1]
+        self._peak_process_rss_bytes = max(peak_rss, process_peak_rss_bytes())
+        current_allocated, current_reserved = current_cuda_memory_peaks(self.device)
+        if self.device.type == "cuda":
+            self._peak_cuda_allocated_bytes = max(
+                cuda_peaks[0] or 0, current_allocated or 0
+            )
+            self._peak_cuda_reserved_bytes = max(
+                cuda_peaks[1] or 0, current_reserved or 0
+            )
+        else:
+            self._peak_cuda_allocated_bytes = None
+            self._peak_cuda_reserved_bytes = None
 
     def get_debug_stats(self) -> Dict[str, float]:
         """
@@ -2442,6 +2828,24 @@ class UPITrmTrainer:
         dataset: Any,
         checker: Any,
     ) -> Dict[str, Any]:
+        before, _, _ = aggregate_model_compute(self._model_roles())
+        started = time.perf_counter()
+        try:
+            return self._evaluate_policy_metrics_impl(env_cfg, dataset, checker)
+        finally:
+            self._evaluation_wall_time_seconds += time.perf_counter() - started
+            after, _, _ = aggregate_model_compute(self._model_roles())
+            self._evaluation_model_work = add_model_counters(
+                self._evaluation_model_work,
+                subtract_model_counters(after, before),
+            )
+
+    def _evaluate_policy_metrics_impl(
+        self,
+        env_cfg: PlanEditEnvConfig,
+        dataset: Any,
+        checker: Any,
+    ) -> Dict[str, Any]:
         """
         Evaluate the deployed policy, returning both strict success rate and mean checker score.
 
@@ -2468,38 +2872,51 @@ class UPITrmTrainer:
 
         episodic_latent = getattr(self.rl_cfg, "episodic_latent", True)
         exact_mixture = bool(getattr(self.rl_cfg, "theory_exact_mixture", False))
+        preinterpolation_mixture = (
+            self._evaluation_policy_mode == "preinterpolation_exact_mixture"
+        )
         policy_dist_fn = None
         eval_policy_mode = "greedy"
         greedy_eval = True
-        if exact_mixture:
-            self.policy_model_candidate.eval()
+        evaluation_model = self.policy_model_old
+        additional_models: Tuple[nn.Module, ...] = ()
+        if self._evaluation_policy_mode == "stochastic_deployed":
+            eval_policy_mode = "stochastic_deployed_policy"
+            greedy_eval = False
+        elif preinterpolation_mixture:
+            if (
+                self.preinterpolation_policy_base is None
+                or self.preinterpolation_policy_candidate is None
+            ):
+                raise RuntimeError("Pre-interpolation evaluation pair is unavailable.")
+            policy_dist_fn = self._preinterpolation_mixed_policy_dist
+            eval_policy_mode = "stochastic_preinterpolation_exact_mixture"
+            greedy_eval = False
+            evaluation_model = self.preinterpolation_policy_base
+            additional_models = (self.preinterpolation_policy_candidate,)
+        elif exact_mixture:
             policy_dist_fn = self._mixed_policy_dist
             eval_policy_mode = "stochastic_exact_mixture"
             greedy_eval = False
+            additional_models = (self.policy_model_candidate,)
 
         eval_seed = int(self.rl_cfg.eval_seed)
-        cpu_rng_state = torch.random.get_rng_state()
-        cuda_rng_states = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-        try:
-            torch.manual_seed(eval_seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(eval_seed)
-            mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
-                model=self.policy_model_old,
-                dataset=dataset,
-                checker=checker,
-                env_cfg=env_cfg,
-                task_config=getattr(self.env, "task_config", None),
-                num_episodes=self.rl_cfg.eval_num_episodes,
-                inner_unroll_n=self.rl_cfg.inner_unroll_n,
-                episodic_latent=episodic_latent,
-                greedy=greedy_eval,
-                policy_dist_fn=policy_dist_fn,
-            )
-        finally:
-            torch.random.set_rng_state(cpu_rng_state)
-            if cuda_rng_states is not None:
-                torch.cuda.set_rng_state_all(cuda_rng_states)
+        mean_score, success_rate, detailed_stats = evaluate_plan_policy_with_scores(
+            model=evaluation_model,
+            dataset=dataset,
+            checker=checker,
+            env_cfg=env_cfg,
+            task_config=getattr(self.env, "task_config", None),
+            num_episodes=self.rl_cfg.eval_num_episodes,
+            inner_unroll_n=self.rl_cfg.inner_unroll_n,
+            episodic_latent=episodic_latent,
+            greedy=greedy_eval,
+            policy_dist_fn=policy_dist_fn,
+            evaluation_seed=eval_seed,
+            collect_per_instance=True,
+            additional_models=additional_models,
+            record_local_seeding=True,
+        )
 
         result = {
             "mean_score": mean_score,

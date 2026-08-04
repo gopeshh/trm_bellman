@@ -1,0 +1,7 @@
+# C1 B0 / I00: persistent, parameter interpolation, historical target/baseline.
+# Replay remains clock-complete; this cell does not recreate the invalid legacy replay.
+episodic_latent: false
+theory_exact_mixture: false
+policy_epsilon: 0.0
+exact_k_step_targets: false
+exact_baseline_summation: false

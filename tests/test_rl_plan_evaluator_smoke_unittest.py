@@ -4,7 +4,10 @@ Converts pytest-style tests to unittest.TestCase for Buck2 compatibility.
 """
 
 import math
+import random
 import unittest
+
+import numpy as np
 import torch
 
 from rl.evaluator import evaluate_plan_policy, evaluate_plan_policy_with_scores
@@ -128,6 +131,166 @@ class TestRLPlanEvaluatorSmoke(unittest.TestCase):
                 env_cfg=env_cfg,
                 num_episodes=3,
             )
+
+    def test_evaluation_isolates_rng_modes_and_emits_deterministic_rows(self):
+        torch.manual_seed(11)
+        dataset = DummyPuzzleDataset(num_instances=3, seq_len=4, vocab_size=4)
+        env_cfg = PlanEditEnvConfig(
+            max_edits=2,
+            gamma=0.99,
+            reward_shaping=True,
+            vocab_size=dataset.vocab_size,
+        )
+        cfg = _tiny_trm_cfg(
+            seq_len=dataset.seq_len,
+            vocab_size=dataset.vocab_size,
+            num_identifiers=dataset.num_identifiers,
+            batch_size=2,
+        )
+        model = TinyRecursiveReasoningModel_ACTV1(cfg)
+        additional_model = TinyRecursiveReasoningModel_ACTV1(cfg)
+        model.train()
+        additional_model.eval()
+
+        def policy_dist(*args, **kwargs):
+            random.random()
+            np.random.random()
+            return model.policy_dist(*args, **kwargs)
+
+        random.seed(101)
+        np.random.seed(102)
+        torch.manual_seed(103)
+        python_state = random.getstate()
+        numpy_state = np.random.get_state()
+        torch_state = torch.random.get_rng_state().clone()
+
+        first = evaluate_plan_policy_with_scores(
+            model=model,
+            dataset=dataset,
+            checker=dummy_checker,
+            env_cfg=env_cfg,
+            num_episodes=3,
+            inner_unroll_n=1,
+            greedy=False,
+            policy_dist_fn=policy_dist,
+            evaluation_seed=1729,
+            collect_per_instance=True,
+            additional_models=(additional_model,),
+            record_local_seeding=True,
+        )
+
+        self.assertEqual(random.getstate(), python_state)
+        restored_numpy_state = np.random.get_state()
+        self.assertEqual(restored_numpy_state[0], numpy_state[0])
+        np.testing.assert_array_equal(restored_numpy_state[1], numpy_state[1])
+        self.assertEqual(restored_numpy_state[2:], numpy_state[2:])
+        torch.testing.assert_close(torch.random.get_rng_state(), torch_state)
+        self.assertTrue(model.training)
+        self.assertFalse(additional_model.training)
+
+        second = evaluate_plan_policy_with_scores(
+            model=model,
+            dataset=dataset,
+            checker=dummy_checker,
+            env_cfg=env_cfg,
+            num_episodes=3,
+            inner_unroll_n=1,
+            greedy=False,
+            policy_dist_fn=policy_dist,
+            evaluation_seed=1729,
+            collect_per_instance=True,
+            additional_models=(additional_model,),
+            record_local_seeding=True,
+        )
+        self.assertEqual(first[2]["per_instance"], second[2]["per_instance"])
+        rows = first[2]["per_instance"]
+        self.assertEqual([row["record_index"] for row in rows], [0, 1, 2])
+        self.assertEqual(len({row["record_sha256"] for row in rows}), 3)
+        self.assertTrue(all(row["evaluation_seed"] is not None for row in rows))
+
+        class ReversedDataset:
+            def __init__(self, source):
+                self.source = source
+                self.vocab_size = source.vocab_size
+
+            def __len__(self):
+                return len(self.source)
+
+            def __getitem__(self, index):
+                return self.source[len(self.source) - index - 1]
+
+        permuted = evaluate_plan_policy_with_scores(
+            model=model,
+            dataset=ReversedDataset(dataset),
+            checker=dummy_checker,
+            env_cfg=env_cfg,
+            num_episodes=3,
+            inner_unroll_n=1,
+            greedy=False,
+            policy_dist_fn=policy_dist,
+            evaluation_seed=1729,
+            collect_per_instance=True,
+            additional_models=(additional_model,),
+            record_local_seeding=True,
+        )[2]["per_instance"]
+        original_by_hash = {
+            row["record_sha256"]: {
+                key: value for key, value in row.items() if key != "record_index"
+            }
+            for row in rows
+        }
+        permuted_by_hash = {
+            row["record_sha256"]: {
+                key: value for key, value in row.items() if key != "record_index"
+            }
+            for row in permuted
+        }
+        self.assertEqual(original_by_hash, permuted_by_hash)
+
+    def test_evaluation_restores_rng_and_modes_when_policy_raises(self):
+        torch.manual_seed(12)
+        dataset = DummyPuzzleDataset(num_instances=1, seq_len=4, vocab_size=4)
+        env_cfg = PlanEditEnvConfig(
+            max_edits=1,
+            gamma=0.99,
+            reward_shaping=True,
+            vocab_size=dataset.vocab_size,
+        )
+        cfg = _tiny_trm_cfg(4, 4, 1, 1)
+        model = TinyRecursiveReasoningModel_ACTV1(cfg)
+        model.train()
+
+        random.seed(201)
+        np.random.seed(202)
+        torch.manual_seed(203)
+        python_state = random.getstate()
+        numpy_state = np.random.get_state()
+        torch_state = torch.random.get_rng_state().clone()
+
+        def fail_policy(*args, **kwargs):
+            random.random()
+            np.random.random()
+            torch.rand(1)
+            raise RuntimeError("deliberate evaluation failure")
+
+        with self.assertRaisesRegex(RuntimeError, "deliberate evaluation failure"):
+            evaluate_plan_policy_with_scores(
+                model=model,
+                dataset=dataset,
+                checker=dummy_checker,
+                env_cfg=env_cfg,
+                num_episodes=1,
+                policy_dist_fn=fail_policy,
+                evaluation_seed=1729,
+            )
+
+        self.assertEqual(random.getstate(), python_state)
+        restored_numpy_state = np.random.get_state()
+        self.assertEqual(restored_numpy_state[0], numpy_state[0])
+        np.testing.assert_array_equal(restored_numpy_state[1], numpy_state[1])
+        self.assertEqual(restored_numpy_state[2:], numpy_state[2:])
+        torch.testing.assert_close(torch.random.get_rng_state(), torch_state)
+        self.assertTrue(model.training)
 
 
 if __name__ == "__main__":

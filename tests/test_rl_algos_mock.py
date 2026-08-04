@@ -17,6 +17,7 @@ from rl.algos.dqn import (
 from rl.algos.ppo import PPOTrainer, PPOConfig
 from rl.evaluator import evaluate_plan_policy_with_scores
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from utils.compute_accounting import ModelComputeCounters
 
 class MockConfig:
     def __init__(self, hidden_dim, rl_num_actions=5):
@@ -36,6 +37,13 @@ class MockModel(nn.Module):
         self.edit_policy = nn.Linear(hidden_dim, action_dim)
         self.value_head = nn.Linear(hidden_dim, 1)
         self.encoder = nn.Linear(10, hidden_dim) 
+        self._compute_counters = ModelComputeCounters()
+
+    def compute_counter_snapshot(self):
+        return self._compute_counters.snapshot()
+
+    def restore_compute_counters(self, counters):
+        self._compute_counters.restore(counters)
         
     def policy_dist(self, x, y, n=4, action_mask=None, z=None):
         batch_size = x["inputs"].shape[0]
@@ -46,12 +54,18 @@ class MockModel(nn.Module):
         if action_mask is not None:
              logits = logits.masked_fill(~action_mask.bool(), -1e9)
         dist = torch.distributions.Categorical(logits=logits)
+        self._compute_counters.policy_api_calls += 1
+        self._compute_counters.policy_state_evaluations += batch_size
+        self._compute_counters.action_logits_evaluated += dist.logits.numel()
         return dist, None
 
     def used_value(self, x, y, n=4):
         batch_size = x["inputs"].shape[0]
         z = self.encoder(x["inputs"].float()) # [B, H]
         value = self.value_head(z).squeeze(-1) # [B]
+        self._compute_counters.value_api_calls += 1
+        self._compute_counters.value_state_evaluations += batch_size
+        self._compute_counters.state_values_evaluated += value.numel()
         return value, None
         
     # For DQN (NoRec backbone interface)
@@ -142,7 +156,9 @@ class TestRLAlgos(unittest.TestCase):
         config = PPOConfig(num_steps=4, num_epochs=1, num_minibatches=2, inner_unroll_n=0)
         trainer = PPOTrainer(self.model, self.env, config)
 
-        trainer.collect_rollouts(config.num_steps)
+        collected = trainer.collect_rollouts(config.num_steps)
+        self.assertEqual(collected, config.num_steps)
+        self.assertEqual(trainer.get_env_step_count(), config.num_steps)
         self.assertEqual(torch.stack(trainer.rollout_buffer.log_probs).shape, (config.num_steps,))
         self.assertEqual(torch.stack(trainer.rollout_buffer.values).shape, (config.num_steps,))
 
@@ -151,6 +167,88 @@ class TestRLAlgos(unittest.TestCase):
         self.assertIn("loss_policy", stats)
         self.assertIn("loss_value", stats)
         self.assertIn("num_updates", stats)
+        self.assertEqual(stats["num_updates"], 2)
+        self.assertEqual(trainer.get_metrics()["optimizer_steps"], 2)
+
+    def test_ppo_exact_budget_counters_are_cumulative(self):
+        config = PPOConfig(
+            num_steps=4,
+            num_epochs=1,
+            num_minibatches=2,
+            inner_unroll_n=0,
+        )
+        trainer = PPOTrainer(self.model, self.env, config)
+
+        first = trainer.train_step(max_env_steps_to_collect=4)
+        second = trainer.train_step(max_env_steps_to_collect=100)
+
+        self.assertEqual(first["env_steps_collected"], 4.0)
+        self.assertEqual(first["env_steps_total"], 4.0)
+        self.assertEqual(first["optimizer_steps_total"], 2.0)
+        self.assertEqual(first["train_steps_total"], 1.0)
+        self.assertEqual(second["env_steps_collected"], 4.0)
+        self.assertEqual(second["env_steps_total"], 8.0)
+        self.assertEqual(second["optimizer_steps_total"], 4.0)
+        self.assertEqual(second["train_steps_total"], 2.0)
+        self.assertEqual(trainer.get_env_step_count(), 8)
+        self.assertEqual(self.env.step.call_count, 8)
+        compute = trainer.compute_accounting_snapshot()
+        training = compute["model_work"]["training"]
+        self.assertEqual(training["policy_api_calls"], 12)
+        self.assertEqual(training["policy_state_evaluations"], 16)
+        # This legacy mock retains an extra singleton plan axis during rollout;
+        # its minibatch mask broadcasts the categorical tensor to [B, B, A].
+        # Count the actual distribution tensor elements, not B * action_dim.
+        self.assertEqual(training["action_logits_evaluated"], 120)
+        self.assertEqual(training["value_api_calls"], 14)
+        self.assertEqual(training["value_state_evaluations"], 18)
+        self.assertEqual(training["state_values_evaluated"], 18)
+        self.assertEqual(training["recurrent_latent_update_calls"], 0)
+        self.assertEqual(compute["model_work"]["evaluation"]["policy_api_calls"], 0)
+        self.assertEqual(compute["progress"]["optimizer_steps_total"], 4)
+        self.assertEqual(compute["model_work"]["uninstrumented_roles"], [])
+
+    def test_ppo_compute_snapshot_rejects_unwrapped_model_work(self):
+        trainer = PPOTrainer(
+            self.model,
+            self.env,
+            PPOConfig(num_steps=2, inner_unroll_n=0),
+        )
+        x = {
+            "inputs": torch.zeros(1, 10),
+            "puzzle_identifiers": torch.zeros(1),
+        }
+        trainer.model.policy_dist(x, torch.zeros(1, 10), n=0)
+        with self.assertRaisesRegex(RuntimeError, "outside PPO"):
+            trainer.compute_accounting_snapshot()
+
+    def test_ppo_rejects_short_exact_budget_cap_before_collection(self):
+        trainer = PPOTrainer(
+            self.model,
+            self.env,
+            PPOConfig(num_steps=4, num_epochs=1, num_minibatches=2, inner_unroll_n=0),
+        )
+
+        with self.assertRaisesRegex(ValueError, "complete rollout"):
+            trainer.train_step(max_env_steps_to_collect=3)
+
+        self.assertEqual(trainer.get_env_step_count(), 0)
+        self.env.step.assert_not_called()
+
+    def test_ppo_counts_only_successful_environment_steps(self):
+        first_result = self.env.step.return_value
+        self.env.step.side_effect = [first_result, RuntimeError("step failed")]
+        trainer = PPOTrainer(
+            self.model,
+            self.env,
+            PPOConfig(num_steps=3, num_epochs=1, num_minibatches=1, inner_unroll_n=0),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "step failed"):
+            trainer.collect_rollouts(3)
+
+        self.assertEqual(trainer.get_env_step_count(), 1)
+        self.assertEqual(len(trainer.rollout_buffer), 1)
 
     def test_ppo_optimizer_splits_policy_value_and_backbone_groups(self):
         policy_lr = 3e-4
@@ -842,6 +940,12 @@ class TestRLAlgos(unittest.TestCase):
 
         def fake_eval(*args, **kwargs):
             captured["num_episodes"] = kwargs.get("num_episodes")
+            model = kwargs["model"]
+            x = {
+                "inputs": torch.zeros(2, 10),
+                "puzzle_identifiers": torch.zeros(2),
+            }
+            model.policy_dist(x, torch.zeros(2, 10), n=0)
             return 0.0, 0.0, {}
 
         import rl.evaluator as evaluator_mod
@@ -863,6 +967,13 @@ class TestRLAlgos(unittest.TestCase):
             evaluator_mod.evaluate_plan_policy_with_scores = orig
 
         self.assertEqual(captured["num_episodes"], 7)
+        compute = trainer.compute_accounting_snapshot()
+        self.assertEqual(compute["model_work"]["training"]["policy_api_calls"], 0)
+        self.assertEqual(compute["model_work"]["evaluation"]["policy_api_calls"], 1)
+        self.assertEqual(
+            compute["model_work"]["evaluation"]["action_logits_evaluated"],
+            2 * self.action_dim,
+        )
 
     def test_a2c_evaluate_policy_metrics_falls_back_to_config_eval_num_episodes(self):
         captured = {}

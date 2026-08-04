@@ -164,6 +164,17 @@ class RLConfig(BaseModel):
     #     - This is a HEURISTIC approximation, NOT covered by theory
     #     - Introduces projection error not analyzed in Theorem 5.9
     theory_exact_mixture: bool = False
+
+    # The deployment bridge keeps legacy training fixed while changing only the
+    # frozen checkpoint evaluator. Both bridge cells capture the base/candidate
+    # pair immediately before parameter interpolation; the treatment evaluates
+    # its exact probability-space mixture instead of the interpolated actor.
+    capture_preinterpolation_policy_pair: bool = False
+    evaluation_policy_mode: Literal[
+        "configured",
+        "stochastic_deployed",
+        "preinterpolation_exact_mixture",
+    ] = "configured"
     
     # === Batch-level advantage centering (HEURISTIC, not theory-exact) ===
     # Subtracts batch mean from advantages: adv = adv - adv.mean()

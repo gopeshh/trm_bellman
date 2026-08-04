@@ -1,0 +1,79 @@
+{
+  "artifact_schema_version": 1,
+  "status": "registered_not_authorized",
+  "runtime_output_root": {
+    "environment_variable": "UPI_TRM_EVIDENCE_ROOT",
+    "relative_path": "iclr-confirmatory-v1"
+  },
+  "dataset": {
+    "root": "data/iclr-confirmatory-sudoku4x4-v1",
+    "train_split": "train",
+    "train_count": 1024,
+    "train_manifest_sha256": "8def4f59387c1ab9466d043c40a7fdd3c7c670e2778b8d949295811ae7b6088a",
+    "validation_split": "validation",
+    "validation_count": 256,
+    "validation_manifest_sha256": "4644a3b1bb8b6e384896888154c9e56252368c1fc2f32962b089ade95a5bc1f2",
+    "test_split": "test",
+    "test_count": 512,
+    "test_manifest_sha256": "163a083a9f5744b7cc485663b269b89acc3103d9e1ec64c7e93f78e36fa79d40"
+  },
+  "confirmatory_seeds": [101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
+  "run_id_templates": {
+    "confirmatory": "{cell_lower}-seed{seed}",
+    "debug": "debug-{cell_lower}-seed{seed}"
+  },
+  "debug_runs": {
+    "status": "debug_only_excluded_from_confirmatory",
+    "seeds": [9001, 9002, 9003],
+    "evaluation_split": "validation",
+    "config_layers": ["debug_smoke.yaml"],
+    "environment_interactions": 80,
+    "log_environment_interval": 80,
+    "evaluation_environment_interval": 80,
+    "save_environment_interval": 80,
+    "save_outer_interval": 0,
+    "reported_environment_checkpoints": [80]
+  },
+  "environment_interactions": 80000,
+  "log_environment_interval": 10000,
+  "evaluation_environment_interval": 10000,
+  "save_environment_interval": 10000,
+  "save_outer_interval": 0,
+  "reported_environment_checkpoints": [10000, 20000, 40000, 80000],
+  "architecture_cli": {
+    "backbone": "trm",
+    "hidden_size": 64,
+    "h_cycles": 2,
+    "l_cycles": 2,
+    "l_layers": 1,
+    "puzzle_emb_ndim": 0
+  },
+  "initialization": {
+    "mode": "random_paired_by_training_seed",
+    "load_checkpoint_allowed": false
+  },
+  "bridge_cells": {
+    "B0_I00": ["bridge_base.yaml", "bridge_b0.yaml"],
+    "Bz_I10": ["bridge_base.yaml", "bridge_b0.yaml", "bridge_bz.yaml"],
+    "Bd_I01": ["bridge_base.yaml", "bridge_b0.yaml", "bridge_bd.yaml"],
+    "Bt": ["bridge_base.yaml", "bridge_b0.yaml", "bridge_bt.yaml"],
+    "Bb": ["bridge_base.yaml", "bridge_b0.yaml", "bridge_bb.yaml"],
+    "I11": ["bridge_base.yaml", "bridge_b0.yaml", "bridge_i11.yaml"]
+  },
+  "bridge_estimands": {
+    "Bt": "With K=1 fixed, Bt changes the bootstrap network from the EMA target model to the current evaluator; it is not a general multistep-target contrast."
+  },
+  "matched_cells": {
+    "UPI_TRM": ["c2_upi.yaml"],
+    "TRM_PPO": ["c2_ppo.yaml"]
+  },
+  "non_executable_cells": {
+    "Bs_legacy": "Legacy plan-only replay is invalid and is not reintroduced."
+  },
+  "deployment_estimands": {
+    "Bd_I01": "paired checkpoint evaluator contrast: record-local stochastic sampling from the exact probability-space mixture of the retained pre-interpolation base/candidate pair versus record-local stochastic sampling from B0's deployed parameter-interpolated actor; training is otherwise identical",
+    "I11": "the same paired deployment evaluator contrast under episodic latent reset",
+    "UPI_TRM": "one record-local stochastic exact-mixture rollout per held-out record",
+    "TRM_PPO": "one deterministic greedy rollout per held-out record"
+  }
+}

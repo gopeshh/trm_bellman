@@ -28,7 +28,10 @@ python_library(
 
 python_library(
     name = "utils",
-    srcs = glob(["utils/*.py"]),
+    srcs = glob(
+        ["utils/*.py"],
+        exclude = ["utils/evaluation_artifacts.py"],
+    ) + ["utils/evaluation_artifacts.py"],
     base_module = "",
     deps = [
         "fbsource//third-party/pypi/torch:torch",
@@ -118,6 +121,10 @@ python_library(
     name = "upi_trm_train_lib",
     srcs = ["upi_trm_train.py"],
     base_module = "",
+    resources = glob([
+        "configs/iclr_confirmatory/*.json",
+        "configs/iclr_confirmatory/*.yaml",
+    ]),
     deps = [
         ":models",
         ":rl",
@@ -142,6 +149,10 @@ python_binary(
     base_module = "",
     keep_gpu_sections = True,
     main_module = "upi_trm_train",
+    resources = glob([
+        "configs/iclr_confirmatory/*.json",
+        "configs/iclr_confirmatory/*.yaml",
+    ]),
     deps = [
         ":models",
         ":rl",
@@ -382,6 +393,8 @@ python_unittest(
     name = "test_run_identity",
     srcs = [
         "tests/__init__.py",
+        "tests/test_compute_accounting_unittest.py",
+        "tests/test_evaluation_artifacts_unittest.py",
         "tests/test_run_identity_unittest.py",
     ],
     base_module = "",
@@ -852,7 +865,11 @@ python_unittest(
         "tests/test_config_integrity.py",
     ],
     base_module = "",
-    resources = ["README.md"] + glob(["configs/**/*.yaml"]),
+    resources = ["README.md"] + glob([
+        "configs/**/*.json",
+        "configs/**/*.yaml",
+        "data/iclr-confirmatory-sudoku4x4-v1/**/*.json",
+    ]),
     deps = [
         ":rl",
         "fbsource//third-party/pypi/pyyaml:pyyaml",

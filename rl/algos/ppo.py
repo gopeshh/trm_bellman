@@ -8,6 +8,7 @@ Reference: Schulman et al., "Proximal Policy Optimization Algorithms" (2017)
 """
 
 import math
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -19,6 +20,19 @@ import torch.nn.utils as nn_utils
 from rl.batch_utils import prepare_batch_x, prepare_plan, stack_batch_states
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.value_targets import compute_gae_trajectory
+from utils.compute_accounting import (
+    COMPUTE_SNAPSHOT_SCHEMA_VERSION,
+    MODEL_COUNTER_DEFINITIONS,
+    OPTIMIZER_STEP_FIELDS,
+    add_model_counters,
+    aggregate_model_compute,
+    capture_model_compute_state,
+    current_cuda_memory_peaks,
+    process_peak_rss_bytes,
+    subtract_model_counters,
+    validate_compute_snapshot,
+    zero_model_counters,
+)
 
 
 @dataclass
@@ -63,6 +77,7 @@ class PPOConfig:
     # not pass an explicit num_episodes; build_trainer() should set this
     # from rl_cfg.eval_num_episodes so UPI-TRM and baselines stay in sync.
     eval_num_episodes: int = 50
+    eval_seed: int = 1729
 
 
 @dataclass
@@ -151,12 +166,30 @@ class PPOTrainer:
         self.config = config
         self.device = device
 
+        for name, value in {
+            "num_steps": config.num_steps,
+            "num_epochs": config.num_epochs,
+            "num_minibatches": config.num_minibatches,
+        }.items():
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"PPO {name} must be a positive integer.")
+
         self.rollout_buffer = RolloutBuffer()
 
         # Training state
         self._train_step_count = 0
+        self._env_step_count = 0
+        self._optimizer_step_count = 0
         self._episode_count = 0
         self.term_stats = {"stop": 0, "solved": 0, "budget": 0}
+        self._training_wall_time_seconds = 0.0
+        self._evaluation_wall_time_seconds = 0.0
+        self._training_model_work = zero_model_counters()
+        self._evaluation_model_work = zero_model_counters()
+        self._peak_process_rss_bytes = process_peak_rss_bytes()
+        cuda_allocated, cuda_reserved = current_cuda_memory_peaks(self.device)
+        self._peak_cuda_allocated_bytes = cuda_allocated
+        self._peak_cuda_reserved_bytes = cuda_reserved
 
         # Optimizer with explicit policy / value / backbone groups.
         policy_params, value_params, backbone_params = (
@@ -254,12 +287,15 @@ class PPOTrainer:
             for mask in masks
         ]).to(self.device)
 
-    def collect_rollouts(self, num_steps: int) -> None:
+    def collect_rollouts(self, num_steps: int) -> int:
         """
         Collect num_steps of experience using current policy.
 
         Stores transitions in self.rollout_buffer for later training.
         """
+        if num_steps <= 0:
+            raise ValueError("PPO rollout length must be positive.")
+
         self.model.eval()
         self.rollout_buffer.clear()
 
@@ -300,6 +336,7 @@ class PPOTrainer:
 
             # Step environment
             (x_next, y_next), reward, done, info = self.env.step(action.item())
+            self._env_step_count += 1
             self._episode_rewards.append(reward)
 
             # Store transition
@@ -328,6 +365,8 @@ class PPOTrainer:
                 # Reset for next episode
                 self._current_x, self._current_y = self.env.reset()
                 self._episode_rewards = []
+
+        return num_steps
 
     def compute_returns_and_advantages(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -473,6 +512,7 @@ class PPOTrainer:
                 if self.config.max_grad_norm > 0:
                     nn_utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
                 self.optimizer.step()
+                self._optimizer_step_count += 1
 
                 # Track losses
                 total_policy_loss += policy_loss.item()
@@ -493,32 +533,193 @@ class PPOTrainer:
         """Stack a list of x dicts into a batched dict."""
         return stack_batch_states(x_list, self.device)
 
-    def train_step(self) -> Dict[str, float]:
+    def train_step(
+        self,
+        max_env_steps_to_collect: Optional[int] = None,
+    ) -> Dict[str, float]:
+        before, _, _ = aggregate_model_compute(self._model_roles())
+        started = time.perf_counter()
+        try:
+            return self._train_step_impl(max_env_steps_to_collect)
+        finally:
+            self._training_wall_time_seconds += time.perf_counter() - started
+            after, _, _ = aggregate_model_compute(self._model_roles())
+            self._training_model_work = add_model_counters(
+                self._training_model_work,
+                subtract_model_counters(after, before),
+            )
+
+    def _train_step_impl(
+        self,
+        max_env_steps_to_collect: Optional[int] = None,
+    ) -> Dict[str, float]:
         """
         Perform one PPO training step: collect rollouts + update.
 
         Returns:
             Dictionary with training statistics
         """
-        # Collect rollouts
-        self.collect_rollouts(self.config.num_steps)
+        if max_env_steps_to_collect is not None:
+            if max_env_steps_to_collect <= 0:
+                raise ValueError("PPO collection cap must be positive.")
+            if max_env_steps_to_collect < self.config.num_steps:
+                raise ValueError(
+                    "PPO exact-budget collection requires a complete rollout; "
+                    f"cap={max_env_steps_to_collect} is smaller than "
+                    f"num_steps={self.config.num_steps}."
+                )
+
+        collected = self.collect_rollouts(self.config.num_steps)
 
         # Update policy and value function
         update_stats = self.update()
+        update_stats.update(
+            {
+                "env_steps_collected": float(collected),
+                "env_steps_total": float(self._env_step_count),
+                "optimizer_steps_total": float(self._optimizer_step_count),
+                "train_steps_total": float(self._train_step_count),
+                "optimization_performed": float(update_stats["num_updates"] > 0),
+            }
+        )
 
         return update_stats
+
+    def get_env_step_count(self) -> int:
+        """Return the exact number of successful environment transitions."""
+
+        return self._env_step_count
 
     def get_metrics(self) -> Dict[str, float]:
         """Get current training metrics."""
         return {
             "train_step": self._train_step_count,
+            "env_steps": self._env_step_count,
+            "optimizer_steps": self._optimizer_step_count,
             "episodes": self._episode_count,
             "term_stop": self.term_stats["stop"],
             "term_solved": self.term_stats["solved"],
             "term_budget": self.term_stats["budget"],
         }
 
+    def _model_roles(self) -> Dict[str, nn.Module]:
+        return {"model": self.model}
+
+    def _record_memory_peaks(self) -> None:
+        self._peak_process_rss_bytes = max(
+            self._peak_process_rss_bytes,
+            process_peak_rss_bytes(),
+        )
+        allocated, reserved = current_cuda_memory_peaks(self.device)
+        if allocated is not None:
+            self._peak_cuda_allocated_bytes = max(
+                self._peak_cuda_allocated_bytes or 0,
+                allocated,
+            )
+            self._peak_cuda_reserved_bytes = max(
+                self._peak_cuda_reserved_bytes or 0,
+                reserved or 0,
+            )
+
+    def compute_accounting_snapshot(self) -> Dict[str, object]:
+        live_total, role_groups, uninstrumented = aggregate_model_compute(
+            self._model_roles()
+        )
+        total = add_model_counters(
+            self._training_model_work,
+            self._evaluation_model_work,
+        )
+        if live_total != total:
+            raise RuntimeError(
+                "Model compute occurred outside PPO train/evaluation accounting."
+            )
+        self._record_memory_peaks()
+        optimizer_steps = {field: 0 for field in OPTIMIZER_STEP_FIELDS}
+        optimizer_steps["combined"] = int(self._optimizer_step_count)
+        snapshot: Dict[str, object] = {
+            "compute_schema_version": COMPUTE_SNAPSHOT_SCHEMA_VERSION,
+            "model_work": {
+                "total": total,
+                "training": dict(self._training_model_work),
+                "evaluation": dict(self._evaluation_model_work),
+                "counter_definitions": dict(MODEL_COUNTER_DEFINITIONS),
+                "role_groups": role_groups,
+                "uninstrumented_roles": uninstrumented,
+            },
+            "progress": {
+                "environment_interactions": int(self._env_step_count),
+                "outer_updates": int(self._train_step_count),
+                "optimizer_steps_total": int(self._optimizer_step_count),
+                "optimizer_steps_by_kind": optimizer_steps,
+            },
+            "wall_time_seconds": {
+                "training": float(self._training_wall_time_seconds),
+                "evaluation": float(self._evaluation_wall_time_seconds),
+            },
+            "peak_memory_bytes": {
+                "cuda_allocated": self._peak_cuda_allocated_bytes,
+                "cuda_reserved": self._peak_cuda_reserved_bytes,
+                "process_rss": int(self._peak_process_rss_bytes),
+            },
+        }
+        return validate_compute_snapshot(snapshot)
+
+    def compute_accounting_checkpoint_state(self) -> Dict[str, object]:
+        live_total, _, uninstrumented = aggregate_model_compute(
+            self._model_roles()
+        )
+        accounted = add_model_counters(
+            self._training_model_work,
+            self._evaluation_model_work,
+        )
+        if uninstrumented or live_total != accounted:
+            raise RuntimeError(
+                "PPO checkpoint compute accounting is incomplete."
+            )
+        self._record_memory_peaks()
+        return {
+            "schema_version": 1,
+            "model_compute_state": capture_model_compute_state(
+                self._model_roles()
+            ),
+            "training_model_work": dict(self._training_model_work),
+            "evaluation_model_work": dict(self._evaluation_model_work),
+            "training_wall_time_seconds": float(
+                self._training_wall_time_seconds
+            ),
+            "evaluation_wall_time_seconds": float(
+                self._evaluation_wall_time_seconds
+            ),
+            "peak_process_rss_bytes": int(self._peak_process_rss_bytes),
+            "peak_cuda_allocated_bytes": self._peak_cuda_allocated_bytes,
+            "peak_cuda_reserved_bytes": self._peak_cuda_reserved_bytes,
+        }
+
     def evaluate_policy_metrics(
+        self,
+        env_cfg: PlanEditEnvConfig,
+        dataset: Any,
+        checker: Any,
+        num_episodes: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        before, _, _ = aggregate_model_compute(self._model_roles())
+        started = time.perf_counter()
+        try:
+            return self._evaluate_policy_metrics_impl(
+                env_cfg,
+                dataset,
+                checker,
+                num_episodes=num_episodes,
+            )
+        finally:
+            self._evaluation_wall_time_seconds += time.perf_counter() - started
+            after, _, _ = aggregate_model_compute(self._model_roles())
+            self._evaluation_model_work = add_model_counters(
+                self._evaluation_model_work,
+                subtract_model_counters(after, before),
+            )
+
+    def _evaluate_policy_metrics_impl(
         self,
         env_cfg: PlanEditEnvConfig,
         dataset: Any,
@@ -564,12 +765,16 @@ class PPOTrainer:
             inner_unroll_n=self.config.inner_unroll_n,
             episodic_latent=True,  # Baselines use episodic latent
             greedy=True,  # Always greedy for deterministic evaluation
+            evaluation_seed=self.config.eval_seed,
+            collect_per_instance=True,
+            record_local_seeding=True,
         )
 
         result = {
             "mean_score": mean_score,
             "success_rate": success_rate,
             "eval_policy_mode": "greedy",
+            "eval_seed": self.config.eval_seed,
         }
         result.update(detailed_stats)
         return result

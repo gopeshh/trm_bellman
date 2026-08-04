@@ -148,6 +148,59 @@ class RunIdentityTest(unittest.TestCase):
                 run_identity_sha256(identity), hashlib.sha256(encoded).hexdigest()
             )
 
+    def test_schema_two_effective_config_binds_seed_data_and_initialization(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._clean_repository(root)
+            provenance = {
+                "provenance_schema_version": 1,
+                "ordered_records": {"train": ["a"], "eval": ["b"]},
+            }
+            legacy = self._identity(root)
+            effective = copy.deepcopy(legacy["effective_config"])
+            effective["effective_config_schema_version"] = 2
+            effective["registration"] = {
+                "cell": "C2_UPI_TRM",
+                "tier": "confirmatory",
+                "run_id": "confirmatory.seed7",
+                "training_seed": 7,
+                "registry_sha256": "f" * 64,
+            }
+            effective["dataset_provenance_sha256"] = canonical_json_sha256(
+                provenance
+            )
+            effective["initialization"] = {
+                "kind": "random",
+                "artifact_sha256": None,
+            }
+
+            identity = build_run_identity(
+                run_id="confirmatory.seed7",
+                training_seed=7,
+                git_lookup_root=root,
+                effective_config=effective,
+                dataset_provenance=provenance,
+                initialization_kind="random",
+                initialization_artifact_sha256=None,
+            )
+            self.assertEqual(
+                identity["effective_config"]["registration"]["cell"],
+                "C2_UPI_TRM",
+            )
+
+            wrong_seed = copy.deepcopy(effective)
+            wrong_seed["registration"]["training_seed"] = 8
+            with self.assertRaisesRegex(RunIdentityError, "seed differs"):
+                build_run_identity(
+                    run_id="confirmatory.seed7",
+                    training_seed=7,
+                    git_lookup_root=root,
+                    effective_config=wrong_seed,
+                    dataset_provenance=provenance,
+                    initialization_kind="random",
+                    initialization_artifact_sha256=None,
+                )
+
     def test_git_discovery_rejects_untracked_and_tracked_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

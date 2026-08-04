@@ -4,11 +4,13 @@ Converts pytest-style tests to unittest.TestCase for Buck2 compatibility.
 """
 
 import copy
+import hashlib
 import json
 import random
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 import numpy as np
 import torch
@@ -27,8 +29,17 @@ from rl.upi_trm_trainer import UPITrmTrainer
 import upi_trm_train
 from upi_trm_train import (
     _capture_rng_state,
+    _config_dict,
+    _fixed_base_effective_config,
+    _reject_confirmatory_resume,
     _resolve_train_pool_size,
+    _resolve_registered_rl_config,
     _restore_rng_state,
+    _validate_ppo_exact_budget_schedule,
+    _validate_registered_confirmatory_assignment,
+    _validate_materialized_split_manifest,
+    _validate_evidence_identity,
+    _validate_expected_producer_commit,
     _verify_producer_source_matches_runtime,
     resume_from_checkpoint,
     save_checkpoint,
@@ -90,6 +101,174 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "missing source"):
                 _verify_producer_source_matches_runtime(unrelated_root)
 
+    def test_confirmatory_launch_binds_registered_producer_commit(self):
+        identity = {"git_commit": "a" * 40, "git_clean": True}
+        self.assertEqual(
+            _validate_expected_producer_commit("a" * 40, identity),
+            "a" * 40,
+        )
+        with self.assertRaisesRegex(RuntimeError, "differs"):
+            _validate_expected_producer_commit("b" * 40, identity)
+        with self.assertRaisesRegex(RuntimeError, "40-character"):
+            _validate_expected_producer_commit("A" * 40, identity)
+
+    def test_confirmatory_evidence_identity_binds_full_config(self):
+        config = {"algorithm": "trm_ppo", "num_steps": 80}
+        identity = {
+            "schema_version": 1,
+            "run_id": "c2-ppo-seed101",
+            "algorithm": "trm_ppo",
+            "training_seed": 101,
+            "producer_git_commit": "a" * 40,
+            "effective_config_sha256": canonical_json_sha256(config),
+            "effective_config": config,
+            "dataset_provenance_sha256": "b" * 64,
+        }
+        self.assertEqual(_validate_evidence_identity(identity), identity)
+        mutated = copy.deepcopy(identity)
+        mutated["effective_config"]["num_steps"] = 81
+        with self.assertRaisesRegex(RuntimeError, "inconsistent"):
+            _validate_evidence_identity(mutated)
+
+    def test_fixed_base_lock_binds_registration_data_and_initialization(self):
+        args = SimpleNamespace(
+            config=[],
+            confirmatory_cell="C2_UPI_TRM",
+            confirmatory_tier="confirmatory",
+            run_id="c2-upi-seed101",
+            seed=101,
+            backbone="trm",
+            train_split="train",
+            eval_split="test",
+            env_step_budget=80_000,
+            save_interval=0,
+            log_env_interval=10_000,
+            eval_env_interval=10_000,
+            save_env_interval=10_000,
+            puzzle_emb_lr=0.01,
+            puzzle_emb_weight_decay=0.0,
+            imitation_pretrain=False,
+            imitation_epochs=0,
+            debug_checks=False,
+        )
+        provenance = {"ordered_records": {"train": ["a"], "eval": ["b"]}}
+
+        def build(*, args_overrides=None, dataset_provenance=None, **initialization):
+            local_args = SimpleNamespace(**vars(args))
+            for name, value in (args_overrides or {}).items():
+                setattr(local_args, name, value)
+            return _fixed_base_effective_config(
+                args=local_args,
+                rl_config={
+                    "num_train_steps": 20_000,
+                    "log_interval": 50,
+                    "eval_interval": 100,
+                    "eval_num_episodes": 512,
+                    "eval_seed": 26080311,
+                },
+                model_config={"hidden_size": 64},
+                execution_device="cpu",
+                train_record_count=1024,
+                eval_record_count=512,
+                dataset_provenance=(dataset_provenance or provenance),
+                initialization_kind=initialization.get("kind", "random"),
+                initialization_artifact_sha256=initialization.get("sha256"),
+                registered_assignment={"registry_sha256": "f" * 64},
+            )
+
+        base = build()
+        variants = (
+            build(args_overrides={"seed": 102, "run_id": "c2-upi-seed102"}),
+            build(args_overrides={"confirmatory_cell": "C2_TRM_PPO"}),
+            build(
+                dataset_provenance={
+                    "ordered_records": {"train": ["x"], "eval": ["b"]}
+                }
+            ),
+            build(kind="weights_checkpoint", sha256="a" * 64),
+        )
+        for variant in variants:
+            self.assertNotEqual(
+                canonical_json_sha256(base),
+                canonical_json_sha256(variant),
+            )
+
+    def test_registered_assignment_rejects_mislabeled_cell_and_seed(self):
+        root = Path(upi_trm_train.__file__).resolve().parent
+        config_dir = root / "configs" / "iclr_confirmatory"
+        args = SimpleNamespace(
+            confirmatory_cell="B0_I00",
+            confirmatory_tier="confirmatory",
+            prepare_confirmatory_lock=True,
+            seed=101,
+            run_id="b0_i00-seed101",
+            config=[
+                str(config_dir / "bridge_base.yaml"),
+                str(config_dir / "bridge_b0.yaml"),
+            ],
+            dataset_paths=[str(root / "data" / "iclr-confirmatory-sudoku4x4-v1")],
+            train_split="train",
+            eval_split="test",
+            train_pool_size=1024,
+            eval_pool_size=512,
+            train_manifest_sha256=(
+                "8def4f59387c1ab9466d043c40a7fdd3c7c670e2778b8d949295811ae7b6088a"
+            ),
+            eval_manifest_sha256=(
+                "163a083a9f5744b7cc485663b269b89acc3103d9e1ec64c7e93f78e36fa79d40"
+            ),
+            env_step_budget=80_000,
+            log_env_interval=10_000,
+            eval_env_interval=10_000,
+            save_env_interval=10_000,
+            save_interval=0,
+            backbone="trm",
+            hidden_size=64,
+            h_cycles=2,
+            l_cycles=2,
+            l_layers=1,
+            puzzle_emb_ndim=0,
+        )
+        rl_cfg = _resolve_registered_rl_config(
+            [config_dir / "bridge_base.yaml", config_dir / "bridge_b0.yaml"]
+        )
+        assignment = _validate_registered_confirmatory_assignment(
+            args=args,
+            selected_baseline=None,
+            rl_cfg=rl_cfg,
+        )
+        self.assertEqual(assignment["cell"], "B0_I00")
+
+        args.confirmatory_cell = "Bd_I01"
+        args.run_id = "bd_i01-seed101"
+        with self.assertRaisesRegex(RuntimeError, "YAML config layers"):
+            _validate_registered_confirmatory_assignment(
+                args=args,
+                selected_baseline=None,
+                rl_cfg=rl_cfg,
+            )
+        args.confirmatory_cell = "B0_I00"
+        args.run_id = "b0_i00-seed111"
+        args.seed = 111
+        with self.assertRaisesRegex(RuntimeError, "seed is not registered"):
+            _validate_registered_confirmatory_assignment(
+                args=args,
+                selected_baseline=None,
+                rl_cfg=rl_cfg,
+            )
+
+        args.seed = 101
+        args.run_id = "b0_i00-seed101"
+        mutated_rl_cfg = RLConfig(
+            **{**rl_cfg.model_dump(), "batch_size": rl_cfg.batch_size * 2}
+        )
+        with self.assertRaisesRegex(RuntimeError, "Resolved RLConfig"):
+            _validate_registered_confirmatory_assignment(
+                args=args,
+                selected_baseline=None,
+                rl_cfg=mutated_rl_cfg,
+            )
+
     def test_cuda_rng_capture_and_restore_use_all_devices(self):
         cuda_states = [torch.tensor([1], dtype=torch.uint8), torch.tensor([2], dtype=torch.uint8)]
         with patch("upi_trm_train.torch.cuda.is_available", return_value=True), patch(
@@ -149,6 +328,8 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         training_protocol="legacy",
         batch_size=8,
         episodic_latent=False,
+        capture_preinterpolation_policy_pair=False,
+        evaluation_policy_mode="configured",
     ):
         class FixedDataset:
             seq_len = 2
@@ -211,6 +392,10 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             theory_exact_mixture=training_protocol == "fixed_base_exact",
             exact_k_step_targets=training_protocol == "fixed_base_exact",
             exact_baseline_summation=training_protocol == "fixed_base_exact",
+            capture_preinterpolation_policy_pair=(
+                capture_preinterpolation_policy_pair
+            ),
+            evaluation_policy_mode=evaluation_policy_mode,
         )
         model = TinyRecursiveReasoningModel_ACTV1(
             _tiny_trm_cfg(
@@ -428,10 +613,27 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             self.assertIn("loss_value", metrics)
             self.assertIn("loss_policy", metrics)
 
+        before_eval = trainer.compute_accounting_snapshot()
+        self.assertGreater(
+            before_eval["model_work"]["training"]["policy_api_calls"], 0
+        )
+        self.assertEqual(
+            before_eval["model_work"]["evaluation"]["policy_api_calls"], 0
+        )
         success_rate = trainer.evaluate_policy_success_rate(env_cfg=env_cfg, dataset=dataset, checker=dummy_checker)
         self.assertIsInstance(success_rate, float)
         self.assertGreaterEqual(success_rate, 0.0)
         self.assertLessEqual(success_rate, 1.0)
+        after_eval = trainer.compute_accounting_snapshot()
+        self.assertEqual(
+            after_eval["model_work"]["training"],
+            before_eval["model_work"]["training"],
+        )
+        self.assertGreater(
+            after_eval["model_work"]["evaluation"]["policy_api_calls"], 0
+        )
+        self.assertIsNone(after_eval["peak_memory_bytes"]["cuda_allocated"])
+        self.assertIsNone(after_eval["peak_memory_bytes"]["cuda_reserved"])
 
     def test_dataset_bootstrap_fallback_is_explicit(self):
         with patch("rl.training_setup.PuzzleDataset", side_effect=RuntimeError("boom")):
@@ -476,6 +678,173 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 batch_size=32,
                 require_explicit=False,
             )
+
+    def test_ppo_exact_budget_schedule_requires_complete_rollouts(self):
+        valid = {
+            "env_step_budget": 80_000,
+            "restored_env_steps": 0,
+            "rollout_steps": 80,
+            "log_env_interval": 10_000,
+            "eval_env_interval": 10_000,
+            "save_env_interval": 10_000,
+        }
+        _validate_ppo_exact_budget_schedule(**valid)
+        _validate_ppo_exact_budget_schedule(
+            **{**valid, "log_env_interval": None, "save_env_interval": 0}
+        )
+
+        for field, value in {
+            "env_step_budget": 80_001,
+            "restored_env_steps": 1,
+            "log_env_interval": 10_001,
+            "eval_env_interval": 10_001,
+            "save_env_interval": 10_001,
+        }.items():
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                _validate_ppo_exact_budget_schedule(**{**valid, field: value})
+
+        for field, value in {
+            "env_step_budget": 0,
+            "restored_env_steps": -1,
+            "rollout_steps": 0,
+            "log_env_interval": -1,
+            "eval_env_interval": True,
+            "save_env_interval": -1,
+        }.items():
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                _validate_ppo_exact_budget_schedule(**{**valid, field: value})
+
+        with self.assertRaisesRegex(ValueError, "final endpoint"):
+            _validate_ppo_exact_budget_schedule(
+                **{**valid, "env_step_budget": 80_000, "eval_env_interval": 12_000}
+            )
+
+    def test_confirmatory_resume_is_rejected_until_eval_publication_is_atomic(self):
+        _reject_confirmatory_resume(None)
+        with self.assertRaisesRegex(RuntimeError, "Restart.*from scratch"):
+            _reject_confirmatory_resume("checkpoint_step_10000.pt")
+
+    def test_config_dict_supports_ppo_dataclass(self):
+        config = upi_trm_train.PPOConfig(num_steps=80, num_minibatches=4)
+        payload = _config_dict(config)
+        self.assertEqual(payload["num_steps"], 80)
+        self.assertEqual(payload["num_minibatches"], 4)
+
+    def test_registered_split_manifest_binds_loaded_record_order(self):
+        torch.manual_seed(777)
+        dataset = DummyPuzzleDataset(num_instances=2, seq_len=4, vocab_size=4)
+        record_hashes = dataset_sample_sha256s(dataset)
+        input_hashes = upi_trm_train.dataset_input_sha256s(dataset)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "manifests").mkdir()
+            (root / "train").mkdir()
+            payload_path = root / "train" / "payload.bin"
+            payload_path.write_bytes(b"registered records")
+            manifest = {
+                "generated_count": 2,
+                "record_sha256s": record_hashes,
+                "input_sha256s": input_hashes,
+                "ordered_record_sha256": upi_trm_train.ordered_record_sha256(
+                    record_hashes
+                ),
+                "files": {
+                    "train/payload.bin": {
+                        "bytes": payload_path.stat().st_size,
+                        "sha256": hashlib.sha256(payload_path.read_bytes()).hexdigest(),
+                    }
+                },
+            }
+            manifest_path = root / "manifests" / "train.json"
+            manifest_path.write_text(
+                json.dumps(manifest, sort_keys=True), encoding="utf-8"
+            )
+            registered_hash = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+
+            validated = _validate_materialized_split_manifest(
+                dataset_root=root,
+                split="train",
+                registered_sha256=registered_hash,
+                dataset=dataset,
+            )
+            self.assertEqual(validated["record_sha256s"], record_hashes)
+
+            dataset.samples.reverse()
+            with self.assertRaisesRegex(RuntimeError, "pool differs"):
+                _validate_materialized_split_manifest(
+                    dataset_root=root,
+                    split="train",
+                    registered_sha256=registered_hash,
+                    dataset=dataset,
+                )
+
+    def test_confirmatory_evaluation_failure_is_fatal(self):
+        trainer = MagicMock()
+        trainer.evaluate_policy_metrics.side_effect = RuntimeError("evaluation failed")
+
+        with self.assertRaisesRegex(RuntimeError, "evaluation failed"):
+            upi_trm_train._run_eval_and_log(
+                progress_step=10_000,
+                outer_step=125,
+                trainer=trainer,
+                env_cfg=MagicMock(),
+                dataset=MagicMock(),
+                checker_fn=MagicMock(),
+                step_iter=None,
+                use_wandb=False,
+                strict=True,
+            )
+
+    def test_confirmatory_source_is_checked_around_artifact_publication(self):
+        trainer = MagicMock()
+        trainer.evaluate_policy_metrics.return_value = {
+            "mean_score": 0.0,
+            "success_rate": 0.0,
+            "eval_policy_mode": "greedy",
+            "eval_seed": 1729,
+            "solved_count": 0,
+            "total_episodes": 1,
+            "score_min": 0.0,
+            "score_max": 0.0,
+            "initial_score_mean": 0.0,
+            "per_instance": [],
+        }
+        trainer.compute_accounting_snapshot.return_value = {
+            "model_work": {"uninstrumented_roles": []}
+        }
+        trainer.get_debug_stats.return_value = {}
+        source_events = []
+
+        with patch(
+            "upi_trm_train.write_evaluation_artifact",
+            return_value={
+                "summary_sha256": "a" * 64,
+                "per_instance_sha256": "b" * 64,
+            },
+        ):
+            upi_trm_train._run_eval_and_log(
+                progress_step=10_000,
+                outer_step=125,
+                trainer=trainer,
+                env_cfg=MagicMock(),
+                dataset=MagicMock(),
+                checker_fn=MagicMock(),
+                step_iter=None,
+                use_wandb=False,
+                strict=True,
+                artifact_output_dir="unused",
+                artifact_metadata={"policy_mode": "greedy"},
+                source_revalidation_fn=source_events.append,
+            )
+
+        self.assertEqual(
+            source_events,
+            [
+                "before evaluation",
+                "before evaluation artifact publication",
+                "after evaluation artifact publication",
+            ],
+        )
 
     def test_training_materialization_uses_requested_pool_not_batch_size(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -682,6 +1051,34 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 next(restored_model.parameters()).grad,
                 saved_gradient,
             )
+            saved_compute = payload["trainer_state"][
+                "compute_accounting_state"
+            ]
+            restored_compute = restored.compute_accounting_checkpoint_state()
+            self.assertEqual(
+                restored_compute["model_compute_state"],
+                saved_compute["model_compute_state"],
+            )
+            self.assertEqual(
+                restored_compute["training_model_work"],
+                saved_compute["training_model_work"],
+            )
+            self.assertEqual(
+                restored_compute["evaluation_model_work"],
+                saved_compute["evaluation_model_work"],
+            )
+            self.assertEqual(
+                restored_compute["training_wall_time_seconds"],
+                saved_compute["training_wall_time_seconds"],
+            )
+            self.assertEqual(
+                restored_compute["evaluation_wall_time_seconds"],
+                saved_compute["evaluation_wall_time_seconds"],
+            )
+            self.assertGreaterEqual(
+                restored_compute["peak_process_rss_bytes"],
+                saved_compute["peak_process_rss_bytes"],
+            )
 
             self.assertEqual(start_update, 0)
             self.assertEqual(restored.get_env_step_count(), 1)
@@ -708,6 +1105,10 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         self.assertEqual(original._train_step_count, restored._train_step_count)
         self.assertEqual(original._next_episode_id, restored._next_episode_id)
         self.assertIsNone(restored._active_episode)
+        self.assertEqual(
+            original.compute_accounting_snapshot()["model_work"],
+            restored.compute_accounting_snapshot()["model_work"],
+        )
 
     def test_schema_v5_episodic_bridge_cell_round_trips_without_latents(self):
         model, original, cfg = self._make_persistent_budget_trainer(
@@ -822,6 +1223,10 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         provenance = self._checkpoint_provenance(trainer)
         identity = self._run_identity(model, trainer, provenance)
         trainer._start_episode()
+        # This fixture invokes a private collector primitive only to construct
+        # an invalid timestep-zero latent. Production starts episodes inside a
+        # train_step accounting boundary.
+        trainer.policy_model_old.reset_compute_counters()
         with tempfile.TemporaryDirectory() as tmp:
             checkpoint_path = save_checkpoint(
                 model,
@@ -1285,6 +1690,60 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
 
             self.assertEqual(stale_path.read_bytes(), b"stale legacy weights")
             self.assertFalse((Path(tmp) / "rl_checkpoint_step_3.pt").exists())
+
+    def test_preinterpolation_mixture_checkpoint_publishes_complete_pair_only(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer(
+            capture_preinterpolation_policy_pair=True,
+            evaluation_policy_mode="preinterpolation_exact_mixture",
+        )
+        with torch.no_grad():
+            next(trainer.policy_model_candidate.edit_policy.parameters()).add_(0.5)
+        trainer._capture_current_preinterpolation_pair()
+        expected_base = {
+            name: value.detach().clone()
+            for name, value in trainer.preinterpolation_policy_base.state_dict().items()
+        }
+        expected_candidate = {
+            name: value.detach().clone()
+            for name, value in trainer.preinterpolation_policy_candidate.state_dict().items()
+        }
+        provenance = self._checkpoint_provenance(trainer)
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=0,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+            )
+            payload = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+
+            self.assertIn("preinterpolation_policy_base_state_dict", payload)
+            self.assertIn("preinterpolation_policy_candidate_state_dict", payload)
+            self.assertEqual(payload["preinterpolation_pair_generation"], 1)
+            self.assertFalse((Path(tmp) / "model_step_0.pt").exists())
+
+            restored_model, restored, _ = self._make_persistent_budget_trainer(
+                capture_preinterpolation_policy_pair=True,
+                evaluation_policy_mode="preinterpolation_exact_mixture",
+            )
+            resume_from_checkpoint(
+                checkpoint_path,
+                restored_model,
+                restored,
+                "cpu",
+                expected_dataset_provenance=provenance,
+            )
+            self.assertEqual(restored._preinterpolation_pair_generation, 1)
+            for name, value in restored.preinterpolation_policy_base.state_dict().items():
+                torch.testing.assert_close(value, expected_base[name])
+            for name, value in restored.preinterpolation_policy_candidate.state_dict().items():
+                torch.testing.assert_close(value, expected_candidate[name])
 
     def test_checkpoint_roundtrip_restores_target_replay_and_counters(self):
         dataset = DummyPuzzleDataset(num_instances=4, seq_len=8, vocab_size=16)

@@ -1,0 +1,3 @@
+# C1 Bd / I01: evaluate the captured pre-interpolation proposal as an exact
+# probability-space mixture. Training remains the B0 legacy path.
+evaluation_policy_mode: preinterpolation_exact_mixture

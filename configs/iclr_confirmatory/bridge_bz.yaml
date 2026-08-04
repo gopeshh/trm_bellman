@@ -1,0 +1,2 @@
+# C1 Bz / I10: only the latent-mode factor differs from B0.
+episodic_latent: true
