@@ -111,6 +111,9 @@ class PlanEditEnv:
         self.config = config
         self.task_config = task_config  # Optional task-specific config
 
+        if config.max_edits < 1:
+            raise ValueError("max_edits must be at least 1")
+
         self.vocab_size: Optional[int] = config.vocab_size
         if self.vocab_size is None:
             self.vocab_size = self._infer_vocab_size()
@@ -216,10 +219,15 @@ class PlanEditEnv:
 
         if not isinstance(state, dict):
             raise TypeError("PlanEditEnv checkpoint state must be a dictionary.")
-        if int(state.get("schema_version", 0)) != 1:
+        schema_version = state.get("schema_version")
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != 1
+        ):
             raise RuntimeError(
                 "Unsupported PlanEditEnv checkpoint schema: "
-                f"{state.get('schema_version')!r}."
+                f"{schema_version!r}."
             )
         if state.get("config") != asdict(self.config):
             raise RuntimeError("PlanEditEnv checkpoint configuration mismatch.")

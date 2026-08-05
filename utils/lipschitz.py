@@ -627,8 +627,12 @@ def compute_value_of_memory_residual(
         value_of_memory = (v_persistent - v_memoryless).abs()
         
         # Bellman residual for memoryless value
-        mask = (~dones).float()
-        td_target_memoryless = rewards + gamma * next_values * mask
+        next_values_masked = torch.where(
+            dones,
+            torch.zeros_like(next_values),
+            next_values,
+        )
+        td_target_memoryless = rewards + gamma * next_values_masked
         bellman_residual = (v_memoryless - td_target_memoryless).abs()
         
         return {
@@ -830,7 +834,12 @@ def compute_exact_baseline_summation(
                     n=n,
                     z=successor_latent,
                 )
-            q_values[:, a] = rewards + gamma * v_next * (~terminal_batch).to(v_next.dtype)
+            v_next_masked = torch.where(
+                terminal_batch,
+                torch.zeros_like(v_next),
+                v_next,
+            )
+            q_values[:, a] = rewards + gamma * v_next_masked
             record_action_values = getattr(
                 model, "record_action_value_evaluations", None
             )

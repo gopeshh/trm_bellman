@@ -104,6 +104,25 @@ class TestGAE(unittest.TestCase):
         expected = torch.tensor([2.21, 0.5, 3.5])
         torch.testing.assert_close(gae, expected, rtol=0.0, atol=1e-6)
 
+    def test_gae_trajectory_terminal_cuts_nonfinite_next_episode(self):
+        rewards = torch.tensor([1.0, 2.0, 3.0])
+        values = torch.tensor([0.5, 1.5, float("nan")])
+        dones = torch.tensor([False, True, False])
+
+        gae = compute_gae_trajectory(
+            rewards,
+            values,
+            dones,
+            gamma=0.9,
+            gae_lambda=0.8,
+            last_value=5.0,
+        )
+
+        # Step 2 belongs to the next episode and is deliberately nonfinite.
+        # The terminal boundary at step 1 must suppress both its value and trace.
+        torch.testing.assert_close(gae[:2], torch.tensor([2.21, 0.5]))
+        self.assertTrue(torch.isnan(gae[2]))
+
     def test_gae_lambda_zero_equals_td(self):
         """Test that λ=0 GAE equals pure TD error."""
         rewards = torch.tensor([1.0, 2.0, 0.5])

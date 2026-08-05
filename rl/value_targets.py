@@ -69,7 +69,7 @@ def compute_k_step_bootstrapped_target(
             )
 
     bootstrap_factor = gamma ** steps_taken.to(v_K.dtype)
-    v_bootstrap = v_K * (~done_final).to(v_K.dtype)
+    v_bootstrap = torch.where(done_final, torch.zeros_like(v_K), v_K)
     return reward_returns + bootstrap_factor * v_bootstrap
 
 
@@ -108,7 +108,8 @@ def compute_gae(
         advantages: [B] GAE-approximated advantages
     """
     mask = (~dones).float()
-    td_error = rewards + gamma * next_values * mask - values
+    next_values_masked = torch.where(dones, torch.zeros_like(next_values), next_values)
+    td_error = rewards + gamma * next_values_masked - values
     
     # For single transitions, we approximate the GAE recursion:
     # A_t = δ_t + γλ * A_{t+1}
@@ -148,15 +149,20 @@ def compute_gae_trajectory(
     """
     T = len(rewards)
     advantages = torch.zeros_like(rewards)
-    gae = 0.0
+    gae = torch.zeros((), device=rewards.device, dtype=rewards.dtype)
 
     # Append last_value for bootstrapping
     values_extended = torch.cat([values, torch.tensor([last_value], device=values.device, dtype=values.dtype)])
 
     for t in reversed(range(T)):
-        mask = 1.0 - dones[t].float()
-        delta = rewards[t] + gamma * values_extended[t + 1] * mask - values[t]
-        gae = delta + gamma * gae_lambda * mask * gae
+        bootstrap_value = torch.where(
+            dones[t],
+            torch.zeros_like(values_extended[t + 1]),
+            values_extended[t + 1],
+        )
+        next_gae = torch.where(dones[t], torch.zeros_like(gae), gae)
+        delta = rewards[t] + gamma * bootstrap_value - values[t]
+        gae = delta + gamma * gae_lambda * next_gae
         advantages[t] = gae
 
     return advantages
@@ -185,8 +191,8 @@ def compute_empirical_bellman_residual(
     Returns:
         Dictionary with residual statistics (mean, max, std)
     """
-    mask = (~dones).float()
-    td_target = rewards + gamma * next_values * mask
+    next_values_masked = torch.where(dones, torch.zeros_like(next_values), next_values)
+    td_target = rewards + gamma * next_values_masked
     residual = (values - td_target).abs()
 
     return {
@@ -218,8 +224,8 @@ def compute_td_advantage(
     Returns:
         advantages: [B] TD advantages
     """
-    mask = (~dones).float()
-    td_target = rewards + gamma * next_values * mask
+    next_values_masked = torch.where(dones, torch.zeros_like(next_values), next_values)
+    td_target = rewards + gamma * next_values_masked
     adv = td_target - values
     
     if centered:

@@ -15,6 +15,7 @@ import torch
 StateDict = Dict[str, torch.Tensor]
 # Type alias for plan (can be tensor or dict with "inputs" key)
 PlanType = Union[torch.Tensor, Dict[str, torch.Tensor]]
+TERMINAL_REASONS = frozenset({"stop", "solved", "budget"})
 
 
 @dataclass
@@ -48,6 +49,7 @@ class Transition:
         latent: Recurrent state before evaluating this state, in persistent mode
         next_latent: Recurrent state carried to the successor, in persistent mode
         behavior_log_prob: Log probability of the sampled action at collection time
+        terminal_reason: Canonical terminal cause, or None for a nonterminal record
     """
     x: StateDict
     y: PlanType
@@ -61,6 +63,7 @@ class Transition:
     latent: Optional[ReplayLatent] = None
     next_latent: Optional[ReplayLatent] = None
     behavior_log_prob: Optional[torch.Tensor] = None
+    terminal_reason: Optional[str] = None
 
 
 class ReplayIntegrityError(ValueError):
@@ -136,6 +139,7 @@ def validate_transition(
     transition: Transition,
     *,
     require_clock: bool = False,
+    require_terminal_reason: bool = False,
 ) -> None:
     """Validate one replay record without assuming an adjacent record exists."""
 
@@ -143,7 +147,21 @@ def validate_transition(
         raise ReplayIntegrityError("`episode_id` must be nonnegative.")
     if transition.timestep < 0:
         raise ReplayIntegrityError("`timestep` must be nonnegative.")
-    _scalar_bool(transition.done, label="done")
+    done = _scalar_bool(transition.done, label="done")
+    terminal_reason = getattr(transition, "terminal_reason", None)
+    if terminal_reason is not None and terminal_reason not in TERMINAL_REASONS:
+        raise ReplayIntegrityError(
+            "`terminal_reason` must be one of "
+            f"{sorted(TERMINAL_REASONS)}, got {terminal_reason!r}."
+        )
+    if not done and terminal_reason is not None:
+        raise ReplayIntegrityError(
+            "A nonterminal replay record cannot have a `terminal_reason`."
+        )
+    if done and require_terminal_reason and terminal_reason is None:
+        raise ReplayIntegrityError(
+            "Theorem-facing terminal replay requires a recognized `terminal_reason`."
+        )
 
     has_latent = transition.latent is not None
     has_next_latent = transition.next_latent is not None
@@ -176,6 +194,10 @@ def validate_transition(
                 "Replay clock must decrement exactly once: "
                 f"expected {expected}, got {next_clock}."
             )
+        if next_clock == 0 and not done:
+            raise ReplayIntegrityError(
+                "A replay record reaching zero remaining edits must be terminal."
+            )
 
 
 def validate_transition_continuity(
@@ -183,11 +205,20 @@ def validate_transition_continuity(
     successor: Transition,
     *,
     require_clock: bool = False,
+    require_terminal_reason: bool = False,
 ) -> None:
     """Validate that two records are adjacent states of one episode."""
 
-    validate_transition(current, require_clock=require_clock)
-    validate_transition(successor, require_clock=require_clock)
+    validate_transition(
+        current,
+        require_clock=require_clock,
+        require_terminal_reason=require_terminal_reason,
+    )
+    validate_transition(
+        successor,
+        require_clock=require_clock,
+        require_terminal_reason=require_terminal_reason,
+    )
     if current.episode_id != successor.episode_id:
         raise ReplayIntegrityError("Adjacent records must have the same episode_id.")
     if _scalar_bool(current.done, label="done"):
@@ -220,17 +251,23 @@ def validate_transition_sequence(
     transitions: Sequence[Transition],
     *,
     require_clock: bool = False,
+    require_terminal_reason: bool = False,
 ) -> None:
     """Validate every record and adjacency relation in one nonempty sequence."""
 
     if not transitions:
         raise ReplayIntegrityError("Cannot validate an empty replay sequence.")
-    validate_transition(transitions[0], require_clock=require_clock)
+    validate_transition(
+        transitions[0],
+        require_clock=require_clock,
+        require_terminal_reason=require_terminal_reason,
+    )
     for current, successor in zip(transitions, transitions[1:]):
         validate_transition_continuity(
             current,
             successor,
             require_clock=require_clock,
+            require_terminal_reason=require_terminal_reason,
         )
 
 
@@ -243,6 +280,7 @@ class ReplayBuffer:
     
     Args:
         capacity: Maximum number of transitions to store
+        theorem_facing: Validate clock-complete records and adjacency before append
         
     Example:
         >>> buffer = ReplayBuffer(capacity=10000)
@@ -250,11 +288,48 @@ class ReplayBuffer:
         >>> batch = buffer.sample_batch(32)
     """
     
-    def __init__(self, capacity: int):
+    def __init__(self, capacity: int, *, theorem_facing: bool = False):
         self.storage: Deque[Transition] = deque(maxlen=capacity)
+        self.theorem_facing = theorem_facing
 
-    def add(self, transition: Transition) -> None:
-        """Add a transition to the buffer."""
+    def add(
+        self,
+        transition: Transition,
+        *,
+        allow_legacy_missing_terminal_reason: bool = False,
+    ) -> None:
+        """Add a transition, failing before mutation in theorem-facing mode."""
+
+        if self.theorem_facing:
+            require_terminal_reason = not allow_legacy_missing_terminal_reason
+            validate_transition(
+                transition,
+                require_clock=True,
+                require_terminal_reason=require_terminal_reason,
+            )
+            if self.storage:
+                previous = self.storage[-1]
+                if previous.episode_id == transition.episode_id:
+                    validate_transition_continuity(
+                        previous,
+                        transition,
+                        require_clock=True,
+                        require_terminal_reason=require_terminal_reason,
+                    )
+                else:
+                    previous_done = _scalar_bool(previous.done, label="done")
+                    if not previous_done:
+                        raise ReplayIntegrityError(
+                            "A new replay episode cannot follow a nonterminal record."
+                        )
+                    if transition.episode_id != previous.episode_id + 1:
+                        raise ReplayIntegrityError(
+                            "Theorem-facing replay episode IDs must be consecutive."
+                        )
+                    if transition.timestep != 0:
+                        raise ReplayIntegrityError(
+                            "The first record of a new replay episode must have timestep zero."
+                        )
         self.storage.append(transition)
 
     def __len__(self) -> int:

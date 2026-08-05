@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from rl.cleanrl.dqn_trm import _sample_random_action
+from rl.cleanrl.dqn_trm import _compute_td_target, _sample_random_action
 from rl.cleanrl.ppo_trm import (
     _apply_truncation_bootstrap,
     _compute_gae,
@@ -44,6 +44,12 @@ class TestCleanRLRegressions(unittest.TestCase):
             vocab_size=32,
             num_identifiers=count,
         )
+
+    def test_external_environment_rejects_zero_edit_budget(self) -> None:
+        from external_baselines.sudoku4x4_env import Sudoku4x4ExternalEnv
+
+        with self.assertRaisesRegex(ValueError, "max_edits must be at least 1"):
+            Sudoku4x4ExternalEnv(max_edits=0)
 
     def test_cleanrl_bundle_uses_disjoint_held_out_pool(self) -> None:
         from rl.cleanrl.trm_adapter import build_sudoku_bundle
@@ -146,6 +152,24 @@ class TestCleanRLRegressions(unittest.TestCase):
         expected = 1.0 + gamma * terminal_value - 2.0
         self.assertAlmostEqual(advantages[0, 0].item(), expected)
 
+    def test_ppo_gae_terminal_cuts_nonfinite_next_episode(self) -> None:
+        advantages = _compute_gae(
+            rewards=torch.tensor([[1.0], [2.0], [3.0]]),
+            values=torch.tensor([[0.5], [1.5], [float("nan")]]),
+            # dones[t + 1] is the boundary after transition t.
+            dones=torch.tensor([[0.0], [0.0], [1.0]]),
+            next_done=torch.tensor([0.0]),
+            next_value=torch.tensor([5.0]),
+            gamma=0.9,
+            gae_lambda=0.8,
+        )
+
+        torch.testing.assert_close(
+            advantages[:2, 0],
+            torch.tensor([2.21, 0.5]),
+        )
+        self.assertTrue(torch.isnan(advantages[2, 0]))
+
     def test_ppo_truncation_reward_correction_handles_all_boundaries(self) -> None:
         class ValueAgent:
             def __init__(self) -> None:
@@ -208,6 +232,16 @@ class TestCleanRLRegressions(unittest.TestCase):
     def test_dqn_epsilon_random_rejects_empty_mask(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "action mask is empty"):
             _sample_random_action(4, torch.zeros(4, dtype=torch.bool))
+
+    def test_dqn_terminal_target_ignores_nonfinite_successor_q(self) -> None:
+        targets = _compute_td_target(
+            rewards=torch.tensor([1.0, 2.0]),
+            discounts=torch.tensor([0.9, 0.9]),
+            next_q=torch.tensor([3.0, float("nan")]),
+            dones=torch.tensor([False, True]),
+        )
+
+        torch.testing.assert_close(targets, torch.tensor([3.7, 2.0]))
 
     def test_cleanrl_action_mask_rejects_empty_and_wrong_shape(self) -> None:
         from rl.cleanrl.trm_adapter import apply_action_mask

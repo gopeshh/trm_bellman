@@ -5,15 +5,16 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.nn.utils as nn_utils
 
 logger = logging.getLogger(__name__)
 
 # Numerical stability constant: minimum log probability to prevent -inf
 # exp(-20) ≈ 2e-9, effectively zero probability
 LOG_PROB_MIN = -20.0
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.nn.utils as nn_utils
+EXACT_CENTERING_TOLERANCE = 1e-5
 
 
 def _clip_and_recenter_advantages(
@@ -35,6 +36,26 @@ def _clip_and_recenter_advantages(
         clipped - clipped_mean,
         torch.zeros_like(clipped),
     )
+
+
+def _validated_statewise_centering_defect(
+    advantages: torch.Tensor,
+    policy_probs: torch.Tensor,
+    *,
+    tolerance: float = EXACT_CENTERING_TOLERANCE,
+) -> float:
+    """Return the maximum centering defect, rejecting nonfinite or excess error."""
+
+    defects = (policy_probs * advantages).sum(dim=-1).abs()
+    if not bool(torch.isfinite(defects).all().item()):
+        raise RuntimeError("Exact statewise centering produced a nonfinite defect.")
+    maximum = float(defects.max().item()) if defects.numel() else 0.0
+    if maximum > tolerance:
+        raise RuntimeError(
+            "Exact statewise centering defect exceeds its declared tolerance: "
+            f"{maximum:.9g} > {tolerance:.9g}."
+        )
+    return maximum
 
 
 def _mean_categorical_kl(
@@ -184,7 +205,10 @@ class UPITrmTrainer:
         self.device = device
         self.debug_checks = bool(getattr(self.rl_cfg, "debug_checks", False))
 
-        self.replay = ReplayBuffer(capacity=rl_cfg.replay_capacity)
+        self.replay = ReplayBuffer(
+            capacity=rl_cfg.replay_capacity,
+            theorem_facing=self._fixed_base_exact,
+        )
         self.term_stats = {"stop": 0.0, "solved": 0.0, "budget": 0.0}
         
         # Debug tracking for RL behavior analysis
@@ -203,6 +227,10 @@ class UPITrmTrainer:
         self._plan_changes: List[float] = []
         # Track value of memory (Remark 5.5)
         self._value_of_memory: List[float] = []
+        self._exact_centering_tolerance = EXACT_CENTERING_TOLERANCE
+        self._exact_centering_defect_max: Optional[float] = None
+        self._exact_centering_batch_count = 0
+        self._exact_centering_history_complete = True
         # Store checker function reference for exact baseline computation
         self._checker_fn = None  # Set by caller if using exact_baseline_summation
         # Track if we've warned about opnorm clamp failures (to print only one warning)
@@ -946,6 +974,97 @@ class UPITrmTrainer:
             "active_episode": active_state,
         }
 
+    def exact_centering_checkpoint_state(self) -> Dict[str, Any]:
+        """Serialize training-time centering evidence for checkpoint audits."""
+
+        return {
+            "schema_version": 1,
+            "tolerance": float(self._exact_centering_tolerance),
+            "batch_count": int(self._exact_centering_batch_count),
+            "maximum_observed": self._exact_centering_defect_max,
+            "history_complete": bool(self._exact_centering_history_complete),
+        }
+
+    def restore_exact_centering_checkpoint_state(
+        self,
+        state: Optional[Dict[str, Any]],
+        *,
+        validate_only: bool = False,
+    ) -> None:
+        """Validate and restore centering evidence without overstating old history."""
+
+        if state is None:
+            parsed_tolerance = EXACT_CENTERING_TOLERANCE
+            parsed_count = 0
+            parsed_maximum: Optional[float] = None
+            parsed_complete = False
+        else:
+            expected_fields = {
+                "schema_version",
+                "tolerance",
+                "batch_count",
+                "maximum_observed",
+                "history_complete",
+            }
+            if not isinstance(state, dict) or set(state) != expected_fields:
+                raise ValueError("Exact-centering checkpoint state has invalid fields.")
+            schema_version = state["schema_version"]
+            if (
+                isinstance(schema_version, bool)
+                or not isinstance(schema_version, int)
+                or schema_version != 1
+            ):
+                raise ValueError("Unsupported exact-centering checkpoint schema.")
+            raw_tolerance = state["tolerance"]
+            raw_count = state["batch_count"]
+            raw_maximum = state["maximum_observed"]
+            raw_complete = state["history_complete"]
+            if isinstance(raw_tolerance, bool) or not isinstance(
+                raw_tolerance, (int, float)
+            ):
+                raise ValueError("Exact-centering tolerance must be finite numeric data.")
+            parsed_tolerance = float(raw_tolerance)
+            if not math.isfinite(parsed_tolerance) or not math.isclose(
+                parsed_tolerance,
+                EXACT_CENTERING_TOLERANCE,
+                rel_tol=0.0,
+                abs_tol=0.0,
+            ):
+                raise ValueError("Exact-centering tolerance differs from this runtime.")
+            if isinstance(raw_count, bool) or not isinstance(raw_count, int):
+                raise ValueError("Exact-centering batch count must be an integer.")
+            parsed_count = raw_count
+            if parsed_count < 0:
+                raise ValueError("Exact-centering batch count must be nonnegative.")
+            if raw_maximum is None:
+                parsed_maximum = None
+            elif isinstance(raw_maximum, bool) or not isinstance(
+                raw_maximum, (int, float)
+            ):
+                raise ValueError("Exact-centering maximum must be finite numeric data.")
+            else:
+                parsed_maximum = float(raw_maximum)
+                if (
+                    not math.isfinite(parsed_maximum)
+                    or parsed_maximum < 0.0
+                    or parsed_maximum > parsed_tolerance
+                ):
+                    raise ValueError("Exact-centering maximum is outside its tolerance.")
+            if (parsed_count == 0) != (parsed_maximum is None):
+                raise ValueError(
+                    "Exact-centering count and maximum must either both be empty or populated."
+                )
+            if not isinstance(raw_complete, bool):
+                raise ValueError("Exact-centering history flag must be boolean.")
+            parsed_complete = raw_complete
+
+        if validate_only:
+            return
+        self._exact_centering_tolerance = parsed_tolerance
+        self._exact_centering_batch_count = parsed_count
+        self._exact_centering_defect_max = parsed_maximum
+        self._exact_centering_history_complete = parsed_complete
+
     @staticmethod
     def _checkpoint_values_equal(left: Any, right: Any) -> bool:
         if torch.is_tensor(left) and torch.is_tensor(right):
@@ -1015,7 +1134,14 @@ class UPITrmTrainer:
     def load_collection_checkpoint_state(self, state: Dict[str, Any]) -> None:
         """Restore collector state after the environment state has been loaded."""
 
-        if not isinstance(state, dict) or int(state.get("schema_version", 0)) != 1:
+        if not isinstance(state, dict):
+            raise RuntimeError("Unsupported UPI collector checkpoint schema.")
+        schema_version = state.get("schema_version")
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != 1
+        ):
             raise RuntimeError("Unsupported UPI collector checkpoint schema.")
         completed = int(state.get("completed_episodes_since_update", -1))
         rollout_target = int(self.rl_cfg.rollout_episodes_per_step)
@@ -1323,6 +1449,11 @@ class UPITrmTrainer:
                         else None
                     ),
                     behavior_log_prob=behavior_log_prob,
+                    terminal_reason=(
+                        str(info["done_reason"])
+                        if done and info.get("done_reason") is not None
+                        else None
+                    ),
                 )
             )
             active["timestep"] = timestep + 1
@@ -1663,8 +1794,7 @@ class UPITrmTrainer:
                     n=self.rl_cfg.inner_unroll_n,
                     z=z_next_batch,
                 )
-                mask = (~dones).float()
-                v_next = v_next * mask
+                v_next = torch.where(dones, torch.zeros_like(v_next), v_next)
 
             self.model.train()
             v_s, _ = self.model.used_value(
@@ -1827,6 +1957,7 @@ class UPITrmTrainer:
         self.policy_model_candidate.train()
         self.policy_opt.zero_grad()
 
+        centering_metrics: Dict[str, float] = {}
         with torch.no_grad():
             gamma = self.rl_cfg.gamma
             old_dist, policy_successor_latent = self.policy_model_old.policy_dist(
@@ -1910,6 +2041,28 @@ class UPITrmTrainer:
                         action_mask,
                         adv_clip,
                     )
+                centering_defect = _validated_statewise_centering_defect(
+                    advantages_all,
+                    old_probs,
+                    tolerance=self._exact_centering_tolerance,
+                )
+                maximum_observed = max(
+                    self._exact_centering_defect_max or 0.0,
+                    centering_defect,
+                )
+                self._exact_centering_defect_max = maximum_observed
+                self._exact_centering_batch_count += 1
+                centering_metrics = {
+                    "exact_centering_defect_max": centering_defect,
+                    "exact_centering_defect_max_observed": maximum_observed,
+                    "exact_centering_tolerance": self._exact_centering_tolerance,
+                    "exact_centering_batches_total": float(
+                        self._exact_centering_batch_count
+                    ),
+                    "exact_centering_history_complete": float(
+                        self._exact_centering_history_complete
+                    ),
+                }
                 batch_indices = torch.arange(actions.shape[0], device=actions.device)
                 adv = advantages_all[batch_indices, actions]
             else:
@@ -1926,8 +2079,11 @@ class UPITrmTrainer:
                     n=self.rl_cfg.inner_unroll_n,
                     z=z_next_batch,
                 )
-                mask = (~dones).float()
-                v_next_masked = v_next * mask
+                v_next_masked = torch.where(
+                    dones,
+                    torch.zeros_like(v_next),
+                    v_next,
+                )
 
                 # Compute advantages (GAE or 1-step TD)
                 if getattr(self.rl_cfg, "use_gae", False):
@@ -2017,11 +2173,13 @@ class UPITrmTrainer:
 
         # Skip batch if advantages are all NaN (degenerate case)
         if torch.isnan(adv).all():
-            return {
+            result = {
                 "loss_policy": 0.0,
                 "skipped_nan_adv": 1.0,
                 "policy_optimizer_step": 0.0,
             }
+            result.update(centering_metrics)
+            return result
         
         # Replace NaN advantages with 0 (neutral gradient)
         adv_clean = torch.where(torch.isnan(adv), torch.zeros_like(adv), adv)
@@ -2056,6 +2214,7 @@ class UPITrmTrainer:
                     "kl_early_stop": 1.0,
                     "policy_optimizer_step": 0.0,
                 }
+                result.update(centering_metrics)
                 return result
 
         loss_policy.backward()
@@ -2150,6 +2309,7 @@ class UPITrmTrainer:
             "loss_policy": float(loss_policy.item()),
             "policy_optimizer_step": 1.0,
         }
+        result.update(centering_metrics)
         if kl_div is not None:
             result["policy_kl"] = float(kl_div.item())
             result["kl_coef"] = self._kl_coef
@@ -2310,8 +2470,12 @@ class UPITrmTrainer:
                     n=self.rl_cfg.inner_unroll_n,
                     z=z_next_b,
                 )
-                mask = (~dones_b).float()
-                td_target = rewards_b + self.rl_cfg.gamma * v_next * mask
+                v_next_masked = torch.where(
+                    dones_b,
+                    torch.zeros_like(v_next),
+                    v_next,
+                )
+                td_target = rewards_b + self.rl_cfg.gamma * v_next_masked
                 adv = td_target - v_s
                 debug_metrics["adv_mean"] = float(adv.mean().item())
                 debug_metrics["adv_std"] = float(adv.std(unbiased=False).item())
@@ -2344,7 +2508,16 @@ class UPITrmTrainer:
         metrics.update(theory_metrics)
         
         # Include policy KL metrics if present (from KL trust region)
-        for key in ("policy_kl", "kl_coef", "kl_early_stop"):
+        for key in (
+            "policy_kl",
+            "kl_coef",
+            "kl_early_stop",
+            "exact_centering_defect_max",
+            "exact_centering_defect_max_observed",
+            "exact_centering_tolerance",
+            "exact_centering_batches_total",
+            "exact_centering_history_complete",
+        ):
             if key in policy_result:
                 metrics[key] = policy_result[key]
         
@@ -2505,7 +2678,12 @@ class UPITrmTrainer:
         }
         if not isinstance(state, dict) or set(state) != expected:
             raise ValueError("compute accounting checkpoint state has an invalid inventory")
-        if state["schema_version"] != 1:
+        schema_version = state["schema_version"]
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != 1
+        ):
             raise ValueError("unsupported compute accounting checkpoint schema")
         training = validate_model_counters(
             state["training_model_work"], name="training_model_work"

@@ -54,6 +54,14 @@ def solved_checker(x, y) -> float:
 class TestPlanEditEnv(unittest.TestCase):
     """Tests for PlanEditEnv dynamics."""
 
+    def test_zero_edit_budget_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "max_edits must be at least 1"):
+            PlanEditEnv(
+                DummyDataset(),
+                dummy_checker,
+                PlanEditEnvConfig(max_edits=0, gamma=0.99, vocab_size=4),
+            )
+
     def test_plan_edit_env_step_and_stop(self):
         """
         REPLACED with bug reproduction test.

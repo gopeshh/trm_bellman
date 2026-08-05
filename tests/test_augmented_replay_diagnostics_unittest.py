@@ -10,6 +10,7 @@ from rl.replay import (
     ReplayIntegrityError,
     ReplayLatent,
     Transition,
+    validate_transition,
     validate_transition_continuity,
     validate_transition_sequence,
 )
@@ -56,6 +57,7 @@ def _transition(
         timestep=timestep,
         latent=_latent(float(timestep)),
         next_latent=_latent(float(timestep + 1)),
+        terminal_reason="budget" if done else None,
     )
 
 
@@ -136,6 +138,51 @@ class TestAugmentedReplayIntegrity(unittest.TestCase):
         replay.add(successor)
         self.assertFalse(replay.has_complete_segment(1, 1, require_clock=True))
 
+    def test_zero_clock_requires_terminal_mask(self) -> None:
+        transition = _transition(2, done=True)
+        transition.done = torch.tensor([False])
+        transition.terminal_reason = None
+        with self.assertRaisesRegex(ReplayIntegrityError, "zero remaining edits"):
+            validate_transition(transition, require_clock=True)
+
+    def test_theorem_replay_validates_terminal_reasons_and_continuity_on_add(self) -> None:
+        for reason in ("stop", "solved", "budget"):
+            replay = ReplayBuffer(capacity=4, theorem_facing=True)
+            terminal = _transition(2, done=True)
+            terminal.terminal_reason = reason
+            replay.add(terminal)
+            self.assertEqual(len(replay), 1)
+
+        missing_reason = _transition(2, done=True)
+        missing_reason.terminal_reason = None
+        replay = ReplayBuffer(capacity=4, theorem_facing=True)
+        with self.assertRaisesRegex(ReplayIntegrityError, "terminal_reason"):
+            replay.add(missing_reason)
+        self.assertEqual(len(replay), 0)
+        legacy_compatible = ReplayBuffer(capacity=4, theorem_facing=True)
+        legacy_compatible.add(
+            missing_reason,
+            allow_legacy_missing_terminal_reason=True,
+        )
+        self.assertEqual(len(legacy_compatible), 1)
+
+        invalid_reason = _transition(2, done=True)
+        invalid_reason.terminal_reason = "timeout"
+        with self.assertRaisesRegex(ReplayIntegrityError, "must be one of"):
+            replay.add(invalid_reason)
+
+        nonterminal_reason = _transition(0)
+        nonterminal_reason.terminal_reason = "solved"
+        with self.assertRaisesRegex(ReplayIntegrityError, "nonterminal"):
+            replay.add(nonterminal_reason)
+
+        replay.add(_transition(0))
+        bad_successor = _transition(1)
+        bad_successor.latent = _latent(99.0)
+        with self.assertRaisesRegex(ReplayIntegrityError, "next_latent"):
+            replay.add(bad_successor)
+        self.assertEqual(len(replay), 1)
+
 
 class _PersistentValueModel:
     def __init__(self, expected_latent: object) -> None:
@@ -206,6 +253,58 @@ class TestPersistentExactBaseline(unittest.TestCase):
         self.assertEqual(model.seen_latents, [successor_latent, successor_latent])
         torch.testing.assert_close(q_all[:, :2], torch.full((2, 2), 4.5))
         torch.testing.assert_close(baseline, torch.full((2,), 4.5))
+
+    def test_terminal_exact_baseline_selects_away_nonfinite_successor_value(self) -> None:
+        successor_latent = object()
+        model = _PersistentValueModel(successor_latent)
+        model.used_value = lambda x, y, n, z=None: (
+            torch.full((y.shape[0],), float("nan")),
+            z,
+        )
+        env = SimpleNamespace(
+            config=SimpleNamespace(
+                reward_shaping=True,
+                solved_threshold=None,
+                task_type="dummy",
+            ),
+            vocab_size=2,
+            stop_action_id=2,
+            _enable_undo=False,
+            _stop_mode="disabled",
+            is_stop_terminal=lambda: False,
+            is_plan_solved=None,
+        )
+        x_batch = {
+            "inputs": torch.zeros(1, 1, dtype=torch.long),
+            "puzzle_identifiers": torch.zeros(1, dtype=torch.long),
+            "remaining_edits": torch.ones(1, dtype=torch.long),
+        }
+        y_batch = torch.zeros(1, 1, dtype=torch.long)
+        action_mask = torch.tensor([[True, True, False]])
+        zeros = torch.zeros(1)
+        with patch(
+            "utils.lipschitz._apply_edit_batch", return_value=y_batch
+        ), patch(
+            "utils.lipschitz._compute_phi_batch",
+            return_value=(zeros, zeros, torch.zeros(1, dtype=torch.bool)),
+        ), patch(
+            "utils.lipschitz._compute_batch_reward_via_env",
+            return_value=torch.ones(1),
+        ):
+            baseline, q_all = compute_exact_baseline_summation(
+                model=model,
+                x_batch=x_batch,
+                y_batch=y_batch,
+                env=env,
+                n=1,
+                gamma=0.9,
+                checker_fn=lambda x, y: 0.0,
+                action_mask=action_mask,
+                policy_probs=torch.tensor([[0.5, 0.5, 0.0]]),
+                successor_latent=successor_latent,
+            )
+        torch.testing.assert_close(q_all[:, :2], torch.ones(1, 2))
+        torch.testing.assert_close(baseline, torch.ones(1))
 
 
 class TestFiniteBatchTheoryDiagnostics(unittest.TestCase):

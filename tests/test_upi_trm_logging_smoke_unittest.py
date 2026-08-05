@@ -1353,6 +1353,107 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                     )
             model_load.assert_not_called()
 
+    def test_schema_v5_terminal_reason_marker_rejects_corrupt_new_checkpoint(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact"
+        )
+        provenance = self._checkpoint_provenance(trainer)
+        identity = self._run_identity(
+            model,
+            trainer,
+            provenance,
+            environment_interactions=3,
+        )
+        self._stub_updates(trainer)
+        trainer.train_step()
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=1,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+                run_identity=identity,
+                checkpoint_lineage=self._root_lineage(),
+            )
+            payload = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            self.assertEqual(
+                payload["trainer_state"]["terminal_reason_replay_version"],
+                1,
+            )
+            terminal = next(
+                transition
+                for transition in payload["replay_transitions"]
+                if bool(transition.done.item())
+            )
+            terminal.terminal_reason = None
+            corrupt_path = Path(tmp) / "missing_terminal_reason.pt"
+            torch.save(payload, corrupt_path)
+
+            restored_model, restored, _ = self._make_persistent_budget_trainer(
+                "fixed_base_exact"
+            )
+            with patch.object(
+                restored_model,
+                "load_state_dict",
+                wraps=restored_model.load_state_dict,
+            ) as model_load:
+                with self.assertRaisesRegex(RuntimeError, "replay record"):
+                    resume_from_checkpoint(
+                        str(corrupt_path),
+                        restored_model,
+                        restored,
+                        "cpu",
+                        expected_dataset_provenance=provenance,
+                        expected_run_identity=identity,
+                        expected_checkpoint_sha256=file_sha256(corrupt_path),
+                    )
+            model_load.assert_not_called()
+
+            del payload["trainer_state"]["terminal_reason_replay_version"]
+            markerless_path = Path(tmp) / "markerless_schema_v5.pt"
+            torch.save(payload, markerless_path)
+            markerless_model, markerless_trainer, _ = (
+                self._make_persistent_budget_trainer("fixed_base_exact")
+            )
+            with patch.object(
+                markerless_model,
+                "load_state_dict",
+                wraps=markerless_model.load_state_dict,
+            ) as model_load, patch.object(
+                markerless_trainer.value_opt,
+                "load_state_dict",
+                wraps=markerless_trainer.value_opt.load_state_dict,
+            ) as optimizer_load, patch.object(
+                markerless_trainer.replay,
+                "clear",
+                wraps=markerless_trainer.replay.clear,
+            ) as replay_clear, patch(
+                "upi_trm_train._restore_rng_state"
+            ) as restore_rng:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "missing terminal-reason replay metadata",
+                ):
+                    resume_from_checkpoint(
+                        str(markerless_path),
+                        markerless_model,
+                        markerless_trainer,
+                        "cpu",
+                        expected_dataset_provenance=provenance,
+                        expected_run_identity=identity,
+                        expected_checkpoint_sha256=file_sha256(markerless_path),
+                    )
+            model_load.assert_not_called()
+            optimizer_load.assert_not_called()
+            replay_clear.assert_not_called()
+            restore_rng.assert_not_called()
+
     def test_schema_v5_resume_rejects_wrong_timestep_zero_active_latent(self):
         model, trainer, cfg = self._make_persistent_budget_trainer(
             "fixed_base_exact"
@@ -1440,6 +1541,26 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 )
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
+            with patch.object(
+                trainer,
+                "exact_centering_checkpoint_state",
+                None,
+            ), self.assertRaisesRegex(
+                RuntimeError,
+                "require exact-centering state",
+            ):
+                save_checkpoint(
+                    model,
+                    trainer,
+                    step=0,
+                    checkpoint_dir=tmp,
+                    rl_cfg=cfg,
+                    dataset_provenance=provenance,
+                    run_identity=identity,
+                    checkpoint_lineage=self._root_lineage(),
+                )
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
             checkpoint_path = save_checkpoint(
                 model,
                 trainer,
@@ -1493,8 +1614,23 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 run_identity=identity,
                 checkpoint_lineage=self._root_lineage(),
             )
+            checkpoint_payload, _ = upi_trm_train._load_checkpoint_payload(
+                checkpoint_path
+            )
+            centering_state = checkpoint_payload["trainer_state"][
+                "exact_centering_state"
+            ]
+            self.assertEqual(centering_state["batch_count"], 1)
+            self.assertTrue(centering_state["history_complete"])
+            self.assertLessEqual(
+                centering_state["maximum_observed"],
+                centering_state["tolerance"],
+            )
 
             expected_metrics = uninterrupted.train_step()
+            expected_centering_state = (
+                uninterrupted.exact_centering_checkpoint_state()
+            )
             expected_modules = {
                 "model": copy.deepcopy(model.state_dict()),
                 "old": copy.deepcopy(uninterrupted.policy_model_old.state_dict()),
@@ -1530,7 +1666,12 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 expected_run_identity=identity,
                 expected_checkpoint_sha256=file_sha256(checkpoint_path),
             )
+            self.assertEqual(
+                restored.exact_centering_checkpoint_state(),
+                centering_state,
+            )
             actual_metrics = restored.train_step()
+            actual_centering_state = restored.exact_centering_checkpoint_state()
             actual_python = random.random()
             actual_numpy = float(np.random.rand())
             actual_torch = torch.rand(4)
@@ -1568,6 +1709,15 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             expected_metrics["policy_optimizer_step"],
             actual_metrics["policy_optimizer_step"],
         )
+        for metric in (
+            "exact_centering_defect_max",
+            "exact_centering_defect_max_observed",
+            "exact_centering_tolerance",
+            "exact_centering_batches_total",
+            "exact_centering_history_complete",
+        ):
+            self.assertEqual(expected_metrics[metric], actual_metrics[metric])
+        self.assertEqual(expected_centering_state, actual_centering_state)
         self.assertEqual(expected_python, actual_python)
         self.assertEqual(expected_numpy, actual_numpy)
         torch.testing.assert_close(expected_torch, actual_torch, rtol=0, atol=0)
@@ -1627,6 +1777,97 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             schema4 = copy.deepcopy(base)
             schema4["checkpoint_schema_version"] = 4
             variants.append(("schema4", schema4, "Schema-v4 fixed-base"))
+
+            for name, invalid_version in (
+                ("schema_bool", True),
+                ("schema_float", 5.0),
+                ("schema_string", "5"),
+            ):
+                invalid_schema = copy.deepcopy(base)
+                invalid_schema["checkpoint_schema_version"] = invalid_version
+                variants.append(
+                    (name, invalid_schema, "schema version must be an integer")
+                )
+
+            markerless = copy.deepcopy(base)
+            del markerless["trainer_state"]["terminal_reason_replay_version"]
+            variants.append(
+                (
+                    "missing_terminal_reason_marker",
+                    markerless,
+                    "missing terminal-reason replay metadata",
+                )
+            )
+
+            terminal_marker_float = copy.deepcopy(base)
+            terminal_marker_float["trainer_state"][
+                "terminal_reason_replay_version"
+            ] = 1.0
+            variants.append(
+                (
+                    "terminal_reason_marker_float",
+                    terminal_marker_float,
+                    "terminal-reason replay version is invalid",
+                )
+            )
+
+            missing_centering = copy.deepcopy(base)
+            del missing_centering["trainer_state"]["exact_centering_state"]
+            variants.append(
+                (
+                    "missing_exact_centering_state",
+                    missing_centering,
+                    "missing exact-centering state",
+                )
+            )
+
+            centering_schema_float = copy.deepcopy(base)
+            centering_schema_float["trainer_state"]["exact_centering_state"][
+                "schema_version"
+            ] = 1.0
+            variants.append(
+                (
+                    "exact_centering_schema_float",
+                    centering_schema_float,
+                    "exact-centering evidence is invalid",
+                )
+            )
+
+            collector_schema_bool = copy.deepcopy(base)
+            collector_schema_bool["trainer_state"]["collection_state"][
+                "schema_version"
+            ] = True
+            variants.append(
+                (
+                    "collector_schema_bool",
+                    collector_schema_bool,
+                    "collector checkpoint schema",
+                )
+            )
+
+            environment_schema_float = copy.deepcopy(base)
+            environment_schema_float["trainer_state"]["environment_state"][
+                "schema_version"
+            ] = 1.0
+            variants.append(
+                (
+                    "environment_schema_float",
+                    environment_schema_float,
+                    "PlanEditEnv checkpoint schema",
+                )
+            )
+
+            compute_schema_string = copy.deepcopy(base)
+            compute_schema_string["trainer_state"]["compute_accounting_state"][
+                "schema_version"
+            ] = "1"
+            variants.append(
+                (
+                    "compute_schema_string",
+                    compute_schema_string,
+                    "compute accounting state is invalid",
+                )
+            )
 
             module_state = copy.deepcopy(base)
             removed_parameter = next(iter(module_state["model_state_dict"]))

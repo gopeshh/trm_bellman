@@ -374,7 +374,11 @@ def validate_dataset_provenance(
         _require_mapping(canonical_value, path="dataset_provenance")
     )
     schema_version = canonical.get("provenance_schema_version")
-    if schema_version != DATASET_PROVENANCE_SCHEMA_VERSION:
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != DATASET_PROVENANCE_SCHEMA_VERSION
+    ):
         raise DatasetProvenanceError(
             "Unsupported dataset provenance schema version "
             f"{schema_version!r}; expected {DATASET_PROVENANCE_SCHEMA_VERSION}."

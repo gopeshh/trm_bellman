@@ -344,6 +344,40 @@ class TestEvaluationArtifacts(unittest.TestCase):
                 )
             self.assertFalse(output.exists())
 
+    def test_schema_versions_reject_bool_float_and_string_before_publication(self):
+        rows = self._rows()
+        for boundary, expected, mutate in (
+            (
+                "evaluation",
+                EVALUATION_ARTIFACT_SCHEMA_VERSION,
+                lambda metadata, compute, invalid: metadata.__setitem__(
+                    "artifact_schema_version", invalid
+                ),
+            ),
+            (
+                "compute",
+                COMPUTE_SNAPSHOT_SCHEMA_VERSION,
+                lambda metadata, compute, invalid: compute.__setitem__(
+                    "compute_schema_version", invalid
+                ),
+            ),
+        ):
+            for invalid in (True, float(expected), str(expected)):
+                with self.subTest(boundary=boundary, invalid=invalid):
+                    metadata = self._metadata(rows)
+                    compute_snapshot = self._compute_snapshot()
+                    mutate(metadata, compute_snapshot, invalid)
+                    with tempfile.TemporaryDirectory() as tmp:
+                        output = Path(tmp) / "artifact"
+                        with self.assertRaises(EvaluationArtifactError):
+                            write_evaluation_artifact(
+                                output,
+                                metadata=metadata,
+                                rows=rows,
+                                compute_snapshot=compute_snapshot,
+                            )
+                        self.assertFalse(output.exists())
+
     def test_compute_progress_must_match_checkpoint_metadata(self):
         rows = self._rows()
         metadata = self._metadata(rows)

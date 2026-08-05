@@ -164,6 +164,8 @@ class Sudoku4x4ExternalEnv:
             raise ValueError(
                 f"Unsupported stop_action_mode {stop_action_mode!r}; expected 'disabled'"
             )
+        if max_edits < 1:
+            raise ValueError("max_edits must be at least 1")
 
         dataset_dir = Path(dataset_dir) if dataset_dir is not None else _default_dataset_dir()
         split_dir = dataset_dir / split

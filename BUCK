@@ -740,6 +740,7 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        ":external_baselines_lib",
         ":puzzle_dataset_lib",
         ":rl",
         "fbsource//third-party/pypi/gym:gym",

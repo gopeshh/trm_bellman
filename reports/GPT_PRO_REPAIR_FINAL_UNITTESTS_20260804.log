@@ -1,0 +1,46 @@
+Generated: 2026-08-04T17:22:59-07:00
+Working directory: /data/repos/fbsource
+Target count: 33
+Command: buck2 test fbcode//buiksat_trm:test_run_identity fbcode//buiksat_trm:test_upi_trm_trainer_smoke fbcode//buiksat_trm:test_cpi_mixture_policy_smoke fbcode//buiksat_trm:test_upi_trm_logging_smoke fbcode//buiksat_trm:test_rl_k_step_targets fbcode//buiksat_trm:test_theory_exact_components fbcode//buiksat_trm:test_trm_latent_unroll fbcode//buiksat_trm:test_plan_edit_env fbcode//buiksat_trm:test_rl_plan_evaluator_smoke fbcode//buiksat_trm:test_edit_policy_head fbcode//buiksat_trm:test_trm_rl_heads fbcode//buiksat_trm:test_lipschitz_spectral_norm fbcode//buiksat_trm:test_theory_metrics fbcode//buiksat_trm:test_gae fbcode//buiksat_trm:test_plan_edit_env_reward_shaping fbcode//buiksat_trm:test_rl_k_step_value_update_trainer fbcode//buiksat_trm:test_z_init_encoder fbcode//buiksat_trm:test_refactored_modules fbcode//buiksat_trm:test_diagnostic_postprocess fbcode//buiksat_trm:test_result_provenance fbcode//buiksat_trm:test_dataset_builders fbcode//buiksat_trm:test_cleanrl_regressions fbcode//buiksat_trm:test_baselines fbcode//buiksat_trm:test_rl_algos_mock fbcode//buiksat_trm:test_undo_and_sequences fbcode//buiksat_trm:test_optimized_exact_baseline fbcode//buiksat_trm:test_augmented_replay_diagnostics fbcode//buiksat_trm:test_persistent_checkpoint_diagnostics fbcode//buiksat_trm:test_sudoku_checkers fbcode//buiksat_trm:test_config_integrity fbcode//buiksat_trm:test_convergence_smoke fbcode//buiksat_trm:test_unroll_sensitivity fbcode//buiksat_trm:test_constraint_aware_masking
+Targets:
+fbcode//buiksat_trm:test_run_identity
+fbcode//buiksat_trm:test_upi_trm_trainer_smoke
+fbcode//buiksat_trm:test_cpi_mixture_policy_smoke
+fbcode//buiksat_trm:test_upi_trm_logging_smoke
+fbcode//buiksat_trm:test_rl_k_step_targets
+fbcode//buiksat_trm:test_theory_exact_components
+fbcode//buiksat_trm:test_trm_latent_unroll
+fbcode//buiksat_trm:test_plan_edit_env
+fbcode//buiksat_trm:test_rl_plan_evaluator_smoke
+fbcode//buiksat_trm:test_edit_policy_head
+fbcode//buiksat_trm:test_trm_rl_heads
+fbcode//buiksat_trm:test_lipschitz_spectral_norm
+fbcode//buiksat_trm:test_theory_metrics
+fbcode//buiksat_trm:test_gae
+fbcode//buiksat_trm:test_plan_edit_env_reward_shaping
+fbcode//buiksat_trm:test_rl_k_step_value_update_trainer
+fbcode//buiksat_trm:test_z_init_encoder
+fbcode//buiksat_trm:test_refactored_modules
+fbcode//buiksat_trm:test_diagnostic_postprocess
+fbcode//buiksat_trm:test_result_provenance
+fbcode//buiksat_trm:test_dataset_builders
+fbcode//buiksat_trm:test_cleanrl_regressions
+fbcode//buiksat_trm:test_baselines
+fbcode//buiksat_trm:test_rl_algos_mock
+fbcode//buiksat_trm:test_undo_and_sequences
+fbcode//buiksat_trm:test_optimized_exact_baseline
+fbcode//buiksat_trm:test_augmented_replay_diagnostics
+fbcode//buiksat_trm:test_persistent_checkpoint_diagnostics
+fbcode//buiksat_trm:test_sudoku_checkers
+fbcode//buiksat_trm:test_config_integrity
+fbcode//buiksat_trm:test_convergence_smoke
+fbcode//buiksat_trm:test_unroll_sensitivity
+fbcode//buiksat_trm:test_constraint_aware_masking
+
+Buck output:
+[2026-08-04T17:22:59.274-07:00] Buck UI: https://www.internalfb.com/buck2/be511540-83f8-40e5-ad4f-71cb4519d09a
+[2026-08-04T17:23:01.168-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/33214047275301020
+[2026-08-04T17:26:37.847-07:00] Network: up 0B  down 0B
+[2026-08-04T17:26:37.847-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/33214047275301020
+Tests finished: [mPass 397[m. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+Exit status: 0

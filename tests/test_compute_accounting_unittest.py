@@ -1,12 +1,18 @@
 """Focused tests for shared confirmatory compute accounting."""
 
+import copy
 import unittest
 
 from utils.compute_accounting import (
+    COMPUTE_SNAPSHOT_SCHEMA_VERSION,
+    MODEL_COUNTER_DEFINITIONS,
+    OPTIMIZER_STEP_FIELDS,
     ModelComputeCounters,
     aggregate_model_compute,
     capture_model_compute_state,
     restore_model_compute_state,
+    validate_compute_snapshot,
+    zero_model_counters,
 )
 
 
@@ -22,6 +28,35 @@ class _InstrumentedModel:
 
 
 class TestComputeAccounting(unittest.TestCase):
+    @staticmethod
+    def _snapshot():
+        zero = zero_model_counters()
+        return {
+            "compute_schema_version": COMPUTE_SNAPSHOT_SCHEMA_VERSION,
+            "model_work": {
+                "total": dict(zero),
+                "training": dict(zero),
+                "evaluation": dict(zero),
+                "counter_definitions": dict(MODEL_COUNTER_DEFINITIONS),
+                "role_groups": [],
+                "uninstrumented_roles": [],
+            },
+            "progress": {
+                "environment_interactions": 0,
+                "outer_updates": 0,
+                "optimizer_steps_total": 0,
+                "optimizer_steps_by_kind": {
+                    field: 0 for field in OPTIMIZER_STEP_FIELDS
+                },
+            },
+            "wall_time_seconds": {"training": 0.0, "evaluation": 0.0},
+            "peak_memory_bytes": {
+                "cuda_allocated": None,
+                "cuda_reserved": None,
+                "process_rss": 0,
+            },
+        }
+
     def test_aliases_are_aggregated_once_but_distinct_modules_are_counted(self):
         shared = _InstrumentedModel(
             policy_api_calls=2,
@@ -77,6 +112,18 @@ class TestComputeAccounting(unittest.TestCase):
             restored_candidate.compute_counter_snapshot(),
             candidate.compute_counter_snapshot(),
         )
+
+    def test_compute_schema_requires_exact_non_bool_integer(self):
+        self.assertEqual(
+            validate_compute_snapshot(self._snapshot())["compute_schema_version"],
+            COMPUTE_SNAPSHOT_SCHEMA_VERSION,
+        )
+        for invalid in (True, float(COMPUTE_SNAPSHOT_SCHEMA_VERSION), "2"):
+            with self.subTest(invalid=invalid):
+                snapshot = copy.deepcopy(self._snapshot())
+                snapshot["compute_schema_version"] = invalid
+                with self.assertRaisesRegex(ValueError, "snapshot schema"):
+                    validate_compute_snapshot(snapshot)
 
 
 if __name__ == "__main__":

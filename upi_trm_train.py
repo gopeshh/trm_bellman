@@ -841,7 +841,12 @@ def _validate_evidence_identity(value: object) -> Dict[str, Any]:
     }
     if not isinstance(value, dict) or set(value) != required:
         raise RuntimeError("Confirmatory evidence identity has an invalid field inventory.")
-    if value["schema_version"] != 1:
+    schema_version = value["schema_version"]
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != 1
+    ):
         raise RuntimeError("Unsupported confirmatory evidence identity schema.")
     try:
         validate_run_id(value["run_id"])
@@ -1101,6 +1106,7 @@ def _validate_schema_v5_replay(
     seq_len: int,
     vocab_size: int,
     num_puzzle_identifiers: int,
+    require_terminal_reason: bool = False,
 ) -> List[Transition]:
     if not isinstance(transitions, list):
         raise RuntimeError("Schema-v5 replay transitions must be a list.")
@@ -1157,7 +1163,11 @@ def _validate_schema_v5_replay(
                 f"Schema-v5 replay record {index} is not a Transition."
             )
         try:
-            validate_transition(transition, require_clock=True)
+            validate_transition(
+                transition,
+                require_clock=True,
+                require_terminal_reason=require_terminal_reason,
+            )
         except (ReplayIntegrityError, AttributeError, TypeError) as exc:
             raise RuntimeError(
                 f"Schema-v5 replay record {index} is invalid."
@@ -1561,9 +1571,16 @@ def _load_schema_v5_resume_metadata(
     checkpoint_path: str,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     checkpoint, checkpoint_sha256 = _load_checkpoint_payload(checkpoint_path)
-    if not isinstance(checkpoint, dict) or checkpoint.get(
-        "checkpoint_schema_version"
-    ) != FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+    if not isinstance(checkpoint, dict):
+        raise RuntimeError(
+            "Confirmatory resume requires a schema-v5 fixed-base checkpoint."
+        )
+    raw_schema_version = checkpoint.get("checkpoint_schema_version")
+    if (
+        isinstance(raw_schema_version, bool)
+        or not isinstance(raw_schema_version, int)
+        or raw_schema_version != FIXED_BASE_CHECKPOINT_SCHEMA_VERSION
+    ):
         raise RuntimeError(
             "Confirmatory resume requires a schema-v5 fixed-base checkpoint."
         )
@@ -1871,6 +1888,7 @@ def save_checkpoint(
             seq_len=int(model_config["seq_len"]),
             vocab_size=int(model_config["vocab_size"]),
             num_puzzle_identifiers=int(model_config["num_puzzle_identifiers"]),
+            require_terminal_reason=True,
         )
         _validate_schema_v5_active_latent(
             collection_checkpoint_state,
@@ -2044,6 +2062,19 @@ def save_checkpoint(
                 "environment_state": environment_checkpoint_state,
             }
         )
+        centering_state_fn = getattr(
+            trainer, "exact_centering_checkpoint_state", None
+        )
+        if not callable(centering_state_fn):
+            if checkpoint_schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+                raise RuntimeError(
+                    "Schema-v5 checkpoints require exact-centering state."
+                )
+        else:
+            checkpoint["trainer_state"]["exact_centering_state"] = (
+                centering_state_fn()
+            )
+        checkpoint["trainer_state"]["terminal_reason_replay_version"] = 1
     else:
         print(
             "[Checkpoint] Baseline trainer checkpoint is weights-only for future "
@@ -2102,7 +2133,12 @@ def resume_from_checkpoint(
     if not isinstance(checkpoint, dict):
         raise RuntimeError("Resume checkpoint must contain a dictionary payload.")
     
-    schema_version = int(checkpoint.get("checkpoint_schema_version", 0))
+    raw_schema_version = checkpoint.get("checkpoint_schema_version")
+    if isinstance(raw_schema_version, bool) or not isinstance(
+        raw_schema_version, int
+    ):
+        raise RuntimeError("Checkpoint schema version must be an integer.")
+    schema_version = raw_schema_version
     if schema_version < 3:
         legacy_flag_note = (
             " The deprecated allow_legacy_warm_start flag cannot make this an "
@@ -2317,9 +2353,47 @@ def resume_from_checkpoint(
         raise RuntimeError(
             f"Schema-v{schema_version} checkpoint is missing live environment or collector state."
         )
+    raw_terminal_reason_version = trainer_state.get(
+        "terminal_reason_replay_version"
+    )
+    if raw_terminal_reason_version is None:
+        if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
+            raise RuntimeError(
+                "Schema-v5 checkpoint is missing terminal-reason replay metadata."
+            )
+        require_terminal_reason = False
+    elif (
+        isinstance(raw_terminal_reason_version, bool)
+        or not isinstance(raw_terminal_reason_version, int)
+        or raw_terminal_reason_version != 1
+    ):
+        raise RuntimeError("Checkpoint terminal-reason replay version is invalid.")
+    else:
+        require_terminal_reason = True
     saved_compute_accounting_state = trainer_state.get(
         "compute_accounting_state"
     )
+    saved_exact_centering_state = trainer_state.get("exact_centering_state")
+    if (
+        schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION
+        and saved_exact_centering_state is None
+    ):
+        raise RuntimeError(
+            "Schema-v5 checkpoint is missing exact-centering state."
+        )
+    restore_centering_state_fn = getattr(
+        trainer, "restore_exact_centering_checkpoint_state", None
+    )
+    if callable(restore_centering_state_fn):
+        try:
+            restore_centering_state_fn(
+                saved_exact_centering_state,
+                validate_only=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "Checkpoint exact-centering evidence is invalid."
+            ) from exc
     if schema_version == FIXED_BASE_CHECKPOINT_SCHEMA_VERSION:
         if saved_compute_accounting_state is None:
             raise RuntimeError(
@@ -2563,6 +2637,7 @@ def resume_from_checkpoint(
             num_puzzle_identifiers=int(
                 current_model_config["num_puzzle_identifiers"]
             ),
+            require_terminal_reason=require_terminal_reason,
         )
     elif not isinstance(replay_transitions, list):
         raise RuntimeError("Checkpoint replay transitions must be a list.")
@@ -2831,6 +2906,8 @@ def resume_from_checkpoint(
     trainer._plan_changes = saved_plan_changes
     trainer._value_of_memory = saved_value_of_memory
     trainer._opnorm_clamp_warned = saved_opnorm_warning
+    if callable(restore_centering_state_fn):
+        restore_centering_state_fn(saved_exact_centering_state)
     if saved_compute_accounting_state is not None:
         trainer.restore_compute_accounting_checkpoint_state(
             saved_compute_accounting_state
@@ -2838,7 +2915,12 @@ def resume_from_checkpoint(
 
     trainer.replay.clear()
     for transition in replay_transitions:
-        trainer.replay.add(transition)
+        trainer.replay.add(
+            transition,
+            # Markerless schema-v3/v4 checkpoints remain loadable; schema-v5
+            # checkpoints fail closed before live state restoration.
+            allow_legacy_missing_terminal_reason=not require_terminal_reason,
+        )
     trainer.env.load_checkpoint_state(trainer_state["environment_state"])
     trainer.load_collection_checkpoint_state(trainer_state["collection_state"])
 
@@ -3243,6 +3325,11 @@ def _log_training_metrics(
             "drift_mean",
             "drift_max",
             "plan_change_mean",
+            "exact_centering_defect_max",
+            "exact_centering_defect_max_observed",
+            "exact_centering_tolerance",
+            "exact_centering_batches_total",
+            "exact_centering_history_complete",
         ]:
             if key in metrics:
                 wandb_metrics[f"theory/{key}"] = metrics[key]

@@ -640,7 +640,12 @@ def load_persistent_checkpoint(
         raise PersistentDiagnosticInputError(
             f"Schema-v5 checkpoint is missing required fields: {missing}."
         )
-    if checkpoint.get("checkpoint_schema_version") != CHECKPOINT_SCHEMA_VERSION:
+    checkpoint_schema_version = checkpoint.get("checkpoint_schema_version")
+    if (
+        isinstance(checkpoint_schema_version, bool)
+        or not isinstance(checkpoint_schema_version, int)
+        or checkpoint_schema_version != CHECKPOINT_SCHEMA_VERSION
+    ):
         raise PersistentDiagnosticInputError(
             f"Expected checkpoint schema {CHECKPOINT_SCHEMA_VERSION}."
         )
@@ -897,7 +902,12 @@ def load_persistent_checkpoint(
         trainer_state.get("collection_state"),
         label="trainer_state.collection_state",
     )
-    if collection_state.get("schema_version") != 1:
+    collection_schema_version = collection_state.get("schema_version")
+    if (
+        isinstance(collection_schema_version, bool)
+        or not isinstance(collection_schema_version, int)
+        or collection_schema_version != 1
+    ):
         raise PersistentDiagnosticInputError(
             "Checkpoint collector state has an unsupported schema."
         )
@@ -1157,7 +1167,12 @@ def _load_provenance_manifest(path: str | Path) -> tuple[dict[str, Any], str]:
             "Dataset provenance manifest must be a JSON object."
         )
 
-    if parsed.get("manifest_schema_version") != DATASET_MANIFEST_SCHEMA_VERSION:
+    manifest_schema_version = parsed.get("manifest_schema_version")
+    if (
+        isinstance(manifest_schema_version, bool)
+        or not isinstance(manifest_schema_version, int)
+        or manifest_schema_version != DATASET_MANIFEST_SCHEMA_VERSION
+    ):
         raise PersistentDiagnosticInputError(
             "Unsupported or missing dataset-manifest schema version."
         )

@@ -47,7 +47,7 @@ class RLConfig(BaseModel):
     gamma: float = 0.99
     K: int = 5  # K-step horizon
     inner_unroll_n: int = 4  # n for U_n(s)
-    max_edits: int = 16
+    max_edits: int = Field(default=16, ge=1)
     
     # Task configuration
     task_name: str = "sudoku"  # "sudoku", "arc", "dummy"

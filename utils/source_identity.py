@@ -85,7 +85,12 @@ def validate_producer_source_manifest(value: object) -> dict[str, Any]:
         "sources",
     }:
         raise SourceIdentityError("Producer source manifest has an invalid inventory.")
-    if value["source_manifest_schema_version"] != SOURCE_MANIFEST_SCHEMA_VERSION:
+    schema_version = value["source_manifest_schema_version"]
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != SOURCE_MANIFEST_SCHEMA_VERSION
+    ):
         raise SourceIdentityError("Unsupported producer source manifest schema.")
     raw_sources = value["sources"]
     if not isinstance(raw_sources, Mapping) or not raw_sources:

@@ -238,6 +238,10 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
     if not isinstance(canonical_value, Mapping):
         raise RunIdentityError("effective_config must be a string-keyed mapping.")
     schema_version = canonical_value.get("effective_config_schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise RunIdentityError(
+            "effective_config_schema_version must be an integer."
+        )
     expected_fields = {
             "effective_config_schema_version",
             "algorithm",
@@ -487,10 +491,15 @@ def validate_run_identity(identity: object) -> dict[str, Any]:
         },
         path="run_identity",
     )
-    if top["run_identity_schema_version"] != RUN_IDENTITY_SCHEMA_VERSION:
+    run_identity_schema_version = top["run_identity_schema_version"]
+    if (
+        isinstance(run_identity_schema_version, bool)
+        or not isinstance(run_identity_schema_version, int)
+        or run_identity_schema_version != RUN_IDENTITY_SCHEMA_VERSION
+    ):
         raise RunIdentityError(
             "Unsupported run identity schema version "
-            f"{top['run_identity_schema_version']!r}."
+            f"{run_identity_schema_version!r}."
         )
     run_id = _validate_run_id(top["run_id"])
     training_seed = _validate_training_seed(top["training_seed"])
@@ -661,9 +670,11 @@ def validate_checkpoint_lineage(value: object) -> dict[str, Any]:
         },
         path="checkpoint_lineage",
     )
+    lineage_schema_version = lineage["checkpoint_lineage_schema_version"]
     if (
-        lineage["checkpoint_lineage_schema_version"]
-        != CHECKPOINT_LINEAGE_SCHEMA_VERSION
+        isinstance(lineage_schema_version, bool)
+        or not isinstance(lineage_schema_version, int)
+        or lineage_schema_version != CHECKPOINT_LINEAGE_SCHEMA_VERSION
     ):
         raise RunIdentityError("Unsupported checkpoint lineage schema version.")
     parent_hash = lineage["parent_checkpoint_sha256"]

@@ -262,20 +262,23 @@ def _compute_gae(
     lastgaelam = torch.zeros_like(next_value)
     for timestep in reversed(range(rewards.shape[0])):
         if timestep == rewards.shape[0] - 1:
-            nextnonterminal = 1.0 - next_done
+            episode_boundary = next_done.to(dtype=torch.bool)
             nextvalues = next_value
         else:
-            nextnonterminal = 1.0 - dones[timestep + 1]
+            episode_boundary = dones[timestep + 1].to(dtype=torch.bool)
             nextvalues = values[timestep + 1]
-        delta = (
-            rewards[timestep]
-            + gamma * nextvalues * nextnonterminal
-            - values[timestep]
+        bootstrap_value = torch.where(
+            episode_boundary,
+            torch.zeros_like(nextvalues),
+            nextvalues,
         )
-        lastgaelam = (
-            delta
-            + gamma * gae_lambda * nextnonterminal * lastgaelam
+        next_gae = torch.where(
+            episode_boundary,
+            torch.zeros_like(lastgaelam),
+            lastgaelam,
         )
+        delta = rewards[timestep] + gamma * bootstrap_value - values[timestep]
+        lastgaelam = delta + gamma * gae_lambda * next_gae
         advantages[timestep] = lastgaelam
     return advantages
 

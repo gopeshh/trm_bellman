@@ -82,6 +82,21 @@ class TestSourceIdentity(unittest.TestCase):
         with self.assertRaises(SourceIdentityError):
             validate_producer_source_manifest(invalid)
 
+    def test_manifest_schema_requires_exact_non_bool_integer(self) -> None:
+        base = {
+            "source_manifest_schema_version": 1,
+            "sources": {"rl/module.py": "a" * 64},
+        }
+        for invalid in (True, 1.0, "1"):
+            with self.subTest(invalid=invalid):
+                manifest = copy.deepcopy(base)
+                manifest["source_manifest_schema_version"] = invalid
+                with self.assertRaisesRegex(
+                    SourceIdentityError,
+                    "source manifest schema",
+                ):
+                    validate_producer_source_manifest(manifest)
+
     def test_runtime_archive_sources_match_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

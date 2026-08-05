@@ -134,6 +134,17 @@ class TestResultProvenance(unittest.TestCase):
                 self._checkpoint_provenance(),
             )
 
+    def test_provenance_schema_requires_exact_non_bool_integer(self):
+        for invalid in (True, 1.0, "1"):
+            with self.subTest(invalid=invalid):
+                provenance = self._checkpoint_provenance()
+                provenance["provenance_schema_version"] = invalid
+                with self.assertRaisesRegex(
+                    DatasetProvenanceError,
+                    "schema version",
+                ):
+                    validate_dataset_provenance(provenance)
+
     def test_dataset_source_builder_version_and_seed_are_retained(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "anonymous-dataset"

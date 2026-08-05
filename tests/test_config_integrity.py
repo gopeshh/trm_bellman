@@ -91,6 +91,10 @@ class TestConfigIntegrity(unittest.TestCase):
     def test_project_root_is_repo_relative(self):
         self.assertTrue((self.root_dir / "README.md").exists())
 
+    def test_zero_edit_budget_is_rejected(self):
+        with self.assertRaises(ValueError):
+            RLConfig(max_edits=0)
+
     def test_rl_config_schema_exposes_single_disable_value_head_norm_field(self):
         matching_fields = [
             field_name

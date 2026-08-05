@@ -1,4 +1,5 @@
 import torch
+import pytest
 
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.task_config import SudokuTaskConfig
@@ -44,6 +45,15 @@ class SingleTokenDataset:
 
 def solved_checker(x, y) -> float:
     return 1.0 if torch.equal(y, x["inputs"]) else -1.0
+
+
+def test_zero_edit_budget_is_rejected():
+    with pytest.raises(ValueError, match="max_edits must be at least 1"):
+        PlanEditEnv(
+            DummyDataset(),
+            dummy_checker,
+            PlanEditEnvConfig(max_edits=0, gamma=0.99, vocab_size=4),
+        )
 
 
 def test_plan_edit_env_step_and_stop():

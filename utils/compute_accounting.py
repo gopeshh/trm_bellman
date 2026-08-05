@@ -300,7 +300,12 @@ def validate_compute_snapshot(value: object) -> dict[str, Any]:
     }
     if set(value) != expected:
         raise ValueError("compute_snapshot has an invalid field inventory")
-    if value["compute_schema_version"] != COMPUTE_SNAPSHOT_SCHEMA_VERSION:
+    schema_version = value["compute_schema_version"]
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != COMPUTE_SNAPSHOT_SCHEMA_VERSION
+    ):
         raise ValueError("unsupported compute snapshot schema")
 
     model_work = value["model_work"]

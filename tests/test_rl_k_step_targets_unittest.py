@@ -98,7 +98,9 @@ class TestKStepTargets(unittest.TestCase):
             [False, False, False],  # not done
         ], dtype=torch.bool)
         steps_taken = torch.tensor([2, 3], dtype=torch.long)
-        v_K = torch.tensor([5.0, 5.0], dtype=torch.float32)  # Bootstrap values
+        # A terminal successor may be outside the model domain. Its nonfinite
+        # placeholder must be selected away, not multiplied by zero.
+        v_K = torch.tensor([float("nan"), 5.0], dtype=torch.float32)
 
         targets_with_cmax = compute_k_step_bootstrapped_target(
             rewards_K=rewards_K,
@@ -125,6 +127,8 @@ class TestKStepTargets(unittest.TestCase):
         expected_terminal = 1.0 + 0.9 * 2.0
         self.assertAlmostEqual(targets_with_cmax[0].item(), expected_terminal, places=4)
         self.assertAlmostEqual(targets_without_cmax[0].item(), expected_terminal, places=4)
+        self.assertTrue(torch.isfinite(targets_with_cmax).all().item())
+        self.assertTrue(torch.isfinite(targets_without_cmax).all().item())
 
         # Sample 1: not terminated, should bootstrap with v_K in both cases
         # G = r0 + γ*r1 + γ^2*r2 + γ^3 * v_K

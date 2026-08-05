@@ -21,6 +21,7 @@ from rl.upi_trm_trainer import (
     UPITrmTrainer,
     _clip_and_recenter_advantages,
     _mean_categorical_kl,
+    _validated_statewise_centering_defect,
 )
 from utils.dataset_provenance import sample_sha256
 from utils.evaluation_artifacts import record_local_evaluation_seed
@@ -240,6 +241,17 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
 
         self.assertIn("loss_policy", result)
         self.assertTrue(math.isfinite(result["loss_policy"]))
+        self.assertLessEqual(
+            result["exact_centering_defect_max"],
+            result["exact_centering_tolerance"],
+        )
+        self.assertEqual(result["exact_centering_batches_total"], 1.0)
+        state = trainer.exact_centering_checkpoint_state()
+        self.assertEqual(state["batch_count"], 1)
+        self.assertEqual(
+            state["maximum_observed"],
+            result["exact_centering_defect_max_observed"],
+        )
 
     def test_exact_mixture_evaluation_uses_deployed_policy_callback(self):
         trainer, dataset = self._make_fixed_base_trainer()
@@ -772,6 +784,25 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
             rtol=0.0,
         )
         self.assertEqual(clipped[0, 2].item(), 0.0)
+
+    def test_exact_centering_defect_rejects_nonfinite_and_excess_error(self):
+        valid = _validated_statewise_centering_defect(
+            torch.tensor([[1.0, -1.0]]),
+            torch.tensor([[0.5, 0.5]]),
+        )
+        self.assertEqual(valid, 0.0)
+
+        with self.assertRaisesRegex(RuntimeError, "nonfinite"):
+            _validated_statewise_centering_defect(
+                torch.tensor([[float("nan"), 0.0]]),
+                torch.tensor([[0.5, 0.5]]),
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "exceeds"):
+            _validated_statewise_centering_defect(
+                torch.tensor([[1.0, 0.0]]),
+                torch.tensor([[0.5, 0.5]]),
+            )
 
     def test_masked_categorical_kl_is_finite_with_finite_gradients(self):
         reference_probs = torch.tensor([[1.0, 0.0]])

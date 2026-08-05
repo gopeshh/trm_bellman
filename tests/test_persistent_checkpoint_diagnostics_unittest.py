@@ -22,6 +22,7 @@ from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.persistent_diagnostic_checkpoint import (
     _build_environment,
+    _load_provenance_manifest,
     load_persistent_diagnostic_context,
     load_persistent_checkpoint,
     PersistentDiagnosticInputError,
@@ -1009,6 +1010,76 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
         self.assertIsNone(loaded.parent_checkpoint_sha256)
         self.assertIsNone(loaded.parent_checkpoint_step)
 
+    def test_checkpoint_schema_versions_reject_alias_types_without_rng_mutation(
+        self,
+    ) -> None:
+        base = _checkpoint_payload()
+        mutations = (
+            (
+                "checkpoint",
+                5,
+                lambda payload, invalid: payload.__setitem__(
+                    "checkpoint_schema_version", invalid
+                ),
+                "checkpoint schema 5",
+            ),
+            (
+                "collector",
+                1,
+                lambda payload, invalid: payload["trainer_state"][
+                    "collection_state"
+                ].__setitem__("schema_version", invalid),
+                "collector state has an unsupported schema",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for boundary, expected, mutate, message in mutations:
+                for invalid in (True, float(expected), str(expected)):
+                    with self.subTest(boundary=boundary, invalid=invalid):
+                        payload = copy.deepcopy(base)
+                        mutate(payload, invalid)
+                        path = self._save(
+                            directory,
+                            payload,
+                            f"{boundary}-{type(invalid).__name__}.pt",
+                        )
+                        torch.manual_seed(431)
+                        rng_before = torch.random.get_rng_state().clone()
+                        with self.assertRaisesRegex(
+                            PersistentDiagnosticInputError,
+                            message,
+                        ):
+                            load_persistent_checkpoint(path, device="cpu")
+                        self.assertTrue(
+                            torch.equal(torch.random.get_rng_state(), rng_before)
+                        )
+
+    def test_dataset_manifest_schema_rejects_alias_types_without_mutation(
+        self,
+    ) -> None:
+        provenance = _checkpoint_payload()["dataset_provenance"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dataset_manifest.json"
+            for invalid in (True, 1.0, "1"):
+                with self.subTest(invalid=invalid):
+                    path.write_text(
+                        json.dumps(
+                            {
+                                "manifest_schema_version": invalid,
+                                "dataset_provenance": provenance,
+                            },
+                            sort_keys=True,
+                        ),
+                        encoding="utf-8",
+                    )
+                    before = path.read_bytes()
+                    with self.assertRaisesRegex(
+                        PersistentDiagnosticInputError,
+                        "dataset-manifest schema version",
+                    ):
+                        _load_provenance_manifest(path)
+                    self.assertEqual(path.read_bytes(), before)
+
     def test_rejects_checkpoint_mutated_during_single_open_load(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = self._save(directory, _checkpoint_payload(), "mutable.pt")
@@ -1201,7 +1272,7 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
             (
                 "zero_budget_nonterminal",
                 zero_budget_nonterminal,
-                "nonterminal at the zero-budget boundary",
+                "reaching zero remaining edits must be terminal",
             )
         )
 

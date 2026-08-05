@@ -152,6 +152,19 @@ class TestRLAlgos(unittest.TestCase):
         self.assertIn("loss_value", stats)
         self.assertIn("loss_total", stats)
 
+    def test_a2c_returns_terminal_cuts_nonfinite_next_episode(self):
+        config = A2CConfig(num_steps=3, inner_unroll_n=0, gamma=0.9, use_gae=False)
+        trainer = A2CTrainer(self.model, self.env, config)
+
+        returns = trainer._compute_n_step_returns(
+            rewards=torch.tensor([1.0, 2.0, 3.0]),
+            dones=torch.tensor([False, True, False]),
+            last_value=float("nan"),
+        )
+
+        torch.testing.assert_close(returns[:2], torch.tensor([2.8, 2.0]))
+        self.assertTrue(torch.isnan(returns[2]))
+
     def test_ppo_train_step(self):
         config = PPOConfig(num_steps=4, num_epochs=1, num_minibatches=2, inner_unroll_n=0)
         trainer = PPOTrainer(self.model, self.env, config)

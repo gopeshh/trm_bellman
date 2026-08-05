@@ -264,6 +264,21 @@ def _sample_random_action(
     return int(random.choice(valid_actions))
 
 
+def _compute_td_target(
+    rewards: torch.Tensor,
+    discounts: torch.Tensor,
+    next_q: torch.Tensor,
+    dones: torch.Tensor,
+) -> torch.Tensor:
+    """Build DQN targets without arithmetically masking terminal Q-values."""
+    bootstrap_q = torch.where(
+        dones.to(dtype=torch.bool),
+        torch.zeros_like(next_q),
+        next_q,
+    )
+    return rewards + discounts * bootstrap_q
+
+
 def _obs_to_buffer(obs: Any, env_kind: str) -> Any:
     """Convert observation to a format suitable for replay buffer storage."""
     if env_kind == "cartpole":
@@ -451,7 +466,12 @@ def run(config: Mapping[str, Any]) -> Dict[str, Any]:
                 best_actions = online_q.argmax(dim=1)
                 target_max_q = target_q.gather(1, best_actions.unsqueeze(1)).squeeze(1)
                 discount = gamma ** b_n_steps
-                td_target = b_rewards + discount * target_max_q * (1.0 - b_dones)
+                td_target = _compute_td_target(
+                    b_rewards,
+                    discount,
+                    target_max_q,
+                    b_dones,
+                )
 
             if env_kind == "cartpole":
                 current_q = q_network(b_obs).gather(1, b_actions.unsqueeze(1)).squeeze(1)

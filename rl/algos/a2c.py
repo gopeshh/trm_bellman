@@ -373,11 +373,12 @@ class A2CTrainer:
     ) -> torch.Tensor:
         """Compute n-step returns with bootstrapping."""
         T = len(rewards)
-        returns = torch.zeros(T, dtype=torch.float32)
+        returns = torch.zeros_like(rewards)
 
-        R = last_value
+        R = rewards.new_tensor(last_value)
         for t in reversed(range(T)):
-            R = rewards[t] + self.config.gamma * R * (1 - dones[t].float())
+            bootstrap_return = torch.where(dones[t], torch.zeros_like(R), R)
+            R = rewards[t] + self.config.gamma * bootstrap_return
             returns[t] = R
 
         return returns

@@ -137,7 +137,12 @@ def _validate_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
         raise EvaluationArtifactError(
             "Evaluation metadata field inventory differs from schema 3."
         )
-    if metadata["artifact_schema_version"] != EVALUATION_ARTIFACT_SCHEMA_VERSION:
+    schema_version = metadata["artifact_schema_version"]
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != EVALUATION_ARTIFACT_SCHEMA_VERSION
+    ):
         raise EvaluationArtifactError("Unsupported evaluation artifact schema.")
     for field in ("run_id", "algorithm", "policy_mode", "reward_definition"):
         value = metadata[field]

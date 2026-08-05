@@ -23,6 +23,7 @@ from utils.run_identity import (
     run_identity_sha256,
     validate_checkpoint_lineage,
     validate_run_identity,
+    validate_upi_effective_config,
 )
 
 
@@ -355,6 +356,36 @@ class RunIdentityTest(unittest.TestCase):
             with self.subTest(name=name):
                 with self.assertRaisesRegex(RunIdentityError, message):
                     validate_run_identity(identity)
+
+    def test_schema_versions_require_exact_non_bool_integers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._clean_repository(root)
+            base = self._identity(root)
+
+        root_lineage = build_checkpoint_lineage(
+            parent_checkpoint_sha256=None,
+            parent_checkpoint_step=None,
+            parent_environment_steps=None,
+        )
+        for invalid in (True, 1.0, "1"):
+            with self.subTest(boundary="effective_config", invalid=invalid):
+                effective_config = copy.deepcopy(base["effective_config"])
+                effective_config["effective_config_schema_version"] = invalid
+                with self.assertRaises(RunIdentityError):
+                    validate_upi_effective_config(effective_config)
+
+            with self.subTest(boundary="run_identity", invalid=invalid):
+                identity = copy.deepcopy(base)
+                identity["run_identity_schema_version"] = invalid
+                with self.assertRaises(RunIdentityError):
+                    validate_run_identity(identity)
+
+            with self.subTest(boundary="checkpoint_lineage", invalid=invalid):
+                lineage = copy.deepcopy(root_lineage)
+                lineage["checkpoint_lineage_schema_version"] = invalid
+                with self.assertRaises(RunIdentityError):
+                    validate_checkpoint_lineage(lineage)
 
     def test_exact_comparison_rejects_each_valid_identity_change(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
