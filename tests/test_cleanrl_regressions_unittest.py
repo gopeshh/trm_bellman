@@ -51,6 +51,27 @@ class TestCleanRLRegressions(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "max_edits must be at least 1"):
             Sudoku4x4ExternalEnv(max_edits=0)
 
+    def test_trm_config_propagates_explicit_disabled_projection(self) -> None:
+        from rl.cleanrl.trm_adapter import _build_trm_cfg
+
+        bundle = SimpleNamespace(
+            seq_len=4,
+            num_identifiers=2,
+            vocab_size=5,
+            num_actions=21,
+        )
+        trm_config = _build_trm_cfg(
+            {
+                "batch_size": 2,
+                "max_edits": 3,
+                "latent_projection_mode": "disabled",
+            },
+            bundle,
+        )
+
+        self.assertEqual(trm_config["rl_latent_projection_mode"], "disabled")
+        self.assertIsNone(trm_config["rl_latent_ball_radius"])
+
     def test_cleanrl_bundle_uses_disjoint_held_out_pool(self) -> None:
         from rl.cleanrl.trm_adapter import build_sudoku_bundle
 

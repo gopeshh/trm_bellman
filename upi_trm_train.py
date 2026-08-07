@@ -43,9 +43,12 @@ except ImportError:  # pragma: no cover
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from models.norec_encoder import NoRecursionEncoder, NoRecEncoderConfig
 from models.sparse_embedding import CastedSparseEmbeddingSignSGD_Distributed
-from rl.config import RLConfig
+from rl.config import RLConfig, merge_rl_config_layer
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
-from rl.upi_trm_trainer import UPITrmTrainer
+from rl.upi_trm_trainer import (
+    UPITrmTrainer,
+    fixed_base_recurrent_map_state_dicts_equal,
+)
 from rl.replay import (
     ReplayBuffer,
     ReplayIntegrityError,
@@ -644,7 +647,7 @@ def _resolve_registered_rl_config(config_paths: List[Path]) -> RLConfig:
             raise RuntimeError("Registered YAML config cannot be parsed.") from exc
         if not isinstance(parsed, dict):
             raise RuntimeError("Registered YAML config must contain a mapping.")
-        merged = {**merged, **parsed}
+        merged = merge_rl_config_layer(merged, parsed)
     return RLConfig(**merged)
 
 
@@ -1162,6 +1165,51 @@ def _validate_schema_v5_replay(
             raise RuntimeError(
                 f"Schema-v5 replay record {index} is not a Transition."
             )
+        if (
+            not torch.is_tensor(transition.done)
+            or transition.done.numel() != 1
+            or transition.done.dtype != torch.bool
+        ):
+            raise RuntimeError(f"Schema-v5 replay record {index} is invalid.")
+        done = bool(transition.done.detach().cpu().reshape(()).item())
+        if episodic_latent:
+            if transition.latent is not None or transition.next_latent is not None:
+                raise RuntimeError(
+                    "Schema-v5 episodic replay must not carry transition latents."
+                )
+            replay_latents: Tuple[Tuple[str, ReplayLatent], ...] = ()
+        else:
+            if not isinstance(transition.latent, ReplayLatent):
+                raise RuntimeError(
+                    "Schema-v5 persistent replay requires a current latent."
+                )
+            if done:
+                if transition.next_latent is not None:
+                    raise RuntimeError(
+                        "Schema-v5 persistent terminal replay must not carry a "
+                        "successor latent."
+                    )
+                replay_latents = (("latent", transition.latent),)
+            else:
+                if not isinstance(transition.next_latent, ReplayLatent):
+                    raise RuntimeError(
+                        "Schema-v5 persistent nonterminal replay requires current "
+                        "and successor latents."
+                    )
+                replay_latents = (
+                    ("latent", transition.latent),
+                    ("next_latent", transition.next_latent),
+                )
+        for latent_name, latent in replay_latents:
+            if (
+                tuple(latent.z_H.shape) != expected_latent_shape
+                or tuple(latent.z_L.shape) != expected_latent_shape
+                or latent.z_H.dtype != expected_latent_dtype
+                or latent.z_L.dtype != expected_latent_dtype
+            ):
+                raise RuntimeError(
+                    f"Schema-v5 replay {latent_name} {index} has wrong model shape."
+                )
         try:
             validate_transition(
                 transition,
@@ -1180,29 +1228,6 @@ def _validate_schema_v5_replay(
             )
         validate_plan(transition.y, label=f"record {index} y")
         validate_plan(transition.y_next, label=f"record {index} y_next")
-        if episodic_latent:
-            if transition.latent is not None or transition.next_latent is not None:
-                raise RuntimeError(
-                    "Schema-v5 episodic replay must not carry transition latents."
-                )
-        else:
-            if transition.latent is None or transition.next_latent is None:
-                raise RuntimeError(
-                    "Schema-v5 persistent replay requires input and successor latents."
-                )
-            for latent_name, latent in (
-                ("latent", transition.latent),
-                ("next_latent", transition.next_latent),
-            ):
-                if (
-                    tuple(latent.z_H.shape) != expected_latent_shape
-                    or tuple(latent.z_L.shape) != expected_latent_shape
-                    or latent.z_H.dtype != expected_latent_dtype
-                    or latent.z_L.dtype != expected_latent_dtype
-                ):
-                    raise RuntimeError(
-                        f"Schema-v5 replay {latent_name} {index} has wrong model shape."
-                    )
         clock = int(
             transition.x["remaining_edits"].detach().cpu().reshape(()).item()
         )
@@ -1218,7 +1243,6 @@ def _validate_schema_v5_replay(
             raise RuntimeError(
                 f"Schema-v5 replay clock {index} disagrees with timestep."
             )
-        done = bool(transition.done.detach().cpu().reshape(()).item())
         if next_clock == 0 and not done:
             raise RuntimeError(
                 f"Schema-v5 replay record {index} is nonterminal at zero budget."
@@ -1733,6 +1757,19 @@ def save_checkpoint(
     ):
         raise RuntimeError(
             "Schema-v5 checkpoint save requires an idle trainer between train calls."
+        )
+    if training_protocol == "fixed_base_exact" and not (
+        fixed_base_recurrent_map_state_dicts_equal(
+            model.state_dict(),
+            trainer.policy_model_old.state_dict(),
+            trainer.policy_model_candidate.state_dict(),
+            trainer.target_model.state_dict(),
+        )
+    ):
+        raise RuntimeError(
+            "Schema-v5 fixed-base checkpoint requires the evaluator, current "
+            "policy, candidate policy, and target evaluator to share one "
+            "bitwise-identical frozen recurrent map."
         )
     model_path = os.path.join(checkpoint_dir, f"model_step_{step}.pt")
     path = os.path.join(checkpoint_dir, f"rl_checkpoint_step_{step}.pt")
@@ -2730,6 +2767,16 @@ def resume_from_checkpoint(
             modules
         ):
             raise RuntimeError("Schema-v5 parameter-gradient inventory mismatch.")
+        if not fixed_base_recurrent_map_state_dicts_equal(
+            checkpoint["model_state_dict"],
+            checkpoint["policy_model_old_state_dict"],
+            checkpoint["policy_model_candidate_state_dict"],
+            checkpoint["target_model_state_dict"],
+        ):
+            raise RuntimeError(
+                "Schema-v5 fixed-base checkpoint does not preserve one shared "
+                "frozen recurrent map."
+            )
 
     # Module and optimizer state dictionaries are parsed on isolated copies.
     # A corrupt late field therefore cannot leave the live run half-restored.
@@ -3719,7 +3766,7 @@ def main():
         for config_path in args.config:
             with open(config_path, "r") as f:
                 override = yaml.safe_load(f) or {}
-            base_dict = {**base_dict, **override}
+            base_dict = merge_rl_config_layer(base_dict, override)
         rl_cfg = RLConfig(**base_dict)
     
     # === CLI overrides take priority over YAML ===
@@ -4118,6 +4165,7 @@ def main():
         # Terminal rewards (Paper Remark 2.6: rush-to-fail mitigation)
         fail_terminal_reward=getattr(rl_cfg, "fail_terminal_reward", 0.0),
         solve_terminal_reward=getattr(rl_cfg, "solve_terminal_reward", 0.0),
+        C_max=rl_cfg.C_max,
         disable_constraint_masking=getattr(rl_cfg, "disable_constraint_masking", False),
     )
     
@@ -4226,8 +4274,9 @@ def main():
         rl_disable_value_head_norm=getattr(rl_cfg, "disable_value_head_norm", False),
         rl_enable_policy_head=True,
         rl_num_actions=rl_num_actions,
-        # Forward-invariant projection (Assumption 4.1)
-        rl_latent_ball_radius=getattr(rl_cfg, "latent_ball_radius", 0.0),
+        # Explicit recurrent projection contract.
+        rl_latent_projection_mode=rl_cfg.latent_projection_mode,
+        rl_latent_ball_radius=rl_cfg.latent_ball_radius,
     )
 
     # === Model Selection ===
@@ -4707,7 +4756,7 @@ def main():
         output_dir = str(resolved_output)
         return output_dir, metadata
 
-    # === Set checker function for exact baseline computation (Theorem 5.9) ===
+    # Set the checker used by Theorem 6.7's centered estimator.
     # Only applies to UPI-TRM trainer
     if hasattr(trainer, 'set_checker_fn'):
         # When exact_baseline_summation=True, the trainer uses this to compute
@@ -4733,7 +4782,7 @@ def main():
         print(f"  Forward-invariant projection: {'✓' if validation['forward_invariant'] else '✗'}")
         print(f"  Clamping intervention enabled: {'✓' if rl_cfg.enable_contraction else '✗'}")
         print("  Global contraction certified: ✗ (local proxies are not a certificate)")
-        print(f"  Exact baseline (Thm 5.9): {'✓' if validation['exact_baseline'] else '✗'}")
+        print(f"  Exact baseline (Thm 6.7): {'✓' if validation['exact_baseline'] else '✗'}")
         print(f"  Distillation (not in theory): {'✗ ENABLED' if validation['distillation_used'] else '✓ disabled'}")
         print(
             "\nFixed-base proposal protocol exact: "
@@ -4747,7 +4796,8 @@ def main():
         print(f"  Inner unroll n (rl_cfg.inner_unroll_n): {rl_cfg.inner_unroll_n}")
         print(f"  K-step horizon K (rl_cfg.K): {rl_cfg.K}")
         print(f"  Mixture alpha (rl_cfg.mixture_alpha): {rl_cfg.mixture_alpha}")
-        print(f"  Latent ball radius (rl_cfg.latent_ball_radius): {rl_cfg.latent_ball_radius}")
+        print(f"  Latent projection mode: {rl_cfg.latent_projection_mode}")
+        print(f"  Latent ball radius: {rl_cfg.latent_ball_radius}")
         print(f"  Episodic latent: {rl_cfg.episodic_latent}")
         print(f"  Exact K-step targets: {rl_cfg.exact_k_step_targets}")
         print(f"  Exact baseline summation: {rl_cfg.exact_baseline_summation}")
@@ -4764,13 +4814,15 @@ def main():
     print(f"[INFO] STOP action mode: {stop_mode}")
     if selected_baseline is None:  # Only show theory-specific info for UPI-TRM
         if getattr(rl_cfg, "exact_baseline_summation", False):
-            print("[INFO] Using EXACT baseline summation (Theorem 5.9 O(α·ε_A) bound)")
-        if getattr(rl_cfg, "latent_ball_radius", 0.0) > 0:
+            print("[INFO] Using exact statewise baseline summation (Theorem 6.7)")
+        if rl_cfg.latent_projection_mode == "enabled":
             print(f"[INFO] Forward-invariant projection enabled (R={rl_cfg.latent_ball_radius})")
+        else:
+            print("[INFO] Recurrent projection disabled (identity operator)")
         if getattr(rl_cfg, "track_drift_metrics", False):
-            print("[INFO] Drift tracking enabled (Lemma 4.4)")
+            print("[INFO] Optional persistent slow-drift tracking enabled")
         if getattr(rl_cfg, "compute_value_of_memory", False):
-            print("[INFO] Value-of-memory computation enabled (Section 5.4)")
+            print("[INFO] Optional value-of-memory diagnostic enabled")
 
     # === Initialize WandB (disabled by default, enable with --wandb) ===
     use_wandb = WANDB_AVAILABLE and args.wandb and not args.no_wandb

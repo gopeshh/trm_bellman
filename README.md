@@ -2,7 +2,10 @@
 
 This repository contains the plan-edit MDP, recurrent evaluator, training loops,
 baselines, diagnostics, and retained experiment outputs for the UPI-TRM paper.
-The current manuscript is `../UPI_TRM/UPI_TRM_ICLR/main.tex`.
+The implementation parity anchor is the manuscript at paper commit `2107125`
+and this repository's `full-implementation` branch. See
+`reports/PAPER_PARITY_REPORT.md` for the executable Algorithm 1/2 mapping and
+the theorem premises that remain conditional.
 
 ## Audit status
 
@@ -14,14 +17,18 @@ The July 2026 correctness audit repaired the following implementation paths:
 - persistent replay retains recurrent state and collection-time behavior probability;
 - the finite-horizon edit clock is part of each state;
 - terminal targets, fixed-K targets, and exact baseline enumeration share one reward contract;
+- exact fixed-K targets bootstrap from the frozen target evaluator; this is a
+  target-network population backup, not a self-bootstrap with the value head
+  currently being fitted;
 - exact-mixture evaluation evaluates the mixture, not only its old-policy component;
 - evaluation uses a private seeded RNG stream and cannot perturb later training samples;
 - exact per-state advantages remain centered after clipping;
 - fixed-base training collects from one frozen base actor, updates only the
   policy-independent value head, and evaluates the explicit proposal mixture;
-- projection and projection diagnostics use the same joint latent norm;
+- projection and projection diagnostics use the same joint latent norm, with
+  an explicit `enabled` mode requiring `R>0` and a `disabled` identity mode;
 - multi-root datasets receive disjoint puzzle-identifier ranges;
-- schema-v4 checkpoints retain training-protocol identity, model construction
+- schema-v5 checkpoints retain training-protocol identity, model construction
   config, target state, replay,
   schedulers, counters, optimizer state, dataset identity, and Python/NumPy/Torch
   RNG state without loading replay onto CUDA;
@@ -54,18 +61,18 @@ Real runs require a dataset root with separate `train/` and `test/` directories.
 The loader refuses a missing requested dataset, overlapping train/test records,
 or an evaluation pool smaller than `eval_num_episodes`.
 
-```bash
-python upi_trm_train.py \
-  --dataset-paths /path/to/sudoku-dataset \
-  --train-split train \
-  --eval-split test \
-  --config configs/revision/upi_trm_feasibility_episodic_z_hard_suite_theory_exact.yaml
-```
+The historical revision config at
+`configs/revision/upi_trm_feasibility_episodic_z_hard_suite_theory_exact.yaml`
+is retained as a non-runnable reference fixture. It is not a registered
+confirmatory assignment, so the main runner rejects it under
+`fixed_base_exact`. The old multi-GPU launcher for that config also exits
+without starting a run. Do not infer a replacement experiment protocol from
+that fixture.
 
-Runs log both split sizes and the ordered evaluation-pool hash. Preserve those
-lines with every result artifact.
-
-For smoke tests only, omit `--dataset-paths` to use `DummyPuzzleDataset`.
+Registered runs log both split sizes and the ordered evaluation-pool hash.
+Preserve those lines with every result artifact. Legacy smoke-only paths may
+omit `--dataset-paths` to use `DummyPuzzleDataset`; `fixed_base_exact` requires
+materialized, disjoint train and evaluation splits.
 
 ## Tests
 
@@ -83,9 +90,13 @@ Run all declared tests with:
 buck2 test --local-only @fbcode//mode/opt 'fbcode//buiksat_trm:'
 ```
 
-That package pattern also runs Buck's generated Python type-check targets. The
-July 2026 audit validated 249 runtime tests and 35 generated type-check targets
-on a fresh daemon.
+That package pattern also runs Buck's generated Python type-check targets.
+The final paper-parity runtime selection passed 243/243, and the six generated
+type-check targets touched by the synchronization passed 6/6. Exact commands,
+the repository-wide diagnostic result, and the scope of the executable parity
+claim are recorded in `reports/PAPER_PARITY_REPORT.md`. The full package pattern
+is not green because pre-existing aggregate libraries, tests, runners,
+diagnostics, and experiment scripts retain unrelated type-check debt.
 
 In a standard environment with the dependencies installed:
 
@@ -100,6 +111,18 @@ does not repair the historical mutable training path by itself. New theorem-faci
 runs must also set `training_protocol: fixed_base_exact`, which collects replay
 from one frozen base, updates only the value head, and treats all candidate steps
 as one proposal rather than a recursive sequence of deployed CPI mixtures.
+The exact protocol also uses terminal STOP semantics, leaves value targets
+unclipped, disables distillation and exploration mixing, and deploys the exact
+pointwise policy mixture. Its fixed-K regression target uses the frozen target
+evaluator followed by the configured retention update. Do not identify that
+operator with the self-bootstrap Bellman operator used in the residual
+certificate.
+
+Projection is configured independently of contraction. Use
+`latent_projection_mode: enabled` with a finite positive
+`latent_ball_radius`, or `latent_projection_mode: disabled` with no radius.
+Radius zero is accepted only when migrating historical payloads; it is not the
+current disabling convention.
 
 Operator-norm clamping is a contraction-oriented intervention. Local
 finite-difference diagnostics do not certify a global contraction modulus.
@@ -108,10 +131,18 @@ Evaluation checkpoints persist the exact model construction config. Legacy
 checkpoints with ambiguous per-puzzle embeddings fail closed instead of silently
 dropping embedding weights.
 
-New schema-v4 training checkpoints record the training protocol and support exact
-continuation when dataset hashes and CUDA topology match. Schema-v3 checkpoints
-resume only under the legacy protocol. Older checkpoints are weights-only warm
-starts and are never treated as exact continuation.
+New schema-v5 training checkpoints record the training protocol and support
+exact continuation when dataset hashes, run identity, source identity, and CUDA
+topology match. Schema-v3 and schema-v4 checkpoints are historical formats.
+Older checkpoints are weights-only warm starts and are never treated as exact
+continuation of a schema-v5 theorem-facing run.
+
+Executable parity does not certify the paper's uniform assumptions. In
+particular, regression loss, finite-batch maxima, and local Lipschitz diagnostics
+do not establish the required sup-norm residuals, invariant-domain bounds,
+policy-overlap constants, or signed occupancy-averaged defect bound. No result
+in this repository turns those assumptions into a claim about SGD, TD, BPTT,
+distillation, learned-model performance, or training dynamics.
 
 UPI outer updates and SB3 environment steps are different budget units.
 Aggregate outputs keep those units separate and do not report a between-method

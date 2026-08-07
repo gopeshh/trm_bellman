@@ -8,7 +8,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 from unittest.mock import patch
 
 import numpy as np
@@ -120,7 +120,8 @@ class _AnalyticPersistentModel(nn.Module):
             "puzzle_emb_len": 0,
             "rl_enable_z_init_encoder": False,
             "rl_value_hidden_dim": 1,
-            "rl_latent_ball_radius": 0.0,
+            "rl_latent_projection_mode": "disabled",
+            "rl_latent_ball_radius": None,
         }
 
     def init_latent(
@@ -225,7 +226,7 @@ class _BiasedPolicyModel(_AnalyticPersistentModel):
 
 
 def _analytic_environment(
-    stop_action_mode: str = "disabled",
+    stop_action_mode: Literal["disabled", "noop", "terminal"] = "disabled",
     *,
     reward_shaping: bool = False,
 ) -> PlanEditEnv:
@@ -240,6 +241,7 @@ def _analytic_environment(
         stop_action_mode=stop_action_mode,
         fail_terminal_reward=0.0,
         solve_terminal_reward=0.0,
+        C_max=1.0,
     )
 
     def checker(_x: Any, y: Any) -> float:
@@ -343,7 +345,8 @@ def _tiny_model_config(
         rl_enable_policy_head=True,
         rl_num_actions=vocab_size + 1,
         rl_value_hidden_dim=8,
-        rl_latent_ball_radius=0.0,
+        rl_latent_projection_mode="disabled",
+        rl_latent_ball_radius=None,
     )
 
 
@@ -356,10 +359,12 @@ def _fixed_base_config() -> RLConfig:
         task_name="dummy",
         solved_threshold=None,
         episodic_latent=False,
-        stop_action_mode="disabled",
+        stop_action_mode="terminal",
         reward_shaping=True,
         fail_terminal_reward=0.0,
         solve_terminal_reward=0.0,
+        C_max=1.0,
+        value_target_clip=None,
         training_protocol="fixed_base_exact",
         exact_k_step_targets=True,
         exact_baseline_summation=True,
@@ -368,7 +373,8 @@ def _fixed_base_config() -> RLConfig:
         policy_epsilon=0.0,
         enable_contraction=False,
         opnorm_clamp_interval=0,
-        latent_ball_radius=0.0,
+        latent_projection_mode="disabled",
+        latent_ball_radius=None,
         batch_size=1,
         replay_capacity=4,
         use_tqdm=False,
@@ -384,17 +390,15 @@ def _checkpoint_payload(
     rl_config = _fixed_base_config()
     model = TinyRecursiveReasoningModel_ACTV1(_model_dump(model_config))
     model_state = _clone_state_dict(model)
-    environment_state = _analytic_environment(
-        reward_shaping=True
-    ).checkpoint_state()
+    environment = _analytic_environment(
+        stop_action_mode="terminal",
+        reward_shaping=True,
+    )
+    environment_state = environment.checkpoint_state()
 
     latent = ReplayLatent(
         z_H=torch.zeros(1, 1, model_config.hidden_size),
         z_L=torch.zeros(1, 1, model_config.hidden_size),
-    )
-    next_latent = ReplayLatent(
-        z_H=torch.ones(1, 1, model_config.hidden_size),
-        z_L=torch.ones(1, 1, model_config.hidden_size),
     )
     transition = Transition(
         x={
@@ -417,8 +421,9 @@ def _checkpoint_payload(
         episode_id=0,
         timestep=1,
         latent=latent,
-        next_latent=next_latent,
+        next_latent=None,
         behavior_log_prob=torch.tensor(0.0),
+        terminal_reason="budget",
     )
     provenance = dataset_provenance or build_dataset_provenance(
         builder_name="tests.OneRecordDataset",
@@ -428,8 +433,8 @@ def _checkpoint_payload(
         eval_record_sha256s=["b" * 64],
         train_split="train",
         eval_split="heldout",
-        environment_config={"max_edits": 2},
-        action_mask_config={"stop_action_mode": "disabled"},
+        environment_config=dict(vars(environment.config)),
+        action_mask_config={"stop_action_mode": "terminal"},
     )
     serialized_rl_config = _model_dump(rl_config)
     serialized_model_config = _model_dump(model_config)
@@ -536,6 +541,7 @@ def _checkpoint_payload(
         },
         "checkpoint_phase": "idle_between_training_calls",
         "trainer_state": {
+            "terminal_reason_replay_version": 1,
             "env_step_count": 1,
             "train_step_count": 0,
             "value_optimizer_step_count": 0,
@@ -690,14 +696,14 @@ class TestPersistentDiagnostics(unittest.TestCase):
         clock_two = rows_by_clock[2]
         self.assertAlmostEqual(clock_two["exact_one_step_backup"], 0.0)
         self.assertAlmostEqual(clock_two["exact_one_step_signed_residual"], 0.0)
-        self.assertAlmostEqual(clock_two["mc_k_step_operator_mean"], 0.5)
-        self.assertAlmostEqual(clock_two["mc_k_step_signed_residual"], -0.5)
+        self.assertAlmostEqual(clock_two["mc_k_step_operator_mean"], 0.25)
+        self.assertAlmostEqual(clock_two["mc_k_step_signed_residual"], -0.25)
         self.assertAlmostEqual(clock_two["mc_k_step_operator_standard_error"], 0.0)
         clock_one = rows_by_clock[1]
-        self.assertAlmostEqual(clock_one["exact_one_step_backup"], 1.0)
-        self.assertAlmostEqual(clock_one["exact_one_step_signed_residual"], -1.0)
-        self.assertAlmostEqual(clock_one["mc_k_step_operator_mean"], 1.0)
-        self.assertAlmostEqual(clock_one["mc_k_step_signed_residual"], -1.0)
+        self.assertAlmostEqual(clock_one["exact_one_step_backup"], 0.5)
+        self.assertAlmostEqual(clock_one["exact_one_step_signed_residual"], -0.5)
+        self.assertAlmostEqual(clock_one["mc_k_step_operator_mean"], 0.5)
+        self.assertAlmostEqual(clock_one["mc_k_step_signed_residual"], -0.5)
         self.assertAlmostEqual(clock_one["mc_k_step_operator_standard_error"], 0.0)
 
         one_step = output.summary["exact_one_step_augmented_residual"]
@@ -719,12 +725,12 @@ class TestPersistentDiagnostics(unittest.TestCase):
         for row in output.mc_rows:
             if output.state_rows[row["state_index"]]["remaining_edits"] == 2:
                 self.assertEqual(row["actions"], [2, 2])
-                self.assertEqual(row["rewards"], [0.0, 1.0])
-                self.assertAlmostEqual(row["k_step_return"], 0.5)
+                self.assertEqual(row["rewards"], [0.0, 0.5])
+                self.assertAlmostEqual(row["k_step_return"], 0.25)
             else:
                 self.assertEqual(row["actions"], [2])
-                self.assertEqual(row["rewards"], [1.0])
-                self.assertAlmostEqual(row["k_step_return"], 1.0)
+                self.assertEqual(row["rewards"], [0.5])
+                self.assertAlmostEqual(row["k_step_return"], 0.5)
 
         carry = output.summary["persistent_carry_and_clock"]
         self.assertEqual(carry["state_count"], 2)
@@ -964,7 +970,7 @@ class TestPersistentDiagnostics(unittest.TestCase):
         self.assertFalse(from_two_done)
         self.assertAlmostEqual(from_two_reward, 0.0)
         self.assertTrue(from_one_done)
-        self.assertAlmostEqual(from_one_reward, 1.0)
+        self.assertAlmostEqual(from_one_reward, 0.5)
 
 
 class TestPersistentCheckpointLoader(unittest.TestCase):
@@ -1009,6 +1015,50 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
         self.assertIsNone(loaded.initialization_artifact_sha256)
         self.assertIsNone(loaded.parent_checkpoint_sha256)
         self.assertIsNone(loaded.parent_checkpoint_step)
+
+    def test_schema5_requires_terminal_reason_marker_and_terminal_cause(self) -> None:
+        base = _checkpoint_payload()
+        cases: list[tuple[str, dict[str, Any], str]] = []
+
+        missing_marker = copy.deepcopy(base)
+        missing_marker["trainer_state"].pop("terminal_reason_replay_version")
+        cases.append(
+            (
+                "missing_marker",
+                missing_marker,
+                "terminal-reason replay version 1",
+            )
+        )
+
+        missing_reason = copy.deepcopy(base)
+        missing_reason["replay_transitions"][0].terminal_reason = None
+        cases.append(
+            (
+                "missing_reason",
+                missing_reason,
+                "recognized `terminal_reason`",
+            )
+        )
+
+        unknown_reason = copy.deepcopy(base)
+        unknown_reason["replay_transitions"][0].terminal_reason = "unknown"
+        cases.append(
+            (
+                "unknown_reason",
+                unknown_reason,
+                "`terminal_reason` must be one of",
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            for name, payload, expected_message in cases:
+                with self.subTest(name=name):
+                    path = self._save(directory, payload, f"{name}.pt")
+                    with self.assertRaisesRegex(
+                        PersistentDiagnosticInputError,
+                        expected_message,
+                    ):
+                        load_persistent_checkpoint(path, device="cpu")
 
     def test_checkpoint_schema_versions_reject_alias_types_without_rng_mutation(
         self,
@@ -1260,6 +1310,17 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
         candidate[recurrent_name] = candidate[recurrent_name].clone() + 1.0
         cases.append(("map_mismatch", map_mismatch, "recurrent map"))
 
+        target_map_mismatch = copy.deepcopy(base)
+        target = target_map_mismatch["target_model_state_dict"]
+        target[recurrent_name] = target[recurrent_name].clone() + 1.0
+        cases.append(
+            (
+                "target_map_mismatch",
+                target_map_mismatch,
+                "target evaluator.*recurrent map",
+            )
+        )
+
         clock_mismatch = copy.deepcopy(base)
         clock_transition = clock_mismatch["replay_transitions"][0]
         clock_transition.x["remaining_edits"] = torch.tensor(2)
@@ -1267,12 +1328,58 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
         cases.append(("clock_mismatch", clock_mismatch, "clock disagrees"))
 
         zero_budget_nonterminal = copy.deepcopy(base)
-        zero_budget_nonterminal["replay_transitions"][0].done = torch.tensor(False)
+        zero_budget_transition = zero_budget_nonterminal["replay_transitions"][0]
+        zero_budget_transition.done = torch.tensor(False)
+        zero_budget_transition.terminal_reason = None
+        zero_budget_transition.next_latent = copy.deepcopy(
+            zero_budget_transition.latent
+        )
         cases.append(
             (
                 "zero_budget_nonterminal",
                 zero_budget_nonterminal,
                 "reaching zero remaining edits must be terminal",
+            )
+        )
+
+        terminal_missing_input_carry = copy.deepcopy(base)
+        terminal_missing_input_carry["replay_transitions"][0].latent = None
+        cases.append(
+            (
+                "terminal_missing_input_carry",
+                terminal_missing_input_carry,
+                "missing its persistent input carry",
+            )
+        )
+
+        terminal_with_successor_carry = copy.deepcopy(base)
+        terminal_with_successor_carry["replay_transitions"][0].next_latent = (
+            copy.deepcopy(
+                terminal_with_successor_carry["replay_transitions"][0].latent
+            )
+        )
+        cases.append(
+            (
+                "terminal_with_successor_carry",
+                terminal_with_successor_carry,
+                "terminal.*must not retain.*successor carry",
+            )
+        )
+
+        nonterminal_missing_successor_carry = copy.deepcopy(base)
+        nonterminal_transition = nonterminal_missing_successor_carry[
+            "replay_transitions"
+        ][0]
+        nonterminal_transition.timestep = 0
+        nonterminal_transition.x["remaining_edits"] = torch.tensor(2)
+        nonterminal_transition.x_next["remaining_edits"] = torch.tensor(1)
+        nonterminal_transition.done = torch.tensor(False)
+        nonterminal_transition.terminal_reason = None
+        cases.append(
+            (
+                "nonterminal_missing_successor_carry",
+                nonterminal_missing_successor_carry,
+                "nonterminal.*missing.*successor carry",
             )
         )
 
@@ -1297,6 +1404,8 @@ class TestPersistentCheckpointLoader(unittest.TestCase):
         skipped_transition.x["remaining_edits"] = torch.tensor(2)
         skipped_transition.x_next["remaining_edits"] = torch.tensor(1)
         skipped_transition.done = torch.tensor(False)
+        skipped_transition.terminal_reason = None
+        skipped_transition.next_latent = copy.deepcopy(skipped_transition.latent)
         skipped_episode_id["replay_transitions"].append(skipped_transition)
         skipped_episode_id["replay_buffer_size"] = 2
         cases.append(
@@ -1622,9 +1731,10 @@ class TestPersistentDiagnosticArtifacts(unittest.TestCase):
                 task_type="dummy",
                 vocab_size=vocab_size,
                 solved_threshold=None,
-                stop_action_mode="disabled",
+                stop_action_mode="terminal",
                 fail_terminal_reward=0.0,
                 solve_terminal_reward=0.0,
+                C_max=1.0,
             )
             task_config = get_task_config(
                 "sudoku",
@@ -1666,7 +1776,7 @@ class TestPersistentDiagnosticArtifacts(unittest.TestCase):
                     "task_config_class": type(task_config).__name__,
                     "task_config_name": task_config.name,
                     "disable_constraint_masking": False,
-                    "stop_action_mode": "disabled",
+                    "stop_action_mode": "terminal",
                     "stop_action_id": stop_action_id,
                     "enable_undo": False,
                     "undo_action_id": None,

@@ -288,6 +288,43 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
         nested = config[name]
         if not isinstance(nested, Mapping) or not nested:
             raise RunIdentityError(f"effective_config.{name} must be nonempty.")
+    rl_config = config["rl_config"]
+    model_config = config["model_config"]
+    assert isinstance(rl_config, Mapping)
+    assert isinstance(model_config, Mapping)
+    projection_contracts = (
+        (
+            "effective_config.rl_config",
+            rl_config.get("latent_projection_mode"),
+            rl_config.get("latent_ball_radius"),
+        ),
+        (
+            "effective_config.model_config",
+            model_config.get("rl_latent_projection_mode"),
+            model_config.get("rl_latent_ball_radius"),
+        ),
+    )
+    for path, mode, radius in projection_contracts:
+        if mode not in {"enabled", "disabled"}:
+            raise RunIdentityError(
+                f"{path} must declare an explicit latent projection mode."
+            )
+        if mode == "enabled":
+            if _require_finite_number(radius, path=f"{path} projection radius") <= 0:
+                raise RunIdentityError(
+                    f"{path} enabled projection radius must be positive."
+                )
+        elif radius is not None:
+            raise RunIdentityError(
+                f"{path} disabled projection must use the identity operator "
+                "without a radius."
+            )
+    if rl_config["latent_projection_mode"] != model_config[
+        "rl_latent_projection_mode"
+    ] or rl_config["latent_ball_radius"] != model_config["rl_latent_ball_radius"]:
+        raise RunIdentityError(
+            "effective_config RL and model projection contracts disagree."
+        )
     execution_device = config["execution_device"]
     if not isinstance(execution_device, str) or not re.fullmatch(
         r"cpu|cuda:[0-9]+", execution_device

@@ -58,6 +58,8 @@ def _tiny_trm_cfg(seq_len: int, vocab_size: int, num_identifiers: int, batch_siz
         rl_enable_contraction=False,
         rl_enable_policy_head=True,
         rl_num_actions=_num_actions(seq_len, vocab_size),
+        rl_latent_projection_mode="enabled",
+        rl_latent_ball_radius=10.0,
     )
 
 
@@ -154,11 +156,13 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
         capture_preinterpolation_policy_pair=False,
         evaluation_policy_mode="configured",
         policy_epsilon=0.0,
+        gamma=0.99,
+        value_target_clip=20.0,
     ):
         dataset = DummyPuzzleDataset(num_instances=6, seq_len=8, vocab_size=12)
         env_cfg = PlanEditEnvConfig(
             max_edits=3,
-            gamma=0.99,
+            gamma=gamma,
             reward_shaping=True,
             vocab_size=dataset.vocab_size,
             stop_action_mode=stop_mode,
@@ -175,6 +179,7 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
             rollout_episodes_per_step=1,
             max_edits=3,
             episodic_latent=episodic_latent,
+            stop_action_mode=stop_mode,
             theory_exact_mixture=theory_exact_mixture,
             enable_kl_trust_region=enable_kl_trust_region,
             distill_mixture_policy=distill_mixture_policy,
@@ -188,6 +193,8 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
             ),
             evaluation_policy_mode=evaluation_policy_mode,
             policy_epsilon=policy_epsilon,
+            gamma=gamma,
+            value_target_clip=value_target_clip,
         )
         model = TinyRecursiveReasoningModel_ACTV1(
             _tiny_trm_cfg(
@@ -213,26 +220,45 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
     def test_persistent_replay_retains_latents_and_behavior_probability(self):
         trainer, _ = self._make_trainer(episodic_latent=False)
         trainer.collect_episode()
-        transition = trainer.replay.storage[0]
-        self.assertIsNotNone(transition.latent)
-        self.assertIsNotNone(transition.next_latent)
-        self.assertIsNotNone(transition.behavior_log_prob)
-        self.assertTrue(torch.isfinite(transition.behavior_log_prob))
+        transitions = list(trainer.replay.storage)
+        self.assertTrue(transitions)
+        self.assertTrue(bool(transitions[-1].done.item()))
+        for transition in transitions:
+            self.assertIsNotNone(transition.latent)
+            if bool(transition.done.item()):
+                self.assertIsNone(transition.next_latent)
+            else:
+                self.assertIsNotNone(transition.next_latent)
+            self.assertIsNotNone(transition.behavior_log_prob)
+            self.assertTrue(torch.isfinite(transition.behavior_log_prob))
 
+        transition = transitions[0]
         x_batch, _, x_next_batch, *_ = trainer._stack_batch([transition])
         self.assertIn("solution", x_batch)
         self.assertIn("solution", x_next_batch)
         torch.testing.assert_close(x_batch["solution"][0], transition.x["solution"])
 
+    def test_gamma_zero_trainer_updates_without_bootstrapping(self):
+        trainer, _ = self._make_trainer(gamma=0.0)
+        trainer.collect_episode()
+        trainer.collect_episode()
+
+        result = trainer.value_update()
+
+        self.assertEqual(trainer.rl_cfg.gamma, 0.0)
+        self.assertTrue(math.isfinite(result["loss_value"]))
+
     def test_persistent_exact_baseline_policy_update_runs(self):
         trainer, _ = self._make_trainer(
             episodic_latent=False,
+            stop_mode="terminal",
             theory_exact_mixture=True,
             exact_baseline_summation=True,
             exact_k_step_targets=True,
             training_protocol="fixed_base_exact",
             enable_contraction=False,
             opnorm_clamp_interval=0,
+            value_target_clip=None,
         )
         trainer.set_checker_fn(dummy_checker)
         trainer.collect_episode()
@@ -641,12 +667,14 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
     def _make_fixed_base_trainer(self, *, episodic_latent=True):
         return self._make_trainer(
             episodic_latent=episodic_latent,
+            stop_mode="terminal",
             theory_exact_mixture=True,
             exact_baseline_summation=True,
             exact_k_step_targets=True,
             training_protocol="fixed_base_exact",
             enable_contraction=False,
             opnorm_clamp_interval=0,
+            value_target_clip=None,
         )
 
     def test_fixed_base_optimizer_owns_only_value_head(self):
@@ -753,12 +781,14 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
     def test_fixed_base_rejects_scheduled_clamp_and_sparse_optimizer(self):
         with self.assertRaisesRegex(ValueError, "fixed_base_exact"):
             self._make_trainer(
+                stop_mode="terminal",
                 theory_exact_mixture=True,
                 exact_baseline_summation=True,
                 exact_k_step_targets=True,
                 training_protocol="fixed_base_exact",
                 enable_contraction=True,
                 opnorm_clamp_interval=1,
+                value_target_clip=None,
             )
 
         trainer, _ = self._make_fixed_base_trainer()

@@ -264,6 +264,7 @@ def build_sudoku_bundle(config: Mapping[str, Any]) -> SudokuBundle:
         task_type="sudoku" if is_sudoku else "dummy",
         stop_action_mode=config.get("stop_action_mode", "noop"),
         stop_action_penalty=float(config.get("stop_action_penalty", -0.1)),
+        C_max=float(config.get("C_max", 10.0)),
         fail_terminal_reward=float(config.get("fail_terminal_reward", 0.0)),
         solve_terminal_reward=float(config.get("solve_terminal_reward", 0.0)),
         disable_constraint_masking=bool(config.get("disable_constraint_masking", False)),
@@ -384,7 +385,8 @@ def _build_trm_cfg(config: Mapping[str, Any], bundle: Any, enable_value_head: bo
     """Build TRM config dict from YAML config, matching upi_trm_train.py:813.
 
     RL-relevant fields are sourced from an RLConfig instance so that defaults
-    (enable_contraction=True, target_Lz=0.9, latent_ball_radius=10.0, etc.)
+    (enable_contraction=True, target_Lz=0.9, projection enabled at R=10.0,
+    etc.)
     match the in-house baseline path exactly.
     """
     from rl.config import RLConfig
@@ -392,7 +394,8 @@ def _build_trm_cfg(config: Mapping[str, Any], bundle: Any, enable_value_head: bo
     rl_fields: Dict[str, Any] = {}
     for key in (
         "enable_contraction", "target_Lz", "target_Lv",
-        "latent_ball_radius", "disable_value_head_norm",
+        "latent_projection_mode", "latent_ball_radius",
+        "disable_value_head_norm",
     ):
         if key in config:
             rl_fields[key] = config[key]
@@ -434,7 +437,8 @@ def _build_trm_cfg(config: Mapping[str, Any], bundle: Any, enable_value_head: bo
         rl_disable_value_head_norm=getattr(rl_cfg, "disable_value_head_norm", False),
         rl_enable_policy_head=True,
         rl_num_actions=bundle.num_actions,
-        rl_latent_ball_radius=getattr(rl_cfg, "latent_ball_radius", 10.0),
+        rl_latent_projection_mode=rl_cfg.latent_projection_mode,
+        rl_latent_ball_radius=rl_cfg.latent_ball_radius,
     )
 
 

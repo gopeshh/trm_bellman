@@ -138,7 +138,7 @@ class TestRLKStepValueUpdateTrainer(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "No replay segment"):
             trainer._sample_k_step_batch(1)
 
-    def test_exact_targets_use_frozen_current_evaluator_not_ema(self):
+    def test_exact_targets_use_frozen_target_evaluator(self):
         for horizon in (1, 2):
             with self.subTest(K=horizon):
                 dataset = DummyPuzzleDataset(
@@ -182,16 +182,96 @@ class TestRLKStepValueUpdateTrainer(unittest.TestCase):
                 for _ in range(2):
                     trainer.collect_episode()
 
-                with patch.object(
+                if horizon == 1:
+                    nonterminal = next(
+                        transition
+                        for transition in trainer.replay.storage
+                        if not bool(transition.done.item())
+                    )
+                    sampled_batch = [nonterminal] * rl_cfg.batch_size
+                else:
+                    with patch(
+                        "rl.upi_trm_trainer.torch.randint",
+                        return_value=torch.zeros(
+                            rl_cfg.batch_size,
+                            dtype=torch.long,
+                        ),
+                    ):
+                        sampled_batch = trainer._sample_k_step_batch(
+                            rl_cfg.batch_size
+                        )
+
+                sampled_method = (
+                    patch.object(
+                        trainer.replay,
+                        "sample_batch",
+                        return_value=sampled_batch,
+                    )
+                    if horizon == 1
+                    else patch.object(
+                        trainer,
+                        "_sample_k_step_batch",
+                        return_value=sampled_batch,
+                    )
+                )
+                with sampled_method, patch.object(
                     trainer.target_model,
                     "used_value",
-                    side_effect=AssertionError(
-                        "exact targets must not use the EMA evaluator"
-                    ),
-                ):
+                    wraps=trainer.target_model.used_value,
+                ) as target_used_value:
                     result = trainer.value_update()
 
                 self.assertTrue(math.isfinite(result["loss_value"]))
+                target_used_value.assert_called_once()
+
+    def test_terminal_value_update_does_not_evaluate_target_successor(self):
+        dataset = DummyPuzzleDataset(num_instances=2, seq_len=8, vocab_size=16)
+        env_cfg = PlanEditEnvConfig(
+            max_edits=2,
+            gamma=0.9,
+            reward_shaping=True,
+            vocab_size=dataset.vocab_size,
+        )
+        env = PlanEditEnv(dataset=dataset, checker=dummy_checker, config=env_cfg)
+        env.set_stop_action_id(
+            _num_actions(dataset.seq_len, dataset.vocab_size) - 1
+        )
+        rl_cfg = RLConfig(
+            batch_size=1,
+            K=1,
+            gamma=env_cfg.gamma,
+            exact_k_step_targets=True,
+            max_edits=env_cfg.max_edits,
+        )
+        model = TinyRecursiveReasoningModel_ACTV1(
+            _tiny_trm_cfg(
+                dataset.seq_len,
+                dataset.vocab_size,
+                dataset.num_identifiers,
+                rl_cfg.batch_size,
+            )
+        )
+        trainer = UPITrmTrainer(model, env, rl_cfg, torch.device("cpu"))
+        trainer.collect_episode()
+        terminal = next(
+            transition
+            for transition in trainer.replay.storage
+            if bool(transition.done.item())
+        )
+        self.assertIsNone(terminal.next_latent)
+
+        with patch.object(
+            trainer.replay,
+            "sample_batch",
+            return_value=[terminal],
+        ), patch.object(
+            trainer.target_model,
+            "used_value",
+            side_effect=AssertionError("terminal successor was evaluated"),
+        ):
+            result = trainer.value_update()
+
+        self.assertTrue(math.isfinite(result["loss_value"]))
 
 
 if __name__ == "__main__":

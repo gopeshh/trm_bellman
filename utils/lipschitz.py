@@ -456,7 +456,7 @@ def compute_unrolling_term_proxy(
 
 
 # =============================================================================
-# NEW: Drift bound monitoring for persistent latents (Section 4.2, Lemma 4.4)
+# Optional slow-drift monitoring for persistent latents.
 # =============================================================================
 
 def estimate_Cdrift(
@@ -469,7 +469,7 @@ def estimate_Cdrift(
     """
     Estimate drift constant C_drift(n) = ||z^(n) - z_init(x, y)|| for persistent latents.
     
-    This corresponds to the tracking error bound in Lemma 4.4:
+    This corresponds to the paper's optional persistent tracking bound:
         C_drift(n) = κ_n * E_0 + (κ_n * L_{z*} * Δy_max) / (1 - κ_n)
     
     In practice, we measure the empirical drift from fresh initialization.
@@ -508,7 +508,7 @@ def estimate_plan_change(
     """
     Estimate plan change Δy = ||y_new - y_old|| for two-timescale analysis.
     
-    This corresponds to the Δy_max bound in Assumption 4.3:
+    This records the Δy_max quantity in the optional slow-drift premise:
         ||y_{t+1} - y_t||_E ≤ Δy_max
     
     For discrete tokens (like Sudoku), we use Hamming distance normalized by sequence length.
@@ -547,7 +547,7 @@ def compute_theoretical_drift_bound(
     delta_y_max: float,
 ) -> float:
     """
-    Compute the theoretical drift bound from Lemma 4.4:
+    Compute the paper's optional persistent slow-drift bound:
     
         C_drift(n) = κ_n * E_0 + (κ_n * L_{z*} * Δy_max) / (1 - κ_n)
     
@@ -568,7 +568,7 @@ def compute_theoretical_drift_bound(
 
 
 # =============================================================================
-# NEW: Value of memory analysis (Section 5.4, Corollary 5.4)
+# Optional value-of-memory diagnostic
 # =============================================================================
 
 def compute_value_of_memory_residual(
@@ -586,13 +586,9 @@ def compute_value_of_memory_residual(
     Compute the "value of memory" residual: ||V_memless - T_K V_memless||.
     
     V_memoryless(x, y, z) := U_*(x, y) ignores the latent z entirely.
-    The residual captures the cost of approximating a history-dependent
-    policy with a memoryless value function (POMDP approximation error).
-    
-    This implements the interpretation in Remark 5.5:
-        The residual measures the combined effect of:
-        (i) ignoring memory (latent z)
-        (ii) approximation limits of (f_θ, V_ψ) on (x, y) alone
+    On the represented batch, the residual combines the effect of ignoring
+    latent memory with approximation error in the memoryless value map. It is
+    a finite diagnostic, not a uniform error certificate.
     
     Args:
         model: TRM model with used_value method
@@ -609,7 +605,7 @@ def compute_value_of_memory_residual(
         Dictionary with:
         - v_memoryless: Value ignoring latent z (fresh init each time)
         - v_persistent: Value using persistent latent z
-        - value_of_memory: ||V_persistent - V_memoryless|| (the "cost of amnesia")
+        - value_of_memory: ||V_persistent - V_memoryless||
         - bellman_residual_memoryless: ||V_memless - T V_memless||
     """
     used_value = _require_method(model, "used_value")
@@ -646,7 +642,7 @@ def compute_value_of_memory_residual(
 
 
 # =============================================================================
-# NEW: Exact baseline computation for Theorem 5.9
+# Exact statewise baseline computation for Theorem 6.7.
 # =============================================================================
 
 def compute_exact_baseline_summation(
@@ -664,7 +660,7 @@ def compute_exact_baseline_summation(
     """
     Compute exact baseline E_{a ~ π}[Q̂(s,a)] via summation over ALL discrete actions.
     
-    This is the KEY requirement for Theorem 5.9's O(α·ε_A) bound.
+    This supplies Theorem 6.7's exact statewise centering arithmetic.
     Without exact summation, the bound reverts to naive O(ε_A).
     
     For each action a:
@@ -818,28 +814,69 @@ def compute_exact_baseline_summation(
             # STOP is terminal only if stop_action_mode == "terminal"
             # Otherwise STOP is a no-op and we bootstrap from V(s')
             # Terminal rewards already fold in the absorbing tail and therefore
-            # do not bootstrap. Persistent mode uses the post-policy-unroll carry
-            # shared by every possible edit successor.
+            # have no represented successor value or latent. Persistent mode
+            # uses the post-policy-unroll carry only for nonterminal successors.
             x_next_batch = dict(x_batch)
             if "remaining_edits" in x_batch:
                 x_next_batch["remaining_edits"] = (
                     x_batch["remaining_edits"] - 1
                 ).clamp_min(0)
-            if successor_latent is None:
-                v_next, _ = used_value(x_next_batch, y_next, n=n)
-            else:
-                v_next, _ = used_value(
-                    x_next_batch,
-                    y_next,
-                    n=n,
-                    z=successor_latent,
+            v_next = torch.zeros_like(rewards)
+            nonterminal_indices = torch.nonzero(
+                ~terminal_batch,
+                as_tuple=False,
+            ).flatten()
+            if nonterminal_indices.numel() > 0:
+                selected_x_next = {
+                    key: (
+                        value.index_select(0, nonterminal_indices)
+                        if torch.is_tensor(value)
+                        and value.ndim > 0
+                        and value.shape[0] == batch_size
+                        else value
+                    )
+                    for key, value in x_next_batch.items()
+                }
+                selected_y_next = y_next.index_select(0, nonterminal_indices)
+                selected_successor_latent = successor_latent
+                if (
+                    successor_latent is not None
+                    and nonterminal_indices.numel() != batch_size
+                ):
+                    successor_h = getattr(successor_latent, "z_H", None)
+                    successor_l = getattr(successor_latent, "z_L", None)
+                    if not torch.is_tensor(successor_h) or not torch.is_tensor(
+                        successor_l
+                    ):
+                        raise TypeError(
+                            "A partially terminal persistent batch requires a "
+                            "batched successor latent with z_H and z_L tensors."
+                        )
+                    assert isinstance(successor_h, torch.Tensor)
+                    assert isinstance(successor_l, torch.Tensor)
+                    selected_successor_latent = type(successor_latent)(
+                        z_H=successor_h.index_select(0, nonterminal_indices),
+                        z_L=successor_l.index_select(0, nonterminal_indices),
+                    )
+                if selected_successor_latent is None:
+                    selected_v_next, _ = used_value(
+                        selected_x_next,
+                        selected_y_next,
+                        n=n,
+                    )
+                else:
+                    selected_v_next, _ = used_value(
+                        selected_x_next,
+                        selected_y_next,
+                        n=n,
+                        z=selected_successor_latent,
+                    )
+                v_next.index_copy_(
+                    0,
+                    nonterminal_indices,
+                    selected_v_next.to(dtype=v_next.dtype),
                 )
-            v_next_masked = torch.where(
-                terminal_batch,
-                torch.zeros_like(v_next),
-                v_next,
-            )
-            q_values[:, a] = rewards + gamma * v_next_masked
+            q_values[:, a] = rewards + gamma * v_next
             record_action_values = getattr(
                 model, "record_action_value_evaluations", None
             )
@@ -972,7 +1009,7 @@ def compute_exact_advantage(
     Compute exact advantage Â(s, a) = Q̂(s, a) - E_{b ~ π}[Q̂(s, b)].
     
     This satisfies the centering property E_{a ~ π}[Â(s, a)] = 0 EXACTLY,
-    which is required for the O(α·ε_A) bound in Theorem 5.9.
+    which is required by Theorem 6.7's exactly centered specialization.
     
     Args:
         q_values: [B, num_actions] Q̂(s, a) for all actions

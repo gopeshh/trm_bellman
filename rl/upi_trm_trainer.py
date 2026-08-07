@@ -2,6 +2,7 @@ import copy
 import logging
 import math
 import time
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
@@ -15,6 +16,58 @@ logger = logging.getLogger(__name__)
 # exp(-20) ≈ 2e-9, effectively zero probability
 LOG_PROB_MIN = -20.0
 EXACT_CENTERING_TOLERANCE = 1e-5
+
+
+def _is_recurrent_map_state(name: str) -> bool:
+    """Return whether one model-state entry belongs to the frozen recurrence."""
+
+    if name.startswith("z_init_encoder."):
+        return True
+    if not name.startswith("inner."):
+        return False
+    return not name.startswith(("inner.lm_head.", "inner.q_head."))
+
+
+def fixed_base_recurrent_map_state_dicts_equal(
+    reference: object,
+    *others: object,
+) -> bool:
+    """Compare the frozen recurrent-map selection exactly across snapshots."""
+
+    if not isinstance(reference, Mapping) or not others:
+        return False
+    reference_names = {
+        name
+        for name in reference
+        if isinstance(name, str) and _is_recurrent_map_state(name)
+    }
+    if not reference_names:
+        return False
+    for other in others:
+        if not isinstance(other, Mapping):
+            return False
+        other_names = {
+            name
+            for name in other
+            if isinstance(name, str) and _is_recurrent_map_state(name)
+        }
+        if other_names != reference_names:
+            return False
+        for name in reference_names:
+            left = reference[name]
+            right = other[name]
+            if (
+                not torch.is_tensor(left)
+                or not torch.is_tensor(right)
+                or left.shape != right.shape
+                or left.dtype != right.dtype
+                or not torch.equal(
+                    left.detach().to(device="cpu"),
+                    right.detach().to(device="cpu"),
+                )
+            ):
+                return False
+    return True
 
 
 def _clip_and_recenter_advantages(
@@ -201,7 +254,9 @@ class UPITrmTrainer:
             rel_tol=1e-6,
             abs_tol=1e-8,
         ), f"Env gamma ({self.env_config.gamma}) and RL gamma ({self.rl_cfg.gamma}) must match."
-        assert 0.0 < self.rl_cfg.gamma < 1.0, "RLConfig.gamma must be in (0,1) for theory to hold."
+        assert 0.0 <= self.rl_cfg.gamma < 1.0, (
+            "RLConfig.gamma must be in [0,1) for theory to hold."
+        )
         self.device = device
         self.debug_checks = bool(getattr(self.rl_cfg, "debug_checks", False))
 
@@ -220,12 +275,12 @@ class UPITrmTrainer:
         # Profiling flag (set True to see per-episode timing breakdown)
         self._profile_rollout: bool = False
         
-        # === NEW: Theory-exact tracking (Sections 4.2, 5.4 of paper) ===
-        # Track drift for persistent latents (Lemma 4.4)
+        # Optional finite-batch theory diagnostics. These are not certificates.
+        # Track the paper's optional persistent slow-drift diagnostic.
         self._drift_values: List[float] = []
-        # Track plan changes Δy (Assumption 4.3)
+        # Track plan changes used by the optional slow-drift specialization.
         self._plan_changes: List[float] = []
-        # Track value of memory (Remark 5.5)
+        # Track the optional value-of-memory diagnostic.
         self._value_of_memory: List[float] = []
         self._exact_centering_tolerance = EXACT_CENTERING_TOLERANCE
         self._exact_centering_defect_max: Optional[float] = None
@@ -432,17 +487,37 @@ class UPITrmTrainer:
 
     def _soft_update_target(self) -> None:
         tau = self.rl_cfg.target_ema_tau
+        source_module: nn.Module = self.model
+        target_module: nn.Module = self.target_model
+        if self._fixed_base_exact:
+            if self.model.value_head is None or self.target_model.value_head is None:
+                raise RuntimeError(
+                    "Fixed-base target update requires source and target value heads."
+                )
+            # Algorithm 2 updates only the target value head bar-psi. The
+            # recurrent map remains the one frozen map shared by every policy
+            # and bootstrap evaluator at this snapshot.
+            source_module = self.model.value_head
+            target_module = self.target_model.value_head
         with torch.no_grad():
-            for p, p_targ in zip(self.model.parameters(), self.target_model.parameters()):
-                p_targ.data.mul_(tau).add_(p.data, alpha=1 - tau)
-            parameter_names = {name for name, _ in self.model.named_parameters()}
-            source_state = self.model.state_dict()
-            target_state = self.target_model.state_dict()
+            source_parameters = dict(source_module.named_parameters())
+            target_parameters = dict(target_module.named_parameters())
+            if source_parameters.keys() != target_parameters.keys():
+                raise RuntimeError("Target parameter structure differs from source.")
+            for name, source_parameter in source_parameters.items():
+                target_parameter = target_parameters[name]
+                target_parameter.data.mul_(tau).add_(
+                    source_parameter.data,
+                    alpha=1 - tau,
+                )
+            parameter_names = set(source_parameters)
+            source_state = source_module.state_dict()
+            target_state = target_module.state_dict()
             for name, source_value in source_state.items():
                 if name in parameter_names or name not in target_state:
                     continue
-                # Persistent buffers, including sparse puzzle embeddings, are
-                # part of the evaluator state. Copy them exactly.
+                # Buffers within the selected target object are state, not EMA
+                # parameters. Copy them exactly.
                 target_state[name].copy_(source_value)
 
     def _maybe_apply_scheduled_opnorm_clamp(
@@ -550,8 +625,8 @@ class UPITrmTrainer:
             dist_new, _ = candidate_model.policy_dist(
                 x_batch, y_batch, n=0, action_mask=action_mask, z=z_old
             )
-            # Use z_old as the updated latent (follows old policy's trajectory which
-            # dominates the mixture with weight 1-alpha)
+            # The recurrent map is shared and frozen, so this carry is independent
+            # of which policy-head component samples the action.
             z_new = z_old
         else:
             # Episodic mode: both models initialize fresh (no shared latent trajectory)
@@ -675,9 +750,9 @@ class UPITrmTrainer:
         so policy_model_old's action distribution will only approximate the ideal
         mixture pi_new = (1 - alpha) * pi_old + alpha * pi_candidate.
         
-        Note: For a more exact treatment, use distill_mixture_policy=True to distill
-        the distributional mixture _mixed_policy_dist into policy_model_old using
-        a KL loss, rather than raw weight interpolation.
+        Distribution-level KL distillation is available as a separate heuristic,
+        but it still only approximates the pointwise probability mixture and is
+        outside the exact-mixture theory.
         """
 
         if self._fixed_base_exact:
@@ -1356,8 +1431,6 @@ class UPITrmTrainer:
             if profile_enabled:
                 active["time_policy"] += end_policy - start_policy
 
-            if not episodic_latent:
-                active["latent"] = latent_after
             action = dist.sample().squeeze()
             behavior_log_prob = dist.log_prob(action).detach().cpu().reshape(())
 
@@ -1410,8 +1483,12 @@ class UPITrmTrainer:
                 self._plan_changes.append(
                     estimate_plan_change(y_tensor, y_next_tensor)
                 )
+            if not episodic_latent and not done:
+                # Only a nonterminal transition has a successor augmented state.
+                active["latent"] = latent_after
             if (
                 not episodic_latent
+                and not done
                 and getattr(self.rl_cfg, "track_drift_metrics", False)
                 and active["latent"] is not None
             ):
@@ -1445,7 +1522,7 @@ class UPITrmTrainer:
                     latent=self._clone_latent(latent_before),
                     next_latent=(
                         self._clone_latent(latent_after)
-                        if not episodic_latent
+                        if not episodic_latent and not done
                         else None
                     ),
                     behavior_log_prob=behavior_log_prob,
@@ -1582,6 +1659,60 @@ class UPITrmTrainer:
             z_L=torch.cat([latent.z_L for latent in concrete_latents], dim=0).to(self.device),
         )
 
+    def _nonterminal_successor_values(
+        self,
+        model: TinyRecursiveReasoningModel_ACTV1,
+        x_next_batch: Dict[str, torch.Tensor],
+        y_next_batch: torch.Tensor,
+        dones: torch.Tensor,
+        next_latents: List[Optional[ReplayLatent]],
+        *,
+        template: torch.Tensor,
+    ) -> torch.Tensor:
+        """Evaluate only represented nonterminal successor states.
+
+        Terminal replay records have neither a represented successor latent nor
+        a value-head bootstrap. The zero entries returned for those rows are
+        boundary values; they are not model evaluations of an absorbing latent.
+        """
+
+        if dones.dtype != torch.bool or dones.dim() != 1:
+            raise ValueError("`dones` must be a one-dimensional boolean tensor.")
+        if template.shape != dones.shape:
+            raise ValueError("The successor-value template must match `dones`.")
+        if len(next_latents) != dones.shape[0]:
+            raise ValueError("The successor latent list must match `dones`.")
+
+        values = torch.zeros_like(template)
+        nonterminal_indices = torch.nonzero(~dones, as_tuple=False).flatten()
+        if nonterminal_indices.numel() == 0:
+            return values
+
+        selected_x = {
+            key: value.index_select(0, nonterminal_indices)
+            for key, value in x_next_batch.items()
+        }
+        selected_y = y_next_batch.index_select(0, nonterminal_indices)
+        selected_latents = [
+            next_latents[index]
+            for index in nonterminal_indices.detach().cpu().tolist()
+        ]
+        selected_z = self._stack_optional_latent_list(
+            selected_latents,
+            "next_latent",
+        )
+        selected_values, _ = model.used_value(
+            selected_x,
+            selected_y,
+            n=self.rl_cfg.inner_unroll_n,
+            z=selected_z,
+        )
+        return values.index_copy(
+            0,
+            nonterminal_indices,
+            selected_values.to(dtype=values.dtype),
+        )
+
     def _compute_training_action_mask(
         self,
         x_batch: Dict[str, torch.Tensor],
@@ -1625,7 +1756,7 @@ class UPITrmTrainer:
         torch.Tensor,
         torch.Tensor,
         Optional[TinyRecursiveReasoningModel_ACTV1InnerCarry],
-        Optional[TinyRecursiveReasoningModel_ACTV1InnerCarry],
+        List[Optional[ReplayLatent]],
     ]:
         """
         Sample a batch of K-step segments from replay, collecting up to K rewards per start state.
@@ -1638,6 +1769,7 @@ class UPITrmTrainer:
             rewards_K: [batch_size, K] rewards (zero-padded if fewer than K steps)
             dones_K: [batch_size, K] done flags (zero-padded if fewer than K steps)
             steps_taken: [batch_size] actual number of steps collected per sample (1 to K)
+            end_latents: Successor carries for nonterminal endpoints and None for terminals
         """
 
         assert self.rl_cfg.K >= 1, "RLConfig.K must be >= 1."
@@ -1728,7 +1860,6 @@ class UPITrmTrainer:
         yK_batch = torch.stack(end_plans, dim=0).to(self.device)
 
         z_batch = self._stack_optional_latent_list(start_latents, "latent")
-        zK_batch = self._stack_optional_latent_list(end_latents, "next_latent")
         return (
             x_batch,
             y_batch,
@@ -1738,7 +1869,7 @@ class UPITrmTrainer:
             dones_K,
             steps_taken,
             z_batch,
-            zK_batch,
+            end_latents,
         )
 
     def _has_complete_k_step_segment(self, start_idx: int, horizon: int) -> bool:
@@ -1772,7 +1903,10 @@ class UPITrmTrainer:
         exact_k_step_targets = bool(
             getattr(self.rl_cfg, "exact_k_step_targets", False)
         )
-        bootstrap_model = self.model if exact_k_step_targets else self.target_model
+        # The fitted target uses the frozen target head even in exact fixed-K
+        # mode. This population target-network backup is distinct from a
+        # self-bootstrap with the value head currently being optimized.
+        bootstrap_model = self.target_model
         
         if self.rl_cfg.K == 1:
             transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
@@ -1781,20 +1915,20 @@ class UPITrmTrainer:
                     validate_transition(transition, require_clock=True)
             x_batch, y_batch, x_next_batch, y_next_batch, _, rewards, dones = self._stack_batch(transitions)
             z_batch = self._stack_latents(transitions, "latent")
-            z_next_batch = self._stack_latents(transitions, "next_latent")
             debug_batch = (x_batch, y_batch)
 
             self.value_opt.zero_grad()
 
             bootstrap_model.eval()
             with torch.no_grad():
-                v_next, _ = bootstrap_model.used_value(
+                v_next = self._nonterminal_successor_values(
+                    bootstrap_model,
                     x_next_batch,
                     y_next_batch,
-                    n=self.rl_cfg.inner_unroll_n,
-                    z=z_next_batch,
+                    dones,
+                    [transition.next_latent for transition in transitions],
+                    template=rewards,
                 )
-                v_next = torch.where(dones, torch.zeros_like(v_next), v_next)
 
             self.model.train()
             v_s, _ = self.model.used_value(
@@ -1835,7 +1969,7 @@ class UPITrmTrainer:
                 dones_K,
                 steps_taken,
                 z_batch,
-                zK_batch,
+                end_latents,
             ) = self._sample_k_step_batch(self.rl_cfg.batch_size)
             debug_batch = (x_batch, y_batch)
 
@@ -1846,11 +1980,18 @@ class UPITrmTrainer:
                 gamma = self.rl_cfg.gamma
                 K = self.rl_cfg.K
 
-                v_K, _ = bootstrap_model.used_value(
+                final_indices = (steps_taken - 1).clamp(min=0)
+                done_final = dones_K[
+                    torch.arange(dones_K.shape[0], device=self.device),
+                    final_indices,
+                ]
+                v_K = self._nonterminal_successor_values(
+                    bootstrap_model,
                     xK_batch,
                     yK_batch,
-                    n=self.rl_cfg.inner_unroll_n,
-                    z=zK_batch,
+                    done_final,
+                    end_latents,
+                    template=rewards_K[:, 0],
                 )
                 G_K = compute_k_step_bootstrapped_target(
                     rewards_K=rewards_K,
@@ -1860,7 +2001,9 @@ class UPITrmTrainer:
                     gamma=gamma,
                     K=K,
                     exact_k_step_targets=bool(getattr(self.rl_cfg, "exact_k_step_targets", False)),
-                    C_max=getattr(self.rl_cfg, "C_max", None),  # Paper Eq. 12: V(s_abs) = -C_max
+                    # Compatibility argument; the terminal reward already folds
+                    # the shared b=-C_max boundary exactly once.
+                    C_max=getattr(self.rl_cfg, "C_max", None),
                 )
 
             self.model.train()
@@ -1950,7 +2093,6 @@ class UPITrmTrainer:
         transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
         x_batch, y_batch, x_next_batch, y_next_batch, actions, rewards, dones = self._stack_batch(transitions)
         z_batch = self._stack_latents(transitions, "latent")
-        z_next_batch = self._stack_latents(transitions, "next_latent")
         action_mask = self._compute_training_action_mask(x_batch, y_batch)
 
         self.model.train()
@@ -1969,7 +2111,7 @@ class UPITrmTrainer:
             )
             old_probs = old_dist.probs
             
-            # === Exact baseline computation (Theorem 5.9) ===
+            # === Exact statewise baseline for Theorem 6.7 ===
             # When exact_baseline_summation=True, compute E_{a ~ π}[Q̂(s,a)] via exact
             # summation over ALL discrete actions. This enables the O(α·ε_A) bound
             # instead of naive O(ε_A) - the key theoretical contribution.
@@ -2073,16 +2215,13 @@ class UPITrmTrainer:
                     n=self.rl_cfg.inner_unroll_n,
                     z=z_batch,
                 )
-                v_next, _ = self.model.used_value(
+                v_next = self._nonterminal_successor_values(
+                    self.model,
                     x_next_batch,
                     y_next_batch,
-                    n=self.rl_cfg.inner_unroll_n,
-                    z=z_next_batch,
-                )
-                v_next_masked = torch.where(
                     dones,
-                    torch.zeros_like(v_next),
-                    v_next,
+                    [transition.next_latent for transition in transitions],
+                    template=rewards,
                 )
 
                 # Compute advantages (GAE or 1-step TD)
@@ -2097,7 +2236,7 @@ class UPITrmTrainer:
                         gae_lambda=gae_lambda,
                     )
                 else:
-                    td_target = rewards + gamma * v_next_masked
+                    td_target = rewards + gamma * v_next
                     adv = td_target - v_s
 
             if (
@@ -2239,7 +2378,7 @@ class UPITrmTrainer:
         #    - Deploy/evaluate the explicit mixture from _mixed_policy_dist()
         #    - Optimize one candidate proposal without recursive promotion
         #
-        # 2. distill_mixture_policy=True (HEURISTIC - Section 6.5):
+        # 2. distill_mixture_policy=True (separate deployment heuristic):
         #    - Distill the mixture into policy_model_old via KL minimization
         #    - Introduces projection error NOT covered by theory
         #
@@ -2460,22 +2599,18 @@ class UPITrmTrainer:
                 transitions = self.replay.sample_batch(self.rl_cfg.batch_size)
                 x_b, y_b, x_next_b, y_next_b, _, rewards_b, dones_b = self._stack_batch(transitions)
                 z_b = self._stack_latents(transitions, "latent")
-                z_next_b = self._stack_latents(transitions, "next_latent")
                 v_s, _ = self.model.used_value(
                     x_b, y_b, n=self.rl_cfg.inner_unroll_n, z=z_b
                 )
-                v_next, _ = self.model.used_value(
+                v_next = self._nonterminal_successor_values(
+                    self.model,
                     x_next_b,
                     y_next_b,
-                    n=self.rl_cfg.inner_unroll_n,
-                    z=z_next_b,
-                )
-                v_next_masked = torch.where(
                     dones_b,
-                    torch.zeros_like(v_next),
-                    v_next,
+                    [transition.next_latent for transition in transitions],
+                    template=rewards_b,
                 )
-                td_target = rewards_b + self.rl_cfg.gamma * v_next_masked
+                td_target = rewards_b + self.rl_cfg.gamma * v_next
                 adv = td_target - v_s
                 debug_metrics["adv_mean"] = float(adv.mean().item())
                 debug_metrics["adv_std"] = float(adv.std(unbiased=False).item())
@@ -2804,7 +2939,7 @@ class UPITrmTrainer:
     
     def set_checker_fn(self, checker_fn) -> None:
         """
-        Set the checker function for exact baseline computation (Theorem 5.9).
+        Set the checker function for Theorem 6.7's centered estimator.
         
         When exact_baseline_summation=True, the trainer needs access to the checker
         function to compute Q̂(s,a) = r(s,a,s') + γV(s') for all actions.
@@ -2890,20 +3025,20 @@ class UPITrmTrainer:
         """
         Compute theory-related metrics from the paper:
         
-        Section 4 (Contraction):
-        - hat_Cz: Estimated C_z = max ||z^(1) - z^(0)|| (Eq. 9)
+        Recurrent-map diagnostics:
+        - hat_Cz: Estimated C_z = max ||z^(1) - z^(0)||
         - hat_Lz: Estimated local Lipschitz constant of inner map
         - hat_Lv: Estimated Lipschitz constant of value head w.r.t. z
-        - unrolling_term: L_V * L_z^n * C_z / (1 - L_z) (Eq. 10)
+        - unrolling_term: L_V * L_z^n * C_z / (1 - L_z)
         
-        Section 4.2 (Two-timescale / Persistent latents):
+        Optional persistent slow-drift diagnostics:
         - drift_mean/max: Empirical C_drift(n) from collected episodes
         - plan_change_mean/max: Empirical Δy_max from collected episodes
         
-        Section 5 (Bellman residual):
+        Finite-batch residual diagnostics:
         - bellman_residual_*: Empirical Bellman residual statistics
         
-        Section 5.4 (Value of memory):
+        Value-of-memory diagnostic:
         - value_of_memory_*: ||V_persistent - V_memoryless||
         """
         metrics: Dict[str, float] = {}
@@ -2913,10 +3048,9 @@ class UPITrmTrainer:
                 transitions = self.replay.sample_batch(min(self.rl_cfg.batch_size, len(self.replay)))
                 x_b, y_b, x_next_b, y_next_b, _, rewards_b, dones_b = self._stack_batch(transitions)
                 z_b = self._stack_latents(transitions, "latent")
-                z_next_b = self._stack_latents(transitions, "next_latent")
                 
-                # === Section 4: Contraction metrics ===
-                # Estimate C_z (Eq. 9)
+                # Recurrent-map diagnostics.
+                # Estimate C_z.
                 hat_Cz = estimate_Cz(self.model, x_b, y_b)
                 metrics["hat_Cz"] = hat_Cz
                 
@@ -2957,28 +3091,30 @@ class UPITrmTrainer:
                 v_s, _ = self.model.used_value(
                     x_b, y_b, n=self.rl_cfg.inner_unroll_n, z=z_b
                 )
-                v_next, _ = self.model.used_value(
+                v_next = self._nonterminal_successor_values(
+                    self.model,
                     x_next_b,
                     y_next_b,
-                    n=self.rl_cfg.inner_unroll_n,
-                    z=z_next_b,
+                    dones_b,
+                    [transition.next_latent for transition in transitions],
+                    template=rewards_b,
                 )
                 residual_metrics = compute_empirical_bellman_residual(
                     v_s, rewards_b, v_next, dones_b, self.rl_cfg.gamma
                 )
                 metrics.update(residual_metrics)
                 
-                # === Section 4.2: Two-timescale / Drift metrics (Lemma 4.4) ===
+                # === Optional persistent slow-drift metrics ===
                 if self._drift_values:
                     metrics["drift_mean"] = sum(self._drift_values) / len(self._drift_values)
                     metrics["drift_max"] = max(self._drift_values)
                     
-                # Plan change tracking (Assumption 4.3: Δy_max)
+                # Plan-change tracking for the optional slow-drift premise.
                 if self._plan_changes:
                     metrics["plan_change_mean"] = sum(self._plan_changes) / len(self._plan_changes)
                     metrics["plan_change_max"] = max(self._plan_changes)
                 
-                # === Section 5.4: Value of memory (Corollary 5.4, Remark 5.5) ===
+                # Optional value-of-memory diagnostic.
                 if getattr(self.rl_cfg, "compute_value_of_memory", False):
                     # Compute value of memory residual
                     vom_metrics = compute_value_of_memory_residual(

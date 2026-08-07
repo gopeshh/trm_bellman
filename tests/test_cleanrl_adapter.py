@@ -89,7 +89,23 @@ def test_build_trm_cfg_uses_rlconfig_defaults():
     rl_defaults = RLConfig(batch_size=4, max_edits=16, gamma=0.99)
     assert trm_cfg["rl_enable_contraction"] == rl_defaults.enable_contraction
     assert trm_cfg["rl_target_Lz"] == rl_defaults.target_Lz
-    assert trm_cfg["rl_latent_ball_radius"] == getattr(rl_defaults, "latent_ball_radius", 10.0)
+    assert trm_cfg["rl_latent_projection_mode"] == rl_defaults.latent_projection_mode
+    assert trm_cfg["rl_latent_ball_radius"] == rl_defaults.latent_ball_radius
+
+
+def test_build_trm_cfg_propagates_explicit_disabled_projection():
+    from rl.cleanrl.trm_adapter import _build_trm_cfg, build_sudoku_bundle
+
+    config = {
+        "dataset_path": "data/sudoku-4x4-trivial",
+        "batch_size": 4,
+        "latent_projection_mode": "disabled",
+    }
+    bundle = build_sudoku_bundle(config)
+    trm_cfg = _build_trm_cfg(config, bundle)
+
+    assert trm_cfg["rl_latent_projection_mode"] == "disabled"
+    assert trm_cfg["rl_latent_ball_radius"] is None
 
 
 def test_pool_size_matches_in_house():

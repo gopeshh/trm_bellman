@@ -28,6 +28,7 @@ lr_min_factor: 1.0
 enable_contraction: false
 target_Lz: 0.9
 target_Lv: 1.0
+latent_projection_mode: enabled
 latent_ball_radius: 10.0
 opnorm_clamp_interval: 0
 episodic_latent: true
@@ -39,7 +40,7 @@ disable_constraint_masking: true
 reward_shaping: true
 solve_terminal_reward: 1.0
 fail_terminal_reward: -16.0
-stop_action_mode: disabled
+stop_action_mode: terminal
 C_max: 16.0
 solved_threshold: null
 

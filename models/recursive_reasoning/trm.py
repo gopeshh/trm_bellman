@@ -1,12 +1,13 @@
-from typing import Tuple, List, Dict, Optional, Any
+from typing import Tuple, List, Dict, Optional, Any, Literal
 from dataclasses import dataclass
 import math
+import warnings
 import torch
 import copy
 import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Categorical
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from models.common import trunc_normal_init_
 from models.layers import rms_norm, SwiGLU, Attention, RotaryEmbedding, CosSin, CastedEmbedding, CastedLinear
@@ -107,11 +108,79 @@ class TinyRecursiveReasoningModel_ACTV1Config(BaseModel):
     rl_num_actions: int = 0   # Total discrete actions; must be > 0 if policy head enabled
     rl_enable_z_init_encoder: bool = False  # Use (x,y)-dependent z initialization
     
-    # === Forward-invariant region (Assumption 4.1 in paper) ===
-    # If > 0, project latent z to ball of this radius after each latent_step
-    # Ensures z ∈ Z_inv = {z : ||z|| ≤ R} for contraction guarantees
-    # Paper Eq. 14: z ← z · min(1, R/||z||)
-    rl_latent_ball_radius: float = 0.0  # 0 = disabled
+    # === Forward-invariant recurrent projection ===
+    # Enabled mode applies Euclidean projection Pi_R with a finite R > 0.
+    # Disabled mode applies the identity operator and has no radius.
+    rl_latent_projection_mode: Literal["enabled", "disabled"] = "disabled"
+    rl_latent_ball_radius: Optional[float] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_projection_config(cls, data: Any) -> Any:
+        """Migrate historical radius-only model payloads to an explicit mode."""
+
+        if not isinstance(data, dict):
+            return data
+        migrated = dict(data)
+        if "rl_latent_projection_mode" in migrated:
+            if (
+                migrated["rl_latent_projection_mode"] == "disabled"
+                and "rl_latent_ball_radius" not in migrated
+            ):
+                migrated["rl_latent_ball_radius"] = None
+            return migrated
+        if "rl_latent_ball_radius" not in migrated:
+            return migrated
+
+        radius = migrated["rl_latent_ball_radius"]
+        if radius == 0 or radius == 0.0:
+            warnings.warn(
+                "Legacy model config used rl_latent_ball_radius=0 to disable "
+                "projection; migrate to rl_latent_projection_mode='disabled' "
+                "with rl_latent_ball_radius=None.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            migrated["rl_latent_projection_mode"] = "disabled"
+            migrated["rl_latent_ball_radius"] = None
+        elif radius is not None:
+            warnings.warn(
+                "Legacy model config omitted rl_latent_projection_mode; "
+                "inferred 'enabled' from its positive projection radius.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            migrated["rl_latent_projection_mode"] = "enabled"
+        return migrated
+
+    @model_validator(mode="after")
+    def _validate_projection_config(self) -> "TinyRecursiveReasoningModel_ACTV1Config":
+        radius = self.rl_latent_ball_radius
+        if self.rl_latent_projection_mode == "enabled":
+            if radius is None or not math.isfinite(radius) or radius <= 0.0:
+                raise ValueError(
+                    "Enabled recurrent projection requires a finite "
+                    "rl_latent_ball_radius > 0."
+                )
+            forward_dtype = getattr(torch, self.forward_dtype, None)
+            if not isinstance(forward_dtype, torch.dtype):
+                raise ValueError(
+                    "Enabled recurrent projection requires a floating-point "
+                    "forward_dtype."
+                )
+            dtype_limits = torch.finfo(forward_dtype)
+            if radius < dtype_limits.tiny or radius > dtype_limits.max:
+                raise ValueError(
+                    "Enabled recurrent projection radius must remain finite and "
+                    "positive when represented in forward_dtype; require "
+                    f"{dtype_limits.tiny} <= R <= {dtype_limits.max}."
+                )
+        elif radius is not None:
+            raise ValueError(
+                "Disabled recurrent projection uses the identity operator and "
+                "requires rl_latent_ball_radius=None."
+            )
+        return self
 
 class TinyRecursiveReasoningModel_ACTV1Block(nn.Module):
     def __init__(self, config: TinyRecursiveReasoningModel_ACTV1Config) -> None:
@@ -305,19 +374,20 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
             z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
         z_H = self.L_level(z_H, z_L, **seq_info)
 
-        pre_projection_norm = torch.sqrt(
-            z_H.pow(2).sum(dim=(1, 2)) + z_L.pow(2).sum(dim=(1, 2))
+        pre_projection_norm = (
+            self._joint_carry_geometry(z_H, z_L)[0].squeeze(-1).squeeze(-1)
         )
         
-        # === Forward-invariant projection (Assumption 4.1, Eq. 14 in paper) ===
-        # Project z to ball of radius R: z ← z · min(1, R/||z||)
-        # This ensures z ∈ Z_inv = {z : ||z|| ≤ R} for contraction guarantees
-        R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
+        # === Forward-invariant recurrent projection ===
+        # Enabled: Euclidean Pi_R for a validated finite R > 0.
+        # Disabled: the recurrent projection operator is exactly the identity.
         projection_active = torch.zeros_like(
             pre_projection_norm,
             dtype=torch.bool,
         )
-        if R > 0.0:
+        if self.config.rl_latent_projection_mode == "enabled":
+            R = self.config.rl_latent_ball_radius
+            assert R is not None
             projection_active = pre_projection_norm > R
             z_H, z_L = self._project_carry_to_ball(z_H, z_L, R)
         
@@ -335,12 +405,58 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Project the joint recurrent carry under its Euclidean product norm."""
 
-        joint_norm = torch.sqrt(
-            z_H.pow(2).sum(dim=(1, 2), keepdim=True)
-            + z_L.pow(2).sum(dim=(1, 2), keepdim=True)
-        ).clamp(min=1e-8)
-        scale = torch.clamp(radius / joint_norm, max=1.0)
-        return z_H * scale, z_L * scale
+        joint_norm, unit_H, unit_L = self._joint_carry_geometry(z_H, z_L)
+        radius_tensor = z_H.new_tensor(radius)
+        outside = joint_norm > radius_tensor
+        return (
+            torch.where(outside, unit_H * radius_tensor, z_H),
+            torch.where(outside, unit_L * radius_tensor, z_L),
+        )
+
+    @staticmethod
+    def _joint_carry_geometry(
+        z_H: torch.Tensor,
+        z_L: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return a stable joint norm and unit direction for one carry batch."""
+
+        max_abs = torch.maximum(
+            z_H.abs().amax(dim=(1, 2), keepdim=True),
+            z_L.abs().amax(dim=(1, 2), keepdim=True),
+        )
+        safe_max_abs = torch.where(
+            max_abs > 0.0,
+            max_abs,
+            torch.ones_like(max_abs),
+        )
+        scaled_H = z_H / safe_max_abs
+        scaled_L = z_L / safe_max_abs
+        accumulation_dtype = (
+            torch.float32
+            if z_H.dtype in (torch.float16, torch.bfloat16)
+            else z_H.dtype
+        )
+        scaled_norm = torch.sqrt(
+            scaled_H.to(accumulation_dtype).square().sum(
+                dim=(1, 2),
+                keepdim=True,
+            )
+            + scaled_L.to(accumulation_dtype).square().sum(
+                dim=(1, 2),
+                keepdim=True,
+            )
+        )
+        joint_norm = (max_abs.to(accumulation_dtype) * scaled_norm).to(z_H.dtype)
+        safe_scaled_norm = torch.where(
+            scaled_norm > 0.0,
+            scaled_norm,
+            torch.ones_like(scaled_norm),
+        ).to(z_H.dtype)
+        return (
+            joint_norm,
+            scaled_H / safe_scaled_norm,
+            scaled_L / safe_scaled_norm,
+        )
 
     def forward(self, carry: TinyRecursiveReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor]) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         latent_context = self.build_latent_context(batch)
@@ -693,10 +809,11 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             z_H = global_H + z_init_H
             z_L = global_L + z_init_L
 
-            # === Project initial latent to forward-invariant region (Assumption 4.1) ===
+            # Project initial latent into the declared invariant ball.
             # Paper requires z^(0) ∈ Z_inv for contraction guarantees to hold
-            R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
-            if R > 0.0:
+            if self.config.rl_latent_projection_mode == "enabled":
+                R = self.config.rl_latent_ball_radius
+                assert R is not None
                 z_H, z_L = self.inner._project_carry_to_ball(z_H, z_L, R)
 
             result = TinyRecursiveReasoningModel_ACTV1InnerCarry(
@@ -712,10 +829,11 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             reset_flag = torch.ones(batch_size, dtype=torch.bool, device=device)
             z = self.inner.reset_carry(reset_flag, empty_carry)
 
-            # === Project initial latent to forward-invariant region (Assumption 4.1) ===
+            # Project a supplied latent into the declared invariant ball.
             # Paper requires z^(0) ∈ Z_inv for contraction guarantees to hold
-            R = getattr(self.config, 'rl_latent_ball_radius', 0.0)
-            if R > 0.0:
+            if self.config.rl_latent_projection_mode == "enabled":
+                R = self.config.rl_latent_ball_radius
+                assert R is not None
                 z_H, z_L = self.inner._project_carry_to_ball(z.z_H, z.z_L, R)
                 z = TinyRecursiveReasoningModel_ACTV1InnerCarry(
                     z_H=z_H,

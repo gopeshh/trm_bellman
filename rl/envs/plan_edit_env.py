@@ -1,6 +1,7 @@
 import copy
+import math
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, List, Literal, Optional, Tuple, TYPE_CHECKING
 
 import torch
 
@@ -24,6 +25,8 @@ class PlanEditEnvConfig:
         solved_threshold: Checker score that triggers episode termination
         stop_action_mode: How STOP action behaves ("terminal", "noop", "disabled")
         stop_action_penalty: Penalty for choosing STOP in "noop" mode
+        C_max: Finite nonnegative checker ceiling. The formal absorbing boundary
+            is b = -C_max; folded terminal rewards include gamma * b once.
 
         UNDO ACTION (IMPLEMENTATION_GUIDELINE Phase 5.4):
         enable_undo: If True, add UNDO action that reverts to previous plan state.
@@ -53,8 +56,9 @@ class PlanEditEnvConfig:
     vocab_size: Optional[int] = None
     solved_threshold: Optional[float] = None
     # STOP action behavior (inherited from RLConfig)
-    stop_action_mode: str = "noop"  # "terminal", "noop", "disabled"
+    stop_action_mode: Literal["terminal", "noop", "disabled"] = "noop"
     stop_action_penalty: float = -0.1
+    C_max: float = 10.0
     # UNDO action support (Phase 5.4)
     enable_undo: bool = False
     # Terminal rewards (Paper Remark 2.6: rush-to-fail mitigation)
@@ -93,10 +97,10 @@ class PlanEditEnv:
 
     ABSORBING-STATE NORMALIZATION:
         The paper assigns V(s_abs) = -C_max. This episodic environment folds
-        the discounted absorbing tail into the terminal transition, so a
-        terminal shaped reward is r_0 - Phi(s). This is return-equivalent to
-        emitting r_0 + gamma*C_max - Phi(s), transitioning to s_abs, and then
-        receiving the absorbing self-loop rewards forever.
+        the discounted absorbing tail into the terminal transition. A shaped
+        terminal reward is r_0 - Phi(s), while an unshaped terminal reward
+        includes -gamma*C_max. Each representation counts the shared absorbing
+        boundary exactly once.
     """
 
     def __init__(
@@ -113,6 +117,10 @@ class PlanEditEnv:
 
         if config.max_edits < 1:
             raise ValueError("max_edits must be at least 1")
+        if not 0.0 <= config.gamma < 1.0:
+            raise ValueError("gamma must lie in [0, 1)")
+        if not math.isfinite(config.C_max) or config.C_max < 0.0:
+            raise ValueError("C_max must be finite and nonnegative")
 
         self.vocab_size: Optional[int] = config.vocab_size
         if self.vocab_size is None:
@@ -344,7 +352,7 @@ class PlanEditEnv:
             raise RuntimeError(
                 "PlanEditEnv checkpoint action-mask presence is inconsistent."
             )
-        if saved_mask is not None:
+        if saved_mask is not None and reconstructed_mask is not None:
             if not torch.is_tensor(saved_mask):
                 saved_mask = torch.as_tensor(saved_mask, dtype=torch.bool)
             if not torch.equal(
@@ -875,9 +883,16 @@ class PlanEditEnv:
             else:
                 r = r_0 + gamma * phi_new - phi_old + stop_penalty
         else:
-            # Sparse reward: only terminal states get checker score + terminal bonus
+            # Fold gamma*b, b=-C_max, into terminal sparse rewards. The K-step
+            # target then uses zero terminal bootstrap and counts the common
+            # absorbing tail exactly once.
             if is_terminal:
-                r = phi_new + r_0 + stop_penalty
+                r = (
+                    phi_new
+                    + r_0
+                    + stop_penalty
+                    - gamma * self.config.C_max
+                )
             else:
                 r = stop_penalty  # Only STOP penalty if any
         

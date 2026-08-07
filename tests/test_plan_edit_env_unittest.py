@@ -62,6 +62,22 @@ class TestPlanEditEnv(unittest.TestCase):
                 PlanEditEnvConfig(max_edits=0, gamma=0.99, vocab_size=4),
             )
 
+    def test_invalid_absorbing_boundary_is_rejected(self):
+        for C_max in (-1.0, float("inf")):
+            with self.subTest(C_max=C_max), self.assertRaisesRegex(
+                ValueError, "C_max must be finite and nonnegative"
+            ):
+                PlanEditEnv(
+                    DummyDataset(),
+                    dummy_checker,
+                    PlanEditEnvConfig(
+                        max_edits=1,
+                        gamma=0.99,
+                        vocab_size=4,
+                        C_max=C_max,
+                    ),
+                )
+
     def test_plan_edit_env_step_and_stop(self):
         """
         REPLACED with bug reproduction test.
@@ -133,6 +149,7 @@ class TestPlanEditEnv(unittest.TestCase):
             reward_shaping=False,
             vocab_size=3,
             solved_threshold=0.5,
+            C_max=2.0,
         )
         env = PlanEditEnv(dataset, solved_checker, cfg)
         seq_len = dataset.data[0]["inputs"].numel()
@@ -142,7 +159,30 @@ class TestPlanEditEnv(unittest.TestCase):
         (_, _), reward, done, _ = env.step(action=2)
 
         self.assertTrue(done)
-        self.assertLess(abs(reward - 1.0), 1e-6)  # terminal reward equals checker score
+        self.assertLess(abs(reward - (1.0 - 0.9 * 2.0)), 1e-6)
+
+    def test_terminal_stop_folds_sparse_absorbing_boundary_once(self):
+        dataset = SingleTokenDataset()
+        cfg = PlanEditEnvConfig(
+            max_edits=2,
+            gamma=0.5,
+            reward_shaping=False,
+            vocab_size=3,
+            stop_action_mode="terminal",
+            fail_terminal_reward=-3.0,
+            C_max=2.0,
+        )
+        env = PlanEditEnv(dataset, solved_checker, cfg)
+        stop_id = dataset.data[0]["inputs"].numel() * cfg.vocab_size
+        env.set_stop_action_id(stop_id)
+        env.reset()
+
+        (_, _), reward, done, info = env.step(stop_id)
+
+        self.assertTrue(done)
+        self.assertEqual(info["done_reason"], "stop")
+        self.assertTrue(info["terminated_by_stop"])
+        self.assertLess(abs(reward - (-1.0 - 3.0 - 0.5 * 2.0)), 1e-6)
 
     def test_plan_edit_env_action_masking(self):
         """

@@ -148,6 +148,29 @@ class TestKStepTargets(unittest.TestCase):
                 exact_k_step_targets=True,
             )
 
+    def test_gamma_zero_uses_only_the_first_reward(self):
+        targets = compute_k_step_bootstrapped_target(
+            rewards_K=torch.tensor(
+                [
+                    [2.0, 30.0, 400.0],
+                    [-1.0, 50.0, 600.0],
+                ]
+            ),
+            dones_K=torch.tensor(
+                [
+                    [False, False, False],
+                    [True, False, False],
+                ]
+            ),
+            steps_taken=torch.tensor([3, 1]),
+            v_K=torch.tensor([7000.0, float("nan")]),
+            gamma=0.0,
+            K=3,
+            exact_k_step_targets=True,
+        )
+
+        torch.testing.assert_close(targets, torch.tensor([2.0, -1.0]))
+
 
 if __name__ == "__main__":
     unittest.main()

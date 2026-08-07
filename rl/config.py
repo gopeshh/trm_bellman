@@ -1,7 +1,43 @@
-from typing import Literal, Optional
+from typing import Any, Literal, Mapping, Optional
+import math
 import warnings
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+def merge_rl_config_layer(
+    base: Mapping[str, Any],
+    override: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Merge one config layer while treating projection mode/radius atomically.
+
+    The canonical loaders start from a fully materialized ``RLConfig``. Without
+    this normalization, a layer that disables projection inherits the default
+    radius, while a historical radius-only layer inherits the default enabled
+    mode. Both combinations bypass the intended Pydantic migration path.
+    """
+
+    merged = dict(base)
+    layer = dict(override)
+    has_mode = "latent_projection_mode" in layer
+    has_radius = "latent_ball_radius" in layer
+
+    if (
+        has_mode
+        and not has_radius
+        and layer["latent_projection_mode"] == "disabled"
+    ):
+        # Disabled mode declares the identity operator, so an inherited radius
+        # is not part of the resulting contract.
+        layer["latent_ball_radius"] = None
+    elif has_radius and not has_mode:
+        # A radius-only layer is a legacy payload. Remove any inherited explicit
+        # mode so RLConfig can infer enabled for R>0 or migrate R=0 to disabled
+        # with its existing DeprecationWarning.
+        merged.pop("latent_projection_mode", None)
+
+    merged.update(layer)
+    return merged
 
 
 class RLConfig(BaseModel):
@@ -37,16 +73,16 @@ class RLConfig(BaseModel):
     NOTE ON ADVANTAGE CENTERING:
     ----------------------------
     - `exact_baseline_summation=True`: Enables TRUE centering (E_{a~π}[Â(s,a)]=0 per state)
-      This is REQUIRED for Theorem 5.9's O(α·ε_A) bound.
+      This is required for Theorem 6.7's exactly centered specialization.
       
     - `batch_centered_advantage=True`: Only subtracts batch mean (a HEURISTIC).
       This does NOT enable the O(α·ε_A) bound - it's just for variance reduction.
     """
     
     # Discount / horizons
-    gamma: float = 0.99
-    K: int = 5  # K-step horizon
-    inner_unroll_n: int = 4  # n for U_n(s)
+    gamma: float = Field(default=0.99, ge=0.0, lt=1.0)
+    K: int = Field(default=5, ge=1)  # K-step horizon
+    inner_unroll_n: int = Field(default=4, ge=0)  # n for U_n(s)
     max_edits: int = Field(default=16, ge=1)
     
     # Task configuration
@@ -90,7 +126,7 @@ class RLConfig(BaseModel):
     # "terminal": STOP ends the episode (standard RL)
     # "noop": STOP is a no-op, episode continues (prevents STOP collapse)
     # "disabled": STOP action is masked out entirely
-    stop_action_mode: str = "noop"  # "terminal", "noop", "disabled"
+    stop_action_mode: Literal["terminal", "noop", "disabled"] = "noop"
     # Penalty applied when STOP is chosen (only used with "noop" mode)
     stop_action_penalty: float = -0.1
     
@@ -103,9 +139,9 @@ class RLConfig(BaseModel):
     # C_max is the maximum checker score (Φ(s_abs) in paper notation).
     # The paper defines V^π(s_abs) = -C_max for all policies.
     # This is used in K-step bootstrapping: when episode terminates, bootstrap
-    # with -C_max instead of 0 (paper Eq. 12, line 677-678).
+    # through the folded terminal reward rather than a terminal bootstrap.
     # For Sudoku: C_max = 10.0 (checker returns 0-10 scale)
-    C_max: float = 10.0
+    C_max: float = Field(default=10.0, ge=0.0, allow_inf_nan=False)
 
     # === Terminal rewards (Paper Remark 2.6: Rush-to-fail mitigation) ===
     # These are the r_0 terms in the shaped reward: r = r_0 + γ·Φ(s') - Φ(s)
@@ -120,7 +156,7 @@ class RLConfig(BaseModel):
     solve_terminal_reward: float = 0.0
     
     # Target network EMA
-    target_ema_tau: float = 0.995
+    target_ema_tau: float = Field(default=0.995, ge=0.0, le=1.0)
 
     # CPI / TRPO-style "dials"
     mixture_alpha: float = Field(
@@ -143,7 +179,7 @@ class RLConfig(BaseModel):
     
     # === Theory-exact mixture mode (Issue 4 - CPI guarantee) ===
     # 
-    # The CPI bound (Theorem 5.9) is proven for a POLICY-SPACE mixture:
+    # The CPI bound (Theorem 6.7) is proven for a POLICY-SPACE mixture:
     #     π_new = (1 - α) * π_old + α * π_candidate
     # 
     # Default behavior (theory_exact_mixture=False):
@@ -159,10 +195,10 @@ class RLConfig(BaseModel):
     # train only a policy-independent value head, and optimize one candidate
     # proposal without recursively promoting the mixture.
     # 
-    # When distill_mixture_policy=True (Section 6.5):
+    # When distill_mixture_policy=True:
     #     - The mixture is distilled into policy_model_old via KL minimization
     #     - This is a HEURISTIC approximation, NOT covered by theory
-    #     - Introduces projection error not analyzed in Theorem 5.9
+    #     - Introduces deployment error not covered by Theorem 6.7 unless bounded
     theory_exact_mixture: bool = False
 
     # The deployment bridge keeps legacy training fixed while changing only the
@@ -178,34 +214,77 @@ class RLConfig(BaseModel):
     
     # === Batch-level advantage centering (HEURISTIC, not theory-exact) ===
     # Subtracts batch mean from advantages: adv = adv - adv.mean()
-    # This is a variance-reduction heuristic, NOT the theoretical centering from Theorem 5.9.
+    # This is a variance-reduction heuristic, not Theorem 6.7's statewise centering.
     # For theory-exact centering, use exact_baseline_summation=True instead.
     # RENAMED from 'centered_advantage' for clarity.
     batch_centered_advantage: bool = True
     
-    # === Theorem 5.9: Exact baseline (KEY THEORETICAL CONTRIBUTION) ===
+    # === Theorem 6.7: exact statewise baseline ===
     # When True, compute E_{a ~ π}[Q̂(s,a)] via exact summation over ALL discrete actions.
     # This ensures E_{a~π}[Â(s,a)] = 0 EXACTLY for each state s (not just batch-level).
-    # This is what enables the O(α·ε_A) bound instead of naive O(ε_A/(1-γ)).
-    # Computationally expensive but tractable for discrete action spaces like Sudoku (~800 actions).
+    # This supplies exact statewise centering for represented discrete-action
+    # states. It does not certify the estimator's required uniform error.
     exact_baseline_summation: bool = False
     
-    # === Two-timescale / drift monitoring (Assumption 4.3, Lemma 4.4) ===
+    # === Optional persistent slow-drift diagnostics ===
     # Track C_drift(n) = ||z^(n) - z_init(x,y)|| for persistent-latent analysis
     track_drift_metrics: bool = False
     # Track Δy_max = max plan change per step (for two-timescale bound)
     track_plan_change: bool = False
     
-    # === Value of memory analysis (Section 5.4) ===
+    # === Optional value-of-memory diagnostic ===
     # If True, compute V_memoryless and the "value of memory" residual
     compute_value_of_memory: bool = False
     
-    # === Forward-invariant projection (Assumption 4.1, CRITICAL) ===
-    # Projects latent z to ball of radius R after each update: z ← z · min(1, R/||z||)
-    # This ensures z ∈ Z_inv = {z : ||z|| ≤ R} which is REQUIRED for contraction guarantees.
-    # Without this, latents can escape the contractive region, breaking Assumption 4.2.
-    # Paper Eq. 14. Recommended: 10.0 for typical hidden dimensions.
-    latent_ball_radius: float = 10.0  # ENABLED by default for theory alignment
+    # === Forward-invariant recurrent projection ===
+    # Enabled mode applies Euclidean Pi_R after each recurrent update and
+    # requires a finite R > 0. Disabled mode applies the identity operator and
+    # has no radius. Recommended enabled radius: 10.0.
+    latent_projection_mode: Literal["enabled", "disabled"] = "enabled"
+    latent_ball_radius: Optional[float] = 10.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_projection_config(cls, data: Any) -> Any:
+        """Migrate the historical radius-zero disabling convention."""
+
+        if not isinstance(data, dict):
+            return data
+        migrated = dict(data)
+        if "latent_projection_mode" in migrated:
+            if (
+                migrated["latent_projection_mode"] == "disabled"
+                and "latent_ball_radius" not in migrated
+            ):
+                migrated["latent_ball_radius"] = None
+            return migrated
+        if migrated.get("latent_ball_radius") in (0, 0.0):
+            warnings.warn(
+                "Legacy RL config used latent_ball_radius=0 to disable "
+                "projection; migrate to latent_projection_mode='disabled' "
+                "with latent_ball_radius=None.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            migrated["latent_projection_mode"] = "disabled"
+            migrated["latent_ball_radius"] = None
+        return migrated
+
+    @model_validator(mode="after")
+    def _validate_projection_config(self) -> "RLConfig":
+        radius = self.latent_ball_radius
+        if self.latent_projection_mode == "enabled":
+            if radius is None or not math.isfinite(radius) or radius <= 0.0:
+                raise ValueError(
+                    "Enabled recurrent projection requires a finite "
+                    "latent_ball_radius > 0."
+                )
+        elif radius is not None:
+            raise ValueError(
+                "Disabled recurrent projection uses the identity operator and "
+                "requires latent_ball_radius=None."
+            )
+        return self
 
     # GAE (Generalized Advantage Estimation)
     # NOTE: GAE is a practical heuristic (Section 6.2) - not covered by formal theory bounds
@@ -283,25 +362,24 @@ class RLConfig(BaseModel):
         issues = []
         
         # Discount sanity check
-        if not (0.0 < self.gamma < 1.0):
+        if not (0.0 <= self.gamma < 1.0):
             issues.append(
-                f"gamma={self.gamma} is outside (0,1). Theoretical guarantees "
-                "assume a strictly discounted MDP. Set 0 < gamma < 1."
+                f"gamma={self.gamma} is outside [0,1). Set 0 <= gamma < 1."
             )
         
         specialization_notes = []
-        if self.latent_ball_radius <= 0:
+        if self.latent_projection_mode == "disabled":
             specialization_notes.append("forward-invariant projection disabled")
         if not self.enable_contraction:
             specialization_notes.append("clamping intervention disabled")
         elif self.target_Lz >= 1.0:
             specialization_notes.append("configured target_Lz is not below 1")
         
-        # Check exact baseline (Theorem 5.9) - THE KEY THEORETICAL CONTRIBUTION
+        # Check exact statewise baseline for Theorem 6.7.
         if not self.exact_baseline_summation:
             issues.append(
                 "exact_baseline_summation=False: Using approximate baseline. "
-                "This gives O(ε_A/(1-γ)) bound instead of O(α·ε_A) from Theorem 5.9. "
+                "This does not satisfy Theorem 6.7's exact statewise centering premise. "
                 "For discrete action spaces (Sudoku), enable for tighter bounds."
             )
         if not self.exact_k_step_targets:
@@ -314,6 +392,16 @@ class RLConfig(BaseModel):
             issues.append("mixture_alpha must lie in [0, 1] for a convex policy mixture.")
 
         if self.training_protocol == "fixed_base_exact":
+            if self.stop_action_mode != "terminal":
+                issues.append(
+                    "fixed_base_exact requires stop_action_mode='terminal' so "
+                    "STOP is the terminal action in the declared edit MDP."
+                )
+            if self.value_target_clip is not None:
+                issues.append(
+                    "fixed_base_exact requires value_target_clip=None so the "
+                    "declared K-step population target is not clipped."
+                )
             if not self.theory_exact_mixture:
                 issues.append(
                     "fixed_base_exact requires theory_exact_mixture=True for "
@@ -324,6 +412,12 @@ class RLConfig(BaseModel):
                     "fixed_base_exact requires opnorm_clamp_interval=0 because "
                     "scheduled clamping would mutate the frozen recurrent map."
                 )
+            if self.enable_contraction and not self.disable_value_head_norm:
+                issues.append(
+                    "fixed_base_exact with contraction enabled requires "
+                    "disable_value_head_norm=True so value-head spectral-norm "
+                    "buffers cannot mutate during exact action enumeration."
+                )
         elif self.theory_exact_mixture:
             issues.append(
                 "theory_exact_mixture=True with training_protocol='legacy' does "
@@ -331,11 +425,11 @@ class RLConfig(BaseModel):
                 "frozen one-step proposal."
             )
         
-        # Check distillation (Section 6.5)
+        # Distillation is a separate deployment policy.
         if self.distill_mixture_policy:
             issues.append(
                 "distill_mixture_policy=True: Distillation is NOT covered by theory "
-                "(Section 6.5). The projected policy may not satisfy improvement guarantees."
+                "The projected policy has no direct exact-mixture guarantee."
             )
         
         # Check CPI mixture mode (Issue 4)
@@ -365,7 +459,8 @@ class RLConfig(BaseModel):
         return {
             "theory_aligned": len(issues) == 0,
             "issues": issues,
-            "forward_invariant": self.latent_ball_radius > 0,
+            "forward_invariant": self.latent_projection_mode == "enabled",
+            "latent_projection_mode": self.latent_projection_mode,
             "clamping_enabled": self.enable_contraction,
             "global_contraction_certified": False,
             "exact_baseline": self.exact_baseline_summation,
@@ -383,24 +478,32 @@ class RLConfig(BaseModel):
         Returns True if configuration matches the exact CPI snapshot protocol.
         Projection and contraction are optional specializations of the finite-reference
         result, not prerequisites for exact centering or mixture deployment:
-        - Exact K-step targets (Section 5.1)
-        - Exact baseline summation (Theorem 5.9) - THE KEY REQUIREMENT
+        - Exact K-step targets
+        - Exact baseline summation (Theorem 6.7)
         - Theory-exact CPI mixture (Issue 4) - policy-space not parameter-space
-        - No distillation (Section 6.5)
+        - No distillation
         
         NOTE: batch_centered_advantage is NOT checked because it's just a heuristic.
         The theory requires exact_baseline_summation for true centering.
         """
         return (
-            0.0 < self.gamma < 1.0 and
+            0.0 <= self.gamma < 1.0 and
             self.training_protocol == "fixed_base_exact" and
+            self.stop_action_mode == "terminal" and
+            self.value_target_clip is None and
             self.exact_k_step_targets and
             self.exact_baseline_summation and  # THE KEY REQUIREMENT for O(α·ε_A)
             self.theory_exact_mixture and  # Policy-space mixture for CPI guarantee
             not self.distill_mixture_policy and
             self.policy_epsilon == 0.0 and
             0.0 <= self.mixture_alpha <= 1.0 and
-            (not self.enable_contraction or self.opnorm_clamp_interval == 0)
+            (
+                not self.enable_contraction
+                or (
+                    self.opnorm_clamp_interval == 0
+                    and self.disable_value_head_norm
+                )
+            )
         )
 
     def is_theory_exact(self) -> bool:

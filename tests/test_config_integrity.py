@@ -181,7 +181,12 @@ class TestConfigIntegrity(unittest.TestCase):
         self.assertNotIn("effective_config_sha256", matrix)
         self.assertEqual(
             set(matrix["bridge_cells"]),
-            {"B0_I00", "Bz_I10", "Bd_I01", "Bt", "Bb", "I11"},
+            {"B0_I00", "Bz_I10", "Bd_I01", "Bb", "I11"},
+        )
+        self.assertIn("Bt", matrix["non_executable_cells"])
+        self.assertIn(
+            "both paths use the frozen target network",
+            matrix["non_executable_cells"]["Bt"],
         )
         self.assertEqual(set(matrix["matched_cells"]), {"UPI_TRM", "TRM_PPO"})
 
@@ -266,7 +271,6 @@ class TestConfigIntegrity(unittest.TestCase):
         expected_changes = {
             "Bz_I10": {"episodic_latent"},
             "Bd_I01": {"evaluation_policy_mode"},
-            "Bt": {"exact_k_step_targets"},
             "Bb": {"exact_baseline_summation"},
             "I11": {"episodic_latent", "evaluation_policy_mode"},
         }
@@ -285,18 +289,10 @@ class TestConfigIntegrity(unittest.TestCase):
             "preinterpolation_exact_mixture",
         )
         self.assertFalse(base.exact_k_step_targets)
-        self.assertTrue(cells["Bt"].exact_k_step_targets)
         self.assertFalse(base.exact_baseline_summation)
         self.assertTrue(cells["Bb"].exact_baseline_summation)
 
         self.assertEqual(base.K, 1)
-        self.assertEqual(cells["Bt"].K, 1)
-        self.assertEqual(
-            self.run_matrix["bridge_estimands"]["Bt"],
-            "With K=1 fixed, Bt changes the bootstrap network from the EMA target "
-            "model to the current evaluator; it is not a general multistep-target "
-            "contrast.",
-        )
 
     def test_confirmatory_c2_cells_and_exact_schedule_are_coherent(self):
         matrix = self.run_matrix
@@ -326,6 +322,13 @@ class TestConfigIntegrity(unittest.TestCase):
             "gamma",
             "inner_unroll_n",
             "max_edits",
+            "task_name",
+            "solved_threshold",
+            "use_constraint_checker",
+            "use_progress_checker",
+            "use_feasibility_checker",
+            "feasibility_violation_weight",
+            "feasibility_zerocand_weight",
             "batch_size",
             "rollout_episodes_per_step",
             "policy_lr",
@@ -333,12 +336,14 @@ class TestConfigIntegrity(unittest.TestCase):
             "entropy_coef",
             "lr_schedule",
             "enable_contraction",
+            "latent_projection_mode",
             "latent_ball_radius",
             "disable_constraint_masking",
             "reward_shaping",
             "solve_terminal_reward",
             "fail_terminal_reward",
             "stop_action_mode",
+            "stop_action_penalty",
             "C_max",
             "eval_num_episodes",
             "eval_seed",

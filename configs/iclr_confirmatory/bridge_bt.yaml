@@ -1,2 +1,3 @@
-# C1 Bt: only the target-construction factor differs from B0.
+# Historical, unregistered C1 Bt fixture. With K=1, this toggle no longer
+# changes the bootstrap evaluator or defines an executable one-factor contrast.
 exact_k_step_targets: true

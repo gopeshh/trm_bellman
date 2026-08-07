@@ -1,5 +1,9 @@
 #!/bin/bash
-# Launch the theorem-aligned episodic-z hard-suite rerun across 2 GPUs.
+# Historical launcher for the retired episodic-z hard-suite protocol.
+#
+# The referenced fixed_base_exact config is not a registered confirmatory
+# assignment. Keep this file for provenance, but fail before creating output
+# directories, building binaries, or starting training.
 #
 # Protocol:
 #   - dataset: sudoku-4x4-easy_6to8empties
@@ -10,6 +14,11 @@
 #   - config: exact-baseline / theory-exact mixture revision config
 
 set -euo pipefail
+
+echo \
+    "ERROR: this historical launcher is retired; its fixed_base_exact config is not a registered executable assignment." \
+    >&2
+exit 2
 
 FBCODE_DIR="$HOME/fbsource/fbcode"
 FBSOURCE_ROOT="$HOME/fbsource"

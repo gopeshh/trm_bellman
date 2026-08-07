@@ -428,13 +428,15 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 return self.samples[idx]
 
         dataset = FixedDataset()
+        fixed_base = training_protocol == "fixed_base_exact"
+        stop_action_mode = "terminal" if fixed_base else "disabled"
         env_cfg = PlanEditEnvConfig(
             max_edits=3,
             gamma=0.9,
             reward_shaping=False,
             task_type="dummy",
             vocab_size=dataset.vocab_size,
-            stop_action_mode="disabled",
+            stop_action_mode=stop_action_mode,
             fail_terminal_reward=-1.0,
         )
         env = PlanEditEnv(
@@ -456,18 +458,20 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             episodic_latent=episodic_latent,
             task_name="dummy",
             solved_threshold=None,
-            stop_action_mode="disabled",
+            stop_action_mode=stop_action_mode,
             reward_shaping=False,
             fail_terminal_reward=-1.0,
+            value_target_clip=None if fixed_base else 20.0,
             enable_contraction=False,
             opnorm_clamp_interval=0,
-            latent_ball_radius=0.0,
+            latent_projection_mode="disabled",
+            latent_ball_radius=None,
             lr_schedule="constant",
             use_tqdm=False,
             training_protocol=training_protocol,
-            theory_exact_mixture=training_protocol == "fixed_base_exact",
-            exact_k_step_targets=training_protocol == "fixed_base_exact",
-            exact_baseline_summation=training_protocol == "fixed_base_exact",
+            theory_exact_mixture=fixed_base,
+            exact_k_step_targets=fixed_base,
+            exact_baseline_summation=fixed_base,
             capture_preinterpolation_policy_pair=(
                 capture_preinterpolation_policy_pair
             ),
@@ -481,6 +485,11 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 cfg.batch_size,
             )
         )
+        if fixed_base:
+            # Keep terminal STOP in the declared action space while making tests
+            # that exercise a full three-edit budget deterministic.
+            with torch.no_grad():
+                model.edit_policy.mlp[-1].bias[-1] = -1e9
         trainer = UPITrmTrainer(model, env, cfg, torch.device("cpu"))
         return model, trainer, cfg
 
@@ -630,12 +639,22 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 self.assertTrue(torch.equal(left.x_next[key], right.x_next[key]))
             self.assertIsNotNone(left.latent)
             self.assertIsNotNone(right.latent)
-            self.assertIsNotNone(left.next_latent)
-            self.assertIsNotNone(right.next_latent)
             torch.testing.assert_close(left.latent.z_H, right.latent.z_H)
             torch.testing.assert_close(left.latent.z_L, right.latent.z_L)
-            torch.testing.assert_close(left.next_latent.z_H, right.next_latent.z_H)
-            torch.testing.assert_close(left.next_latent.z_L, right.next_latent.z_L)
+            if bool(left.done.item()):
+                self.assertIsNone(left.next_latent)
+                self.assertIsNone(right.next_latent)
+            else:
+                self.assertIsNotNone(left.next_latent)
+                self.assertIsNotNone(right.next_latent)
+                torch.testing.assert_close(
+                    left.next_latent.z_H,
+                    right.next_latent.z_H,
+                )
+                torch.testing.assert_close(
+                    left.next_latent.z_L,
+                    right.next_latent.z_L,
+                )
 
     def _assert_nested_equal(self, expected, actual):
         if torch.is_tensor(expected) or torch.is_tensor(actual):
@@ -1314,7 +1333,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             checkpoint_path = save_checkpoint(
                 model,
                 trainer,
-                step=1,
+                step=trainer._env_step_count,
                 checkpoint_dir=tmp,
                 rl_cfg=cfg,
                 dataset_provenance=provenance,
@@ -1353,6 +1372,135 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                     )
             model_load.assert_not_called()
 
+            missing_successor = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            self.assertFalse(
+                bool(missing_successor["replay_transitions"][0].done.item())
+            )
+            missing_successor["replay_transitions"][0].next_latent = None
+            missing_successor_path = Path(tmp) / "missing_successor_latent.pt"
+            torch.save(missing_successor, missing_successor_path)
+
+            restored_model, restored, _ = self._make_persistent_budget_trainer(
+                "fixed_base_exact"
+            )
+            with patch.object(
+                restored_model,
+                "load_state_dict",
+                wraps=restored_model.load_state_dict,
+            ) as model_load:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "nonterminal replay requires current and successor latents",
+                ):
+                    resume_from_checkpoint(
+                        str(missing_successor_path),
+                        restored_model,
+                        restored,
+                        "cpu",
+                        expected_dataset_provenance=provenance,
+                        expected_run_identity=identity,
+                        expected_checkpoint_sha256=file_sha256(
+                            missing_successor_path
+                        ),
+                    )
+            model_load.assert_not_called()
+
+    def test_schema_v5_resume_enforces_terminal_replay_latent_contract(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact"
+        )
+        provenance = self._checkpoint_provenance(trainer)
+        identity = self._run_identity(
+            model,
+            trainer,
+            provenance,
+            environment_interactions=3,
+        )
+        self._stub_updates(trainer)
+        trainer.train_step()
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=trainer._env_step_count,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+                run_identity=identity,
+                checkpoint_lineage=self._root_lineage(),
+            )
+            base = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            terminal_index = next(
+                index
+                for index, transition in enumerate(base["replay_transitions"])
+                if bool(transition.done.item())
+            )
+            terminal = base["replay_transitions"][terminal_index]
+            self.assertIsNotNone(terminal.latent)
+            self.assertIsNone(terminal.next_latent)
+
+            cases = []
+            missing_current = copy.deepcopy(base)
+            missing_current["replay_transitions"][terminal_index].latent = None
+            cases.append(
+                (
+                    "terminal_missing_current.pt",
+                    missing_current,
+                    "persistent replay requires a current latent",
+                )
+            )
+            successor_on_terminal = copy.deepcopy(base)
+            corrupted_terminal = successor_on_terminal["replay_transitions"][
+                terminal_index
+            ]
+            corrupted_terminal.next_latent = copy.deepcopy(
+                corrupted_terminal.latent
+            )
+            cases.append(
+                (
+                    "terminal_with_successor.pt",
+                    successor_on_terminal,
+                    "terminal replay must not carry a successor latent",
+                )
+            )
+
+            for filename, payload, expected_message in cases:
+                with self.subTest(filename=filename):
+                    corrupt_path = Path(tmp) / filename
+                    torch.save(payload, corrupt_path)
+                    restored_model, restored, _ = (
+                        self._make_persistent_budget_trainer("fixed_base_exact")
+                    )
+                    with patch.object(
+                        restored_model,
+                        "load_state_dict",
+                        wraps=restored_model.load_state_dict,
+                    ) as model_load:
+                        with self.assertRaisesRegex(
+                            RuntimeError,
+                            expected_message,
+                        ):
+                            resume_from_checkpoint(
+                                str(corrupt_path),
+                                restored_model,
+                                restored,
+                                "cpu",
+                                expected_dataset_provenance=provenance,
+                                expected_run_identity=identity,
+                                expected_checkpoint_sha256=file_sha256(
+                                    corrupt_path
+                                ),
+                            )
+                    model_load.assert_not_called()
+
     def test_schema_v5_terminal_reason_marker_rejects_corrupt_new_checkpoint(self):
         model, trainer, cfg = self._make_persistent_budget_trainer(
             "fixed_base_exact"
@@ -1370,7 +1518,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             checkpoint_path = save_checkpoint(
                 model,
                 trainer,
-                step=1,
+                step=trainer._env_step_count,
                 checkpoint_dir=tmp,
                 rl_cfg=cfg,
                 dataset_provenance=provenance,
@@ -1870,7 +2018,11 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             )
 
             module_state = copy.deepcopy(base)
-            removed_parameter = next(iter(module_state["model_state_dict"]))
+            removed_parameter = next(
+                name
+                for name in module_state["model_state_dict"]
+                if name.startswith("value_head.")
+            )
             module_state["model_state_dict"].pop(removed_parameter)
             variants.append(("module_state", module_state, "model state failed"))
 
@@ -1895,6 +2047,45 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             ] = torch.zeros(1)
             variants.append(("gradients", gradients, "model state failed"))
 
+            recurrent_name = next(
+                name
+                for name, value in base["model_state_dict"].items()
+                if name.startswith("inner.")
+                and not name.startswith(("inner.lm_head.", "inner.q_head."))
+                and torch.is_floating_point(value)
+            )
+            candidate_recurrence = copy.deepcopy(base)
+            candidate_recurrence["policy_model_candidate_state_dict"][
+                recurrent_name
+            ] = (
+                candidate_recurrence["policy_model_candidate_state_dict"][
+                    recurrent_name
+                ].clone()
+                + 1.0
+            )
+            variants.append(
+                (
+                    "candidate_recurrence",
+                    candidate_recurrence,
+                    "shared frozen recurrent map",
+                )
+            )
+
+            target_recurrence = copy.deepcopy(base)
+            target_recurrence["target_model_state_dict"][recurrent_name] = (
+                target_recurrence["target_model_state_dict"][
+                    recurrent_name
+                ].clone()
+                + 1.0
+            )
+            variants.append(
+                (
+                    "target_recurrence",
+                    target_recurrence,
+                    "shared frozen recurrent map",
+                )
+            )
+
             trainer_state = copy.deepcopy(base)
             trainer_state["trainer_state"]["term_stats"] = 1
             variants.append(
@@ -1908,15 +2099,36 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                     restored_model, restored, _ = (
                         self._make_persistent_budget_trainer("fixed_base_exact")
                     )
-                    before = {
-                        key: value.detach().clone()
-                        for key, value in restored_model.state_dict().items()
+                    live_modules = {
+                        "model": restored_model,
+                        "old": restored.policy_model_old,
+                        "candidate": restored.policy_model_candidate,
+                        "target": restored.target_model,
+                    }
+                    before_modules = {
+                        module_name: {
+                            key: value.detach().clone()
+                            for key, value in module.state_dict().items()
+                        }
+                        for module_name, module in live_modules.items()
                     }
                     with patch.object(
                         restored_model,
                         "load_state_dict",
                         wraps=restored_model.load_state_dict,
                     ) as model_load, patch.object(
+                        restored.policy_model_old,
+                        "load_state_dict",
+                        wraps=restored.policy_model_old.load_state_dict,
+                    ) as old_load, patch.object(
+                        restored.policy_model_candidate,
+                        "load_state_dict",
+                        wraps=restored.policy_model_candidate.load_state_dict,
+                    ) as candidate_load, patch.object(
+                        restored.target_model,
+                        "load_state_dict",
+                        wraps=restored.target_model.load_state_dict,
+                    ) as target_load, patch.object(
                         restored.value_opt,
                         "load_state_dict",
                         wraps=restored.value_opt.load_state_dict,
@@ -1943,11 +2155,18 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                                 ),
                             )
                     model_load.assert_not_called()
+                    old_load.assert_not_called()
+                    candidate_load.assert_not_called()
+                    target_load.assert_not_called()
                     optimizer_load.assert_not_called()
                     replay_clear.assert_not_called()
                     restore_rng.assert_not_called()
-                    for key, value in restored_model.state_dict().items():
-                        torch.testing.assert_close(value, before[key])
+                    for module_name, module in live_modules.items():
+                        for key, value in module.state_dict().items():
+                            torch.testing.assert_close(
+                                value,
+                                before_modules[module_name][key],
+                            )
 
     def test_legacy_checkpoint_requires_explicit_weights_only_warm_start(self):
         torch.manual_seed(606)

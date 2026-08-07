@@ -2,11 +2,11 @@
 Tests for theory-exact components that close the gap between paper and implementation.
 
 These tests verify:
-1. Forward-invariant projection (Assumption 4.1, Eq. 14)
-2. Exact baseline computation (Theorem 5.9)
-3. Drift bound monitoring (Lemma 4.4)
-4. Value of memory computation (Section 5.4)
-5. Plan change tracking (Assumption 4.3)
+1. Forward-invariant projection
+2. Exact baseline computation (Theorem 6.7)
+3. Persistent slow-drift bound monitoring
+4. Value-of-memory diagnostics
+5. Plan-change tracking used by slow-drift premises
 """
 
 import pytest
@@ -65,7 +65,8 @@ def small_config():
         rl_target_Lv=1.0,
         rl_enable_policy_head=True,
         rl_num_actions=16 * 10 + 1,  # seq_len * vocab_size + STOP
-        rl_latent_ball_radius=0.0,  # Disabled by default
+        rl_latent_projection_mode="disabled",
+        rl_latent_ball_radius=None,
     )
 
 
@@ -73,6 +74,7 @@ def small_config():
 def model_with_projection(small_config):
     """TRM with forward-invariant projection enabled."""
     config = dict(small_config)
+    config["rl_latent_projection_mode"] = "enabled"
     config["rl_latent_ball_radius"] = 5.0  # Enable projection
     return TinyRecursiveReasoningModel_ACTV1(config)
 
@@ -101,7 +103,7 @@ def sample_plan(sample_batch):
 
 
 # =============================================================================
-# Test: Forward-Invariant Projection (Assumption 4.1)
+# Test: Forward-Invariant Projection
 # =============================================================================
 
 class TestForwardInvariantProjection:
@@ -170,7 +172,7 @@ class TestForwardInvariantProjection:
 
 
 # =============================================================================
-# Test: Plan Change Tracking (Assumption 4.3)
+# Test: Plan Change Tracking for Slow-Drift Premises
 # =============================================================================
 
 class TestPlanChangeTracking:
@@ -208,7 +210,7 @@ class TestPlanChangeTracking:
 
 
 # =============================================================================
-# Test: Drift Bound (Lemma 4.4)
+# Test: Persistent Slow-Drift Bound
 # =============================================================================
 
 class TestDriftBound:
@@ -248,7 +250,7 @@ class TestDriftBound:
 
 
 # =============================================================================
-# Test: Value of Memory (Section 5.4)
+# Test: Value-of-Memory Diagnostic
 # =============================================================================
 
 class TestValueOfMemory:
@@ -290,11 +292,11 @@ class TestValueOfMemory:
 
 
 # =============================================================================
-# Test: Exact Baseline Computation (Theorem 5.9)
+# Test: Exact Baseline Computation (Theorem 6.7)
 # =============================================================================
 
 class TestExactBaseline:
-    """Tests for exact baseline computation for Theorem 5.9."""
+    """Tests exact statewise centering used by Theorem 6.7."""
     
     def test_exact_advantage_centering(self):
         """Test that exact advantages are centered: E_{a~π}[Â(s,a)] = 0."""
@@ -352,8 +354,8 @@ class TestRLConfigTheoryOptions:
         """Test default values for new config options."""
         cfg = RLConfig()
         
-        # Most new options default to off/zero, except latent_ball_radius
-        # which defaults to 10.0 for theory alignment (Assumption 4.1)
+        # Most new options default to off/zero; projection defaults to enabled
+        # with radius 10.0 under the current explicit configuration contract.
         assert cfg.exact_baseline_summation == False
         assert cfg.latent_ball_radius == 10.0  # ENABLED by default for theory alignment
         assert cfg.track_drift_metrics == False

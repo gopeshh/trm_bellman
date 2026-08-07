@@ -424,6 +424,22 @@ python_unittest(
 )
 
 python_unittest(
+    name = "test_algorithm2_boundary_contract",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_algorithm2_boundary_contract_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":models",
+        ":rl",
+        ":utils",
+        ":puzzle_dataset_lib",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_unittest(
     name = "test_cpi_mixture_policy_smoke",
     srcs = [
         "tests/__init__.py",

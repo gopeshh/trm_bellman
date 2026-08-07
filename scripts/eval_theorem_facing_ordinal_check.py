@@ -230,6 +230,7 @@ def build_env(
         task_type=getattr(rl_cfg, "task_name", "sudoku"),
         stop_action_mode=getattr(rl_cfg, "stop_action_mode", "noop"),
         stop_action_penalty=float(getattr(rl_cfg, "stop_action_penalty", -0.1)),
+        C_max=float(rl_cfg.C_max),
         fail_terminal_reward=float(getattr(rl_cfg, "fail_terminal_reward", 0.0)),
         solve_terminal_reward=float(getattr(rl_cfg, "solve_terminal_reward", 0.0)),
         disable_constraint_masking=bool(getattr(rl_cfg, "disable_constraint_masking", False)),

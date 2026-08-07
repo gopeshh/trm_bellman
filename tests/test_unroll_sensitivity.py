@@ -408,23 +408,23 @@ class TestIntegration:
 # =============================================================================
 
 class TestSaturationSemantics:
-    """Tests for projection saturation semantics, especially R=0."""
+    """Tests saturation semantics for explicit projection modes."""
 
-    def test_r0_saturation_is_negative_one(self):
-        """When R=0 (projection disabled), saturated should be -1 (N/A)."""
+    def test_disabled_saturation_is_negative_one(self):
+        """Disabled projection should report saturated=-1 (N/A)."""
         # This tests the logic at eval_unroll_sensitivity.py:934-938
-        # When radius <= 0, saturated = -1
+        # When radius is None, saturated = -1.
 
         # Simulate the check
-        radius = 0.0
+        radius = None
         z_pre = 10.0  # arbitrary nonzero
 
-        if radius <= 0:
+        if radius is None:
             saturated = -1
         else:
             saturated = 1 if z_pre >= 0.95 * radius else 0
 
-        assert saturated == -1, f"R=0 should give saturated=-1, got {saturated}"
+        assert saturated == -1
 
     def test_r_positive_saturation_logic(self):
         """When R>0, saturation should be computed correctly."""
@@ -433,7 +433,7 @@ class TestSaturationSemantics:
         z_pre_high = 9.6  # >= 0.95 * 10 = 9.5
         z_pre_low = 5.0   # < 9.5
 
-        if radius <= 0:
+        if radius is None:
             sat_high = -1
             sat_low = -1
         else:
@@ -443,10 +443,10 @@ class TestSaturationSemantics:
         assert sat_high == 1, "z_pre >= 0.95*R should give saturated=1"
         assert sat_low == 0, "z_pre < 0.95*R should give saturated=0"
 
-    def test_saturation_rate_excludes_r0(self):
+    def test_saturation_rate_excludes_disabled_projection(self):
         """Saturation rate computation should skip -1 values."""
         # Simulate the filter logic from the script
-        saturated_values = [-1, -1, 1, 0, 1]  # R=0 for first two
+        saturated_values = [-1, -1, 1, 0, 1]
 
         valid_sat = [s for s in saturated_values if s >= 0]
         assert valid_sat == [1, 0, 1], "Should exclude -1 values"

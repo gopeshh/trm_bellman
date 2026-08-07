@@ -1,9 +1,10 @@
 import math
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
+import torch.nn as nn
 
 from rl.replay import (
     ReplayBuffer,
@@ -56,7 +57,7 @@ def _transition(
         episode_id=episode_id,
         timestep=timestep,
         latent=_latent(float(timestep)),
-        next_latent=_latent(float(timestep + 1)),
+        next_latent=None if done else _latent(float(timestep + 1)),
         terminal_reason="budget" if done else None,
     )
 
@@ -129,6 +130,15 @@ class TestAugmentedReplayIntegrity(unittest.TestCase):
 
     def test_terminal_record_cannot_have_a_successor(self) -> None:
         terminal = _transition(0, done=True)
+        self.assertIsNotNone(terminal.latent)
+        self.assertIsNone(terminal.next_latent)
+        validate_transition(terminal, require_clock=True)
+
+        invalid_terminal = _transition(0, done=True)
+        invalid_terminal.next_latent = _latent(1.0)
+        with self.assertRaisesRegex(ReplayIntegrityError, "terminal.*next_latent"):
+            validate_transition(invalid_terminal, require_clock=True)
+
         successor = _transition(1)
         with self.assertRaisesRegex(ReplayIntegrityError, "terminal"):
             validate_transition_continuity(terminal, successor, require_clock=True)
@@ -141,6 +151,7 @@ class TestAugmentedReplayIntegrity(unittest.TestCase):
     def test_zero_clock_requires_terminal_mask(self) -> None:
         transition = _transition(2, done=True)
         transition.done = torch.tensor([False])
+        transition.next_latent = _latent(3.0)
         transition.terminal_reason = None
         with self.assertRaisesRegex(ReplayIntegrityError, "zero remaining edits"):
             validate_transition(transition, require_clock=True)
@@ -184,8 +195,9 @@ class TestAugmentedReplayIntegrity(unittest.TestCase):
         self.assertEqual(len(replay), 1)
 
 
-class _PersistentValueModel:
+class _PersistentValueModel(nn.Module):
     def __init__(self, expected_latent: object) -> None:
+        super().__init__()
         self.expected_latent = expected_latent
         self.seen_latents = []
 
@@ -254,12 +266,11 @@ class TestPersistentExactBaseline(unittest.TestCase):
         torch.testing.assert_close(q_all[:, :2], torch.full((2, 2), 4.5))
         torch.testing.assert_close(baseline, torch.full((2,), 4.5))
 
-    def test_terminal_exact_baseline_selects_away_nonfinite_successor_value(self) -> None:
+    def test_terminal_exact_baseline_does_not_evaluate_a_successor(self) -> None:
         successor_latent = object()
         model = _PersistentValueModel(successor_latent)
-        model.used_value = lambda x, y, n, z=None: (
-            torch.full((y.shape[0],), float("nan")),
-            z,
+        model.used_value = Mock(
+            side_effect=AssertionError("terminal successor was evaluated")
         )
         env = SimpleNamespace(
             config=SimpleNamespace(
@@ -305,6 +316,74 @@ class TestPersistentExactBaseline(unittest.TestCase):
             )
         torch.testing.assert_close(q_all[:, :2], torch.ones(1, 2))
         torch.testing.assert_close(baseline, torch.ones(1))
+        model.used_value.assert_not_called()
+
+    def test_mixed_terminal_baseline_evaluates_only_nonterminal_rows(self) -> None:
+        successor_latent = ReplayLatent(
+            z_H=torch.tensor([[[3.0]], [[5.0]]]),
+            z_L=torch.tensor([[[-3.0]], [[-5.0]]]),
+        )
+        model = _PersistentValueModel(successor_latent)
+        seen = []
+
+        def used_value(x, y, n, z=None):
+            seen.append((x, y, z))
+            self.assertEqual(y.shape[0], 1)
+            self.assertIsInstance(z, ReplayLatent)
+            torch.testing.assert_close(z.z_H, torch.tensor([[[5.0]]]))
+            torch.testing.assert_close(z.z_L, torch.tensor([[[-5.0]]]))
+            return torch.full((1,), 2.0), z
+
+        model.used_value = used_value
+        env = SimpleNamespace(
+            config=SimpleNamespace(
+                reward_shaping=True,
+                solved_threshold=None,
+                task_type="dummy",
+            ),
+            vocab_size=2,
+            stop_action_id=2,
+            _enable_undo=False,
+            _stop_mode="disabled",
+            is_stop_terminal=lambda: False,
+            is_plan_solved=None,
+        )
+        x_batch = {
+            "inputs": torch.zeros(2, 1, dtype=torch.long),
+            "puzzle_identifiers": torch.arange(2),
+            "remaining_edits": torch.tensor([1, 2]),
+        }
+        y_batch = torch.zeros(2, 1, dtype=torch.long)
+        action_mask = torch.tensor([[True, True, False], [True, True, False]])
+        zeros = torch.zeros(2)
+        with patch(
+            "utils.lipschitz._apply_edit_batch", return_value=y_batch
+        ), patch(
+            "utils.lipschitz._compute_phi_batch",
+            return_value=(zeros, zeros, torch.zeros(2, dtype=torch.bool)),
+        ), patch(
+            "utils.lipschitz._compute_batch_reward_via_env",
+            return_value=torch.ones(2),
+        ):
+            baseline, q_all = compute_exact_baseline_summation(
+                model=model,
+                x_batch=x_batch,
+                y_batch=y_batch,
+                env=env,
+                n=1,
+                gamma=0.5,
+                checker_fn=lambda x, y: 0.0,
+                action_mask=action_mask,
+                policy_probs=torch.tensor(
+                    [[0.5, 0.5, 0.0], [0.5, 0.5, 0.0]]
+                ),
+                successor_latent=successor_latent,
+            )
+
+        self.assertEqual(len(seen), 2)
+        torch.testing.assert_close(q_all[0, :2], torch.ones(2))
+        torch.testing.assert_close(q_all[1, :2], torch.full((2,), 2.0))
+        torch.testing.assert_close(baseline, torch.tensor([1.0, 2.0]))
 
 
 class TestFiniteBatchTheoryDiagnostics(unittest.TestCase):

@@ -416,8 +416,19 @@ class TestModelLoading(unittest.TestCase):
         self.assertEqual(config["L_cycles"], 3)
         self.assertEqual(config["L_layers"], 2)
         self.assertEqual(config["inner_unroll_n"], 5)
+        self.assertEqual(config["latent_projection_mode"], "disabled")
+        self.assertIsNone(config["latent_ball_radius"])
         for key, expected in source.state_dict().items():
             torch.testing.assert_close(loaded.state_dict()[key], expected)
+
+    def test_radius_override_rejects_zero_disabling_convention(self):
+        from scripts.eval.unroll_sensitivity import load_model_for_eval
+
+        with self.assertRaisesRegex(ValueError, "must be positive"):
+            load_model_for_eval(
+                "unused.pt",
+                latent_ball_radius_override=0.0,
+            )
 
     def test_legacy_loader_uses_current_token_embedding_key(self):
         from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
@@ -516,6 +527,38 @@ class TestIntegration(unittest.TestCase):
 
             dist, z = model.policy_dist(x, y, n=4)
             self.assertTrue(torch.isfinite(dist.probs).all(), "Policy probs should be finite")
+
+    def test_disabled_projection_evaluation_marks_saturation_na(self):
+        from scripts.eval_unroll_sensitivity import (
+            PuzzleState,
+            evaluate_state_at_depths,
+        )
+
+        model = self._get_dummy_model()
+        if model is None:
+            self.skipTest("Model imports not available")
+
+        state = PuzzleState(
+            state_id="disabled_projection",
+            inputs=torch.ones(16, dtype=torch.long),
+            puzzle_identifier=torch.tensor(0),
+            plan=torch.ones(16, dtype=torch.long),
+            empties=16,
+            source_path="test",
+        )
+        metrics = evaluate_state_at_depths(
+            model,
+            state,
+            n_values=[1, 2],
+            config={
+                "vocab_size": 6,
+                "num_actions": 97,
+                "latent_projection_mode": "disabled",
+                "latent_ball_radius": None,
+            },
+        )
+
+        self.assertEqual(metrics[(1, 2)].saturated, -1)
 
 
 if __name__ == "__main__":

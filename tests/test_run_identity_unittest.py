@@ -63,8 +63,17 @@ class RunIdentityTest(unittest.TestCase):
                 "algorithm": "upi_trm",
                 "training_protocol": "fixed_base_exact",
                 "backbone": "trm",
-                "rl_config": {"gamma": 0.9, "K": 3},
-                "model_config": {"hidden_size": 64},
+                "rl_config": {
+                    "gamma": 0.9,
+                    "K": 3,
+                    "latent_projection_mode": "enabled",
+                    "latent_ball_radius": 10.0,
+                },
+                "model_config": {
+                    "hidden_size": 64,
+                    "rl_latent_projection_mode": "enabled",
+                    "rl_latent_ball_radius": 10.0,
+                },
                 "execution_device": "cpu",
                 "runtime_fingerprint_sha256": "a" * 64,
                 "dataset": {

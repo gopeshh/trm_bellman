@@ -411,16 +411,37 @@ def _validate_persistent_replay(
             raise PersistentDiagnosticInputError(
                 f"Replay record {index} is not a Transition."
             )
-        if not isinstance(transition.latent, ReplayLatent) or not isinstance(
-            transition.next_latent, ReplayLatent
+        if (
+            not torch.is_tensor(transition.done)
+            or transition.done.numel() != 1
+            or transition.done.dtype != torch.bool
         ):
             raise PersistentDiagnosticInputError(
-                f"Replay record {index} is missing its persistent pre/post carry."
+                f"Replay record {index} has an invalid terminal flag."
             )
-        for label, latent in (
-            ("latent", transition.latent),
-            ("next_latent", transition.next_latent),
-        ):
+        done = _scalar_bool(transition.done)
+        if not isinstance(transition.latent, ReplayLatent):
+            raise PersistentDiagnosticInputError(
+                f"Replay record {index} is missing its persistent input carry."
+            )
+        if done:
+            if transition.next_latent is not None:
+                raise PersistentDiagnosticInputError(
+                    f"Replay record {index} is terminal and must not retain a "
+                    "persistent successor carry."
+                )
+            replay_latents = (("latent", transition.latent),)
+        else:
+            if not isinstance(transition.next_latent, ReplayLatent):
+                raise PersistentDiagnosticInputError(
+                    f"Replay record {index} is nonterminal and is missing its "
+                    "persistent successor carry."
+                )
+            replay_latents = (
+                ("latent", transition.latent),
+                ("next_latent", transition.next_latent),
+            )
+        for label, latent in replay_latents:
             if (
                 tuple(latent.z_H.shape) != expected_latent_shape
                 or tuple(latent.z_L.shape) != expected_latent_shape
@@ -429,7 +450,11 @@ def _validate_persistent_replay(
                     f"Replay record {index} {label} has the wrong model shape."
                 )
         try:
-            validate_transition(transition, require_clock=True)
+            validate_transition(
+                transition,
+                require_clock=True,
+                require_terminal_reason=True,
+            )
         except ReplayIntegrityError as exc:
             raise PersistentDiagnosticInputError(
                 f"Replay record {index} is not clock-complete: {exc}"
@@ -453,7 +478,7 @@ def _validate_persistent_replay(
             raise PersistentDiagnosticInputError(
                 f"Replay record {index} clock disagrees with its timestep and max_edits."
             )
-        if not _scalar_bool(transition.done) and next_clock == 0:
+        if not done and next_clock == 0:
             raise PersistentDiagnosticInputError(
                 f"Replay record {index} is nonterminal at the zero-budget boundary."
             )
@@ -525,7 +550,7 @@ def _validate_persistent_replay(
                     raise PersistentDiagnosticInputError(
                         "A replay episode boundary does not restart at timestep zero."
                     )
-        terminal_count += int(_scalar_bool(transition.done))
+        terminal_count += int(done)
         episode_ids.add(transition.episode_id)
         previous = transition
 
@@ -708,6 +733,10 @@ def load_persistent_checkpoint(
             model_config.rl_disable_value_head_norm,
             rl_config.disable_value_head_norm,
         ),
+        "rl_latent_projection_mode": (
+            model_config.rl_latent_projection_mode,
+            rl_config.latent_projection_mode,
+        ),
         "rl_latent_ball_radius": (
             model_config.rl_latent_ball_radius,
             rl_config.latent_ball_radius,
@@ -869,6 +898,23 @@ def load_persistent_checkpoint(
             model_config.puzzle_emb_ndim // -model_config.hidden_size
         )
     )
+    trainer_state = _require_mapping(
+        checkpoint["trainer_state"],
+        label="trainer_state",
+    )
+    terminal_reason_replay_version = trainer_state.get(
+        "terminal_reason_replay_version"
+    )
+    if (
+        isinstance(terminal_reason_replay_version, bool)
+        or not isinstance(terminal_reason_replay_version, int)
+        or terminal_reason_replay_version != 1
+    ):
+        raise PersistentDiagnosticInputError(
+            "Schema-v5 persistent diagnostics require terminal-reason replay "
+            "version 1."
+        )
+
     replay_validation = _validate_persistent_replay(
         checkpoint,
         action_count=model_config.rl_num_actions,
@@ -881,10 +927,6 @@ def load_persistent_checkpoint(
     )
 
     progress = _require_mapping(checkpoint["progress"], label="progress")
-    trainer_state = _require_mapping(
-        checkpoint["trainer_state"],
-        label="trainer_state",
-    )
     _require_mapping(checkpoint["rng_state"], label="rng_state")
     _require_mapping(
         checkpoint["value_optimizer_state_dict"],
@@ -1041,10 +1083,15 @@ def load_persistent_checkpoint(
         current_state,
         candidate_state,
         include=_is_recurrent_map_state,
+    ) and _state_selections_equal(
+        candidate_state,
+        target_state,
+        include=_is_recurrent_map_state,
     )
     if not recurrent_map_shared:
         raise PersistentDiagnosticInputError(
-            "Evaluator, current policy, and candidate do not share one recurrent map."
+            "Evaluator, current policy, candidate, and target evaluator do not "
+            "share one recurrent map."
         )
     non_edit_state_shared = _state_selections_equal(
         evaluator_state,
@@ -1361,6 +1408,7 @@ def _build_environment(
         stop_action_penalty=checkpoint.rl_config.stop_action_penalty,
         fail_terminal_reward=checkpoint.rl_config.fail_terminal_reward,
         solve_terminal_reward=checkpoint.rl_config.solve_terminal_reward,
+        C_max=checkpoint.rl_config.C_max,
         disable_constraint_masking=checkpoint.rl_config.disable_constraint_masking,
     )
     if not _canonical_json_equal(

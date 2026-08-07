@@ -56,6 +56,21 @@ def test_zero_edit_budget_is_rejected():
         )
 
 
+@pytest.mark.parametrize("C_max", [-1.0, float("inf")])
+def test_invalid_absorbing_boundary_is_rejected(C_max):
+    with pytest.raises(ValueError, match="C_max must be finite and nonnegative"):
+        PlanEditEnv(
+            DummyDataset(),
+            dummy_checker,
+            PlanEditEnvConfig(
+                max_edits=1,
+                gamma=0.99,
+                vocab_size=4,
+                C_max=C_max,
+            ),
+        )
+
+
 def test_plan_edit_env_step_and_stop():
     """
     Test that:
@@ -159,6 +174,7 @@ def test_plan_edit_env_threshold_works_without_reward_shaping():
         reward_shaping=False,
         vocab_size=3,
         solved_threshold=0.5,
+        C_max=2.0,
     )
     env = PlanEditEnv(dataset, solved_checker, cfg)
     seq_len = dataset.data[0]["inputs"].numel()
@@ -168,7 +184,31 @@ def test_plan_edit_env_threshold_works_without_reward_shaping():
     (_, _), reward, done, _ = env.step(action=2)
 
     assert done is True
-    assert abs(reward - 1.0) < 1e-6  # terminal reward equals checker score
+    assert abs(reward - (1.0 - 0.9 * 2.0)) < 1e-6
+
+
+def test_terminal_stop_folds_sparse_absorbing_boundary_once():
+    dataset = SingleTokenDataset()
+    cfg = PlanEditEnvConfig(
+        max_edits=2,
+        gamma=0.5,
+        reward_shaping=False,
+        vocab_size=3,
+        stop_action_mode="terminal",
+        fail_terminal_reward=-3.0,
+        C_max=2.0,
+    )
+    env = PlanEditEnv(dataset, solved_checker, cfg)
+    stop_id = dataset.data[0]["inputs"].numel() * cfg.vocab_size
+    env.set_stop_action_id(stop_id)
+    env.reset()
+
+    (_, _), reward, done, info = env.step(stop_id)
+
+    assert done is True
+    assert info["done_reason"] == "stop"
+    assert info["terminated_by_stop"] is True
+    assert abs(reward - (-1.0 - 3.0 - 0.5 * 2.0)) < 1e-6
 
 
 def test_action_masking():

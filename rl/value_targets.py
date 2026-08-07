@@ -47,6 +47,9 @@ def compute_k_step_bootstrapped_target(
     Returns:
         [batch_size] K-step bootstrapped targets
     """
+    if not 0.0 <= gamma < 1.0:
+        raise ValueError(f"`gamma` must lie in [0,1), got {gamma!r}.")
+
     batch_size = rewards_K.shape[0]
 
     # Mask rewards beyond steps_taken for each sample (defensive against improper padding)

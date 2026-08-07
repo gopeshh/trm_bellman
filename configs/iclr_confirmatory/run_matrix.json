@@ -56,19 +56,16 @@
     "B0_I00": ["bridge_base.yaml", "bridge_b0.yaml"],
     "Bz_I10": ["bridge_base.yaml", "bridge_b0.yaml", "bridge_bz.yaml"],
     "Bd_I01": ["bridge_base.yaml", "bridge_b0.yaml", "bridge_bd.yaml"],
-    "Bt": ["bridge_base.yaml", "bridge_b0.yaml", "bridge_bt.yaml"],
     "Bb": ["bridge_base.yaml", "bridge_b0.yaml", "bridge_bb.yaml"],
     "I11": ["bridge_base.yaml", "bridge_b0.yaml", "bridge_i11.yaml"]
-  },
-  "bridge_estimands": {
-    "Bt": "With K=1 fixed, Bt changes the bootstrap network from the EMA target model to the current evaluator; it is not a general multistep-target contrast."
   },
   "matched_cells": {
     "UPI_TRM": ["c2_upi.yaml"],
     "TRM_PPO": ["c2_ppo.yaml"]
   },
   "non_executable_cells": {
-    "Bs_legacy": "Legacy plan-only replay is invalid and is not reintroduced."
+    "Bs_legacy": "Legacy plan-only replay is invalid and is not reintroduced.",
+    "Bt": "The historical exact_k_step_targets toggle no longer changes the bootstrap evaluator: both paths use the frozen target network. The old Bt label is therefore not an executable one-factor contrast."
   },
   "deployment_estimands": {
     "Bd_I01": "paired checkpoint evaluator contrast: record-local stochastic sampling from the exact probability-space mixture of the retained pre-interpolation base/candidate pair versus record-local stochastic sampling from B0's deployed parameter-interpolated actor; training is otherwise identical",

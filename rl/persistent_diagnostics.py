@@ -316,6 +316,7 @@ _RECURRENT_CONFIG_FIELDS = (
     "puzzle_emb_len",
     "rl_enable_z_init_encoder",
     "rl_value_hidden_dim",
+    "rl_latent_projection_mode",
     "rl_latent_ball_radius",
 )
 
@@ -1526,11 +1527,13 @@ def _projection_metrics(
     per_state_rate = active.mean(dim=-1)
     per_state_max_pre_norm = pre_norms.max(dim=-1).values
     model_config = _config_dict(current_policy.config)
+    projection_mode, radius = _projection_contract(model_config)
     summary = {
         "metric": "radial_projection_activation",
         "scope": FINITE_BATCH_SCOPE,
         "uniform_certificate": False,
-        "configured_radius": float(model_config["rl_latent_ball_radius"]),
+        "configured_mode": projection_mode,
+        "configured_radius": radius,
         "recurrent_step_count": int(active.numel()),
         "active_step_count": int(active.sum().item()),
         "active_step_rate": float(active.mean().item()),
@@ -1553,6 +1556,31 @@ def _projection_metrics(
     }
 
 
+def _projection_contract(config: Mapping[str, Any]) -> Tuple[str, Optional[float]]:
+    """Read the explicit projection contract, with legacy diagnostics fallback."""
+
+    raw_radius = config.get("rl_latent_ball_radius")
+    mode = config.get("rl_latent_projection_mode")
+    if mode is None:
+        # Non-production test doubles and historical diagnostic models predate
+        # the explicit mode. Current serialized model configs always contain it.
+        mode = (
+            "enabled"
+            if isinstance(raw_radius, (int, float)) and raw_radius > 0.0
+            else "disabled"
+        )
+    if mode == "disabled":
+        return mode, None
+    if mode != "enabled" or isinstance(raw_radius, bool) or not isinstance(
+        raw_radius, (int, float)
+    ):
+        raise ValueError("Invalid recurrent projection configuration.")
+    radius = float(raw_radius)
+    if not math.isfinite(radius) or radius <= 0.0:
+        raise ValueError("Enabled recurrent projection requires a finite R > 0.")
+    return mode, radius
+
+
 def _initial_latent_sensitivity(
     evaluator: Any,
     current_policy: Any,
@@ -1563,7 +1591,9 @@ def _initial_latent_sensitivity(
     """Compare actual carries with reset and registered perturbed carries."""
 
     device = _model_device(current_policy)
-    radius = float(_config_dict(current_policy.config)["rl_latent_ball_radius"])
+    projection_mode, radius = _projection_contract(
+        _config_dict(current_policy.config)
+    )
     reset_start_h: List[torch.Tensor] = []
     reset_start_l: List[torch.Tensor] = []
     reset_post_h: List[torch.Tensor] = []
@@ -1656,12 +1686,22 @@ def _initial_latent_sensitivity(
                 )
             )
         perturbed_start = _stack_replay_latents(perturbed_latents, device)
-        if radius > 0.0:
+        if projection_mode == "enabled":
+            assert radius is not None
             joint_norm = _joint_norm(
                 perturbed_start.z_H,
                 perturbed_start.z_L,
             ).reshape(-1, 1, 1)
-            projection_scale = torch.clamp(radius / joint_norm.clamp_min(1e-8), max=1.0)
+            safe_norm = torch.where(
+                joint_norm > 0.0,
+                joint_norm,
+                torch.ones_like(joint_norm),
+            )
+            projection_scale = torch.where(
+                joint_norm > radius,
+                radius / safe_norm,
+                torch.ones_like(joint_norm),
+            )
             perturbed_start = ReplayLatent(
                 z_H=perturbed_start.z_H * projection_scale,
                 z_L=perturbed_start.z_L * projection_scale,
@@ -1748,7 +1788,8 @@ def _initial_latent_sensitivity(
             "kind": "occurrence_seeded_joint_gaussian_direction",
             "requested_l2_norm": config.initial_latent_perturbation_l2_norm,
             "seed": config.initial_latent_perturbation_seed,
-            "projected_to_configured_ball": radius > 0.0,
+            "projection_mode": projection_mode,
+            "projected_to_configured_ball": projection_mode == "enabled",
         },
     }
     for name, values in raw.items():

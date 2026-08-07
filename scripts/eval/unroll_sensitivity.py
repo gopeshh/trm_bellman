@@ -2,9 +2,9 @@
 """
 Unroll Sensitivity Evaluation Script (ICML Phase 1 - "Theory Saver")
 
-This script evaluates how model predictions change when evaluated at deeper
-unroll depths than trained. It validates the "stability dial" hypothesis:
-contraction reduces peak success but provides mathematical consistency.
+This script reports finite-sample changes in model predictions at deeper
+unroll depths. These diagnostics do not establish a uniform contraction,
+residual, or value-error premise from the paper.
 
 Subcommands:
     build-batches: Build evaluation batches B0 (initial states) and B1 (successor closure)
@@ -269,6 +269,7 @@ def load_model_for_eval(
     device: str = "cpu",
     config_yaml_path: Optional[str] = None,
     latent_ball_radius_override: Optional[float] = None,
+    latent_projection_mode_override: Optional[str] = None,
 ) -> Tuple[TinyRecursiveReasoningModel_ACTV1, Dict[str, Any]]:
     """
     Load a model checkpoint and extract its config.
@@ -279,8 +280,10 @@ def load_model_for_eval(
         config_yaml_path: Optional path to YAML config used during training.
                           If provided, uses exact training config values.
                           If not provided, infers config from checkpoint.
-        latent_ball_radius_override: Optional override for latent_ball_radius.
-                                     If provided, overrides config/YAML value.
+        latent_ball_radius_override: Positive radius override. This enables
+                                     Euclidean projection.
+        latent_projection_mode_override: Explicit ``enabled`` or ``disabled``
+                                         recurrent projection mode.
 
     Returns:
         (model, config_dict) where config_dict contains key settings.
@@ -291,6 +294,15 @@ def load_model_for_eval(
     print(f"[Load] Loading checkpoint from {checkpoint_path}")
     if config_yaml_path:
         print(f"[Load] Using YAML config: {config_yaml_path}")
+    if latent_projection_mode_override not in (None, "enabled", "disabled"):
+        raise ValueError("latent_projection_mode_override must be enabled or disabled")
+    if latent_ball_radius_override is not None and latent_ball_radius_override <= 0.0:
+        raise ValueError("latent_ball_radius_override must be positive")
+    if (
+        latent_projection_mode_override == "disabled"
+        and latent_ball_radius_override is not None
+    ):
+        raise ValueError("Disabled projection cannot also specify a radius override")
 
     # Load YAML config if provided
     yaml_config = {}
@@ -359,7 +371,14 @@ def load_model_for_eval(
         # Sparse-embedding scratch buffers are non-persistent. Evaluation uses
         # one state at a time, so they can be rebuilt for batch size one.
         construction_config["batch_size"] = 1
+        if latent_projection_mode_override is not None:
+            construction_config["rl_latent_projection_mode"] = (
+                latent_projection_mode_override
+            )
+            if latent_projection_mode_override == "disabled":
+                construction_config["rl_latent_ball_radius"] = None
         if latent_ball_radius_override is not None:
+            construction_config["rl_latent_projection_mode"] = "enabled"
             construction_config["rl_latent_ball_radius"] = float(
                 latent_ball_radius_override
             )
@@ -425,14 +444,30 @@ def load_model_for_eval(
             enable_contraction = bool(rl_config_dict["enable_contraction"])
         else:
             enable_contraction = has_contraction_keys
-        if latent_ball_radius_override is not None:
-            latent_ball_radius = float(latent_ball_radius_override)
-        elif "latent_ball_radius" in yaml_config:
-            latent_ball_radius = float(yaml_config["latent_ball_radius"])
-        elif "latent_ball_radius" in rl_config_dict:
-            latent_ball_radius = float(rl_config_dict["latent_ball_radius"])
+        if "latent_projection_mode" in yaml_config or "latent_ball_radius" in yaml_config:
+            latent_projection_mode = yaml_config.get("latent_projection_mode")
+            raw_latent_ball_radius = yaml_config.get("latent_ball_radius")
+        elif (
+            "latent_projection_mode" in rl_config_dict
+            or "latent_ball_radius" in rl_config_dict
+        ):
+            latent_projection_mode = rl_config_dict.get("latent_projection_mode")
+            raw_latent_ball_radius = rl_config_dict.get("latent_ball_radius")
         else:
-            latent_ball_radius = float(rl_cfg.latent_ball_radius)
+            latent_projection_mode = rl_cfg.latent_projection_mode
+            raw_latent_ball_radius = rl_cfg.latent_ball_radius
+        if latent_projection_mode_override is not None:
+            latent_projection_mode = latent_projection_mode_override
+            if latent_projection_mode == "disabled":
+                raw_latent_ball_radius = None
+        if latent_ball_radius_override is not None:
+            latent_projection_mode = "enabled"
+            raw_latent_ball_radius = latent_ball_radius_override
+        latent_ball_radius = (
+            None
+            if raw_latent_ball_radius is None
+            else float(raw_latent_ball_radius)
+        )
         target_lz_value = yaml_config.get(
             "target_Lz",
             rl_config_dict.get("target_Lz", rl_cfg.target_Lz),
@@ -449,6 +484,11 @@ def load_model_for_eval(
                 ),
             )
         )
+        projection_config: Dict[str, Any] = {
+            "rl_latent_ball_radius": latent_ball_radius
+        }
+        if latent_projection_mode is not None:
+            projection_config["rl_latent_projection_mode"] = latent_projection_mode
         model_config = TinyRecursiveReasoningModel_ACTV1Config(
             batch_size=1,
             seq_len=seq_len,
@@ -475,7 +515,7 @@ def load_model_for_eval(
             rl_enable_contraction=enable_contraction,
             rl_target_Lz=target_lz,
             rl_disable_value_head_norm=disable_value_head_norm,
-            rl_latent_ball_radius=latent_ball_radius,
+            **projection_config,
         )
         config_source = "legacy_inferred"
 
@@ -486,7 +526,8 @@ def load_model_for_eval(
     enable_contraction = bool(model_config.rl_enable_contraction)
     target_Lz = float(model_config.rl_target_Lz)
     disable_value_head_norm = bool(model_config.rl_disable_value_head_norm)
-    latent_ball_radius = float(model_config.rl_latent_ball_radius)
+    latent_projection_mode = model_config.rl_latent_projection_mode
+    latent_ball_radius = model_config.rl_latent_ball_radius
 
     # Create model (expects dict, not config object)
     model = TinyRecursiveReasoningModel_ACTV1(model_config.model_dump())
@@ -517,6 +558,7 @@ def load_model_for_eval(
         "target_Lz": target_Lz,
         "disable_value_head_norm": disable_value_head_norm,
         "episodic_latent": episodic_latent,
+        "latent_projection_mode": latent_projection_mode,
         "latent_ball_radius": latent_ball_radius,
         "use_feasibility_checker": use_feasibility_checker,
         "puzzle_emb_ndim": int(model_config.puzzle_emb_ndim),
@@ -949,7 +991,11 @@ class ProjectionStatsWrapper:
     This is a non-invasive approach that hooks into the model temporarily.
     """
 
-    def __init__(self, model: TinyRecursiveReasoningModel_ACTV1, radius: float):
+    def __init__(
+        self,
+        model: TinyRecursiveReasoningModel_ACTV1,
+        radius: Optional[float],
+    ):
         self.model = model
         self.radius = radius
         self.z_pre_norms: List[float] = []
@@ -1000,7 +1046,9 @@ class ProjectionStatsWrapper:
 
         pre = np.mean(self.z_pre_norms)
         post = np.mean(self.z_post_norms)
-        saturated = pre >= 0.95 * self.radius
+        saturated = (
+            self.radius is not None and pre >= 0.95 * self.radius
+        )
 
         return pre, post, saturated
 
@@ -1037,7 +1085,7 @@ def evaluate_state_at_depths(
     vocab_size = config["vocab_size"]
     num_actions = config["num_actions"]
     stop_action_id = num_actions - 1
-    radius = config.get("latent_ball_radius", 10.0)
+    radius = config.get("latent_ball_radius")
 
     # Prepare inputs
     x = {
@@ -1109,9 +1157,9 @@ def evaluate_state_at_depths(
             # Use n1 stats for pre/post norms
             z_pre = pre_norms[n1]
             z_post = post_norms[n1]
-            # R=0 means projection disabled; saturation is N/A (use -1)
-            if radius <= 0:
-                saturated = -1  # N/A - projection disabled
+            # Disabled projection has no radius; saturation is N/A (use -1).
+            if radius is None:
+                saturated = -1
             else:
                 saturated = 1 if z_pre >= 0.95 * radius else 0
 
@@ -1204,7 +1252,7 @@ def write_summary_csv(
             argmax_rate = np.mean([m.argmax_agree for m in ms])
             row += f",{argmax_rate:.4f}"
 
-            # Saturation rate. R=0 uses -1 as an N/A sentinel.
+            # Saturation rate. Disabled projection uses -1 as an N/A sentinel.
             valid_sat = [m.saturated for m in ms if m.saturated >= 0]
             sat_rate = np.mean(valid_sat) if valid_sat else -1.0
             row += f",{sat_rate:.4f}"
@@ -1237,18 +1285,19 @@ def write_markdown_table(
         f.write("|---------|---------|--------|\n")
         # Include all key settings
         for key in ["enable_contraction", "target_Lz", "disable_value_head_norm",
-                    "episodic_latent", "latent_ball_radius", "inner_unroll_n", "config_source"]:
+                    "episodic_latent", "latent_projection_mode",
+                    "latent_ball_radius", "inner_unroll_n", "config_source"]:
             val_a = config_a.get(key, "N/A")
             val_b = config_b.get(key, "N/A")
             f.write(f"| {key} | {val_a} | {val_b} |\n")
         f.write("\n")
 
         # Sanity checks
-        R_a = config_a.get("latent_ball_radius", 0.0)
-        R_b = config_b.get("latent_ball_radius", 0.0)
+        R_a = config_a.get("latent_ball_radius")
+        R_b = config_b.get("latent_ball_radius")
         f.write("## Projection Sanity Check\n\n")
-        f.write(f"- Model A: R = {R_a}, max Δ_z bound (2R) = {2*R_a if R_a > 0 else 'N/A (projection disabled)'}\n")
-        f.write(f"- Model B: R = {R_b}, max Δ_z bound (2R) = {2*R_b if R_b > 0 else 'N/A (projection disabled)'}\n\n")
+        f.write(f"- Model A: mode = {config_a.get('latent_projection_mode')}, R = {R_a}, max Δ_z bound (2R) = {2*R_a if R_a is not None else 'N/A (projection disabled)'}\n")
+        f.write(f"- Model B: mode = {config_b.get('latent_projection_mode')}, R = {R_b}, max Δ_z bound (2R) = {2*R_b if R_b is not None else 'N/A (projection disabled)'}\n\n")
 
         # Hat_Lz section if available
         if hat_lz_a is not None and hat_lz_b is not None:
@@ -1293,7 +1342,7 @@ def write_markdown_table(
             agree_b = np.mean([m.argmax_agree for m in mb])
             f.write(f"| argmax_agree | rate | {agree_a:.4f} | {agree_b:.4f} | {agree_b - agree_a:+.4f} |\n")
 
-            # Saturation rate (handle -1 = N/A for R=0)
+            # Saturation rate (handle -1 = N/A when projection is disabled).
             valid_sat_a = [m.saturated for m in ma if m.saturated >= 0]
             valid_sat_b = [m.saturated for m in mb if m.saturated >= 0]
             if valid_sat_a and valid_sat_b:
@@ -1301,7 +1350,7 @@ def write_markdown_table(
                 sat_b = np.mean(valid_sat_b)
                 f.write(f"| saturation | rate | {sat_a:.4f} | {sat_b:.4f} | {sat_b - sat_a:+.4f} |\n")
             else:
-                # R=0 case: projection disabled
+                # Projection-disabled case.
                 f.write("| saturation | rate | N/A | N/A | N/A |\n")
 
             # z_pre and z_post norms
@@ -1458,15 +1507,18 @@ def cmd_compare(args):
 
     # Load models with config YAML paths if provided
     radius_override = getattr(args, 'latent_ball_radius_override', None)
+    mode_override = getattr(args, 'latent_projection_mode_override', None)
     model_a, config_a = load_model_for_eval(
         args.checkpoint_a, device,
         config_yaml_path=getattr(args, 'config_a', None),
         latent_ball_radius_override=radius_override,
+        latent_projection_mode_override=mode_override,
     )
     model_b, config_b = load_model_for_eval(
         args.checkpoint_b, device,
         config_yaml_path=getattr(args, 'config_b', None),
         latent_ball_radius_override=radius_override,
+        latent_projection_mode_override=mode_override,
     )
 
     # Check compatibility
@@ -1612,7 +1664,13 @@ def main():
     p_cmp.add_argument("--n_values", type=str, default=None, help="Comma-separated absolute depth values (overrides n_mults)")
     p_cmp.add_argument("--seed", type=int, default=42)
     p_cmp.add_argument("--latent_ball_radius_override", type=float, default=None,
-                       help="Override latent_ball_radius for BOTH models (for radius sweep experiments)")
+                       help="Enable projection at positive R for BOTH models")
+    p_cmp.add_argument(
+        "--latent_projection_mode_override",
+        choices=("enabled", "disabled"),
+        default=None,
+        help="Explicit recurrent projection mode for BOTH models",
+    )
     p_cmp.add_argument("--estimate_lz", action="store_true", help="Estimate hat_Lz on the batch")
 
     args = parser.parse_args()

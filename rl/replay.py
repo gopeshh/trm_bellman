@@ -33,8 +33,9 @@ class Transition:
 
     ``x`` retains the transition-relevant ``remaining_edits`` clock. In
     persistent mode, ``latent`` is the carry before the current recurrent
-    unroll and ``next_latent`` is the post-unroll carry passed to the successor
-    state. The edit action is applied after that recurrent unroll.
+    unroll. A nonterminal record also retains ``next_latent``, the post-unroll
+    carry passed to its successor. A terminal record has no successor latent.
+    The edit action is applied after the recurrent unroll.
     
     Attributes:
         x: Instance state, including ``remaining_edits`` when available
@@ -47,7 +48,7 @@ class Transition:
         episode_id: ID of the episode this transition belongs to
         timestep: Step within the episode
         latent: Recurrent state before evaluating this state, in persistent mode
-        next_latent: Recurrent state carried to the successor, in persistent mode
+        next_latent: Recurrent state carried to a nonterminal successor, in persistent mode
         behavior_log_prob: Log probability of the sampled action at collection time
         terminal_reason: Canonical terminal cause, or None for a nonterminal record
     """
@@ -165,12 +166,19 @@ def validate_transition(
 
     has_latent = transition.latent is not None
     has_next_latent = transition.next_latent is not None
-    if has_latent != has_next_latent:
+    if done:
+        if has_next_latent:
+            raise ReplayIntegrityError(
+                "A terminal replay record cannot contain a `next_latent`."
+            )
+    elif has_latent != has_next_latent:
         raise ReplayIntegrityError(
-            "A transition must contain both `latent` and `next_latent`, or neither."
+            "A nonterminal transition must contain both `latent` and "
+            "`next_latent`, or neither."
         )
-    if transition.latent is not None and transition.next_latent is not None:
+    if transition.latent is not None:
         _validate_latent(transition.latent, label="latent")
+    if transition.next_latent is not None:
         _validate_latent(transition.next_latent, label="next_latent")
 
     clock = _clock_value(transition.x, label="x")
