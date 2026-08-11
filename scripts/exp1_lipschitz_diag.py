@@ -9,8 +9,8 @@ Evaluates Exp1 checkpoints (No Contraction vs Contraction) for:
 
 Evaluated at R=10 (training default) and R=100 (projection mostly inactive).
 
-This provides Exp1-Exp2 consistency: confirms projection dominance behavior
-is consistent across both experiment sets.
+This compares finite sampled projection diagnostics across the two experiment
+sets. It does not establish a uniform Lipschitz bound or a causal effect.
 
 Output:
 - results/paper_ready/exp1_lipschitz_diag/
@@ -35,7 +35,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import torch
-import torch.nn as nn
+
+from models.recursive_reasoning.trm import (
+    TinyRecursiveReasoningModel_ACTV1,
+    TinyRecursiveReasoningModel_ACTV1Config,
+)
 
 
 # =============================================================================
@@ -92,26 +96,17 @@ EPS = 1e-4
 # Helper Functions
 # =============================================================================
 
-def project_to_ball(z: torch.Tensor, radius: float) -> torch.Tensor:
-    """Project latent to ball of given radius."""
-    norm = z.norm(p=2, dim=-1, keepdim=True).clamp(min=1e-12)
-    scale = torch.clamp(radius / norm, max=1.0)
-    return z * scale
-
-
 def compute_norm_per_sample(z: torch.Tensor) -> torch.Tensor:
     """Compute per-sample L2 norm."""
     return z.norm(p=2, dim=(1, 2))
 
 
-def load_model(checkpoint_path: Path, device: str, radius_override: float = None) -> Tuple[nn.Module, Dict]:
+def load_model(
+    checkpoint_path: Path,
+    device: str,
+    radius_override: Optional[float] = None,
+) -> Tuple[TinyRecursiveReasoningModel_ACTV1, Dict[str, Any]]:
     """Load model from checkpoint using proper model construction."""
-    from models.recursive_reasoning.trm import (
-        TinyRecursiveReasoningModel_ACTV1,
-        TinyRecursiveReasoningModel_ACTV1Config,
-    )
-    from rl.config import RLConfig
-
     ckpt = torch.load(checkpoint_path, map_location=device)
 
     # Handle nested checkpoint structure
@@ -151,9 +146,14 @@ def load_model(checkpoint_path: Path, device: str, radius_override: float = None
     lip_scale_keys = [k for k in cleaned_state.keys() if "_lip_scale" in k]
     has_contraction_keys = len(lip_scale_keys) > 0
 
-    rl_cfg = RLConfig()
     enable_contraction = rl_config_dict.get("enable_contraction", has_contraction_keys)
-    latent_ball_radius = radius_override if radius_override else rl_config_dict.get("latent_ball_radius", 10.0)
+    latent_ball_radius = (
+        radius_override
+        if radius_override is not None
+        else rl_config_dict.get("latent_ball_radius", 10.0)
+    )
+    if latent_ball_radius is None or float(latent_ball_radius) <= 0.0:
+        raise ValueError("Exp1 projection diagnostics require an explicit finite R > 0.")
     target_Lz = rl_config_dict.get("target_Lz", 0.9 if enable_contraction else 1.0)
     disable_value_head_norm = rl_config_dict.get("disable_value_head_norm", True)
 
@@ -184,6 +184,7 @@ def load_model(checkpoint_path: Path, device: str, radius_override: float = None
         rl_enable_contraction=enable_contraction,
         rl_target_Lz=float(target_Lz),
         rl_disable_value_head_norm=bool(disable_value_head_norm),
+        rl_latent_projection_mode="enabled",
         rl_latent_ball_radius=float(latent_ball_radius),
     )
 
@@ -229,13 +230,15 @@ def load_batch(batch_path: Path) -> List[PuzzleState]:
 
 
 def estimate_lipschitz(
-    model: nn.Module,
+    model: TinyRecursiveReasoningModel_ACTV1,
     states: List[Any],
     n_train: int,
     device: str,
     eval_radius: float,
 ) -> Dict[str, Any]:
     """Estimate Lipschitz constants and projection activity."""
+    if eval_radius <= 0.0:
+        raise ValueError("Exp1 projection diagnostics require an explicit finite R > 0.")
     rng = np.random.default_rng(42)
 
     if len(states) > NUM_SAMPLES:
@@ -265,11 +268,15 @@ def estimate_lipschitz(
 
                 z_H = z_base.z_H
                 z_L = z_base.z_L
+                if z_L is None:
+                    raise RuntimeError("TRM latent carry is missing z_L.")
 
                 # Build context for manual step
                 batch = model._standardize_latent_batch(x, y)
                 context = model._resolve_latent_context(batch)
                 input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+                if input_embeds is None:
+                    raise RuntimeError("Latent context is missing input embeddings.")
                 seq_info = context["seq_info"]
                 inner = model.inner
 
@@ -286,7 +293,7 @@ def estimate_lipschitz(
                 ).item()
 
                 # Check projection activity
-                is_active = fz_norm > eval_radius if eval_radius > 0 else False
+                is_active = fz_norm > eval_radius
                 projection_active_samples.append(is_active)
 
                 # Estimate Lipschitz via perturbations
@@ -316,17 +323,20 @@ def estimate_lipschitz(
                     ).item()
                     L_preproj_samples.append(diff_norm_pre / EPS)
 
-                    # Apply projection to both
-                    if eval_radius > 0:
-                        z_H_next_proj = project_to_ball(z_H_next, eval_radius)
-                        z_L_next_proj = project_to_ball(z_L_next, eval_radius)
-                        z_H_next_p_proj = project_to_ball(z_H_next_p, eval_radius)
-                        z_L_next_p_proj = project_to_ball(z_L_next_p, eval_radius)
-                    else:
-                        z_H_next_proj = z_H_next
-                        z_L_next_proj = z_L_next
-                        z_H_next_p_proj = z_H_next_p
-                        z_L_next_p_proj = z_L_next_p
+                    # Use the same Euclidean product-space projection as the
+                    # recurrent model. One scale applies jointly to z_H and z_L.
+                    z_H_next_proj, z_L_next_proj = inner._project_carry_to_ball(
+                        z_H_next,
+                        z_L_next,
+                        eval_radius,
+                    )
+                    z_H_next_p_proj, z_L_next_p_proj = (
+                        inner._project_carry_to_ball(
+                            z_H_next_p,
+                            z_L_next_p,
+                            eval_radius,
+                        )
+                    )
 
                     # L_postproj
                     diff_H_post = z_H_next_p_proj - z_H_next_proj
@@ -451,7 +461,7 @@ def generate_table(agg: Dict[str, Any], out_path: Path):
     lines = [
         r"\begin{table}[h]",
         r"\centering",
-        r"\caption{Exp1 Lipschitz/Projection Diagnostic. Confirms projection dominance at R=10 is consistent with Exp2 findings.}",
+        r"\caption{Finite-sample Exp1 Lipschitz/projection diagnostics at two evaluation radii.}",
         r"\label{tab:exp1_lipschitz_diag}",
         r"\begin{tabular}{llcccc}",
         r"\toprule",
@@ -489,7 +499,7 @@ def generate_claims(agg: Dict[str, Any], out_path: Path):
 
 ## Purpose
 
-Cross-check diagnostic to verify Exp1 checkpoints exhibit the same projection dominance behavior observed in Exp2. This strengthens reviewer defensibility.
+Cross-check finite sampled diagnostics for Exp1 checkpoints against the corresponding Exp2 summaries. These observations do not establish uniform Lipschitz bounds, population premises, or causal effects.
 
 ## Findings
 
@@ -513,16 +523,16 @@ Cross-check diagnostic to verify Exp1 checkpoints exhibit the same projection do
             content += f"- **{cond_label}**: projection_active_rate = {m['projection_active_rate']*100:.0f}%\n"
 
     content += """
-## Consistency with Exp2
+## Finite-sample comparison with Exp2
 
-This diagnostic confirms:
-1. At R=10, projection is highly active (~100%) for both Exp1 conditions, consistent with Exp2
-2. At R=100, projection is mostly inactive, consistent with Exp2c-lite findings
-3. The projection dominance effect is architecture-wide, not specific to the Exp2 contraction sweep
+For the sampled checkpoints and states:
+1. At R=10, projection is highly active for both Exp1 conditions.
+2. At R=100, projection is mostly inactive.
+3. These observations can be compared with the separately sampled Exp2 diagnostics, but they do not support an architecture-wide conclusion.
 
 ## Scoped Claim
 
-> Exp1 checkpoints exhibit the same projection dominance pattern as Exp2: at R=10, projection is active ~100% of samples, masking underlying Lipschitz differences. This is consistent across both "No Contraction" and "Contraction" conditions.
+> In these sampled Exp1 checkpoints and states, projection at R=10 is active on nearly all evaluated samples for both conditions. This finite diagnostic neither establishes a uniform modulus nor shows that projection causes the observed differences.
 """
 
     out_path.write_text(content)

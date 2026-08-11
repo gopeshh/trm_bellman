@@ -5,8 +5,13 @@ Converts pytest-style tests to unittest.TestCase for Buck2 compatibility.
 
 import copy
 import hashlib
+import importlib
 import json
+import os
+import py_compile
 import random
+import shutil
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -98,6 +103,50 @@ def _tiny_trm_cfg(seq_len: int, vocab_size: int, num_identifiers: int, batch_siz
 
 
 class TestUPITrmLoggingSmoke(unittest.TestCase):
+    def test_runtime_bytecode_cache_ignores_checkout_pyc(self):
+        self.assertEqual(
+            Path(sys.pycache_prefix or "").resolve(),
+            upi_trm_train._RUNTIME_BYTECODE_CACHE_ROOT,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module_name = "runtime_bytecode_identity_probe"
+            source_path = root / f"{module_name}.py"
+            source_path.write_text('VALUE = "evill"\n', encoding="ascii")
+            malicious_stat = source_path.stat()
+            local_cache = (
+                root
+                / "__pycache__"
+                / f"{module_name}.{sys.implementation.cache_tag}.pyc"
+            )
+            local_cache.parent.mkdir()
+            py_compile.compile(
+                str(source_path),
+                cfile=str(local_cache),
+                doraise=True,
+                invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP,
+            )
+            source_path.write_text('VALUE = "clean"\n', encoding="ascii")
+            os.utime(
+                source_path,
+                ns=(malicious_stat.st_atime_ns, malicious_stat.st_mtime_ns),
+            )
+
+            sys.path.insert(0, str(root))
+            importlib.invalidate_caches()
+            try:
+                module = importlib.import_module(module_name)
+                self.assertEqual(module.VALUE, "clean")
+                cached_path = Path(module.__cached__).resolve()
+                self.assertTrue(
+                    cached_path.is_relative_to(
+                        upi_trm_train._RUNTIME_BYTECODE_CACHE_ROOT
+                    )
+                )
+            finally:
+                sys.modules.pop(module_name, None)
+                sys.path.remove(str(root))
+
     """Smoke tests for UPI-TRM logging and evaluation hooks."""
 
     def test_producer_root_must_match_executing_sources(self):
@@ -108,6 +157,58 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             unrelated_root = Path(directory)
             with self.assertRaisesRegex(RuntimeError, "source manifest"):
                 _verify_producer_source_matches_runtime(unrelated_root)
+
+    def test_source_tree_runtime_hashes_executing_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            producer_root = Path(directory) / "producer"
+            for relative_path in ("upi_trm_train.py", "puzzle_dataset.py"):
+                destination = producer_root / relative_path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(f"# {relative_path}\n", encoding="ascii")
+            for source_directory in (
+                "dataset",
+                "evaluators",
+                "models",
+                "rl",
+                "utils",
+            ):
+                destination = producer_root / source_directory / "module.py"
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(
+                    f"# {source_directory}\n",
+                    encoding="ascii",
+                )
+            config_root = producer_root / "configs" / "iclr_confirmatory"
+            config_root.mkdir(parents=True)
+            (config_root / "cell.yaml").write_text(
+                "gamma: 0.9\n",
+                encoding="ascii",
+            )
+            manifest = build_producer_source_manifest(producer_root)
+            (producer_root / SOURCE_MANIFEST_RELATIVE_PATH).write_text(
+                json.dumps(manifest, sort_keys=True),
+                encoding="ascii",
+            )
+
+            runtime_root = Path(directory) / "runtime"
+            shutil.copytree(producer_root, runtime_root)
+            runtime_module_path = runtime_root / "upi_trm_train.py"
+            with (
+                patch.object(upi_trm_train, "__file__", str(runtime_module_path)),
+                patch("upi_trm_train.assert_git_files_match_head"),
+            ):
+                _verify_producer_source_matches_runtime(producer_root)
+
+            (runtime_root / "rl" / "module.py").write_text(
+                "# tampered runtime\n",
+                encoding="ascii",
+            )
+            with (
+                patch.object(upi_trm_train, "__file__", str(runtime_module_path)),
+                patch("upi_trm_train.assert_git_files_match_head"),
+                self.assertRaisesRegex(RuntimeError, "source manifest"),
+            ):
+                _verify_producer_source_matches_runtime(producer_root)
 
     def test_standalone_runtime_rejects_tampered_archive_source(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
-Generate ablation configs for ICML experiments.
+Generate ablation configs for diagnostic comparisons.
 
-Creates configs that systematically remove each theory-exact feature to isolate contributions.
-Addresses Bahram's guidance (main.tex:1426-1429):
-
-    "Add ablations that remove (i) contraction enforcement, (ii) exact centering,
-     and (iii) conservative mixture updates, to show each is necessary for stability."
+Creates configs that remove one implementation feature at a time. Results from
+these finite comparisons describe only the evaluated runs; they do not establish
+that a feature is necessary or sufficient for stability.
 """
 
 import os
@@ -19,7 +17,7 @@ ABLATIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Base theory-exact config (all features ON)
 BASE_CONFIG = {
-    # Shaped rewards with rush-to-fail mitigation
+    # Shaped rewards with explicit terminal-outcome terms
     "reward_shaping": True,
     "fail_terminal_reward": -10.0,
     "solve_terminal_reward": 0.0,
@@ -41,6 +39,7 @@ BASE_CONFIG = {
     "enable_contraction": True,
     "target_Lz": 0.9,
     "target_Lv": 1.0,
+    "latent_projection_mode": "enabled",
     "latent_ball_radius": 10.0,
 
     # Conservative updates
@@ -110,7 +109,7 @@ def create_ablation(name: str, changes: dict, description: str):
 
 
 # ===================================================================
-# ABLATION 1: Remove Contraction Enforcement (Assumption 4.2)
+# ABLATION 1: Remove the contraction-oriented intervention
 # ===================================================================
 create_ablation(
     name="no_contraction",
@@ -119,15 +118,15 @@ create_ablation(
         "target_Lz": 1.0,  # No longer enforced, but set to 1.0 to disable
     },
     description=(
-        "Disables contraction enforcement (Assumption 4.2).\n"
-        "# Tests: Can the agent learn without L_z < 1 guarantee?\n"
-        "# Expected: Higher variance, possible instability, worse sample efficiency.\n"
-        "# This removes spectral normalization, so latent dynamics can expand."
+        "Disables the contraction-oriented architectural intervention.\n"
+        "# This finite ablation does not test or establish the paper's\n"
+        "# domain-relative contraction premise.\n"
+        "# Spectral normalization is removed, so latent dynamics may expand."
     )
 )
 
 # ===================================================================
-# ABLATION 2: Remove Exact Baseline (Theorem 5.9 - KEY CONTRIBUTION)
+# ABLATION 2: Remove exact statewise baseline centering
 # ===================================================================
 create_ablation(
     name="no_exact_baseline",
@@ -136,10 +135,10 @@ create_ablation(
         "batch_centered_advantage": True,  # Fall back to batch-level centering heuristic
     },
     description=(
-        "Disables exact baseline summation (Theorem 5.9 - KEY CONTRIBUTION).\n"
-        "# Tests: Impact of O(α·ε_{A,0}) vs O(ε_A/(1-γ)) evaluation-error penalty.\n"
-        "# Expected: Weaker improvement guarantee, possibly more gradient variance.\n"
-        "# Uses batch-level centering instead (heuristic, not theory-exact)."
+        "Disables exact statewise baseline summation.\n"
+        "# Uses batch-level centering instead (heuristic, not theory-exact).\n"
+        "# Finite ablation results do not establish either population CPI\n"
+        "# certificate or its required estimator-defect premise."
     )
 )
 
@@ -153,25 +152,24 @@ create_ablation(
     },
     description=(
         "Disables conservative mixture updates (sets α=1.0).\n"
-        "# Tests: Can the agent learn with greedy policy updates?\n"
-        "# Expected: Possible instability, policy oscillation, worse final performance.\n"
-        "# The CPI bound degenerates to standard PI (no conservatism)."
+        "# This is a configuration contrast only; finite outcomes do not\n"
+        "# establish the population CPI premises or a causal stability effect."
     )
 )
 
 # ===================================================================
-# ABLATION 4: Remove Forward-Invariant Projection (Assumption 4.1)
+# ABLATION 4: Remove forward-invariant recurrent projection
 # ===================================================================
 create_ablation(
     name="no_projection",
     changes={
-        "latent_ball_radius": 0.0,  # Disable projection
+        "latent_projection_mode": "disabled",
+        "latent_ball_radius": None,
     },
     description=(
-        "Disables forward-invariant projection (Assumption 4.1).\n"
-        "# Tests: Can the agent learn without latent ball constraint?\n"
-        "# Expected: Latents can escape the contractive region, breaking bounds.\n"
-        "# May lead to NaN/Inf issues or divergence."
+        "Disables forward-invariant recurrent projection.\n"
+        "# This finite ablation does not establish or refute any invariant-set\n"
+        "# or contraction premise from the paper."
     )
 )
 
@@ -184,10 +182,9 @@ create_ablation(
         "theory_exact_mixture": False,
     },
     description=(
-        "Disables theory-exact CPI mixture (Issue 4).\n"
-        "# Tests: Parameter-space interpolation vs policy-space mixture.\n"
-        "# Expected: Similar performance but technically NOT CPI-compliant.\n"
-        "# Uses param.lerp_(candidate_param, α) instead of π_new = (1-α)π + απ_0."
+        "Replaces exact pointwise probability mixing with parameter interpolation.\n"
+        "# Uses param.lerp_(candidate_param, α), which is not the exact mixture\n"
+        "# π_new = (1-α)π + απ_0 analyzed by the paper."
     )
 )
 
@@ -202,15 +199,15 @@ create_ablation(
         "exact_baseline_summation": False,
         "batch_centered_advantage": True,
         "mixture_alpha": 1.0,
-        "latent_ball_radius": 0.0,
+        "latent_projection_mode": "disabled",
+        "latent_ball_radius": None,
         "theory_exact_mixture": False,
         "exact_k_step_targets": False,
     },
     description=(
-        "Disables ALL theory-exact features (baseline RL).\n"
-        "# Tests: How much does the theory framework contribute?\n"
-        "# Expected: Worst performance, highest variance, possible divergence.\n"
-        "# This is a standard actor-critic baseline without UPI-TRM guarantees."
+        "Disables the configured paper-facing mechanisms (baseline RL).\n"
+        "# This configuration supplies none of those mechanisms; finite outcomes\n"
+        "# establish neither their population premises nor causal effects."
     )
 )
 
@@ -226,15 +223,15 @@ create_ablation(
         "exact_baseline_summation": False,
         "batch_centered_advantage": True,
         "mixture_alpha": 1.0,
-        "latent_ball_radius": 0.0,
+        "latent_projection_mode": "disabled",
+        "latent_ball_radius": None,
         "theory_exact_mixture": False,
         "exact_k_step_targets": False,
     },
     description=(
-        "Sparse rewards + NO theory features (hardest baseline).\n"
-        "# Tests: Can standard actor-critic learn Sudoku from terminal rewards?\n"
-        "# Expected: Very slow learning or complete failure.\n"
-        "# This is the 'default RL' approach without any UPI-TRM innovations."
+        "Sparse rewards with the configured paper-facing mechanisms disabled.\n"
+        "# This is a configuration contrast only; no performance ordering or\n"
+        "# population-theorem premise is inferred from finite outcomes."
     )
 )
 
@@ -245,7 +242,7 @@ print(f"\nGenerated {len(list(ABLATIONS_DIR.glob('*.yaml')))} ablation configs i
 print("\nTo run ablations:")
 print("  python upi_trm_train.py --config configs/ablations/ablation_<name>.yaml")
 print("\nRecommended ablation sweep:")
-print("  1. ablation_no_contraction.yaml      - Tests Assumption 4.2")
-print("  2. ablation_no_exact_baseline.yaml   - Tests Theorem 5.9 (KEY)")
+print("  1. ablation_no_contraction.yaml      - Disables contraction intervention")
+print("  2. ablation_no_exact_baseline.yaml   - Uses approximate centering")
 print("  3. ablation_no_conservative_mixture.yaml - Tests CPI benefit")
 print("  4. ablation_no_theory_features.yaml  - Full ablation (baseline)")

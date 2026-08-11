@@ -20,7 +20,7 @@ Usage:
         --out_dir results/paper_ready/exp4_projection_free_dial_final
 
 Non-negotiables:
-- latent_ball_radius = 0.0 (projection disabled)
+- latent_projection_mode = disabled with latent_ball_radius = null
 - disable_value_head_norm: true
 - No fallback to random inputs (hard error if dataset missing)
 """
@@ -163,7 +163,8 @@ def load_model_strict(
 
     # Verify non-negotiables
     disable_value_head_norm = yaml_config.get("disable_value_head_norm", False)
-    latent_ball_radius = yaml_config.get("latent_ball_radius", 10.0)
+    latent_projection_mode = yaml_config.get("latent_projection_mode")
+    latent_ball_radius = yaml_config.get("latent_ball_radius")
 
     if not disable_value_head_norm:
         raise ValueError(
@@ -171,10 +172,12 @@ def load_model_strict(
             f"Found: disable_value_head_norm={disable_value_head_norm}"
         )
 
-    if latent_ball_radius != 0.0:
+    if latent_projection_mode != "disabled" or latent_ball_radius is not None:
         raise ValueError(
-            f"NON-NEGOTIABLE VIOLATION: latent_ball_radius must be 0.0 (projection disabled).\n"
-            f"Found: latent_ball_radius={latent_ball_radius}"
+            "NON-NEGOTIABLE VIOLATION: projection must use explicit identity "
+            "mode with latent_ball_radius=None.\n"
+            f"Found: latent_projection_mode={latent_projection_mode}, "
+            f"latent_ball_radius={latent_ball_radius}"
         )
 
     # Load state dict
@@ -238,7 +241,8 @@ def load_model_strict(
         rl_enable_contraction=enable_contraction,
         rl_target_Lz=float(target_Lz),
         rl_disable_value_head_norm=True,  # Non-negotiable
-        rl_latent_ball_radius=0.0,  # Non-negotiable: projection disabled
+        rl_latent_projection_mode="disabled",
+        rl_latent_ball_radius=None,
     )
 
     model = TinyRecursiveReasoningModel_ACTV1(model_config.model_dump())
@@ -255,7 +259,8 @@ def load_model_strict(
         "enable_contraction": enable_contraction,
         "target_Lz": target_Lz,
         "disable_value_head_norm": True,
-        "latent_ball_radius": 0.0,
+        "latent_projection_mode": "disabled",
+        "latent_ball_radius": None,
         "config_source": "yaml",
         "yaml_path": config_yaml_path,
         "checkpoint_path": checkpoint_path,
@@ -681,32 +686,21 @@ def compute_projection_active_rate(
     device: str,
 ) -> float:
     """
-    Check if projection is active by examining the model's configuration.
-    When latent_ball_radius=0, projection is disabled and rate should be 0.
+    Check if projection is active by examining the model's explicit mode.
 
     Returns 0.0 if projection is disabled, 1.0 if enabled.
     """
-    # Check model configuration for latent_ball_radius
     inner = getattr(model, 'inner', model)
-
-    # Try to get latent_ball_radius from config
-    latent_ball_radius = getattr(inner, 'latent_ball_radius', None)
-    if latent_ball_radius is None:
-        # Check in config
-        if hasattr(inner, 'config'):
-            config = inner.config
-            if isinstance(config, dict):
-                latent_ball_radius = config.get('rl_latent_ball_radius', 10.0)
-            else:
-                latent_ball_radius = getattr(config, 'rl_latent_ball_radius', 10.0)
-        else:
-            latent_ball_radius = 10.0  # Default
-
-    # Projection is inactive if R=0
-    if latent_ball_radius == 0.0:
-        return 0.0
+    config = getattr(inner, "config", None)
+    if isinstance(config, dict):
+        projection_mode = config.get("rl_latent_projection_mode")
     else:
+        projection_mode = getattr(config, "rl_latent_projection_mode", None)
+    if projection_mode == "disabled":
+        return 0.0
+    if projection_mode == "enabled":
         return 1.0
+    raise ValueError("Model config lacks an explicit latent projection mode.")
 
 
 # =============================================================================
@@ -1118,7 +1112,7 @@ def generate_provenance(summary: Dict[str, Any], out_path: Path) -> None:
 ## Non-Negotiables Verified
 
 - `disable_value_head_norm: true` ✓
-- `latent_ball_radius: 0.0` (projection disabled) ✓
+- `latent_projection_mode: disabled` and `latent_ball_radius: null` ✓
 
 ## Dial Implementation
 

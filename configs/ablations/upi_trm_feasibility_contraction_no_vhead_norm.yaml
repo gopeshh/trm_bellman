@@ -45,7 +45,7 @@ eval_num_episodes: 50
 
 episodic_latent: true
 
-# Forward-invariant projection (Assumption 4.1)
+# Forward-invariant recurrent projection
 latent_ball_radius: 10.0
 
 # Feasibility checker

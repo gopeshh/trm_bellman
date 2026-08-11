@@ -48,6 +48,9 @@ from scripts.persistent_checkpoint_diagnostics import (
     run_registered_diagnostics,
     write_artifact_bundle,
 )
+from scripts.episodic_z_hard_suite_diagnostics import (
+    diagnostic_projection_radius,
+)
 from torch import nn
 from torch.distributions import Categorical
 from utils.dataset_provenance import build_dataset_provenance
@@ -71,6 +74,21 @@ def _clone_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
     return {
         name: value.detach().cpu().clone() for name, value in model.state_dict().items()
     }
+
+
+class TestEpisodicProjectionModeContract(unittest.TestCase):
+    def test_disabled_projection_uses_identity_without_numeric_radius(self):
+        disabled = RLConfig(
+            latent_projection_mode="disabled",
+            latent_ball_radius=None,
+        )
+        enabled = RLConfig(
+            latent_projection_mode="enabled",
+            latent_ball_radius=3.0,
+        )
+
+        self.assertIsNone(diagnostic_projection_radius(disabled))
+        self.assertEqual(diagnostic_projection_radius(enabled), 3.0)
 
 
 class _OneRecordDataset:

@@ -94,14 +94,14 @@ class TinyRecursiveReasoningModel_ACTV1Config(BaseModel):
     # For UPI-TRM (RL):
     #   - rl_enable_value_head = True (adds LatentValueHead for V_ψ)
     #   - rl_enable_policy_head = True (adds EditPolicyHead for π_θ)
-    #   - rl_enable_contraction = True (for Assumption 3.2 guarantees)
+    #   - rl_enable_contraction = True (optional contraction-oriented intervention)
     #   - Set rl_num_actions to the discrete action space size
     # ==========================================================================
     
     rl_enable_value_head: bool = False  # Add V_ψ(z, x) value head
     rl_enable_contraction: bool = False  # Apply spectral norm + contraction scaling
     rl_value_hidden_dim: int = 256  # Hidden dimension of value head MLP
-    rl_target_Lz: float = 0.9  # Target contraction factor L_z < 1 (Assumption 3.2)
+    rl_target_Lz: float = 0.9  # Configured recurrent-modulus target L_z < 1
     rl_target_Lv: float = 1.0  # Target Lipschitz of value head w.r.t. z
     rl_disable_value_head_norm: bool = False  # Skip value head normalization (2x2 ablation finding)
     rl_enable_policy_head: bool = False  # Add edit policy head π_θ(a|s)
@@ -595,7 +595,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         else:
             self.z_init_encoder = None
 
-        # === Contraction-oriented intervention (Assumption 3.2) ===
+        # === Optional contraction-oriented intervention ===
         #
         # WARNING: Enabling rl_enable_contraction is NOT compatible with loading
         # vanilla pretrained TRM weights without fine-tuning!
@@ -603,11 +603,11 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         # When enabled, this applies operator-norm clamping and output scaling
         # intended to reduce the recurrent modulus. This modifies network behavior:
         # - opnorm clamp: Rescales each layer to ||W|| <= 1 (1-Lipschitz per layer)
-        # - Output scaling: Compounds to achieve global contraction L_z ≈ target_Lz
+        # - Output scaling: Applies a configured recurrent-path scaling factor
         #
-        # NOTE: We use opnorm_clamp instead of spectral_norm because PyTorch's
-        # spectral_norm is numerically unstable in this architecture (causes Lz
-        # explosion to 10^5+). See artifact/README_ARTIFACT.md (Appendix: Contraction fix) for details.
+        # NOTE: We use opnorm_clamp instead of spectral_norm because finite
+        # diagnostics on this architecture recorded local-Lz estimates above
+        # 10^5 with spectral_norm. See artifact/README_ARTIFACT.md for context.
         #
         # If you load a checkpoint that was trained WITHOUT contraction:
         # - The pretrained weights will be rescaled by the contraction factors
@@ -615,16 +615,18 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         # - You must fine-tune the model with the new constraints
         #
         # This intervention is not a certificate of the uniform global modulus
-        # in Assumption 3.2. It only supplies a controlled architectural factor.
+        # required by the recurrent-contraction specialization. It only supplies
+        # a controlled architectural factor.
         # For practical RL that builds on pretrained TRM, consider:
         # - Training with contraction from scratch, OR
-        # - Disabling contraction (loses theory guarantees but preserves pretrained behavior)
+        # - Disabling the intervention to preserve pretrained behavior. The
+        #   finite-reference certificate does not require recurrent contraction.
         if self.config.rl_enable_contraction:
             import warnings
             warnings.warn(
                 "rl_enable_contraction=True: Applying contraction-oriented "
                 "operator-norm clamping and scaling to z->z path layers. This "
-                "does not certify the uniform modulus in Assumption 3.2 and "
+                "does not certify the uniform recurrent modulus and "
                 "will modify network behavior. "
                 "Pretrained weights from vanilla TRM may require fine-tuning.",
                 UserWarning,
@@ -645,7 +647,8 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
                 restrict_to_reasoning_layers=True,
             )
             # Value head normalization: can be disabled independently of z→z contraction
-            # The 2x2 ablation showed value head norm causes collapse, z→z contraction is stable
+            # A finite 2x2 diagnostic observed collapse with value-head
+            # normalization and not with z→z contraction alone.
             if self.value_head is not None and not self.config.rl_disable_value_head_norm:
                 apply_spectral_norm_to_value_head(self.value_head)
                 enforce_global_contraction_on_value_head(self.value_head, self.config.rl_target_Lv)
@@ -810,7 +813,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             z_L = global_L + z_init_L
 
             # Project initial latent into the declared invariant ball.
-            # Paper requires z^(0) ∈ Z_inv for contraction guarantees to hold
+            # The contraction specialization requires z^(0) in Z_inv.
             if self.config.rl_latent_projection_mode == "enabled":
                 R = self.config.rl_latent_ball_radius
                 assert R is not None
@@ -830,7 +833,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
             z = self.inner.reset_carry(reset_flag, empty_carry)
 
             # Project a supplied latent into the declared invariant ball.
-            # Paper requires z^(0) ∈ Z_inv for contraction guarantees to hold
+            # The contraction specialization requires z^(0) in Z_inv.
             if self.config.rl_latent_projection_mode == "enabled":
                 R = self.config.rl_latent_ball_radius
                 assert R is not None

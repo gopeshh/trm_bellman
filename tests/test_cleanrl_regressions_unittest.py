@@ -45,6 +45,140 @@ class TestCleanRLRegressions(unittest.TestCase):
             num_identifiers=count,
         )
 
+    def _gym_plan_edit_env(self, max_edits: int):
+        from rl.cleanrl.trm_adapter import GymPlanEditEnv
+        from rl.envs.plan_edit_env import PlanEditEnvConfig
+        from rl.sudoku_checkers import dummy_checker
+
+        return GymPlanEditEnv(
+            dataset=self._offline_dataset(1, 2),
+            checker_fn=dummy_checker,
+            env_cfg=PlanEditEnvConfig(
+                max_edits=max_edits,
+                gamma=0.9,
+                reward_shaping=False,
+                task_type="dummy",
+                vocab_size=32,
+                stop_action_mode="disabled",
+                disable_constraint_masking=True,
+            ),
+            seed=0,
+        )
+
+    def test_gym_plan_edit_env_uses_gymnasium_step_contract(self) -> None:
+        env = self._gym_plan_edit_env(max_edits=2)
+        observation, info = env.reset()
+
+        self.assertIsInstance(observation, dict)
+        self.assertEqual(info, {})
+        self.assertTrue(
+            {"inputs", "plan", "remaining_edits", "action_mask"}.issubset(
+                observation
+            )
+        )
+        transition = env.step(0)
+        self.assertEqual(len(transition), 5)
+        _, reward, terminated, truncated, transition_info = transition
+        self.assertIsInstance(reward, float)
+        self.assertIsInstance(terminated, bool)
+        self.assertIsInstance(truncated, bool)
+        self.assertIsInstance(transition_info, dict)
+
+    def test_gym_plan_edit_env_budget_is_terminal_not_truncated(self) -> None:
+        env = self._gym_plan_edit_env(max_edits=2)
+        observation, _ = env.reset()
+        self.assertEqual(observation["remaining_edits"].tolist(), [2.0])
+
+        _, _, first_terminated, first_truncated, _ = env.step(0)
+        self.assertFalse(first_terminated)
+        self.assertFalse(first_truncated)
+        observation, _, terminated, truncated, info = env.step(0)
+
+        self.assertTrue(terminated)
+        self.assertFalse(truncated)
+        self.assertTrue(info["terminated_by_budget"])
+        self.assertEqual(observation["remaining_edits"].tolist(), [0.0])
+
+    def test_cleanrl_bundle_propagates_checker_and_threshold_fields(self) -> None:
+        from rl.cleanrl.trm_adapter import build_sudoku_bundle
+
+        feasibility_bundle = build_sudoku_bundle(
+            {
+                "batch_size": 4,
+                "use_feasibility_checker": True,
+                "feasibility_violation_weight": 3.0,
+                "feasibility_zerocand_weight": 7.0,
+            }
+        )
+        self.assertEqual(feasibility_bundle.checker_kind, "feasibility")
+
+        threshold_bundle = build_sudoku_bundle(
+            {
+                "batch_size": 4,
+                "solved_threshold": None,
+            }
+        )
+        self.assertIsNone(threshold_bundle.env_cfg.solved_threshold)
+
+    def test_trm_config_uses_rlconfig_defaults(self) -> None:
+        from rl.cleanrl.trm_adapter import _build_trm_cfg
+        from rl.config import RLConfig
+
+        bundle = SimpleNamespace(
+            seq_len=4,
+            num_identifiers=2,
+            vocab_size=5,
+            num_actions=21,
+        )
+        trm_config = _build_trm_cfg(
+            {"batch_size": 2, "max_edits": 3, "gamma": 0.9},
+            bundle,
+        )
+        defaults = RLConfig(batch_size=2, max_edits=3, gamma=0.9)
+
+        self.assertEqual(
+            trm_config["rl_enable_contraction"],
+            defaults.enable_contraction,
+        )
+        self.assertEqual(trm_config["rl_target_Lz"], defaults.target_Lz)
+        self.assertEqual(
+            trm_config["rl_latent_projection_mode"],
+            defaults.latent_projection_mode,
+        )
+        self.assertEqual(
+            trm_config["rl_latent_ball_radius"],
+            defaults.latent_ball_radius,
+        )
+
+    def test_cleanrl_bundle_uses_default_training_pool_size(self) -> None:
+        from rl.cleanrl.trm_adapter import build_sudoku_bundle
+
+        for batch_size, expected_pool_size in ((4, 8), (16, 16)):
+            with self.subTest(batch_size=batch_size):
+                dataset = self._offline_dataset(1, 32)
+                observed_calls = []
+
+                def load_dataset(*, dataset_paths, pool_size, split):
+                    observed_calls.append((dataset_paths, pool_size, split))
+                    return (
+                        dataset,
+                        dataset.seq_len,
+                        dataset.vocab_size,
+                        dataset.num_identifiers,
+                    )
+
+                with patch(
+                    "rl.training_setup.build_dataset_from_paths",
+                    side_effect=load_dataset,
+                ):
+                    bundle = build_sudoku_bundle({"batch_size": batch_size})
+
+                self.assertIs(bundle.dataset, dataset)
+                self.assertEqual(
+                    observed_calls,
+                    [(None, expected_pool_size, "train")],
+                )
+
     def test_external_environment_rejects_zero_edit_budget(self) -> None:
         from external_baselines.sudoku4x4_env import Sudoku4x4ExternalEnv
 
@@ -74,6 +208,7 @@ class TestCleanRLRegressions(unittest.TestCase):
 
     def test_cleanrl_bundle_uses_disjoint_held_out_pool(self) -> None:
         from rl.cleanrl.trm_adapter import build_sudoku_bundle
+        from utils.dataset_provenance import dataset_input_sha256s
 
         train = self._offline_dataset(1, 3)
         evaluation = self._offline_dataset(10, 2)
@@ -95,8 +230,13 @@ class TestCleanRLRegressions(unittest.TestCase):
         self.assertIs(bundle.eval_dataset, evaluation)
         self.assertEqual(bundle.train_split, "train")
         self.assertEqual(bundle.eval_split, "test")
-        self.assertIsNotNone(bundle.train_pool_sha256)
-        self.assertIsNotNone(bundle.eval_pool_sha256)
+        self.assertTrue(bundle.train_pool_sha256)
+        self.assertTrue(bundle.eval_pool_sha256)
+        self.assertFalse(
+            set(dataset_input_sha256s(train)).intersection(
+                dataset_input_sha256s(evaluation)
+            )
+        )
         train_ids = {
             int(sample["puzzle_identifiers"].item()) for sample in train.samples
         }
@@ -105,9 +245,21 @@ class TestCleanRLRegressions(unittest.TestCase):
             for sample in evaluation.samples
         }
         self.assertFalse(train_ids.intersection(eval_ids))
+        self.assertGreaterEqual(min(eval_ids), bundle.eval_puzzle_id_offset)
 
     def test_cleanrl_bundle_rejects_overlapping_or_small_eval_pool(self) -> None:
         from rl.cleanrl.trm_adapter import build_sudoku_bundle
+
+        with patch("rl.training_setup.build_dataset_from_paths") as load_dataset:
+            with self.assertRaisesRegex(ValueError, "different splits"):
+                build_sudoku_bundle(
+                    {
+                        "dataset_paths": ["fixture"],
+                        "train_split": "train",
+                        "eval_split": "train",
+                    }
+                )
+            load_dataset.assert_not_called()
 
         train = self._offline_dataset(1, 3)
         overlap = self._offline_dataset(1, 2)
@@ -281,6 +433,65 @@ class TestCleanRLRegressions(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "action mask"):
             apply_action_mask(logits, torch.ones(2, 3, dtype=torch.bool))
 
+    def test_cleanrl_action_mask_blocks_argmax_and_sampling(self) -> None:
+        from rl.cleanrl.trm_adapter import apply_action_mask
+
+        logits = torch.zeros(1, 5)
+        mask = torch.tensor([[True, False, True, False, True]])
+        masked_logits = apply_action_mask(logits, mask)
+
+        self.assertIn(masked_logits.argmax(dim=-1).item(), {0, 2, 4})
+        self.assertLess(masked_logits[0, 1].item(), -1e6)
+        self.assertLess(masked_logits[0, 3].item(), -1e6)
+        samples = torch.distributions.Categorical(logits=masked_logits).sample(
+            (1000,)
+        )
+        self.assertTrue(set(samples.reshape(-1).tolist()).issubset({0, 2, 4}))
+
+    def test_trm_actor_critic_interface_shapes(self) -> None:
+        from rl.cleanrl.trm_adapter import TRMActorCritic
+
+        bundle = SimpleNamespace(
+            seq_len=4,
+            num_identifiers=2,
+            vocab_size=5,
+            num_actions=21,
+        )
+        agent = TRMActorCritic(
+            {
+                "_bundle": bundle,
+                "batch_size": 1,
+                "hidden_size": 32,
+                "h_cycles": 1,
+                "l_cycles": 1,
+                "inner_unroll_n": 1,
+            }
+        )
+        observation = {
+            "inputs": torch.zeros(1, bundle.seq_len),
+            "plan": torch.zeros(1, bundle.seq_len),
+            "puzzle_identifiers": torch.zeros(1, 1),
+            "action_mask": torch.ones(
+                1,
+                bundle.num_actions,
+                dtype=torch.bool,
+            ),
+        }
+
+        with torch.no_grad():
+            value = agent.get_value(observation)
+            logits = agent.get_policy_logits(observation)
+            action, logprob, entropy, action_value = agent.get_action_and_value(
+                observation
+            )
+
+        self.assertEqual(tuple(value.shape), (1, 1))
+        self.assertEqual(tuple(logits.shape), (1, bundle.num_actions))
+        self.assertEqual(tuple(action.shape), (1,))
+        self.assertEqual(tuple(logprob.shape), (1,))
+        self.assertEqual(tuple(entropy.shape), (1,))
+        self.assertEqual(tuple(action_value.shape), (1, 1))
+
     def test_q_eval_adapter_preserves_remaining_edits(self) -> None:
         from rl.cleanrl.trm_adapter import _QNetworkEvalAdapter
 
@@ -308,6 +519,18 @@ class TestCleanRLRegressions(unittest.TestCase):
 
         self.assertIsNotNone(q_network.observed)
         self.assertEqual(q_network.observed["remaining_edits"].tolist(), [6.0])
+
+    def test_q_eval_adapter_rejects_persistent_latent_state(self) -> None:
+        from rl.cleanrl.trm_adapter import _QNetworkEvalAdapter
+
+        class DummyQNetwork(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.model = nn.Linear(1, 1)
+
+        adapter = _QNetworkEvalAdapter(DummyQNetwork())
+        with self.assertRaisesRegex(ValueError, "episodic latent state only"):
+            adapter.policy_dist({}, torch.zeros(1), z=object())
 
     def test_cleanrl_ppo_evaluates_held_out_bundle_dataset(self) -> None:
         train_dataset = object()

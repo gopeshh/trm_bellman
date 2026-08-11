@@ -2,12 +2,12 @@
 """
 Exp4 Final v2: Projection-free Contraction Dial (Paper-Defensible, Multi-Checkpoint)
 
-FIXES pseudo-replication issue by using N=12 truly independent samples:
+Uses 12 observations clustered within 3 independently trained checkpoints:
 - 3 independently trained checkpoints (seeds 41, 42, 43)
 - 4 dial scales each
 
 Key improvements over v1:
-1. Multi-checkpoint evaluation (true N=12 independent points)
+1. Multi-checkpoint evaluation (12 repeated-measure observations)
 2. B1 built using union across ALL checkpoints × ALL scales
 3. Action entropy and success rate metrics (anti-degenerate checks)
 4. Proper git SHA tracking
@@ -20,7 +20,7 @@ Usage:
         --out_dir results/paper_ready/exp4_projection_free_dial_final
 
 Non-negotiables:
-- latent_ball_radius = 0.0 (projection disabled)
+- latent_projection_mode = disabled with latent_ball_radius = null
 - disable_value_head_norm: true
 - No fallback to random inputs (hard error if dataset missing)
 """
@@ -333,7 +333,8 @@ def load_model_strict(
 
     # Verify non-negotiables
     disable_value_head_norm = yaml_config.get("disable_value_head_norm", False)
-    latent_ball_radius = yaml_config.get("latent_ball_radius", 10.0)
+    latent_projection_mode = yaml_config.get("latent_projection_mode")
+    latent_ball_radius = yaml_config.get("latent_ball_radius")
 
     if not disable_value_head_norm:
         raise ValueError(
@@ -341,10 +342,12 @@ def load_model_strict(
             f"Found: disable_value_head_norm={disable_value_head_norm}"
         )
 
-    if latent_ball_radius != 0.0:
+    if latent_projection_mode != "disabled" or latent_ball_radius is not None:
         raise ValueError(
-            f"NON-NEGOTIABLE VIOLATION: latent_ball_radius must be 0.0.\n"
-            f"Found: latent_ball_radius={latent_ball_radius}"
+            "NON-NEGOTIABLE VIOLATION: projection must use explicit identity "
+            "mode with latent_ball_radius=None.\n"
+            f"Found: latent_projection_mode={latent_projection_mode}, "
+            f"latent_ball_radius={latent_ball_radius}"
         )
 
     # Load state dict
@@ -410,7 +413,8 @@ def load_model_strict(
         rl_enable_contraction=enable_contraction,
         rl_target_Lz=float(target_Lz),
         rl_disable_value_head_norm=True,  # Non-negotiable
-        rl_latent_ball_radius=0.0,  # Non-negotiable: projection disabled
+        rl_latent_projection_mode="disabled",
+        rl_latent_ball_radius=None,
     )
 
     model = TinyRecursiveReasoningModel_ACTV1(model_config.model_dump())
@@ -427,7 +431,8 @@ def load_model_strict(
         "enable_contraction": enable_contraction,
         "target_Lz": target_Lz,
         "disable_value_head_norm": True,
-        "latent_ball_radius": 0.0,
+        "latent_projection_mode": "disabled",
+        "latent_ball_radius": None,
     }
 
     return model, config_dict
@@ -821,8 +826,11 @@ def compute_mismatch_metrics(
 
 
 def check_projection_disabled(config: Dict[str, Any]) -> bool:
-    """Check if projection is disabled (latent_ball_radius=0)."""
-    return config.get("latent_ball_radius", 10.0) == 0.0
+    """Check that projection uses the explicit identity-mode configuration."""
+    return (
+        config.get("latent_projection_mode") == "disabled"
+        and config.get("latent_ball_radius") is None
+    )
 
 
 # =============================================================================
@@ -894,7 +902,7 @@ def run_exp4_final_v2(
     print(f"[Batches] B1: {len(b1_states)} states (hash: {b1_hash})")
     print()
 
-    # Run evaluation: N = num_checkpoints × num_scales = 12 independent points
+    # Run evaluation: 12 observations, clustered by checkpoint.
     all_results = []
 
     for model, original_weights, ckpt_seed in models_and_weights:
@@ -1027,17 +1035,19 @@ def run_exp4_final_v2(
     print(f"  Entropy OK (min > 0.5): {'YES' if entropy_ok else 'NO'}")
 
     # Pseudo-replication check
-    # Check if argmax values vary across checkpoints within same scale
-    pseudo_replication = True
+    # Check whether recorded metrics vary across checkpoints within a scale.
+    # This is descriptive only; value equality cannot diagnose sample dependence.
+    within_scale_variation_observed = False
     for scale in DIAL_SCALES:
         scale_results = [r for r in all_results if r.scale == scale]
         argmax_vals = [r.argmax_b0_8x for r in scale_results]
-        if len(set(argmax_vals)) > 1:
-            pseudo_replication = False
+        delta_v_vals = [r.delta_V_b0_8x for r in scale_results]
+        if len(set(argmax_vals)) > 1 or len(set(delta_v_vals)) > 1:
+            within_scale_variation_observed = True
             break
 
-    print(f"\n[Pseudo-replication check]")
-    print(f"  Argmax varies across checkpoints within scale: {'YES' if not pseudo_replication else 'NO'}")
+    print("\n[Within-scale variation check]")
+    print(f"  Argmax or ΔV varies across checkpoints within scale: {'YES' if within_scale_variation_observed else 'NO'}")
 
     # Decision gates
     print("\n" + "-" * 60)
@@ -1098,13 +1108,13 @@ def run_exp4_final_v2(
     elif not g1_passed:
         decision = "INVALID: Numerical instability (NaN)"
     elif not g2_passed:
-        decision = "NEGATIVE: Dial has insufficient range"
-    elif g3_any_passed and entropy_ok and not pseudo_replication:
-        decision = "POSITIVE: Dial viable with statistically significant monotonicity"
+        decision = "NEGATIVE: Observed dial range is below the configured threshold"
+    elif g3_any_passed and entropy_ok and within_scale_variation_observed:
+        decision = "POSITIVE: Sampled dial criteria met with bootstrap-supported monotonicity"
     elif g3_any_passed and entropy_ok:
-        decision = "POSITIVE: Dial viable (note: potential pseudo-replication)"
+        decision = "POSITIVE: Sampled dial criteria met (within-scale variation warning)"
     else:
-        decision = "INCONCLUSIVE: Dial range exists but no significant monotonicity"
+        decision = "INCONCLUSIVE: Observed range met threshold without bootstrap-supported monotonicity"
 
     print(f"\nDECISION: {decision}")
 
@@ -1147,7 +1157,7 @@ def run_exp4_final_v2(
             "b0_target_easy": B0_TARGET_EASY,
             "b0_target_hard": B0_TARGET_HARD,
             "b1_cap": B1_CAP,
-            "n_independent_samples": len(all_results),
+            "n_observations": len(all_results),
         },
         "batches": {
             "b0_count": len(b0_states),
@@ -1183,7 +1193,7 @@ def run_exp4_final_v2(
             "mean_entropy_eval": float(mean_entropy_eval),
             "min_entropy_train": float(min_entropy_train),
             "entropy_ok": bool(entropy_ok),
-            "pseudo_replication_detected": bool(pseudo_replication),
+            "within_scale_variation_observed": bool(within_scale_variation_observed),
         },
         "gates": {
             "g0_projection_inactive": {"passed": bool(g0_passed)},
@@ -1282,7 +1292,7 @@ This is more conservative than i.i.d. inference and accounts for within-checkpoi
 | Mean entropy (eval) | {anti_deg['mean_entropy_eval']:.3f} |
 | Min entropy (train) | {anti_deg['min_entropy_train']:.3f} |
 | Entropy OK | {'YES' if anti_deg['entropy_ok'] else 'NO'} |
-| Pseudo-replication | {'DETECTED' if anti_deg['pseudo_replication_detected'] else 'NOT DETECTED'} |
+| Within-scale metric variation | {'OBSERVED' if anti_deg['within_scale_variation_observed'] else 'NOT OBSERVED'} |
 
 ## Results by Scale (Pooled Across Checkpoints)
 
@@ -1315,8 +1325,9 @@ This is more conservative than i.i.d. inference and accounts for within-checkpoi
 
 """
     if "POSITIVE" in decision:
-        content += f"""**Claim (Positive):** Inference-time contraction scaling on z→z layers produces a measurable,
-controllable "dial" for the achieved Lipschitz constant (L_preproj) when projection is disabled.
+        content += f"""**Finite-run observation (Positive):** Across the evaluated checkpoints and scales,
+inference-time z→z weight scaling coincided with an L_preproj spread above the configured
+threshold and at least one bootstrap-supported monotonic association with a mismatch metric.
 
 **Statistical Support:** With {mono['n_samples']} observations from {mono.get('n_clusters', 3)} independently trained checkpoints,
 using cluster bootstrap for proper inference:
@@ -1326,12 +1337,12 @@ using cluster bootstrap for proper inference:
         if gates['g3_monotonicity']['aa_b1_passed']:
             content += f"- Spearman ρ={boot_aa_b1.get('rho_point', 0):.3f} (95% CI: [{boot_aa_b1.get('rho_ci_lower', 0):.3f}, {boot_aa_b1.get('rho_ci_upper', 0):.3f}]) for L_preproj vs B1 argmax at n2=8 (4× mismatch).\n"
     elif "NEGATIVE" in decision:
-        content += """**Claim (Negative):** Inference-time contraction scaling does not produce sufficient
-L_preproj variation to constitute a meaningful stability dial.
+        content += """**Finite-run observation (Negative):** Across the evaluated checkpoints and scales,
+the observed L_preproj spread was below the configured dial-range threshold.
 """
     else:
-        content += f"""**Claim (Inconclusive):** Dial range exists (L_preproj varies with scaling factor),
-but no statistically significant monotonic relationship with mismatch metrics was observed
+        content += f"""**Finite-run observation (Inconclusive):** The observed L_preproj spread met the
+configured threshold, but no bootstrap-supported monotonic association with mismatch metrics was observed
 (bootstrap 95% CI crosses 0) with {mono['n_samples']} observations from {mono.get('n_clusters', 3)} checkpoints.
 """
 
@@ -1342,6 +1353,7 @@ but no statistically significant monotonic relationship with mismatch metrics wa
 - Checkpoints: 3 independently trained models with seeds 41, 42, 43
 - Trivial 4×4 Sudoku suite only
 - Training depth n_train={summary['parameters']['n_train']}, eval depths: {summary['parameters']['eval_n_list']}
+- These finite diagnostics do not establish a causal effect or a global Lipschitz guarantee
 
 ## Evaluation Batches
 
@@ -1386,7 +1398,7 @@ def generate_provenance_v2(
 ## Non-Negotiables Verified
 
 - `disable_value_head_norm: true` ✓
-- `latent_ball_radius: 0.0` (projection disabled) ✓
+- `latent_projection_mode: disabled` and `latent_ball_radius: null` ✓
 
 ## Dial Implementation
 
@@ -1405,7 +1417,7 @@ for module in L_level.modules():
 |-----------|-------|
 | Dial scales | {summary['parameters']['dial_scales']} |
 | Checkpoint seeds | {summary['parameters']['checkpoint_seeds']} |
-| N (independent samples) | {summary['parameters']['n_independent_samples']} |
+| N observations (clustered by checkpoint) | {summary['parameters']['n_observations']} |
 | n_train | {summary['parameters']['n_train']} |
 | Eval depths | {summary['parameters']['eval_n_list']} |
 | B0 composition | {summary['parameters']['b0_target_easy']} easy + {summary['parameters']['b0_target_hard']} hard |

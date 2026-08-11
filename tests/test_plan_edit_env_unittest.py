@@ -5,6 +5,7 @@ import torch
 
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.task_config import SudokuTaskConfig
+from utils.lipschitz import compute_exact_baseline_summation
 
 class DummyDataset:
     def __init__(self):
@@ -183,6 +184,87 @@ class TestPlanEditEnv(unittest.TestCase):
         self.assertEqual(info["done_reason"], "stop")
         self.assertTrue(info["terminated_by_stop"])
         self.assertLess(abs(reward - (-1.0 - 3.0 - 0.5 * 2.0)), 1e-6)
+
+    def test_sparse_structural_solve_reward_matches_exact_enumeration(self):
+        solved_grid = torch.tensor(
+            [
+                2, 3, 4, 5,
+                4, 5, 2, 3,
+                3, 2, 5, 4,
+                5, 4, 3, 2,
+            ],
+            dtype=torch.long,
+        )
+        initial_plan = solved_grid.clone()
+        initial_plan[0] = 1
+
+        class OneEditSudokuDataset:
+            def __len__(self):
+                return 1
+
+            def __getitem__(self, idx):
+                return {
+                    "inputs": initial_plan.clone(),
+                    "puzzle_identifiers": torch.tensor([0]),
+                    "initial_plan": initial_plan.clone(),
+                }
+
+        class TerminalOnlyModel:
+            def policy_dist(self, *args, **kwargs):
+                raise AssertionError("fixed policy_probs should bypass policy_dist")
+
+            def used_value(self, *args, **kwargs):
+                raise AssertionError("a solved successor must not be bootstrapped")
+
+        def filled_cell_checker(_x, y):
+            return float((y != 1).sum().item())
+
+        cfg = PlanEditEnvConfig(
+            max_edits=2,
+            gamma=0.9,
+            reward_shaping=False,
+            vocab_size=6,
+            solved_threshold=None,
+            stop_action_mode="disabled",
+            task_type="sudoku",
+            C_max=16.0,
+        )
+        env = PlanEditEnv(OneEditSudokuDataset(), filled_cell_checker, cfg)
+        stop_id = initial_plan.numel() * cfg.vocab_size
+        env.set_stop_action_id(stop_id)
+        x, y = env.reset(0)
+
+        edit_action = 2
+        num_actions = stop_id + 1
+        policy_probs = torch.zeros(1, num_actions)
+        policy_probs[0, edit_action] = 1.0
+        action_mask = policy_probs.to(dtype=torch.bool)
+        x_batch = {
+            key: value.reshape(1) if value.ndim == 0 else value.unsqueeze(0)
+            for key, value in x.items()
+        }
+        exact_baseline, q_values = compute_exact_baseline_summation(
+            model=TerminalOnlyModel(),
+            x_batch=x_batch,
+            y_batch=y.unsqueeze(0),
+            env=env,
+            n=0,
+            gamma=cfg.gamma,
+            checker_fn=filled_cell_checker,
+            action_mask=action_mask,
+            policy_probs=policy_probs,
+        )
+
+        (_, y_next), reward, done, info = env.step(edit_action)
+
+        expected_reward = 16.0 - cfg.gamma * cfg.C_max
+        self.assertTrue(done)
+        self.assertEqual(info["done_reason"], "solved")
+        self.assertEqual(info["phi_new"], 16.0)
+        self.assertTrue(torch.equal(y_next, solved_grid))
+        self.assertAlmostEqual(reward, expected_reward)
+        self.assertAlmostEqual(q_values[0, edit_action].item(), reward)
+        self.assertAlmostEqual(exact_baseline.item(), reward)
 
     def test_plan_edit_env_action_masking(self):
         """

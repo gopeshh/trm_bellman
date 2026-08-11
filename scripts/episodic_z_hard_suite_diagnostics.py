@@ -284,26 +284,22 @@ def compute_action_mask(env: Any, x_batch: Dict[str, torch.Tensor], y_batch: tor
     return mask
 
 
-def project_joint_to_ball(
-    z_h: torch.Tensor,
-    z_l: torch.Tensor,
-    radius: float,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    if radius <= 0.0:
-        return z_h, z_l
-    norm = torch.sqrt(
-        z_h.pow(2).sum(dim=(1, 2), keepdim=True)
-        + z_l.pow(2).sum(dim=(1, 2), keepdim=True)
-    ).clamp(min=1e-8)
-    scale = torch.clamp(radius / norm, max=1.0)
-    return z_h * scale, z_l * scale
-
-
 def combined_latent_norm(z_h: torch.Tensor, z_l: torch.Tensor) -> torch.Tensor:
     return torch.sqrt(
         z_h.pow(2).sum(dim=(1, 2)) +
         z_l.pow(2).sum(dim=(1, 2))
     )
+
+
+def diagnostic_projection_radius(config: RLConfig) -> Optional[float]:
+    """Return the enabled radius, or None for the identity operator."""
+
+    if config.latent_projection_mode == "disabled":
+        return None
+    radius = config.latent_ball_radius
+    if radius is None:
+        raise ValueError("Enabled recurrent projection requires a finite R > 0.")
+    return float(radius)
 
 
 def manual_preprojection_update(
@@ -379,7 +375,7 @@ def estimate_projection_terms(
     directions: FrozenDirections,
     *,
     n: int,
-    radius: float,
+    radius: Optional[float],
 ) -> Tuple[float, float, int]:
     _, _, z_n = build_value_head_inputs(model, x_batch, y_batch, n=n)
     z_h = z_n.z_H
@@ -387,10 +383,20 @@ def estimate_projection_terms(
 
     z_h_next, z_l_next = manual_preprojection_update(model, x_batch, y_batch, z_h, z_l)
     pre_norms = combined_latent_norm(z_h_next, z_l_next)
-    rho_r = float(pre_norms.min().item()) if pre_norms.numel() > 0 else math.inf
-    active_count = int((pre_norms > radius).sum().item()) if radius > 0 else 0
-
-    z_h_post, z_l_post = project_joint_to_ball(z_h_next, z_l_next, radius)
+    if radius is None:
+        rho_r = math.inf
+        active_count = 0
+        z_h_post, z_l_post = z_h_next, z_l_next
+    else:
+        rho_r = (
+            float(pre_norms.min().item()) if pre_norms.numel() > 0 else math.inf
+        )
+        active_count = int((pre_norms > radius).sum().item())
+        z_h_post, z_l_post = model.inner._project_carry_to_ball(
+            z_h_next,
+            z_l_next,
+            radius,
+        )
 
     seq_len = int(z_h.shape[1])
     hidden_size = int(z_h.shape[2])
@@ -406,9 +412,14 @@ def estimate_projection_terms(
         z_h_pert = z_h + delta_h
         z_l_pert = z_l + delta_l
         z_h_next_p, z_l_next_p = manual_preprojection_update(model, x_batch, y_batch, z_h_pert, z_l_pert)
-        z_h_post_p, z_l_post_p = project_joint_to_ball(
-            z_h_next_p, z_l_next_p, radius
-        )
+        if radius is None:
+            z_h_post_p, z_l_post_p = z_h_next_p, z_l_next_p
+        else:
+            z_h_post_p, z_l_post_p = model.inner._project_carry_to_ball(
+                z_h_next_p,
+                z_l_next_p,
+                radius,
+            )
 
         diff_norm = combined_latent_norm(z_h_post_p - z_h_post, z_l_post_p - z_l_post)
         lz_post = max(lz_post, float((diff_norm / eps).max().item()))
@@ -475,7 +486,8 @@ def compute_checkpoint_diagnostics(
     n = int(trainer.rl_cfg.inner_unroll_n)
     gamma = float(trainer.rl_cfg.gamma)
     k_horizon = int(trainer.rl_cfg.K)
-    radius = float(getattr(trainer.rl_cfg, "latent_ball_radius", 0.0))
+    projection_mode = trainer.rl_cfg.latent_projection_mode
+    radius = diagnostic_projection_radius(trainer.rl_cfg)
 
     eps_res_n = 0.0
     eps_cent = 0.0
@@ -609,7 +621,7 @@ def compute_checkpoint_diagnostics(
             )
             uniform_batch_advantage_mean = expected_adv_sums[alpha] / float(total_states)
 
-            if l_z_post >= 1.0:
+            if radius is None or l_z_post >= 1.0:
                 penalty = math.inf
             else:
                 truncation_term = (
@@ -639,6 +651,8 @@ def compute_checkpoint_diagnostics(
         "L_V": l_v,
         "rho_R": rho_r,
         "L_z_post": l_z_post,
+        "latent_projection_mode": projection_mode,
+        "latent_ball_radius": radius,
         "projection_active_rate": projection_active / float(max(total_states, 1)),
         "eta_old_proxy": eta_old_proxy,
         "eta_old_proxy_std": float(eta_old_stats.discounted_return_std),

@@ -94,14 +94,14 @@ run_gpu1() {
 run_gpu2() {
     echo "=== GPU 2: Ablation Experiments (Theory) ==="
 
-    # Key ablation: No exact baseline (tests Theorem 5.9)
+    # Key ablation: replace exact statewise centering with an approximation
     for seed in $SEEDS; do
         run_exp 2 "ablation_no_exact_baseline" \
             "$CONFIGS/ablations/ablation_no_exact_baseline.yaml" \
             "$DATA_4x4" $seed
     done
 
-    # Ablation: No contraction (tests Assumption 4.2)
+    # Ablation: disable the contraction-oriented intervention
     run_exp 2 "ablation_no_contraction" \
         "$CONFIGS/ablations/ablation_no_contraction.yaml" \
         "$DATA_4x4" 42

@@ -17,7 +17,8 @@ This script implements the current Phase 5 experiment tracked in
 
 3. Apply single policy update with varying α and measure:
    - KL(π_new || π_old) for each α
-   - Whether KL scales linearly with α (as theory predicts)
+   - The finite-sample relationship between KL and α; the local mixture
+     expansion is quadratic in α near zero
 
 4. Generate paper-ready artifacts:
    - Centering defect comparison figure
@@ -56,6 +57,7 @@ import yaml
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv
 from models.recursive_reasoning.tiny_recursive_reasoning_model_ACTV1 import (
     TinyRecursiveReasoningModel_ACTV1,
@@ -121,9 +123,16 @@ def load_model(
     """Load model from checkpoint using the same pattern as exp4_final_v2."""
     yaml_config = load_yaml_config(config_path)
 
-    # Verify non-negotiables
+    # Resolve the recurrent projection as one atomic mode/radius contract.
     disable_value_head_norm = yaml_config.get("disable_value_head_norm", False)
-    latent_ball_radius = yaml_config.get("latent_ball_radius", 10.0)
+    projection_fields = {
+        key: yaml_config[key]
+        for key in ("latent_projection_mode", "latent_ball_radius")
+        if key in yaml_config
+    }
+    projection_config = RLConfig(**projection_fields)
+    latent_projection_mode = projection_config.latent_projection_mode
+    latent_ball_radius = projection_config.latent_ball_radius
 
     if not disable_value_head_norm:
         print("WARNING: disable_value_head_norm is False in config. Forcing to True.")
@@ -192,7 +201,8 @@ def load_model(
         rl_enable_contraction=enable_contraction,
         rl_target_Lz=float(target_Lz),
         rl_disable_value_head_norm=True,  # Non-negotiable
-        rl_latent_ball_radius=float(latent_ball_radius),
+        rl_latent_projection_mode=latent_projection_mode,
+        rl_latent_ball_radius=latent_ball_radius,
     )
 
     model = TinyRecursiveReasoningModel_ACTV1(model_config.model_dump())
@@ -209,6 +219,7 @@ def load_model(
         "enable_contraction": enable_contraction,
         "target_Lz": target_Lz,
         "disable_value_head_norm": True,
+        "latent_projection_mode": latent_projection_mode,
         "latent_ball_radius": latent_ball_radius,
         "gamma": gamma,
     }
@@ -608,7 +619,7 @@ def generate_figures(
 
     # Box plot comparing defects
     data = [exact_defects, approx_defects]
-    labels = ['Exact\n(Theorem 5.9)', 'Approximate\n(Learned V)']
+    labels = ['Exact\n(Statewise)', 'Approximate\n(Learned V)']
 
     bp = ax.boxplot(data, labels=labels, patch_artist=True)
     bp['boxes'][0].set_facecolor('lightgreen')
@@ -709,6 +720,8 @@ def generate_claims(
     alpha_kl_exact: Dict[str, List[float]],
     output_dir: Path,
     git_sha: str,
+    latent_projection_mode: str,
+    latent_ball_radius: Optional[float],
 ):
     """Generate CLAIMS.md for Phase 5."""
 
@@ -719,19 +732,19 @@ def generate_claims(
 
 ## Summary
 
-Phase 5 validates the theorem-alignment of exact baseline centering:
+Phase 5 reports finite diagnostics for exact statewise baseline centering:
 
 ### Centering Defect
 
 | Baseline | Mean Defect | Max Defect |
 |----------|-------------|------------|
-| Exact (Theorem 5.9) | {exact_defects.mean():.2e} | {exact_defects.max():.2e} |
+| Exact (statewise) | {exact_defects.mean():.2e} | {exact_defects.max():.2e} |
 | Approximate (Learned V) | {approx_defects.mean():.2e} | {approx_defects.max():.2e} |
 
 **Interpretation:**
-- Exact baseline achieves ε_cent ≈ {exact_defects.mean():.1e} (numerical precision)
-- Approximate baseline has ε_cent ≈ {approx_defects.mean():.1e} (non-zero centering error)
-- Ratio: {approx_defects.mean() / max(exact_defects.mean(), 1e-10):.1f}× worse with approximate baseline
+- On the sampled represented states, exact enumeration records ε_cent ≈ {exact_defects.mean():.1e}
+- On the same states, the learned-value baseline records ε_cent ≈ {approx_defects.mean():.1e}
+- Recorded ratio: {approx_defects.mean() / max(exact_defects.mean(), 1e-10):.1f}×
 
 ### KL Scaling with α
 
@@ -746,16 +759,17 @@ Phase 5 validates the theorem-alignment of exact baseline centering:
 
     content += f"""
 **Interpretation:**
-- KL scales approximately as O(α²), consistent with policy gradient theory
-- This validates the O(α·ε_A) bound from Theorem 5.9 when ε_cent → 0
+- The recorded KL values are compared with an α² reference.
+- This finite comparison establishes neither the population CPI bound nor its
+  uniform premises.
 
-## Scoped Claims
+## Scoped Observations
 
-1. **Exact baseline achieves true centering:** E_{{a~π}}[Â(s,a)] = O(10^{{{int(np.log10(exact_defects.mean()))}}}), limited by numerical precision.
+1. **Exact enumeration on sampled states:** the recorded centering defect is {exact_defects.mean():.2e}.
 
-2. **Approximate baseline has non-zero centering error:** ε_cent ≈ {approx_defects.mean():.2e}, confirming that learned V(s) does not center advantages per-state.
+2. **Learned-value baseline on the same states:** the recorded centering defect is {approx_defects.mean():.2e}.
 
-3. **KL scales as O(α²):** Single-step policy updates produce KL ∝ α², consistent with theoretical predictions.
+3. **Finite alpha comparison:** recorded single-step KL values are shown beside α²; no population scaling law is inferred.
 
 ## Scope Limitations
 
@@ -763,10 +777,11 @@ Phase 5 validates the theorem-alignment of exact baseline centering:
 - Single checkpoint (seed 42)
 - KL approximation uses variance-based formula (not exact gradient step)
 
-## Non-Negotiables Verified
+## Recorded Configuration
 
 - `disable_value_head_norm: true`
-- `latent_ball_radius: 0.0` (projection disabled)
+- `latent_projection_mode: {latent_projection_mode}`
+- `latent_ball_radius: {"null" if latent_ball_radius is None else latent_ball_radius}`
 """
 
     with open(output_dir / 'CLAIMS.md', 'w') as f:
@@ -919,7 +934,9 @@ def main():
     generate_claims(
         exact_defects_np, approx_defects_np,
         alpha_kl_exact,
-        args.out_dir, git_sha
+        args.out_dir, git_sha,
+        config_dict["latent_projection_mode"],
+        config_dict["latent_ball_radius"],
     )
 
     # Save summary.json

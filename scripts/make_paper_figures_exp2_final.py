@@ -4,14 +4,14 @@ Exp2 Final: Generate paper-ready figures, tables, and documentation.
 
 This script produces the canonical Exp2 bundle documenting:
 1. Dial failure: spectral-norm targeting does NOT control L_z effectively
-2. Projection stabilization: R=10 projection provides significant stability
+2. Finite projection comparison: recorded R=10 versus disabled diagnostics
 
 Reads from existing artifacts (no checkpoint loading):
 - results/paper_ready/exp2c/DIAGNOSTICS_exp2c_lite.json (Exp2c evaluation)
 
 Outputs to results/paper_ready/exp2_final/:
 - fig_exp2_dial_does_not_control_Lz.pdf
-- fig_exp2_projection_is_primary_stabilizer.pdf
+- fig_exp2_projection_is_primary_stabilizer.pdf (legacy artifact filename)
 - table_exp2_dial_does_not_control_Lz.tex
 - table_exp2_projection_effect.tex
 - CLAIMS.md
@@ -245,7 +245,7 @@ def generate_dial_figure(dial_metrics: Dict[str, Any], out_path: Path):
     ax.set_xticklabels([f"{t}" for t in target_lz], fontweight='bold')
     ax.set_xlabel("Target $L_z$", fontweight='bold')
     ax.set_ylabel("Projection Active Rate", fontweight='bold')
-    ax.set_title("(C) Projection Dominance", fontweight='bold')
+    ax.set_title("(C) Recorded Projection-Active Rate", fontweight='bold')
     ax.legend(fontsize=12, framealpha=0.9, edgecolor='black')
     ax.set_ylim(0, 1.1)
     ax.tick_params(width=1.5)
@@ -260,7 +260,7 @@ def generate_dial_figure(dial_metrics: Dict[str, Any], out_path: Path):
 
 
 def generate_stability_figure(stability_comp: Dict[str, Any], by_radius: Dict, out_path: Path):
-    """Generate figure showing projection is primary stabilizer."""
+    """Generate the finite R=10 versus disabled diagnostic figure."""
     if not HAS_MATPLOTLIB:
         print(f"[Skip] {out_path.name} (matplotlib not available)")
         return
@@ -295,7 +295,7 @@ def generate_stability_figure(stability_comp: Dict[str, Any], by_radius: Dict, o
     ax.set_xticklabels([f"{t}" for t in target_lz], fontweight='bold')
     ax.set_xlabel("Target $L_z$", fontweight='bold')
     ax.set_ylabel("$\\Delta V$ (n=2 → n=16)", fontweight='bold')
-    ax.set_title("(A) Projection Reduces $\\Delta V$", fontweight='bold')
+    ax.set_title("(A) Recorded $\\Delta V$", fontweight='bold')
     ax.legend(fontsize=12, framealpha=0.9, edgecolor='black')
     ax.set_yscale('log')
     ax.tick_params(width=1.5)
@@ -315,7 +315,7 @@ def generate_stability_figure(stability_comp: Dict[str, Any], by_radius: Dict, o
     ax.set_xticklabels([f"{t}" for t in target_lz], fontweight='bold')
     ax.set_xlabel("Target $L_z$", fontweight='bold')
     ax.set_ylabel("Argmax Agreement (%)", fontweight='bold')
-    ax.set_title("(B) Projection Improves Agreement", fontweight='bold')
+    ax.set_title("(B) Recorded Agreement", fontweight='bold')
     ax.legend(fontsize=12, framealpha=0.9, edgecolor='black')
     ax.set_ylim(80, 105)
     ax.tick_params(width=1.5)
@@ -341,7 +341,7 @@ def generate_dial_table(dial_metrics: Dict[str, Any], out_path: Path):
     lines = [
         r"\begin{table}[h]",
         r"\centering",
-        r"\caption{Spectral-norm dial does not control Lipschitz constant. At R=10, projection dominates (100\% active) and $\hat{L}_{post}$ saturates. At R=disabled, $\hat{L}_{pre}$ varies weakly (spread 0.064 $<$ 0.08 threshold) and non-monotonically.}",
+        r"\caption{Finite contraction-target sweep. At R=10, the recorded projection-active rate is 100\% and $\hat{L}_{post}$ clusters near 0.23. With projection disabled, recorded $\hat{L}_{pre}$ has spread 0.064 and non-monotonic ordering across the sampled targets.}",
         r"\label{tab:exp2_dial_failure}",
         r"\begin{tabular}{lcccc}",
         r"\toprule",
@@ -376,7 +376,7 @@ def generate_projection_table(stability_comp: Dict[str, Any], by_radius: Dict, o
     lines = [
         r"\begin{table}[h]",
         r"\centering",
-        r"\caption{Projection is the primary stabilizer. R=10 projection dramatically improves stability metrics compared to disabled projection.}",
+        r"\caption{Finite diagnostic comparison of R=10 projection and disabled projection on the recorded sweep.}",
         r"\label{tab:exp2_projection_stabilizer}",
         r"\begin{tabular}{lccccc}",
         r"\toprule",
@@ -422,45 +422,47 @@ def generate_claims_md(dial_metrics: Dict, stability_comp: Dict, out_path: Path)
     r10_agg = stability_comp["R10"]
     r_inf_agg = stability_comp["R_disabled"]
 
-    content = f"""# Exp2 Final: Paper Claims
+    content = f"""# Exp2 Final: Finite Diagnostic Observations
 
 **Generated**: {datetime.now().isoformat()}
-**Status**: Path B (Negative Result for Dial + Positive Result for Projection)
+**Status**: Finite diagnostic comparison
 
-## Claim 1: Dial Failure (Negative Result)
+## Observation 1: Recorded Dial Behavior
 
-**Statement**: In this TRM setup, targeting spectral-norm-based contraction does NOT provide a reliable 'stability dial'.
+**Statement**: Across these sampled checkpoints, changing the configured target does not produce a monotonic ordering of the recorded pre-projection estimate.
 
 **Evidence**:
 - $\\hat{{L}}_{{preproj}}$ varies only weakly across target $L_z$ values
 - Spread: {r_disabled['L_preproj_spread']:.3f} (threshold for "dial works": $\\geq$ 0.08)
 - Ordering is non-monotonic: {' → '.join(f'{t}' for t in r_disabled['target_lz'])} yields $\\hat{{L}}_{{preproj}}$ = {' → '.join(f'{v:.3f}' for v in r_disabled['L_preproj_mean'])}
-- At R=10: projection dominates (100% active), $\\hat{{L}}_{{postproj}}$ saturates at ~0.23
+- At R=10: the recorded projection-active rate is 100% and $\\hat{{L}}_{{postproj}}$ clusters near 0.23
 
 **Scope**:
 - Evaluated on B0 (initial states)
 - target $L_z \\in$ {{{', '.join(str(t) for t in r_disabled['target_lz'])}}}
 - 3 seeds per condition
+- This finite sweep does not establish a global response to the configured target
 
-## Claim 2: Projection Stabilizes (Positive Result)
+## Observation 2: Finite Projection Comparison
 
-**Statement**: Latent-ball projection is a strong stabilizer in this architecture.
+**Statement**: On these sampled states and checkpoints, the R=10 condition has lower observed value drift and higher action agreement than the projection-disabled condition.
 
 **Evidence**:
-- $\\Delta V$ (n=2 → n=16): improves from {r_inf_agg['delta_V_min']:.1f}–{r_inf_agg['delta_V_max']:.1f} (R=disabled) to {r10_agg['delta_V_min']:.1f}–{r10_agg['delta_V_max']:.1f} (R=10)
-  - Mean improvement: {r_inf_agg['delta_V_mean']:.1f} → {r10_agg['delta_V_mean']:.1f} (~{r_inf_agg['delta_V_mean']/r10_agg['delta_V_mean']:.0f}× reduction)
-- Argmax agreement: improves from {r_inf_agg['argmax_agree_min']*100:.0f}–{r_inf_agg['argmax_agree_max']*100:.0f}% to {r10_agg['argmax_agree_min']*100:.0f}–{r10_agg['argmax_agree_max']*100:.0f}%
-  - Mean improvement: +{(r10_agg['argmax_agree_mean'] - r_inf_agg['argmax_agree_mean'])*100:.1f} percentage points
+- Recorded $\\Delta V$ (n=2 → n=16): {r_inf_agg['delta_V_min']:.1f}–{r_inf_agg['delta_V_max']:.1f} (R=disabled) and {r10_agg['delta_V_min']:.1f}–{r10_agg['delta_V_max']:.1f} (R=10)
+  - Means: {r_inf_agg['delta_V_mean']:.1f} and {r10_agg['delta_V_mean']:.1f} (~{r_inf_agg['delta_V_mean']/r10_agg['delta_V_mean']:.0f}× ratio)
+- Recorded argmax agreement: {r_inf_agg['argmax_agree_min']*100:.0f}–{r_inf_agg['argmax_agree_max']*100:.0f}% and {r10_agg['argmax_agree_min']*100:.0f}–{r10_agg['argmax_agree_max']*100:.0f}%
+  - Difference of means: {(r10_agg['argmax_agree_mean'] - r_inf_agg['argmax_agree_mean'])*100:.1f} percentage points
 
 **Scope**:
 - Evaluated on B0 (initial states)
 - Comparison: R=10 (projection ON, 100% active) vs R=disabled (projection OFF, 0% active)
 - Mismatch protocol: n_train=2, n_eval=16
+- These finite diagnostics establish no causal effect, global contraction, or uniform stability guarantee
 
 ## Explicit Non-Claims
 
-1. **NO monotonicity claim**: The dial does NOT produce monotonic $\\hat{{L}}_z$ vs target $L_z$
-2. **NO dial control claim**: The spectral-norm mechanism does NOT provide controllable contraction
+1. **NO global monotonicity claim**: The finite sweep records a non-monotonic ordering
+2. **NO dial-control claim**: The finite sweep does not establish controllable contraction
 3. **NO projection-vs-R monotonicity claim**: We did not sweep R values; only compared R=10 vs R=disabled
 
 ## Audit Requirements
@@ -483,7 +485,7 @@ def generate_provenance_md(out_path: Path):
 | Experiment | Commit | Description |
 |------------|--------|-------------|
 | Exp2 | {COMMITS['exp2']} | Initial contraction sweep |
-| Exp2b | {COMMITS['exp2b']} | Projection dominance diagnostics |
+| Exp2b | {COMMITS['exp2b']} | Projection comparison diagnostics |
 | Exp2c | {COMMITS['exp2c']} | Dial unmasking evaluation |
 
 ## Checkpoint Paths
@@ -546,11 +548,11 @@ We investigate whether targeting spectral-norm-based contraction provides a reli
 \paragraph{Setup.}
 We train models with target Lipschitz constants $L_z^* \in \{0.9, 0.95, 0.99, 0.999\}$ using spectral normalization on the update function, with 3 seeds per condition. We evaluate achieved Lipschitz constants and unroll sensitivity metrics at two projection settings: $R=10$ (default) and $R=\infty$ (projection disabled).
 
-\paragraph{Finding 1: Dial failure.}
-The spectral-norm targeting mechanism does \emph{not} produce a reliable dial. At $R=\infty$ (projection disabled), the achieved pre-projection Lipschitz constant $\hat{L}_{\text{pre}}$ varies only weakly (spread 0.064, below our 0.08 threshold) and non-monotonically across target values (Table~\ref{tab:exp2_dial_failure}). At $R=10$, projection dominates (100\% active) and post-projection Lipschitz saturates at $\approx 0.23$, masking any underlying differences.
+\paragraph{Finding 1: finite dial behavior.}
+Across the sampled checkpoints, the recorded pre-projection estimate has spread 0.064 and non-monotonic ordering across configured targets when projection is disabled (Table~\ref{tab:exp2_dial_failure}). At $R=10$, the recorded projection-active rate is 100\% and the post-projection estimate clusters near 0.23. This finite sweep does not establish a global response to the configured target.
 
-\paragraph{Finding 2: Projection stabilizes.}
-Latent-ball projection at $R=10$ provides substantial stabilization (Table~\ref{tab:exp2_projection_stabilizer}). Value stability $\Delta V$ improves from 7.7--14.8 ($R=\infty$) to 0.5--2.2 ($R=10$), approximately 6--10$\times$ reduction. Argmax agreement improves from 88--91\% to 97--99\%, a gain of 8--10 percentage points.
+\paragraph{Finding 2: finite projection comparison.}
+On the sampled states and checkpoints, observed value drift $\Delta V$ is 7.7--14.8 with projection disabled and 0.5--2.2 at $R=10$ (Table~\ref{tab:exp2_projection_stabilizer}). Recorded argmax agreement is 88--91\% and 97--99\%, respectively. These finite diagnostics establish no causal effect, global contraction, or uniform stability guarantee.
 
 \input{results/paper_ready/exp2_final/table_exp2_dial_does_not_control_Lz}
 
@@ -559,14 +561,14 @@ Latent-ball projection at $R=10$ provides substantial stabilization (Table~\ref{
 \begin{figure}[h]
     \centering
     \includegraphics[width=\textwidth]{results/paper_ready/exp2_final/fig_exp2_dial_does_not_control_Lz.pdf}
-    \caption{Spectral-norm dial does not control Lipschitz constant. (A) Pre-projection Lipschitz varies weakly across target $L_z$ values. (B) Post-projection Lipschitz saturates at $R=10$. (C) Projection dominates at $R=10$ (100\% active).}
+    \caption{Finite contraction-target sweep. (A) Recorded pre-projection estimate. (B) Recorded post-projection estimate at $R=10$. (C) Recorded projection-active rate.}
     \label{fig:exp2_dial_failure}
 \end{figure}
 
 \begin{figure}[h]
     \centering
     \includegraphics[width=0.8\textwidth]{results/paper_ready/exp2_final/fig_exp2_projection_is_primary_stabilizer.pdf}
-    \caption{Projection is the primary stabilizer. (A) $\Delta V$ dramatically reduces with projection enabled. (B) Argmax agreement improves with projection.}
+    \caption{Finite R=10 versus disabled comparison. (A) Recorded $\Delta V$. (B) Recorded argmax agreement.}
     \label{fig:exp2_projection_stabilizer}
 \end{figure}
 """
@@ -620,7 +622,7 @@ def generate_summary_json(dial_metrics: Dict, stability_comp: Dict, out_path: Pa
         },
         "claims": {
             "dial_failure": True,
-            "projection_stabilizes": True,
+            "finite_projection_comparison": True,
             "dial_monotonic": False,
         },
     }
@@ -685,7 +687,13 @@ def main():
     # Generate outputs - figures go to paper repo
     print("\n[Generate] Creating figures (to paper repo)...")
     generate_dial_figure(dial_metrics, FIG_DIR / "fig_exp2_dial_does_not_control_Lz.pdf")
-    generate_stability_figure(stability_comp, by_radius, FIG_DIR / "fig_exp2_projection_is_primary_stabilizer.pdf")
+    # Preserve the established artifact filename for downstream readers. The
+    # generated caption and claims are finite-sample comparisons, not causal.
+    generate_stability_figure(
+        stability_comp,
+        by_radius,
+        FIG_DIR / "fig_exp2_projection_is_primary_stabilizer.pdf",
+    )
 
     print("\n[Generate] Creating tables...")
     generate_dial_table(dial_metrics, OUT_DIR / "table_exp2_dial_does_not_control_Lz.tex")
@@ -703,7 +711,7 @@ def main():
     print("=" * 60)
     print(f"\nFigures (paper repo): {FIG_DIR}")
     print(f"  - fig_exp2_dial_does_not_control_Lz.pdf")
-    print(f"  - fig_exp2_projection_is_primary_stabilizer.pdf")
+    print("  - fig_exp2_projection_is_primary_stabilizer.pdf (legacy filename)")
     print(f"\nDocs & tables (trm_bellman): {OUT_DIR}")
     print(f"  - table_exp2_*.tex, CLAIMS.md, PROVENANCE.md")
     print("\nNext step: Run audit with")

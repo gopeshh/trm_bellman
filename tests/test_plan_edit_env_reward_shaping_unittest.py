@@ -53,7 +53,7 @@ class TestPlanEditEnvRewardShaping(unittest.TestCase):
 
     def test_reward_shaping_matches_potential_form(self):
         """
-        Test that reward shaping follows the potential-based formula from the paper (Eq. 4):
+        Test that reward shaping follows the canonical potential-based formula:
             r(s, a, s') = r_0 + γ·Φ(s') - Φ(s)
         where Φ(x, y) = c(x, y) is the checker score.
         """
@@ -72,7 +72,7 @@ class TestPlanEditEnvRewardShaping(unittest.TestCase):
         phi_new = scalar_checker(x, y_next)
         r_0 = 0.0  # Base reward for intermediate steps
 
-        # Paper Eq. 4: r = r_0 + γ·Φ(s') - Φ(s)
+        # Canonical shaped reward: r = r_0 + gamma*Phi(s') - Phi(s)
         expected = r_0 + gamma * phi_new - phi_old
 
         self.assertFalse(done)

@@ -49,6 +49,34 @@ def _dummy_batch(config):
 class TestTRMLatentUnroll(unittest.TestCase):
     """Tests for TRM latent unroll helpers."""
 
+    def test_joint_projection_uses_one_product_norm_scale(self):
+        config = _make_config()
+        model = TinyRecursiveReasoningModel_ACTV1(config)
+        z_h = torch.zeros((2, 2, 2), dtype=torch.float32)
+        z_l = torch.zeros((2, 2, 2), dtype=torch.float32)
+        z_h[0, 0, 0] = 20.0
+        z_l[0, 0, 0] = 5.0
+        z_h[1, 0, 0] = 6.0
+        z_l[1, 0, 0] = 8.0
+
+        projected_h, projected_l = model.inner._project_carry_to_ball(
+            z_h,
+            z_l,
+            radius=10.0,
+        )
+
+        projected_norm = torch.sqrt(
+            projected_h.square().sum(dim=(1, 2))
+            + projected_l.square().sum(dim=(1, 2))
+        )
+        torch.testing.assert_close(projected_norm, torch.tensor([10.0, 10.0]))
+        torch.testing.assert_close(
+            projected_h[0, 0, 0] / projected_l[0, 0, 0],
+            torch.tensor(4.0),
+        )
+        torch.testing.assert_close(projected_h[1], z_h[1])
+        torch.testing.assert_close(projected_l[1], z_l[1])
+
     def test_latent_unroll_helpers_shapes_and_determinism(self):
         """Test latent unroll helper shapes and determinism."""
         torch.manual_seed(0)

@@ -415,8 +415,9 @@ def _policy_mask_note() -> str:
     return (
         "Vanilla SB3 PPO/A2C/DQN does not apply logit masking from action_mask; "
         "the policy acts in the full no-mask action space and invalid edits are "
-        "penalized by the environment. This matches the paper's hard-4x4 no-mask "
-        "protocol and should be compared against the internal no-mask A2C baseline."
+        "penalized by the environment. This is an external no-mask baseline "
+        "configuration; the canonical theory paper specifies no learned-task "
+        "benchmark protocol."
     )
 
 

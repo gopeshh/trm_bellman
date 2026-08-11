@@ -4,15 +4,15 @@ Exp2c-Lite: Evaluate existing checkpoints with projection override to unmask sta
 
 This script:
 1. Loads existing Exp2 checkpoints (trained with R=10)
-2. Evaluates at R_eval ∈ {10, 100, disabled (0)}
+2. Evaluates projection settings {enabled at R=10, enabled at R=100, disabled}
 3. Computes L_preproj, L_postproj, projection_active_rate
 4. Computes unroll sensitivity metrics (ΔV, Δπ, argmax agreement) at n_train=2 vs n_eval={4,8,16}
 5. Checks decision gates G1, G2, G3
 
 Decision Gates:
-- G1: projection_active_rate < 20% at chosen R_eval
+- G1: projection_active_rate < 20% at the chosen projection setting
 - G2: L_preproj spread ≥ 0.08 across conditions
-- G3: Lower L_preproj ⇒ lower ΔV/Δπ and higher argmax agreement
+- G3: finite observed linkage between L_preproj and mismatch metrics
 
 Output:
 - results/paper_ready/exp2c/DIAGNOSTICS_exp2c_lite.json
@@ -34,7 +34,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import torch
-import torch.nn as nn
 
 
 # =============================================================================
@@ -43,14 +42,14 @@ import torch.nn as nn
 
 class NumpyEncoder(json.JSONEncoder):
     """Custom JSON encoder for numpy types."""
-    def default(self, obj):
-        if isinstance(obj, (np.bool_, np.integer)):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return super().default(obj)
+    def default(self, o: Any) -> Any:
+        if isinstance(o, (np.bool_, np.integer)):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        return super().default(o)
 
 
 # =============================================================================
@@ -65,8 +64,12 @@ OUT_DIR = PROJECT_ROOT / "results/paper_ready/exp2c"
 LZ_TARGETS = [0.9, 0.95, 0.99, 0.999]
 SEEDS = [41, 42, 43]
 
-# Eval-time radii to test: R=10 (training), R=100 (relaxed), disabled
-EVAL_RADII = [10.0, 100.0, 0.0]  # 0.0 = disabled (∞)
+# Eval-time projection settings. Disabled mode has no radius.
+EVAL_PROJECTION_SETTINGS: List[Tuple[str, Optional[float]]] = [
+    ("enabled", 10.0),
+    ("enabled", 100.0),
+    ("disabled", None),
+]
 
 # Unroll depths for sensitivity analysis
 N_TRAIN = 2
@@ -101,9 +104,10 @@ class UnrollMetrics:
 
 @dataclass
 class ConditionResult:
-    """Results for a single (target_lz, eval_radius) condition."""
+    """Results for a single target and explicit projection setting."""
     target_lz: float
-    eval_radius: float
+    eval_projection_mode: str
+    eval_radius: Optional[float]
     seeds: List[int]
 
     # Lipschitz estimates
@@ -155,24 +159,36 @@ def find_checkpoint(target_lz: float, seed: int) -> Optional[Path]:
     return None
 
 
-def load_model_with_radius_override(
+def load_model_with_projection_override(
     checkpoint_path: Path,
     device: str,
-    radius_override: float,
-) -> Tuple[nn.Module, Dict]:
-    """Load model with latent_ball_radius override."""
+    projection_mode: str,
+    radius_override: Optional[float],
+) -> Tuple[Any, Dict[str, Any]]:
+    """Load a model with a validated projection mode/radius override."""
     from scripts.eval_unroll_sensitivity import load_model_for_eval
 
-    # 0.0 means disabled, pass None to use very large value
-    override = radius_override if radius_override > 0 else 1e6
+    if projection_mode not in ("enabled", "disabled"):
+        raise ValueError("projection_mode must be 'enabled' or 'disabled'")
+    if projection_mode == "enabled":
+        if (
+            radius_override is None
+            or radius_override <= 0.0
+            or not np.isfinite(radius_override)
+        ):
+            raise ValueError("Enabled projection requires a positive finite radius")
+    elif radius_override is not None:
+        raise ValueError("Disabled projection requires radius_override=None")
 
     model, config = load_model_for_eval(
         str(checkpoint_path),
         device,
-        latent_ball_radius_override=override,
+        latent_ball_radius_override=radius_override,
+        latent_projection_mode_override=projection_mode,
     )
 
     # Update config to reflect what we're actually using
+    config["eval_projection_mode"] = projection_mode
     config["eval_radius"] = radius_override
     return model, config
 
@@ -188,26 +204,13 @@ def load_batch(batch_path: Path) -> List[Any]:
 # Lipschitz Estimation (from diagnose script)
 # =============================================================================
 
-def project_to_ball(z: torch.Tensor, radius: float) -> torch.Tensor:
-    """Project z to ball of given radius."""
-    if radius <= 0:
-        return z
-    z_norm = z.norm(p=2, dim=(1, 2), keepdim=True).clamp(min=1e-8)
-    scale = torch.clamp(radius / z_norm, max=1.0)
-    return z * scale
-
-
-def compute_norm_per_sample(z: torch.Tensor) -> torch.Tensor:
-    """Compute per-sample L2 norm."""
-    return z.norm(p=2, dim=(1, 2))
-
-
 def estimate_lipschitz_and_projection(
-    model: nn.Module,
+    model: Any,
     states: List[Any],
     n_train: int,
     device: str,
-    eval_radius: float,
+    projection_mode: str,
+    eval_radius: Optional[float],
 ) -> Dict[str, Any]:
     """
     Estimate Lipschitz constants and projection activity.
@@ -215,6 +218,24 @@ def estimate_lipschitz_and_projection(
     Returns dict with L_preproj, L_postproj, projection_active_rate.
     """
     from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1InnerCarry
+
+    if projection_mode not in ("enabled", "disabled"):
+        raise ValueError("projection_mode must be 'enabled' or 'disabled'")
+    if projection_mode == "enabled":
+        if (
+            eval_radius is None
+            or eval_radius <= 0.0
+            or not np.isfinite(eval_radius)
+        ):
+            raise ValueError("Enabled projection requires a positive finite radius")
+    elif eval_radius is not None:
+        raise ValueError("Disabled projection requires eval_radius=None")
+
+    inner = model.inner
+    if inner.config.rl_latent_projection_mode != projection_mode:
+        raise ValueError("Model projection mode does not match evaluation setting")
+    if inner.config.rl_latent_ball_radius != eval_radius:
+        raise ValueError("Model projection radius does not match evaluation setting")
 
     rng = np.random.default_rng(42)
 
@@ -249,25 +270,30 @@ def estimate_lipschitz_and_projection(
                 # Build context for manual step
                 batch = model._standardize_latent_batch(x, y)
                 context = model._resolve_latent_context(batch)
-                input_embeds = context.get("input_embeddings_with_plan", context["input_embeddings"])
+                input_embeds = (
+                    context["input_embeddings_with_plan"]
+                    if "input_embeddings_with_plan" in context
+                    else context["input_embeddings"]
+                )
                 seq_info = context["seq_info"]
-                inner = model.inner
 
-                # Apply L-level updates WITHOUT projection
+                # Mirror the production recurrent update up to projection so
+                # L_preproj remains observable.
                 z_H_next, z_L_next = z_H.clone(), z_L.clone()
                 for _ in range(inner.config.L_cycles):
                     z_L_next = inner.L_level(z_L_next, z_H_next + input_embeds, **seq_info)
                 z_H_next = inner.L_level(z_H_next, z_L_next, **seq_info)
 
-                # Compute f(z) norm before projection
-                fz_norm = torch.sqrt(
-                    compute_norm_per_sample(z_H_next)**2 +
-                    compute_norm_per_sample(z_L_next)**2
-                ).item()
-
-                # Check projection activity
-                is_active = fz_norm > eval_radius if eval_radius > 0 else False
-                projection_active_samples.append(is_active)
+                # Production owns projection and activation semantics, including
+                # the joint (z_H, z_L) product-space norm.
+                baseline_post, _, baseline_active = (
+                    inner.latent_step_with_projection_info(
+                        z_base,
+                        input_embeds,
+                        seq_info,
+                    )
+                )
+                projection_active_samples.append(bool(baseline_active.item()))
 
                 # Estimate Lipschitz via perturbations
                 for _ in range(NUM_PERTURBATIONS):
@@ -281,6 +307,10 @@ def estimate_lipschitz_and_projection(
 
                     z_H_pert = z_H + noise_H
                     z_L_pert = z_L + noise_L
+                    perturbed_carry = TinyRecursiveReasoningModel_ACTV1InnerCarry(
+                        z_H=z_H_pert,
+                        z_L=z_L_pert,
+                    )
 
                     # Apply step to perturbed z (no projection)
                     z_H_next_p, z_L_next_p = z_H_pert.clone(), z_L_pert.clone()
@@ -296,21 +326,15 @@ def estimate_lipschitz_and_projection(
                     ).item()
                     L_preproj_samples.append(diff_norm_pre / EPS)
 
-                    # Apply projection to both
-                    if eval_radius > 0:
-                        z_H_next_proj = project_to_ball(z_H_next, eval_radius)
-                        z_L_next_proj = project_to_ball(z_L_next, eval_radius)
-                        z_H_next_p_proj = project_to_ball(z_H_next_p, eval_radius)
-                        z_L_next_p_proj = project_to_ball(z_L_next_p, eval_radius)
-                    else:
-                        z_H_next_proj = z_H_next
-                        z_L_next_proj = z_L_next
-                        z_H_next_p_proj = z_H_next_p
-                        z_L_next_p_proj = z_L_next_p
+                    perturbed_post, _, _ = inner.latent_step_with_projection_info(
+                        perturbed_carry,
+                        input_embeds,
+                        seq_info,
+                    )
 
-                    # L_postproj
-                    diff_H_post = z_H_next_p_proj - z_H_next_proj
-                    diff_L_post = z_L_next_p_proj - z_L_next_proj
+                    # L_postproj uses the exact production recurrent step.
+                    diff_H_post = perturbed_post.z_H - baseline_post.z_H
+                    diff_L_post = perturbed_post.z_L - baseline_post.z_L
                     diff_norm_post = torch.sqrt(
                         (diff_H_post**2).sum() + (diff_L_post**2).sum()
                     ).item()
@@ -343,7 +367,7 @@ def compute_kl_divergence(p: torch.Tensor, q: torch.Tensor, eps: float = 1e-8) -
 
 
 def evaluate_unroll_sensitivity(
-    model: nn.Module,
+    model: Any,
     states: List[Any],
     n_train: int,
     n_eval_depths: List[int],
@@ -356,7 +380,6 @@ def evaluate_unroll_sensitivity(
     vocab_size = config["vocab_size"]
     num_actions = config["num_actions"]
     stop_action_id = num_actions - 1
-    radius = config.get("latent_ball_radius", config.get("eval_radius", 10.0))
 
     # Collect (value, policy) at each depth for each state
     results_by_depth = {n: {"values": [], "policies": []} for n in n_eval_depths}
@@ -439,17 +462,21 @@ def run_exp2c_lite(device: str = "cuda") -> Tuple[List[ConditionResult], List[Ga
     states = load_batch(batch_path)
     print(f"[Exp2c] Loaded {len(states)} states from B0")
 
-    all_results = []
+    all_results: List[ConditionResult] = []
 
-    # Evaluate each (target_lz, eval_radius) condition
-    for eval_radius in EVAL_RADII:
-        R_str = "disabled" if eval_radius == 0 else f"{eval_radius:.0f}"
+    # Evaluate each (target_lz, projection setting) condition.
+    for projection_mode, eval_radius in EVAL_PROJECTION_SETTINGS:
+        setting_label = (
+            "disabled"
+            if projection_mode == "disabled"
+            else f"R={eval_radius:.0f}"
+        )
         print(f"\n{'='*60}")
-        print(f"EVAL RADIUS: R={R_str}")
+        print(f"EVAL PROJECTION: {setting_label}")
         print(f"{'='*60}")
 
         for target_lz in LZ_TARGETS:
-            seed_results = []
+            seed_results: List[Dict[str, Any]] = []
 
             for seed in SEEDS:
                 ckpt_path = find_checkpoint(target_lz, seed)
@@ -457,13 +484,23 @@ def run_exp2c_lite(device: str = "cuda") -> Tuple[List[ConditionResult], List[Ga
                     print(f"  [SKIP] target_Lz={target_lz}, seed={seed}: checkpoint not found")
                     continue
 
-                print(f"\n[Eval] target_Lz={target_lz}, seed={seed}, R_eval={R_str}")
+                print(f"\n[Eval] target_Lz={target_lz}, seed={seed}, projection={setting_label}")
 
-                model, config = load_model_with_radius_override(ckpt_path, device, eval_radius)
+                model, config = load_model_with_projection_override(
+                    ckpt_path,
+                    device,
+                    projection_mode,
+                    eval_radius,
+                )
 
                 # Lipschitz estimation
                 lip_stats = estimate_lipschitz_and_projection(
-                    model, states, N_TRAIN, device, eval_radius
+                    model,
+                    states,
+                    N_TRAIN,
+                    device,
+                    projection_mode,
+                    eval_radius,
                 )
 
                 print(f"  L_preproj: {lip_stats['L_preproj_mean']:.3f}±{lip_stats['L_preproj_std']:.3f}")
@@ -504,8 +541,11 @@ def run_exp2c_lite(device: str = "cuda") -> Tuple[List[ConditionResult], List[Ga
                         agree_2_16.append(um.argmax_agree_rate)
 
             # Aggregate unroll metrics across seeds
-            aggregated_unroll = []
-            depth_to_metrics = {}
+            aggregated_unroll: List[UnrollMetrics] = []
+            depth_to_metrics: Dict[
+                Tuple[int, int],
+                List[UnrollMetrics],
+            ] = {}
             for r in seed_results:
                 for um in r["unroll_metrics"]:
                     key = (um.n_train, um.n_eval)
@@ -527,6 +567,7 @@ def run_exp2c_lite(device: str = "cuda") -> Tuple[List[ConditionResult], List[Ga
 
             result = ConditionResult(
                 target_lz=target_lz,
+                eval_projection_mode=projection_mode,
                 eval_radius=eval_radius,
                 seeds=[r["seed"] for r in seed_results],
                 L_preproj_mean=np.mean(L_pre_vals),
@@ -551,18 +592,33 @@ def check_gates(results: List[ConditionResult]) -> List[GateResult]:
     """Check decision gates G1, G2, G3."""
     gates = []
 
-    # Find best R where G1 passes (projection not dominating)
-    for eval_R in [100.0, 0.0]:  # Check R=100 and disabled first
-        R_results = [r for r in results if r.eval_radius == eval_R]
-        if not R_results:
+    # Check relaxed enabled projection and explicit disabled mode first.
+    for projection_mode, eval_radius in [
+        ("enabled", 100.0),
+        ("disabled", None),
+    ]:
+        setting_label = (
+            "projection disabled"
+            if projection_mode == "disabled"
+            else f"R={eval_radius:.0f}"
+        )
+        setting_results = [
+            r
+            for r in results
+            if r.eval_projection_mode == projection_mode
+            and r.eval_radius == eval_radius
+        ]
+        if not setting_results:
             continue
 
-        proj_rate_mean = np.mean([r.projection_active_rate for r in R_results])
+        proj_rate_mean = np.mean(
+            [r.projection_active_rate for r in setting_results]
+        )
 
         # G1: projection_active_rate < 20%
         g1_passed = proj_rate_mean < G1_THRESHOLD
         gates.append(GateResult(
-            gate_name=f"G1 (R={eval_R if eval_R > 0 else '∞'})",
+            gate_name=f"G1 ({setting_label})",
             passed=g1_passed,
             value=proj_rate_mean,
             threshold=G1_THRESHOLD,
@@ -573,12 +629,14 @@ def check_gates(results: List[ConditionResult]) -> List[GateResult]:
             continue
 
         # G2: L_preproj spread >= 0.08
-        L_preproj_by_target = {r.target_lz: r.L_preproj_mean for r in R_results}
+        L_preproj_by_target = {
+            r.target_lz: r.L_preproj_mean for r in setting_results
+        }
         L_preproj_spread = max(L_preproj_by_target.values()) - min(L_preproj_by_target.values())
 
         g2_passed = L_preproj_spread >= G2_THRESHOLD
         gates.append(GateResult(
-            gate_name=f"G2 (R={eval_R if eval_R > 0 else '∞'})",
+            gate_name=f"G2 ({setting_label})",
             passed=g2_passed,
             value=L_preproj_spread,
             threshold=G2_THRESHOLD,
@@ -588,9 +646,8 @@ def check_gates(results: List[ConditionResult]) -> List[GateResult]:
         if not g2_passed:
             continue
 
-        # G3: Lower L_preproj ⇒ lower ΔV/Δπ, higher argmax agreement
-        # Sort by L_preproj and check correlation
-        sorted_by_L = sorted(R_results, key=lambda r: r.L_preproj_mean)
+        # G3: finite observed linkage at this evaluation setting.
+        sorted_by_L = sorted(setting_results, key=lambda r: r.L_preproj_mean)
 
         # Check if stability metrics improve as L decreases
         L_vals = [r.L_preproj_mean for r in sorted_by_L]
@@ -610,11 +667,14 @@ def check_gates(results: List[ConditionResult]) -> List[GateResult]:
             corr_details.append(f"L={r.L_preproj_mean:.3f} → ΔV={r.delta_V_2_16:.4f}, agree={r.argmax_agree_2_16:.2%}")
 
         gates.append(GateResult(
-            gate_name=f"G3 (R={eval_R if eval_R > 0 else '∞'})",
+            gate_name=f"G3 ({setting_label})",
             passed=g3_passed,
             value=0,  # qualitative
             threshold=0,
-            details=f"Stability linkage: {'PASSED' if g3_passed else 'FAILED'}\n" + "\n".join(corr_details)
+            details=(
+                f"Observed linkage criterion: {'PASSED' if g3_passed else 'FAILED'}\n"
+                + "\n".join(corr_details)
+            )
         ))
 
     return gates
@@ -633,7 +693,10 @@ def generate_outputs(results: List[ConditionResult], gates: List[GateResult]):
         "generated": datetime.now().isoformat(),
         "n_train": N_TRAIN,
         "n_eval_depths": N_EVAL_DEPTHS,
-        "eval_radii": EVAL_RADII,
+        "eval_projection_settings": [
+            {"mode": mode, "radius": radius}
+            for mode, radius in EVAL_PROJECTION_SETTINGS
+        ],
         "results": [],
         "gates": [asdict(g) for g in gates],
     }
@@ -655,27 +718,36 @@ def generate_outputs(results: List[ConditionResult], gates: List[GateResult]):
 
 - n_train: {N_TRAIN}
 - n_eval depths: {N_EVAL_DEPTHS}
-- Eval radii: {EVAL_RADII}
+- Eval projection settings: {EVAL_PROJECTION_SETTINGS}
 - Target L_z values: {LZ_TARGETS}
 
 ## Results by Eval Radius
 
 """
 
-    for eval_R in EVAL_RADII:
-        R_str = "∞ (disabled)" if eval_R == 0 else f"{eval_R:.0f}"
-        R_results = [r for r in results if r.eval_radius == eval_R]
+    for projection_mode, eval_radius in EVAL_PROJECTION_SETTINGS:
+        setting_label = (
+            "Projection disabled"
+            if projection_mode == "disabled"
+            else f"R = {eval_radius:.0f}"
+        )
+        setting_results = [
+            r
+            for r in results
+            if r.eval_projection_mode == projection_mode
+            and r.eval_radius == eval_radius
+        ]
 
-        if not R_results:
+        if not setting_results:
             continue
 
-        md_content += f"""### R = {R_str}
+        md_content += f"""### {setting_label}
 
 | Target L_z | L_preproj | L_postproj | Proj Active | ΔV (2→16) | Δπ (2→16) | Agree (2→16) |
 |------------|-----------|------------|-------------|-----------|-----------|--------------|
 """
 
-        for r in sorted(R_results, key=lambda x: x.target_lz):
+        for r in sorted(setting_results, key=lambda x: x.target_lz):
             md_content += f"| {r.target_lz} | {r.L_preproj_mean:.3f}±{r.L_preproj_std:.3f} | {r.L_postproj_mean:.3f}±{r.L_postproj_std:.3f} | {r.projection_active_rate:.1%} | {r.delta_V_2_16:.4f} | {r.delta_pi_2_16:.4f} | {r.argmax_agree_2_16:.1%} |\n"
 
         md_content += "\n"
@@ -693,7 +765,7 @@ def generate_outputs(results: List[ConditionResult], gates: List[GateResult]):
 
 - **G1 (Projection Dominance)**: projection_active_rate < {G1_THRESHOLD:.0%}
 - **G2 (Dial Range)**: L_preproj spread >= {G2_THRESHOLD:.2f}
-- **G3 (Stability Linkage)**: Lower L_preproj ⇒ lower ΔV/Δπ, higher argmax agreement
+- **G3 (Observed Linkage)**: the lowest sampled L_preproj condition also has the lowest ΔV or highest argmax agreement
 
 ## Results
 
@@ -714,14 +786,11 @@ def generate_outputs(results: List[ConditionResult], gates: List[GateResult]):
 """
 
     if all_passed:
-        gates_content += "**All gates passed!** → Proceed to paper-ready artifacts (Path A)\n"
+        gates_content += "**All configured finite-sample gate criteria passed.**\n"
     else:
         failed_gates = [g.gate_name for g in gates if not g.passed]
         gates_content += f"**Failed gates**: {', '.join(failed_gates)}\n\n"
-        gates_content += "Consider:\n"
-        gates_content += "- If G1 failed at all radii: Retraining may be needed\n"
-        gates_content += "- If G2 failed: Dial has insufficient range → negative result\n"
-        gates_content += "- If G3 failed: No stability linkage → negative result\n"
+        gates_content += "These finite results identify which configured criteria were not met; they do not establish necessity or causality.\n"
 
     gates_path = OUT_DIR / "GATES.md"
     gates_path.write_text(gates_content)

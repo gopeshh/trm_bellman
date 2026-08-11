@@ -2,9 +2,9 @@
 """
 Plot Radius Sweep Results for ICML Experiment 1.
 
-Generates publication-ready plots showing stability across different
-projection radii, demonstrating contraction provides stability independent
-of clipping.
+Generates plots comparing recorded stability metrics across finite projection
+radii and an explicit disabled setting. These finite artifact comparisons do
+not establish causality or projection-independent guarantees.
 """
 
 import argparse
@@ -41,29 +41,35 @@ def get_metric_value(row: Dict[str, str], metric: str):
 def load_radius_data(
     results_dir: str,
     seeds: List[int],
-    radii: List[float],
+    radii: List[Optional[float]],
     model_name: str,
     batch: str = "b0",
-) -> Dict[float, Dict[str, Dict[str, float]]]:
+) -> Dict[Optional[float], Dict[str, Dict[str, float]]]:
     """
     Load metrics for each radius across seeds.
 
     Returns:
-        Dict mapping R -> {metric: {"mean": x, "std": y}}
+        Dict mapping finite radius or None (disabled) to metric summaries.
     """
     base = Path(results_dir)
     result = {}
 
-    for R in radii:
-        R_str = f"R{int(R)}" if R == int(R) else f"R{R}"
+    for radius in radii:
+        if radius is None:
+            # Frozen Exp1 artifacts used the R0 directory tag for disabled mode.
+            radius_artifact_tag = "R0"
+        else:
+            radius_artifact_tag = (
+                f"R{int(radius)}" if radius == int(radius) else f"R{radius}"
+            )
 
         all_metrics = {"delta_V": [], "delta_pi": [], "delta_z": [], "argmax_agree": [], "saturated": []}
 
         for seed in seeds:
-            csv_path = base / f"seed{seed}" / R_str / f"{model_name}_{batch}_per_state.csv"
+            csv_path = base / f"seed{seed}" / radius_artifact_tag / f"{model_name}_{batch}_per_state.csv"
             if not csv_path.exists():
                 # Try alternate path structure
-                csv_path = base / R_str / f"seed{seed}" / f"{model_name}_{batch}_per_state.csv"
+                csv_path = base / radius_artifact_tag / f"seed{seed}" / f"{model_name}_{batch}_per_state.csv"
                 if not csv_path.exists():
                     print(f"Warning: {csv_path} not found")
                     continue
@@ -82,22 +88,22 @@ def load_radius_data(
                         all_metrics[metric].append(val)
 
         # Compute mean ± std
-        result[R] = {}
+        result[radius] = {}
         for metric, values in all_metrics.items():
             if values:
-                result[R][metric] = {
+                result[radius][metric] = {
                     "mean": float(np.mean(values)),
                     "std": float(np.std(values)),
                 }
             else:
-                result[R][metric] = {"mean": 0.0, "std": 0.0}
+                result[radius][metric] = {"mean": 0.0, "std": 0.0}
 
     return result
 
 
 def plot_radius_sweep(
-    data_a: Dict[float, Dict],
-    data_b: Dict[float, Dict],
+    data_a: Dict[Optional[float], Dict],
+    data_b: Dict[Optional[float], Dict],
     metric: str,
     out_path: str,
     ylabel: str,
@@ -107,19 +113,25 @@ def plot_radius_sweep(
     """
     Plot metric vs radius for Model A and B.
     """
-    radii = sorted(set(data_a.keys()) & set(data_b.keys()))
+    radii = sorted(
+        set(data_a.keys()) & set(data_b.keys()),
+        key=lambda radius: (radius is None, radius if radius is not None else 0.0),
+    )
     if not radii:
         print(f"Warning: No common radii for {metric}")
         return
 
-    # Filter out R=0 for x-axis (use categorical)
-    radii_labels = [f"R={int(R)}" if R > 0 else "R=0\n(disabled)" for R in radii]
+    # Use a categorical axis because disabled mode has no numeric radius.
+    radii_labels = [
+        f"R={int(radius)}" if radius is not None else "Disabled\n(legacy tag R0)"
+        for radius in radii
+    ]
     x = np.arange(len(radii))
 
-    means_a = [data_a[R][metric]["mean"] for R in radii]
-    stds_a = [data_a[R][metric]["std"] for R in radii]
-    means_b = [data_b[R][metric]["mean"] for R in radii]
-    stds_b = [data_b[R][metric]["std"] for R in radii]
+    means_a = [data_a[radius][metric]["mean"] for radius in radii]
+    stds_a = [data_a[radius][metric]["std"] for radius in radii]
+    means_b = [data_b[radius][metric]["mean"] for radius in radii]
+    stds_b = [data_b[radius][metric]["std"] for radius in radii]
 
     # Create figure
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -142,8 +154,8 @@ def plot_radius_sweep(
     # Add saturation annotation
     if show_saturation and "saturated" in data_a.get(radii[0], {}):
         ax2 = ax.twinx()
-        sat_a = [data_a[R].get("saturated", {}).get("mean", 0) * 100 for R in radii]
-        sat_b = [data_b[R].get("saturated", {}).get("mean", 0) * 100 for R in radii]
+        sat_a = [data_a[radius].get("saturated", {}).get("mean", 0) * 100 for radius in radii]
+        sat_b = [data_b[radius].get("saturated", {}).get("mean", 0) * 100 for radius in radii]
         ax2.plot(x - width/2, sat_a, 'o--', color='gray', alpha=0.5, markersize=4)
         ax2.plot(x + width/2, sat_b, 's--', color='gray', alpha=0.5, markersize=4)
         ax2.set_ylabel("Saturation Rate (%)", fontsize=10, color='gray')
@@ -163,8 +175,8 @@ def main():
                         help="Base results directory")
     parser.add_argument("--seeds", type=str, default="41,42,43,44,45,46,47,48,49,50",
                         help="Comma-separated list of seeds")
-    parser.add_argument("--radii", type=str, default="10,30,100,0",
-                        help="Comma-separated list of radii")
+    parser.add_argument("--radii", type=str, default="10,30,100,disabled",
+                        help="Comma-separated positive radii and/or 'disabled'")
     parser.add_argument("--out_dir", type=str, default="results/figures/exp1_v4",
                         help="Output directory for figures")
     parser.add_argument("--batch", type=str, default="b0",
@@ -173,7 +185,16 @@ def main():
     args = parser.parse_args()
 
     seeds = [int(s) for s in args.seeds.split(",")]
-    radii = [float(r) for r in args.radii.split(",")]
+    radii: List[Optional[float]] = []
+    for token in args.radii.split(","):
+        token = token.strip()
+        if token.lower() == "disabled":
+            radii.append(None)
+            continue
+        radius = float(token)
+        if radius <= 0.0:
+            parser.error("--radii entries must be positive numbers or 'disabled'")
+        radii.append(radius)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 

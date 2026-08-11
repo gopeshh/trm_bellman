@@ -66,7 +66,7 @@ def audit_condition_results(summary: dict, claims: str) -> tuple[bool, str]:
 
         # Check if this condition appears in claims table with matching values
         # Table format: | name | Contraction | R | Success | NaN | G1 |
-        pattern = rf"\| {name} \| (?:True|False) \| [\d.]+ \| ([\d.]+) \| (?:YES|NO) \| (PASS|FAIL) \|"
+        pattern = rf"\| {name} \| (?:True|False) \| (?:[\d.]+|disabled) \| ([\d.]+) \| (?:YES|NO) \| (PASS|FAIL) \|"
         match = re.search(pattern, claims)
 
         if not match:
@@ -89,39 +89,53 @@ def audit_condition_results(summary: dict, claims: str) -> tuple[bool, str]:
 
 
 def audit_no_nan(summary: dict) -> tuple[bool, str]:
-    """Verify no conditions had NaN."""
+    """Verify no condition recorded its had_nan flag."""
     conditions = summary["conditions"]
     nan_conditions = [c["name"] for c in conditions if c["training"]["had_nan"]]
 
     if nan_conditions:
         return False, f"NaN detected in: {', '.join(nan_conditions)}"
 
-    return True, "No NaN in any condition"
+    return True, "No condition recorded had_nan=true"
 
 
-def audit_claim2_disabled_stable(summary: dict, claims: str) -> tuple[bool, str]:
-    """Verify Claim 2 about R=disabled stability is accurate."""
-    # Find conditions with R=disabled (latent_ball_radius = 0)
+def audit_disabled_condition_g1(summary: dict, claims: str) -> tuple[bool, str]:
+    """Verify the recorded G1 result for projection-disabled conditions."""
+
+    def is_projection_disabled(condition: dict) -> bool:
+        mode = condition.get("latent_projection_mode")
+        radius = condition.get("latent_ball_radius", "missing")
+        if "latent_projection_mode" in condition:
+            return mode == "disabled" and radius is None
+        if radius is None:
+            # Normalized summaries may omit the mode after evaluation.
+            return True
+        # Frozen Exp3 paper-ready artifacts used radius 0 as the disabled tag.
+        return radius == 0.0
+
     disabled_conditions = [
         c for c in summary["conditions"]
-        if c["latent_ball_radius"] == 0.0
+        if is_projection_disabled(c)
     ]
 
-    # Check all are stable (passed G1)
+    # Check the recorded G1 flags without inferring a general stability claim.
     unstable = [c["name"] for c in disabled_conditions if not c["g1_passed"]]
 
     if unstable:
-        return False, f"Claim 2 violated: R=disabled conditions unstable: {unstable}"
+        return False, f"Projection-disabled conditions did not pass recorded G1: {unstable}"
 
-    # Verify claim 2 mentions these conditions
-    if "Claim 2" not in claims:
-        return False, "Claim 2 not found in CLAIMS.md"
+    # Accept the old heading when auditing frozen claims artifacts.
+    if "Finite-run observation 2" not in claims and "Claim 2" not in claims:
+        return False, "Projection-disabled observation not found in CLAIMS.md"
 
     for cond in disabled_conditions:
         if cond["name"] not in claims:
-            return False, f"Claim 2 missing condition {cond['name']}"
+            return False, f"Projection-disabled observation missing condition {cond['name']}"
 
-    return True, f"Claim 2 verified: {[c['name'] for c in disabled_conditions]} all stable"
+    return True, (
+        f"Projection-disabled conditions {[c['name'] for c in disabled_conditions]} "
+        "passed their recorded G1 checks"
+    )
 
 
 def main():
@@ -155,7 +169,7 @@ def main():
         ("G1 Consistency", audit_g1_consistency(summary, claims)),
         ("Condition Results", audit_condition_results(summary, claims)),
         ("No NaN", audit_no_nan(summary)),
-        ("Claim 2 (R=disabled stable)", audit_claim2_disabled_stable(summary, claims)),
+        ("Projection-disabled recorded G1", audit_disabled_condition_g1(summary, claims)),
     ]
 
     print("AUDIT RESULTS")

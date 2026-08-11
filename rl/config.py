@@ -135,7 +135,7 @@ class RLConfig(BaseModel):
     # False: Sparse terminal rewards only (receive checker score at episode end)
     reward_shaping: bool = True
 
-    # === Absorbing state value (Paper Section 3.1, lines 653-656) ===
+    # === Canonical absorbing-state boundary ===
     # C_max is the maximum checker score (Φ(s_abs) in paper notation).
     # The paper defines V^π(s_abs) = -C_max for all policies.
     # This is used in K-step bootstrapping: when episode terminates, bootstrap
@@ -143,16 +143,17 @@ class RLConfig(BaseModel):
     # For Sudoku: C_max = 10.0 (checker returns 0-10 scale)
     C_max: float = Field(default=10.0, ge=0.0, allow_inf_nan=False)
 
-    # === Terminal rewards (Paper Remark 2.6: Rush-to-fail mitigation) ===
+    # === Terminal outcome rewards ===
     # These are the r_0 terms in the shaped reward: r = r_0 + γ·Φ(s') - Φ(s)
     #
     # fail_terminal_reward: Applied when episode ends WITHOUT solving.
-    #   Paper requires r_fail ≤ -γC_max to prevent "rush to fail".
-    #   Default -10.0 = -C_max for Sudoku, satisfying this condition.
+    #   For a failed terminal transition, the folded shaped reward is
+    #   r_fail - Phi(s) plus any STOP penalty. Its sign depends on an established
+    #   lower bound for Phi(s), not only on the checker ceiling C_max.
     #
     # solve_terminal_reward: Applied when episode ends WITH solving.
     #   Default 0.0 relies purely on shaping. Can add positive bonus.
-    fail_terminal_reward: float = -10.0  # Theory-aligned default (= -C_max)
+    fail_terminal_reward: float = -10.0  # Historical Sudoku default (= -C_max)
     solve_terminal_reward: float = 0.0
     
     # Target network EMA
@@ -316,9 +317,9 @@ class RLConfig(BaseModel):
     opnorm_clamp_num_power_iters: int = 10  # Power iterations for spectral norm estimation
     opnorm_log_max_sigma: bool = False  # If True, log max σ(W) when clamp fires (adds overhead)
 
-    # === Value head normalization toggle (2x2 ablation finding) ===
+    # === Value head normalization toggle ===
     # When enable_contraction=True, the value head normally gets spectral_norm + Lv scaling.
-    # The 2x2 ablation showed this causes training collapse (targets saturate to ±20).
+    # A finite 2x2 diagnostic observed target saturation when this was enabled.
     # Set disable_value_head_norm=True to keep z→z contraction ON but skip value-head normalization.
     disable_value_head_norm: bool = False
 
@@ -350,7 +351,7 @@ class RLConfig(BaseModel):
 
     def validate_theory_alignment(self, warn: bool = True) -> dict:
         """
-        Check if configuration aligns with theoretical guarantees from the paper.
+        Check whether configuration satisfies the paper-facing execution contract.
         
         Returns a dict with validation results and optionally emits warnings.
         
@@ -440,17 +441,6 @@ class RLConfig(BaseModel):
                 "guarantee does not strictly apply. Set theory_exact_mixture=True for "
                 "theory-exact behavior (but slower due to evaluating two networks)."
             )
-        
-        # Rush-to-fail mitigation (Remark 2.6)
-        # The theory requires fail_terminal_reward <= -gamma * C_max.
-        # With C_max now explicit, we can check this properly.
-        if self.reward_shaping:
-            required_threshold = -self.gamma * self.C_max
-            if self.fail_terminal_reward > required_threshold:
-                issues.append(
-                    f"fail_terminal_reward={self.fail_terminal_reward} > -γ·C_max={required_threshold:.2f} "
-                    f"may allow 'rush to fail' (Remark 2.6). Set fail_terminal_reward <= {required_threshold:.2f}."
-                )
         
         if warn and issues:
             for issue in issues:

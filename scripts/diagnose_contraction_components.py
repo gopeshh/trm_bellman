@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ablation diagnostic to isolate which contraction component causes Lz blow-up.
+Ablation diagnostic comparing sampled Lz behavior across contraction components.
 
 Tests 4 variants:
   (i) OFF: no spectral_norm, no scaling
@@ -109,7 +109,8 @@ def build_base_model(
         rl_target_Lv=0.9,
         rl_enable_policy_head=True,
         rl_num_actions=num_actions,
-        rl_latent_ball_radius=0.0,
+        rl_latent_projection_mode="disabled",
+        rl_latent_ball_radius=None,
     )
 
     model = TinyRecursiveReasoningModel_ACTV1(cfg_dict)
@@ -291,13 +292,13 @@ def main():
         print(f"  SN+SCALE:   Lz={both_lz:.2f} {'<-- EXPLODED!' if both_lz > 10 else ''}")
 
         if sn_lz > 10 and scale_lz <= 10:
-            print("  ==> spectral_norm is the culprit")
+            print("  ==> only the sampled spectral_norm condition exceeds 10")
         elif scale_lz > 10 and sn_lz <= 10:
-            print("  ==> scaling wrapper is the culprit")
+            print("  ==> only the sampled scaling condition exceeds 10")
         elif sn_lz > 10 and scale_lz > 10:
-            print("  ==> both spectral_norm AND scaling cause issues")
+            print("  ==> both sampled component conditions exceed 10")
         elif both_lz > 10 and sn_lz <= 10 and scale_lz <= 10:
-            print("  ==> interaction between SN and scaling is the culprit")
+            print("  ==> only the sampled combined condition exceeds 10")
         else:
             print("  ==> no explosion detected")
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Diagnostic script to validate contraction implementation by measuring Lipschitz constants.
+Diagnostic script comparing finite sampled local-Lz estimates.
 
-Compares empirical Lz (latent map Lipschitz) with contraction ON vs OFF,
-and checks whether measured Lz tracks the target_Lz setting.
+Reports estimates from separately initialized contraction-ON and contraction-OFF
+models. This is not a controlled causal comparison or a global Lipschitz bound.
 
 Usage:
     buck2 run //buiksat_trm:diagnose_contraction_lipschitz -- \
@@ -109,7 +109,8 @@ def build_model(
         rl_target_Lv=0.9,
         rl_enable_policy_head=True,
         rl_num_actions=num_actions,
-        rl_latent_ball_radius=0.0,
+        rl_latent_projection_mode="disabled",
+        rl_latent_ball_radius=None,
     )
 
     model = TinyRecursiveReasoningModel_ACTV1(cfg_dict)
@@ -134,7 +135,7 @@ def estimate_Lz_stats(
         # Get context for latent_step
         context = model._resolve_latent_context(batch)
 
-        # Warmup forward passes to converge spectral norm power iteration
+        # Warmup forward passes to advance spectral-norm power iteration.
         for _ in range(5):
             _ = model.inner.latent_step(z0, context["input_embeddings_with_plan"], context["seq_info"])
 
@@ -177,7 +178,7 @@ def estimate_Lz_stats(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Diagnose contraction Lipschitz constants")
+    parser = argparse.ArgumentParser(description="Compare sampled local Lz estimates")
     parser.add_argument("--dataset", type=str, required=True, help="Path to Sudoku dataset")
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size for evaluation")
     parser.add_argument("--num-repeats", type=int, default=10, help="Number of Lz estimation repeats")
@@ -297,23 +298,25 @@ def main():
     # Interpretation
     print("INTERPRETATION:")
     if lz_mean_on < lz_mean_off:
-        print(f"  ✓ Contraction ON reduces Lz: {lz_mean_off:.4f} → {lz_mean_on:.4f}")
+        print(f"  Contraction-ON run has the lower sampled mean: {lz_mean_off:.4f} → {lz_mean_on:.4f}")
     else:
-        print(f"  ✗ WARNING: Contraction ON does NOT reduce Lz: {lz_mean_off:.4f} → {lz_mean_on:.4f}")
+        print(f"  Contraction-ON run does not have the lower sampled mean: {lz_mean_off:.4f} → {lz_mean_on:.4f}")
 
     if lz_mean_strict < lz_mean_on:
-        print(f"  ✓ Stricter target reduces Lz further: {lz_mean_on:.4f} → {lz_mean_strict:.4f}")
+        print(f"  Stricter-target run has the lower sampled mean: {lz_mean_on:.4f} → {lz_mean_strict:.4f}")
     else:
-        print(f"  ✗ WARNING: Stricter target did NOT reduce Lz: {lz_mean_on:.4f} → {lz_mean_strict:.4f}")
+        print(f"  Stricter-target run does not have the lower sampled mean: {lz_mean_on:.4f} → {lz_mean_strict:.4f}")
 
     # Check if measured Lz roughly tracks target
     ratio = lz_mean_on / args.target_lz if args.target_lz > 0 else float('inf')
-    print(f"  Lz_est / target_Lz ratio: {ratio:.2f} (ideally ~1.0 or slightly above)")
+    print(f"  Sampled local-Lz mean / target_Lz ratio: {ratio:.2f}")
 
     if lz_mean_on < 1.0:
-        print(f"  ✓ Contraction achieved: Lz < 1.0")
+        print("  Sampled contraction-ON local-Lz mean is below 1.0.")
     else:
-        print(f"  ✗ WARNING: Not contractive: Lz >= 1.0")
+        print("  Sampled contraction-ON local-Lz mean is at least 1.0.")
+    print("  Models were initialized separately, so differences do not identify a causal effect.")
+    print("  Finite local estimates below 1.0 do not establish a global contraction bound.")
 
 
 if __name__ == "__main__":

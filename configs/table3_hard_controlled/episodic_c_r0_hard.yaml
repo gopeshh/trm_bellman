@@ -3,7 +3,7 @@
 # 2x2 controlled experiment to deconfound contraction vs projection effects
 # on hard 4x4 Sudoku (6-8 empties).
 #
-# Cell: enable_contraction=true, latent_ball_radius=0.0 (projection disabled)
+# Cell: enable_contraction=true, projection disabled (legacy cell name r0)
 #
 # CRITICAL CONTROLS (per CLAUDE.md non-negotiables):
 # - disable_value_head_norm: true (MUST be true for ALL cells in this 2x2)
@@ -39,8 +39,9 @@ entropy_coef: 0.05
 enable_contraction: true
 target_Lz: 0.9
 
-# FACTOR B: Projection OFF (R=0)
-latent_ball_radius: 0.0
+# FACTOR B: Projection OFF (identity mode)
+latent_projection_mode: disabled
+latent_ball_radius: null
 
 # === CRITICAL CONTROL: Value-head normalization OFF ===
 # MUST be true for ALL cells in this 2x2 to avoid confound

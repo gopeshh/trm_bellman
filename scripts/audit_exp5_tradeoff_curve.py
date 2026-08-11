@@ -33,12 +33,23 @@ def check_value_head_norm(summary: Dict[str, Any]) -> Tuple[bool, str]:
 
 
 def check_projection_disabled(summary: Dict[str, Any]) -> Tuple[bool, str]:
-    """Check latent_ball_radius is 0."""
+    """Check explicit disabled mode, with a frozen-artifact fallback."""
     config = summary.get("config", {})
+    projection_mode = config.get("latent_projection_mode")
     latent_ball_radius = config.get("latent_ball_radius", 10.0)
-    if latent_ball_radius == 0.0:
-        return True, "PASS: latent_ball_radius=0.0 (projection disabled)"
-    return False, f"FAIL: latent_ball_radius={latent_ball_radius}"
+    if (
+        projection_mode == "disabled"
+        and "latent_ball_radius" in config
+        and latent_ball_radius is None
+    ):
+        return True, "PASS: explicit disabled mode with radius=None"
+    if "latent_projection_mode" not in config and latent_ball_radius == 0.0:
+        return True, "PASS: legacy frozen-artifact radius=0 encoding"
+    return False, (
+        "FAIL: projection must use latent_projection_mode=disabled with "
+        f"latent_ball_radius=None; got mode={projection_mode}, "
+        f"radius={latent_ball_radius}"
+    )
 
 
 def check_projection_inactive(summary: Dict[str, Any]) -> Tuple[bool, str]:
@@ -110,7 +121,7 @@ def check_scale_summaries(summary: Dict[str, Any]) -> Tuple[bool, str]:
 
 
 def check_success_variation(summary: Dict[str, Any]) -> Tuple[bool, str]:
-    """Check that success rate varies across scales (tradeoff exists)."""
+    """Report recorded success-rate variation across evaluated scales."""
     scale_sums = summary.get("scale_summaries", [])
     if not scale_sums:
         return False, "FAIL: No scale summaries to check"
@@ -120,8 +131,8 @@ def check_success_variation(summary: Dict[str, Any]) -> Tuple[bool, str]:
 
     # Warning if no variation
     if success_range < 0.001:
-        return True, f"WARNING: Success rate shows no variation (range={success_range:.4f})"
-    return True, f"PASS: Success rate varies (range={success_range:.4f})"
+        return True, f"WARNING: No success-rate variation recorded (range={success_range:.4f})"
+    return True, f"PASS: Recorded success-rate range={success_range:.4f}"
 
 
 def generate_audit_md(
@@ -162,15 +173,16 @@ def generate_audit_md(
 
 | Gate | Status | Details |
 |------|--------|---------|
-| G0 (Projection inactive) | {'PASS' if summary.get('gates', {}).get('g0_projection_inactive', {}).get('passed') else 'FAIL'} | latent_ball_radius=0 |
+| G0 (Projection inactive) | {'PASS' if summary.get('gates', {}).get('g0_projection_inactive', {}).get('passed') else 'FAIL'} | Explicit disabled mode; legacy radius-0 summaries accepted by this auditor |
 | G1 (Stability) | {'PASS' if summary.get('gates', {}).get('g1_stability', {}).get('passed') else 'FAIL'} | No NaN values |
 | G2 (Dial range) | {'PASS' if summary.get('gates', {}).get('g2_dial_range', {}).get('passed') else 'FAIL'} | spread={summary.get('gates', {}).get('g2_dial_range', {}).get('spread', 0):.4f} |
-| G3 (Tradeoff exists) | {'PASS' if summary.get('gates', {}).get('g3_tradeoff_exists', {}).get('passed') else 'FAIL'} | success_range={summary.get('gates', {}).get('g3_tradeoff_exists', {}).get('success_range', 0):.4f} |
+| G3 (Recorded success variation) | {'PASS' if summary.get('gates', {}).get('g3_tradeoff_exists', {}).get('passed') else 'FAIL'} | success_range={summary.get('gates', {}).get('g3_tradeoff_exists', {}).get('success_range', 0):.4f} |
 
 ## Non-Negotiables Verified
 
 - `disable_value_head_norm: true` (value-head spectral norm OFF)
-- `latent_ball_radius: 0.0` (projection disabled)
+- Current schema: `latent_projection_mode: disabled`, `latent_ball_radius: null`
+- Compatibility: frozen summaries without a mode field may use `latent_ball_radius: 0.0`
 
 """
 

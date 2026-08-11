@@ -43,7 +43,8 @@ model_type: "trm"
 enable_contraction: false  # FIXED: Contraction hurts on this task
 target_Lz: 0.9  # Ignored when contraction disabled
 target_Lv: 5.0
-latent_ball_radius: 0.0  # Disabled with contraction
+latent_projection_mode: disabled
+latent_ball_radius: null
 
 # Optimization
 value_lr: 5.0e-4  # FIXED: Lowered from 1e-3 for stability

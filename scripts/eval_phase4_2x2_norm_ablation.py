@@ -65,6 +65,8 @@ class ConditionResult:
     # Config verification
     enable_contraction: bool
     disable_value_head_norm: bool
+    latent_projection_mode: str
+    latent_ball_radius: Optional[float]
     # Lipschitz
     L_preproj: float
     L_preproj_std: float
@@ -90,6 +92,8 @@ class ConditionAggregate:
     label: str
     enable_contraction: bool
     disable_value_head_norm: bool
+    latent_projection_mode: str
+    latent_ball_radius: Optional[float]
     n_seeds: int
     # Lipschitz
     L_preproj_mean: float
@@ -146,6 +150,27 @@ def load_checkpoint(ckpt_path: str, config_path: str, device: str = "cuda"):
     hidden_size = saved_rl_config.get("hidden_size", 64)
     rl_num_actions = saved_rl_config.get("num_actions", 513)  # Trained with 513 actions
 
+    projection_mode = yaml_config.get("latent_projection_mode", "enabled")
+    if projection_mode == "enabled":
+        projection_radius = yaml_config.get("latent_ball_radius", 10.0)
+        if (
+            projection_radius is None
+            or projection_radius <= 0.0
+            or not np.isfinite(projection_radius)
+        ):
+            raise ValueError("Enabled projection requires latent_ball_radius > 0")
+    elif projection_mode == "disabled":
+        projection_radius = yaml_config.get("latent_ball_radius")
+        if projection_radius is not None:
+            raise ValueError("Disabled projection requires latent_ball_radius=None")
+    else:
+        raise ValueError("latent_projection_mode must be 'enabled' or 'disabled'")
+
+    # Return the normalized pair so serialized results expose canonical state.
+    yaml_config = dict(yaml_config)
+    yaml_config["latent_projection_mode"] = projection_mode
+    yaml_config["latent_ball_radius"] = projection_radius
+
     # Build TRM config dict (matching upi_trm_train.py structure)
     trm_cfg_dict = dict(
         batch_size=32,
@@ -176,7 +201,8 @@ def load_checkpoint(ckpt_path: str, config_path: str, device: str = "cuda"):
         rl_disable_value_head_norm=yaml_config.get("disable_value_head_norm", True),
         rl_enable_policy_head=True,
         rl_num_actions=rl_num_actions,
-        rl_latent_ball_radius=yaml_config.get("latent_ball_radius", 10.0),
+        rl_latent_projection_mode=projection_mode,
+        rl_latent_ball_radius=projection_radius,
     )
 
     # Create model
@@ -337,12 +363,23 @@ def compute_stability_metrics(
 
 
 def compute_projection_rate(model, states: List[Dict], n_steps: int = 2, device: str = "cuda") -> float:
-    """Compute projection activation rate."""
+    """Compute next-step activation using production projection instrumentation."""
     model.eval()
-    radius = model.config.rl_latent_ball_radius if hasattr(model, 'config') else 10.0
-
-    if radius <= 0:
+    if not hasattr(model, "config"):
+        raise ValueError("Model config is required for projection diagnostics")
+    projection_mode = model.config.rl_latent_projection_mode
+    radius = model.config.rl_latent_ball_radius
+    if projection_mode == "disabled":
+        if radius is not None:
+            raise ValueError("Disabled projection must not have a radius")
         return 0.0
+    if (
+        projection_mode != "enabled"
+        or radius is None
+        or radius <= 0.0
+        or not np.isfinite(radius)
+    ):
+        raise ValueError("Enabled projection requires a positive finite radius")
 
     active_count = 0
     total_count = 0
@@ -360,12 +397,23 @@ def compute_projection_rate(model, states: List[Dict], n_steps: int = 2, device:
                 continue
 
             inner_carry = carry.inner_carry if hasattr(carry, 'inner_carry') else carry
-            if not hasattr(inner_carry, 'z_L'):
+            if not hasattr(inner_carry, 'z_H'):
                 continue
-            z = inner_carry.z_L
-            norms = z.norm(dim=-1)
-            active_count += (norms > radius * 0.99).sum().item()
-            total_count += norms.numel()
+
+            batch = model._standardize_latent_batch(x, y)
+            context = model._resolve_latent_context(batch)
+            input_embeddings = (
+                context["input_embeddings_with_plan"]
+                if "input_embeddings_with_plan" in context
+                else context["input_embeddings"]
+            )
+            _, _, projection_active = model.inner.latent_step_with_projection_info(
+                inner_carry,
+                input_embeddings,
+                context["seq_info"],
+            )
+            active_count += projection_active.sum().item()
+            total_count += projection_active.numel()
 
     return active_count / total_count if total_count > 0 else 0.0
 
@@ -465,6 +513,8 @@ def evaluate_condition(
         checkpoint_path=str(ckpt_path),
         enable_contraction=config.get("enable_contraction", False),
         disable_value_head_norm=config.get("disable_value_head_norm", True),
+        latent_projection_mode=config["latent_projection_mode"],
+        latent_ball_radius=config["latent_ball_radius"],
         L_preproj=L_preproj,
         L_preproj_std=L_preproj_std,
         var_V=stability["var_V"],
@@ -495,6 +545,8 @@ def aggregate_results(results: List[ConditionResult]) -> List[ConditionAggregate
             label=CONDITION_LABELS[condition],
             enable_contraction=cond_results[0].enable_contraction,
             disable_value_head_norm=cond_results[0].disable_value_head_norm,
+            latent_projection_mode=cond_results[0].latent_projection_mode,
+            latent_ball_radius=cond_results[0].latent_ball_radius,
             n_seeds=n,
             L_preproj_mean=np.mean([r.L_preproj for r in cond_results]),
             L_preproj_std=np.std([r.L_preproj for r in cond_results]),
@@ -535,10 +587,11 @@ def generate_claims_md(aggregates: List[ConditionAggregate], out_path: Path) -> 
     """Generate CLAIMS.md."""
     content = """# Phase 4 Claims: 2×2 Norm Ablation
 
-## Primary Claim
+## Recorded finite-run metrics
 
-Value-head spectral normalization (when enabled) causes training instability,
-while z→z contraction alone does not harm performance.
+The table below reports the recorded conditions without inferring a causal
+effect, a population-level stability guarantee, or an ordering not established
+by the values themselves.
 
 ## Evidence
 

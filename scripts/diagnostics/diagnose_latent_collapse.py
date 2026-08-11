@@ -387,7 +387,7 @@ downstream signal and hurt learning.
 
 **Variance Comparison**:
 - Total variance ratio (B/A): {var_ratio:.3f}
-- If << 1: contraction causes samples to cluster together
+- If << 1: sampled contracted representations are more clustered
 
 **Cosine Similarity**:
 - Δ cos_sim (B - A): {cos_diff:+.4f}
@@ -430,7 +430,7 @@ downstream signal and hurt learning.
     if len(collapse_evidence) >= 2:
         report += """**EVIDENCE SUPPORTS COLLAPSE HYPOTHESIS**
 
-Contraction causes latent representations to collapse:
+The sampled contracted representations are more clustered:
 """
         for e in collapse_evidence:
             report += f"{e}\n"
@@ -441,7 +441,7 @@ Contraction causes latent representations to collapse:
     elif len(no_collapse_evidence) >= 2:
         report += """**NO SIGNIFICANT EVIDENCE OF COLLAPSE**
 
-Contraction does NOT cause latent representations to collapse significantly:
+The sampled diagnostics do not show substantial additional clustering:
 """
         for e in no_collapse_evidence:
             report += f"{e}\n"

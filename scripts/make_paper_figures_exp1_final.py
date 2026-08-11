@@ -409,12 +409,18 @@ def write_radius_sweep_tex(
         if is_main:
             f.write("\\caption{Projection radius sweep on B0 (initial states), using the fixed ")
             f.write(f"$n={N_TRAIN}\\rightarrow{RADIUS_SWEEP_N2}$ mismatch. ")
-            f.write(f"R=0 disables projection; contraction still provides ${r0_improvement:.1f}\\times$ improvement.}}\n")
+            f.write(
+                f"With projection disabled (legacy artifact tag R0), the two "
+                f"checkpoint conditions have a recorded "
+                f"$\\Delta_V$ ratio of ${r0_improvement:.1f}\\times$.}}\n"
+            )
             f.write("\\label{tab:radius_sweep}\n")
         else:
             f.write("\\caption{Radius sweep on B1 (successor states). ")
-            f.write("Under the refrozen 10-seed protocol, contraction improves all three metrics at R=0, ")
-            f.write("though absolute instability remains higher than on B0.}\n")
+            f.write(
+                "The table reports finite metrics for the two checkpoint "
+                "conditions and does not establish a uniform guarantee.}\n"
+            )
             f.write("\\label{tab:radius_sweep_b1}\n")
 
         f.write("\\begin{tabular}{llccc}\n")
@@ -655,8 +661,9 @@ def write_claims(
         z_improvement = dz_a.mean / dz_b.mean if dz_b.mean > 0 else 0
 
         f.write(
-            f"1. **Claim**: At fixed n={N_TRAIN}→{main_n2} mismatch on B0, contraction reduces Δ_V by "
-            f"{v_improvement:.1f}×.\n"
+            f"1. **Observation**: At fixed n={N_TRAIN}→{main_n2} mismatch on "
+            f"sampled B0 states, the contraction-oriented checkpoint has "
+            f"{v_improvement:.1f}× lower observed Δ_V.\n"
         )
         f.write(f"   **Evidence**: Δ_V {dV_a.mean:.3f}±{dV_a.std:.3f} → {dV_b.mean:.3f}±{dV_b.std:.3f}\n\n")
 
@@ -666,10 +673,16 @@ def write_claims(
             f"({pi_improvement:.1f}× ratio on small absolute values)\n\n"
         )
 
-        f.write(f"3. **Claim**: Latent drift is reduced by {z_improvement:.1f}× on B0.\n")
+        f.write(
+            f"3. **Observation**: On sampled B0 states, the contraction-oriented "
+            f"checkpoint has {z_improvement:.1f}× lower observed Δ_z.\n"
+        )
         f.write(f"   **Evidence**: Δ_z {dz_a.mean:.2f} → {dz_b.mean:.2f}\n\n")
 
-        f.write(f"4. **Claim**: Action agreement improves from {argmax_a.mean:.1%} to {argmax_b.mean:.1%} on B0.\n\n")
+        f.write(
+            f"4. **Observation**: Sampled B0 action agreement is {argmax_a.mean:.1%} "
+            f"and {argmax_b.mean:.1%} for the two checkpoint conditions.\n\n"
+        )
 
         # Radius sweep claims (B0)
         f.write("## Radius Sweep (B0 - Isolation Result)\n\n")
@@ -687,28 +700,38 @@ def write_claims(
             r0_improvement = dV_a_r0.mean / dV_b_r0.mean if dV_b_r0.mean > 0 else 0
 
             f.write(
-                f"5. **Claim**: On B0 (initial states), with R=0 (projection disabled), at fixed "
+                f"5. **Observation**: On sampled B0 states, with projection "
+                f"disabled (legacy artifact tag R0), at fixed "
                 f"{RADIUS_SWEEP_N2 // N_TRAIN}× mismatch (n={N_TRAIN}→{RADIUS_SWEEP_N2}), "
-                f"contraction provides {r0_improvement:.1f}× value stability improvement.\n"
+                f"the contraction-oriented checkpoint has {r0_improvement:.1f}× "
+                f"lower observed Δ_V.\n"
             )
             f.write(
                 f"   **Evidence**: Δ_V (pooled over all states and seeds) "
                 f"{dV_a_r0.mean:.3f} → {dV_b_r0.mean:.3f}\n"
             )
-            f.write("   **Interpretation**: Contraction contributes a projection-independent stability benefit.\n\n")
+            f.write(
+                "   **Interpretation**: The sampled checkpoint difference remains "
+                "when projection is disabled. This finite diagnostic does not "
+                "establish a projection-independent or uniform guarantee.\n\n"
+            )
 
             proj_gain_a = dV_a_r0.mean / r10_a.mean if r10_a.mean > 0 else 0
             proj_gain_b = dV_b_r0.mean / r10_b.mean if r10_b.mean > 0 else 0
-            f.write("6. **Observation**: Projection remains the dominant stabilizer on top of contraction.\n")
             f.write(
-                f"   **Evidence**: On B0, moving from R=0 to R=10 reduces Δ_V "
+                "6. **Observation**: On sampled B0 states, both checkpoint "
+                "conditions have lower observed Δ_V at R=10 than with "
+                "projection disabled.\n"
+            )
+            f.write(
+                f"   **Evidence**: On B0, the disabled and R=10 conditions record Δ_V "
                 f"{dV_a_r0.mean:.3f} → {r10_a.mean:.3f} for No Contraction ({proj_gain_a:.1f}×) and "
                 f"{dV_b_r0.mean:.3f} → {r10_b.mean:.3f} for Contraction ({proj_gain_b:.1f}×).\n"
             )
             f.write(
-                f"   **Saturation**: R=10 is active 100% of the time "
-                f"({sat10_a.mean:.0%} / {sat10_b.mean:.0%}); R=100 never fires "
-                f"({sat100_a.mean:.0%} / {sat100_b.mean:.0%}).\n\n"
+                f"   **Recorded active rates**: R=10: "
+                f"{sat10_a.mean:.0%} / {sat10_b.mean:.0%}; R=100: "
+                f"{sat100_a.mean:.0%} / {sat100_b.mean:.0%}.\n\n"
             )
         else:
             r0_improvement = 0.0
@@ -726,7 +749,8 @@ def write_claims(
 
             f.write("⚠️ **Warning**: B1 remains appendix-only and should not replace the B0 main-text anchor.\n")
             f.write(
-                f"   Under the refrozen 10-seed protocol, B1 is directionally consistent with B0 even at R=0: "
+                f"   In the refrozen 10-seed protocol, the B1 disabled condition "
+                f"(legacy tag R0) has the same recorded direction as B0: "
                 f"Δ_V {dV_a_b1.mean:.3f} → {dV_b_b1.mean:.3f}, "
                 f"Δ_z {dz_a_b1.mean:.2f} → {dz_b_b1.mean:.2f}, "
                 f"argmax {argmax_a_b1.mean:.1%} → {argmax_b_b1.mean:.1%}.\n"
@@ -735,13 +759,13 @@ def write_claims(
 
         # Summary
         f.write("## One-Sentence Summary\n\n")
-        f.write("On initial states (B0), contraction enforcement provides a consistent projection-independent stability benefit ")
+        f.write("On the sampled B0 states, the contraction-oriented checkpoint has lower observed value drift ")
         f.write(
-            f"independent of projection radius ({r0_improvement:.1f}× improvement at fixed "
-            f"n={N_TRAIN}→{RADIUS_SWEEP_N2} even at R=0); "
+            f"with projection disabled ({r0_improvement:.1f}× difference at fixed "
+            f"n={N_TRAIN}→{RADIUS_SWEEP_N2} with projection disabled); "
         )
-        f.write("projection then provides an additional order-of-magnitude reduction on top of that effect; ")
-        f.write("B1 follows the same qualitative direction but remains supporting appendix evidence rather than the main-text claim anchor.\n")
+        f.write("R=10 also has lower observed drift than disabled mode in both conditions; ")
+        f.write("B1 is supporting finite-sample context. These diagnostics establish no causal or uniform guarantee.\n")
 
     print(f"[Claims] {out_path}")
 

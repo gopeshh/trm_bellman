@@ -11,10 +11,20 @@ import platform
 import random
 import re
 import tempfile
+import sys
 import zipfile
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# Force subsequent imports to compile from the manifest-covered source files.
+# A process-unique cache prevents timestamp-valid bytecode in the checkout from
+# replacing those source bytes before the runtime identity check executes.
+_RUNTIME_BYTECODE_CACHE = tempfile.TemporaryDirectory(
+    prefix="upi_trm_runtime_bytecode."
+)
+_RUNTIME_BYTECODE_CACHE_ROOT = Path(_RUNTIME_BYTECODE_CACHE.name).resolve()
+sys.pycache_prefix = str(_RUNTIME_BYTECODE_CACHE_ROOT)
 
 import numpy as np
 import torch
@@ -973,12 +983,22 @@ def _verify_producer_source_matches_runtime(lookup_root: str | Path) -> None:
                     embedded_manifest,
                 )
         else:
+            if Path(sys.pycache_prefix or "").resolve() != _RUNTIME_BYTECODE_CACHE_ROOT:
+                raise SourceIdentityError(
+                    "Runtime bytecode cache isolation is not active."
+                )
             manifest_bytes = (
                 runtime_root / SOURCE_MANIFEST_RELATIVE_PATH
             ).read_bytes()
             embedded_manifest = validate_producer_source_manifest(
                 json.loads(manifest_bytes.decode("ascii"))
             )
+            runtime_manifest = build_producer_source_manifest(runtime_root)
+            if runtime_manifest != embedded_manifest:
+                raise SourceIdentityError(
+                    "Runtime directory source bytes differ from the embedded "
+                    "manifest."
+                )
         producer_manifest = build_producer_source_manifest(producer_root)
         behavior_sources = behavior_source_relative_paths(producer_root)
     except (
@@ -4162,7 +4182,7 @@ def main():
         # STOP action behavior from RLConfig
         stop_action_mode=getattr(rl_cfg, "stop_action_mode", "noop"),
         stop_action_penalty=getattr(rl_cfg, "stop_action_penalty", -0.1),
-        # Terminal rewards (Paper Remark 2.6: rush-to-fail mitigation)
+        # Additive base rewards selected by terminal outcome.
         fail_terminal_reward=getattr(rl_cfg, "fail_terminal_reward", 0.0),
         solve_terminal_reward=getattr(rl_cfg, "solve_terminal_reward", 0.0),
         C_max=rl_cfg.C_max,

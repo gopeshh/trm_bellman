@@ -2,9 +2,9 @@
 """
 Exp4 Range Test: Inference-Time Contraction Scaling
 
-Tests whether applying different contraction scaling factors to z→z layers
-at evaluation time produces sufficient L_preproj spread (≥0.10) to constitute
-a meaningful "dial".
+Compares finite local L_preproj estimates and mismatch metrics after applying
+different z→z weight-scaling factors at evaluation time. The ≥0.10 spread
+threshold is a go/no-go criterion for a larger sweep.
 
 This is a cheap go/no-go test before committing to a full training sweep.
 
@@ -108,8 +108,9 @@ def load_model_and_config(
         "enable_contraction",
         rl_config_dict.get("enable_contraction", False)
     )
-    # Force projection disabled for range test
-    latent_ball_radius = 0.0
+    # Force explicit identity projection mode for the range test.
+    latent_projection_mode = "disabled"
+    latent_ball_radius = None
     target_Lz = yaml_config.get(
         "target_Lz",
         rl_config_dict.get("target_Lz", rl_cfg.target_Lz)
@@ -150,7 +151,8 @@ def load_model_and_config(
         rl_enable_contraction=enable_contraction,
         rl_target_Lz=float(target_Lz),
         rl_disable_value_head_norm=bool(disable_value_head_norm),
-        rl_latent_ball_radius=float(latent_ball_radius),
+        rl_latent_projection_mode=latent_projection_mode,
+        rl_latent_ball_radius=latent_ball_radius,
     )
 
     model = TinyRecursiveReasoningModel_ACTV1(model_config.model_dump())
@@ -167,6 +169,7 @@ def load_model_and_config(
         "enable_contraction": enable_contraction,
         "target_Lz": target_Lz,
         "disable_value_head_norm": disable_value_head_norm,
+        "latent_projection_mode": latent_projection_mode,
         "latent_ball_radius": latent_ball_radius,
     }
 
@@ -180,8 +183,9 @@ def apply_contraction_scaling(
     """
     Apply contraction scaling to z→z layers (L_level) in the model.
 
-    This scales the output of linear layers in L_level by scaling_factor,
-    effectively changing the Lipschitz constant of the z→z map.
+    This scales weights in the L_level linear layers. The sampled diagnostics
+    below measure how the resulting model differs; they do not establish a
+    global Lipschitz constant.
     """
     # Access inner model
     inner = getattr(model, 'inner', model)
@@ -450,8 +454,11 @@ def run_range_test(
     L_preproj_values = [r["L_preproj"] for r in results]
     L_preproj_spread = max(L_preproj_values) - min(L_preproj_values)
 
-    # G0: projection_active_rate (should be 0% since R=0)
-    g0_passed = True  # Always pass when R=0 (projection disabled)
+    # G0 follows from the explicit identity projection mode used at construction.
+    g0_passed = (
+        config.get("latent_projection_mode") == "disabled"
+        and config.get("latent_ball_radius") is None
+    )
 
     # G1: stability (no NaN)
     g1_passed = bool(all(not np.isnan(r["L_preproj"]) for r in results))
@@ -487,7 +494,7 @@ def run_range_test(
     # Print gate results
     print("DECISION GATES")
     print("-" * 60)
-    print(f"G0 (Projection inactive): PASS (R=0, projection disabled)")
+    print(f"G0 (Projection inactive): {'PASS' if g0_passed else 'FAIL'} (explicit disabled mode)")
     print(f"G1 (Training stability):  {'PASS' if g1_passed else 'FAIL'}")
     print(f"G2 (Dial range ≥0.10):    {'PASS' if g2_passed else 'FAIL'} (spread={L_preproj_spread:.4f})")
     print(f"G3 (Monotonic linkage):   {g3_status} (ρ={rho:.4f})")
@@ -496,14 +503,20 @@ def run_range_test(
 
     # Overall decision
     if not g2_passed:
-        decision = "NEGATIVE: Dial has insufficient range"
-        claim = "Even with inference-time contraction scaling, L_preproj spread is insufficient (<0.10) to constitute a meaningful stability dial."
+        decision = "NEGATIVE: Observed dial range is below the configured threshold"
+        claim = "For this checkpoint and sampled states, the observed L_preproj spread is below 0.10."
     elif g3_passed:
-        decision = "POSITIVE: Dial is viable"
-        claim = "Inference-time contraction scaling produces measurable L_preproj spread with monotonic linkage to stability metrics."
+        decision = "POSITIVE: Sampled range and association criteria met"
+        claim = (
+            "For this checkpoint and sampled states, the observed L_preproj spread is at least 0.10 "
+            "and is monotonically associated with the recorded mismatch metric under the configured criterion."
+        )
     else:
-        decision = "INCONCLUSIVE: Dial has range but no clear monotonicity"
-        claim = "Contraction scaling produces L_preproj spread ≥0.10 but does not show clear monotonic relationship with stability metrics."
+        decision = "INCONCLUSIVE: Observed range met threshold without clear monotonicity"
+        claim = (
+            "For this checkpoint and sampled states, the observed L_preproj spread is at least 0.10, "
+            "but the configured monotonic-association criterion was not met."
+        )
 
     print(f"DECISION: {decision}")
     print()
@@ -578,10 +591,11 @@ def run_range_test(
 - Single checkpoint (nc_rdis_s42) from Exp3
 - Trivial 4×4 Sudoku suite
 - {num_samples} evaluation samples
+- Finite local estimates do not establish causality or a global Lipschitz bound
 
 ## Proceed to Full Sweep?
 
-{"YES - G2 passed, dial range is sufficient" if g2_passed else "NO - G2 failed, dial range is insufficient"}
+{"YES - G2 met the sampled spread threshold" if g2_passed else "NO - G2 did not meet the sampled spread threshold"}
 """
 
     claims_path = out_path / "CLAIMS.md"

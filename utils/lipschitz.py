@@ -360,7 +360,7 @@ def estimate_Cz(
     """
     Estimate C_z = max ||z^(1) - z^(0)|| over a batch.
 
-    This corresponds to Equation 9 in the paper:
+    This is a finite-batch estimate of the one-step latent displacement:
         C_z = sup_{(x,y)} ||f_θ(z^(0)(x,y), y, x) - z^(0)(x,y)||
 
     Args:
@@ -434,11 +434,12 @@ def compute_unrolling_term_proxy(
     n: int,
 ) -> float:
     """
-    Compute the finite-unrolling term proxy from Equation 10 in the paper:
+    Compute the geometric finite-unrolling diagnostic:
 
         L_V * L_z^n * C_z / (1 - L_z)
 
-    This bounds the value error due to finite unrolling.
+    The hatted inputs are finite diagnostics. Their composition is a proxy for
+    the recurrent-contraction specialization, not a certified uniform bound.
 
     Args:
         hat_Lv: Estimated Lipschitz constant of value head w.r.t. z

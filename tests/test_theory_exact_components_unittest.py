@@ -13,6 +13,7 @@ from models.recursive_reasoning.trm import (
 )
 from rl.config import RLConfig, merge_rl_config_layer
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
+from rl.upi_trm_trainer import UPITrmTrainer
 from utils.lipschitz import (
     estimate_Cdrift,
     estimate_plan_change,
@@ -121,6 +122,59 @@ class TestDriftBound(unittest.TestCase):
         """Test drift bound returns inf when not contractive."""
         drift = compute_theoretical_drift_bound(1.5, 1.0, 0.5, 0.1)
         self.assertEqual(drift, float("inf"))
+
+    def test_estimate_cdrift_is_nonnegative(self):
+        model = TinyRecursiveReasoningModel_ACTV1(get_small_config())
+        sample_batch = get_sample_batch()
+        sample_plan = torch.randint(0, 10, sample_batch["inputs"].shape)
+        latent = model.init_latent(sample_batch, sample_plan)
+
+        drift = estimate_Cdrift(
+            model,
+            sample_batch,
+            sample_plan,
+            latent,
+            n=4,
+        )
+
+        self.assertGreaterEqual(drift, 0.0)
+
+
+class TestValueOfMemory(unittest.TestCase):
+    def test_value_of_memory_residual_reports_finite_nonnegative_metrics(self):
+        model = TinyRecursiveReasoningModel_ACTV1(get_small_config())
+        sample_batch = get_sample_batch()
+        sample_plan = torch.randint(0, 10, sample_batch["inputs"].shape)
+        batch_size = sample_batch["inputs"].shape[0]
+        rewards = torch.zeros(batch_size)
+        dones = torch.zeros(batch_size, dtype=torch.bool)
+
+        with torch.no_grad():
+            next_values, _ = model.used_value(sample_batch, sample_plan, n=4)
+
+        metrics = compute_value_of_memory_residual(
+            model=model,
+            x_batch=sample_batch,
+            y_batch=sample_plan,
+            z_batch=None,
+            n=4,
+            rewards=rewards,
+            next_values=next_values,
+            dones=dones,
+            gamma=0.99,
+        )
+
+        expected_keys = {
+            "v_memoryless_mean",
+            "v_persistent_mean",
+            "value_of_memory_mean",
+            "value_of_memory_max",
+            "bellman_residual_memoryless_mean",
+        }
+        self.assertTrue(expected_keys.issubset(metrics))
+        self.assertTrue(all(torch.isfinite(torch.tensor(value)) for value in metrics.values()))
+        self.assertGreaterEqual(metrics["value_of_memory_mean"], 0.0)
+        self.assertGreaterEqual(metrics["value_of_memory_max"], 0.0)
 
 
 class TestExactBaseline(unittest.TestCase):
@@ -304,6 +358,30 @@ class TestRLConfigTheoryOptions(unittest.TestCase):
 
         self.assertTrue(cfg.is_fixed_base_proposal_exact())
 
+    def test_terminal_penalty_is_not_treated_as_uniform_sign_certificate(self):
+        cfg = RLConfig(
+            gamma=0.99,
+            C_max=16.0,
+            reward_shaping=True,
+            fail_terminal_reward=0.0,
+            training_protocol="fixed_base_exact",
+            stop_action_mode="terminal",
+            value_target_clip=None,
+            exact_k_step_targets=True,
+            exact_baseline_summation=True,
+            theory_exact_mixture=True,
+            policy_epsilon=0.0,
+            distill_mixture_policy=False,
+            enable_contraction=False,
+        )
+
+        validation = cfg.validate_theory_alignment(warn=False)
+
+        self.assertTrue(validation["theory_aligned"], validation["issues"])
+        self.assertFalse(
+            any("fail_terminal_reward" in issue for issue in validation["issues"])
+        )
+
     def test_fixed_base_protocol_requires_terminal_stop(self):
         cfg = RLConfig(
             training_protocol="fixed_base_exact",
@@ -364,8 +442,71 @@ class TestRLConfigTheoryOptions(unittest.TestCase):
         )
 
 
+class TestTrainerTheoryIntegration(unittest.TestCase):
+    @staticmethod
+    def _make_trainer(track_plan_change: bool = False):
+        class DummyDataset:
+            def __len__(self):
+                return 8
+
+            def __getitem__(self, idx):
+                return {
+                    "inputs": torch.randint(0, 10, (16,)),
+                    "puzzle_identifiers": torch.tensor(idx),
+                    "initial_plan": torch.zeros(16, dtype=torch.long),
+                    "solution": torch.randint(0, 10, (16,)),
+                }
+
+        def dummy_checker(_x, _y):
+            return 0.0
+
+        model = TinyRecursiveReasoningModel_ACTV1(get_small_config())
+        env_config = PlanEditEnvConfig(
+            max_edits=2,
+            gamma=0.99,
+            vocab_size=10,
+            task_type="dummy",
+            stop_action_mode="terminal",
+        )
+        env = PlanEditEnv(DummyDataset(), dummy_checker, env_config)
+        env.set_stop_action_id(16 * 10)
+        rl_config = RLConfig(
+            batch_size=4,
+            max_edits=2,
+            episodic_latent=True,
+            latent_projection_mode="disabled",
+            stop_action_mode="terminal",
+            track_plan_change=track_plan_change,
+        )
+        trainer = UPITrmTrainer(
+            model=model,
+            env=env,
+            rl_cfg=rl_config,
+            device=torch.device("cpu"),
+        )
+        return trainer, dummy_checker
+
+    def test_trainer_accepts_checker_for_exact_statewise_enumeration(self):
+        trainer, checker = self._make_trainer()
+
+        trainer.set_checker_fn(checker)
+
+        self.assertIs(trainer._checker_fn, checker)
+
+    def test_collection_populates_plan_change_statistics(self):
+        trainer, _ = self._make_trainer(track_plan_change=True)
+
+        collected = trainer.collect_episode()
+        statistics = trainer.get_theory_stats()
+
+        self.assertGreaterEqual(collected, 1)
+        self.assertGreaterEqual(statistics["plan_change_count"], 1)
+        self.assertGreaterEqual(statistics["plan_change_mean"], 0.0)
+        self.assertGreaterEqual(statistics["plan_change_max"], 0.0)
+
+
 class TestForwardInvariantProjection(unittest.TestCase):
-    """Tests for forward-invariant projection (Eq. 14 in paper)."""
+    """Tests for the forward-invariant latent projection."""
 
     def setUp(self):
         self.config = get_small_config()

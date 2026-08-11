@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-TEMPORARY diagnostic script to test whether spectral_norm on the VALUE HEAD
-affects measured contraction of the INNER z→z recursion.
+TEMPORARY diagnostic script comparing sampled inner local-Lz estimates with
+and without spectral_norm on the VALUE HEAD.
 
 This script:
 1. Builds two models with identical settings (contraction=ON, target_Lz=0.9)
@@ -9,11 +9,8 @@ This script:
 3. Model B: Removes spectral_norm from value_head ONLY (ablation)
 4. Measures inner Lz for both and compares
 
-Expected result:
-- If value_head spectral_norm does NOT affect inner Lz, A and B should give
-  the same Lz estimates (within noise).
-- If they differ significantly, value_head spectral_norm is somehow affecting
-  the inner recursion (unexpected behavior).
+The comparison reports whether the sampled estimates differ by a configured
+threshold. It does not prove independence or identify a causal effect.
 
 Usage:
     python scripts/_tmp_diagnose_value_head_sn_effect.py \
@@ -99,7 +96,8 @@ def build_model(
         rl_target_Lv=0.9,
         rl_enable_policy_head=True,
         rl_num_actions=num_actions,
-        rl_latent_ball_radius=0.0,
+        rl_latent_projection_mode="disabled",
+        rl_latent_ball_radius=None,
     )
 
     import warnings
@@ -233,7 +231,7 @@ def run_single_seed(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test value_head spectral_norm effect on inner Lz")
+    parser = argparse.ArgumentParser(description="Compare sampled inner Lz with value-head spectral norm on and off")
     parser.add_argument("--dataset", type=str, required=True, help="Path to Sudoku dataset")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--num-repeats", type=int, default=10)
@@ -246,7 +244,7 @@ def main():
     seeds = [int(s) for s in args.seeds.split(",")]
 
     print("=" * 100)
-    print("VALUE HEAD SPECTRAL_NORM EFFECT ON INNER Lz DIAGNOSTIC")
+    print("VALUE HEAD SPECTRAL_NORM SAMPLED INNER-Lz COMPARISON")
     print("=" * 100)
     print(f"Dataset: {args.dataset}")
     print(f"Batch size: {args.batch_size}")
@@ -255,8 +253,8 @@ def main():
     print(f"Eps: {args.eps}")
     print(f"Seeds: {seeds}")
     print()
-    print("Question: Does spectral_norm on the VALUE HEAD affect measured inner Lz?")
-    print("Expected: NO - the value head and inner model should be independent.")
+    print("Comparison: sampled inner local-Lz with value-head spectral_norm intact vs removed")
+    print("Scope: finite seeds, one batch, and sampled perturbations; no causal or independence claim")
     print()
 
     all_results = []
@@ -305,7 +303,7 @@ def main():
     print()
 
     overall_diff = abs(lz_A_overall_mean - lz_B_overall_mean)
-    threshold = 0.01  # Consider differences > 0.01 as significant
+    threshold = 0.01  # Reporting threshold, not a significance test.
 
     print("=" * 100)
     print("CONCLUSION")
@@ -313,13 +311,13 @@ def main():
     print(f"Difference: |A - B| = {overall_diff:.6f}")
 
     if overall_diff < threshold:
-        print(f"✓ Difference is within noise (< {threshold}).")
-        print("✓ Value head spectral_norm does NOT affect inner Lz measurement.")
-        print("✓ The value head and inner model are independent as expected.")
+        print(f"Difference is below the reporting threshold (< {threshold}).")
+        print("No sampled difference above the threshold was detected in these runs.")
+        print("This does not establish independence or absence of an effect.")
     else:
-        print(f"✗ UNEXPECTED: Difference exceeds noise threshold ({threshold})!")
-        print("✗ Value head spectral_norm IS affecting inner Lz measurement.")
-        print("✗ This suggests unexpected coupling between value_head and inner model.")
+        print(f"Difference exceeds the reporting threshold ({threshold}).")
+        print("These runs contain a sampled difference that warrants controlled follow-up.")
+        print("The diagnostic alone does not identify its cause.")
         print()
         print("Code snippet used to remove spectral_norm from value_head:")
         print("-" * 60)

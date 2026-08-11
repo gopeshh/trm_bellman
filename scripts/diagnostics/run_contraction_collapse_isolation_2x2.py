@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-2x2 Ablation: Isolate cause of contraction collapse.
+2x2 diagnostic comparing collapse indicators across contraction components.
 
-This script runs 4 training conditions to isolate whether the collapse
-observed with enable_contraction=True is caused by:
+This script runs four finite conditions and reports their collapse indicators:
   - z→z contraction (opnorm clamp + output scaling on L_level layers)
   - value head normalization (spectral norm + output scaling on value head)
   - their interaction
 
 Conditions:
   A: zcon OFF, vhead_norm OFF      (baseline - should match no_contraction behavior)
-  B: zcon ON,  vhead_norm OFF      (isolates z→z contraction)
-  C: zcon OFF, vhead_norm ON       (isolates value head normalization)
+  B: zcon ON,  vhead_norm OFF      (paired with A)
+  C: zcon OFF, vhead_norm ON       (paired with A)
   D: zcon ON,  vhead_norm ON       (matches current enable_contraction=true behavior)
 
 Usage:
@@ -318,6 +317,9 @@ def run_training(
         rl_target_Lv=base_config.get("target_Lv", 1.0),
         rl_enable_policy_head=True,
         rl_num_actions=rl_num_actions,
+        rl_latent_projection_mode=base_config.get(
+            "latent_projection_mode", "enabled"
+        ),
         rl_latent_ball_radius=base_config.get("latent_ball_radius", 10.0),
     )
 
@@ -613,7 +615,7 @@ def main():
         with open(readme_path, 'w') as f:
             f.write("# 2x2 Contraction Collapse Isolation Results\n\n")
             f.write("## Experiment Design\n\n")
-            f.write("This experiment isolates the cause of training collapse when `enable_contraction=True`.\n\n")
+            f.write("This finite diagnostic compares collapse indicators across four configurations.\n\n")
             f.write("### Conditions\n\n")
             f.write("| Condition | z→z Contraction | Value Head Norm | Description |\n")
             f.write("|-----------|-----------------|-----------------|-------------|\n")
@@ -649,26 +651,26 @@ def main():
             f.write("\n")
 
             f.write("## Conclusion\n\n")
-            # Determine cause of collapse
+            # Describe the observed finite-run pattern without assigning causality.
             a_collapsed = collapse_results.get("A", (False, None))[0]
             b_collapsed = collapse_results.get("B", (False, None))[0]
             c_collapsed = collapse_results.get("C", (False, None))[0]
             d_collapsed = collapse_results.get("D", (False, None))[0]
 
             if c_collapsed and not b_collapsed:
-                f.write("**Value head normalization is the culprit.**\n\n")
+                f.write("**Only the sampled value-head-only condition collapses.**\n\n")
                 f.write("Condition C (vhead_norm ON, zcon OFF) collapses but Condition B (zcon ON, vhead_norm OFF) is stable.\n")
-                f.write("This indicates that the spectral normalization + Lv scaling on the value head causes V(s) to saturate.\n")
+                f.write("This pattern is consistent with value-head saturation in these runs; it does not establish causality.\n")
             elif b_collapsed and not c_collapsed:
-                f.write("**z→z contraction is the culprit.**\n\n")
+                f.write("**Only the sampled z→z-only condition collapses.**\n\n")
                 f.write("Condition B (zcon ON, vhead_norm OFF) collapses but Condition C (vhead_norm ON, zcon OFF) is stable.\n")
-                f.write("This indicates that the opnorm clamping + Lz scaling on z→z layers causes the collapse.\n")
+                f.write("This pattern is consistent with collapse in the z→z-only run; it does not establish causality.\n")
             elif d_collapsed and not b_collapsed and not c_collapsed:
-                f.write("**Interaction effect between z→z contraction and value head normalization.**\n\n")
+                f.write("**Only the sampled combined condition collapses.**\n\n")
                 f.write("Only Condition D (both ON) collapses; B and C individually are stable.\n")
-                f.write("The collapse requires both mechanisms acting together.\n")
+                f.write("The finite pattern does not determine whether an interaction is causal.\n")
             elif b_collapsed and c_collapsed:
-                f.write("**Both mechanisms independently cause collapse.**\n\n")
+                f.write("**Both sampled single-component conditions collapse.**\n\n")
                 f.write("Both Condition B and Condition C collapse independently.\n")
             elif not any([b_collapsed, c_collapsed, d_collapsed]):
                 f.write("**No collapse detected in any condition.**\n\n")

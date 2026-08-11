@@ -496,7 +496,7 @@ def generate_latex_table(results: List[SweepResults], out_path: Path):
 \begin{table}[t]
 \centering
 \small
-\caption{Contraction strength sweep on B0. Lower $\hat{L}_z$ improves stability ($\downarrow\Delta_V$) with modest performance trade-off.}
+\caption{Finite B0 contraction-strength sweep reporting $\hat{L}_z$, $\Delta_V$, policy change, and task metrics.}
 \label{tab:contraction_sweep}
 \begin{tabular}{cccccc}
 \toprule
@@ -525,7 +525,7 @@ $L_z^*$ (target) & $\hat{L}_z$ (achieved) & Success & $\Delta_V$ & $\Delta_\pi$ 
 # =============================================================================
 
 def generate_claims(results: List[SweepResults], out_path: Path):
-    """Generate CLAIMS.md with scientifically honest interpretations."""
+    """Generate finite-sweep observations with explicit scope."""
     results = sorted(results, key=lambda r: r.target_lz)
 
     # Calculate key statistics
@@ -546,15 +546,15 @@ def generate_claims(results: List[SweepResults], out_path: Path):
     best_delta_v = min(results, key=lambda r: r.delta_V_mean)
     worst_delta_v = max(results, key=lambda r: r.delta_V_mean)
 
-    content = f"""# Experiment 2: Paper Claims
+    content = f"""# Experiment 2: Finite-Sweep Observations
 
-All claims are from the contraction-strength sweep on B0 (initial states).
+All statements below are limited to the recorded B0 checkpoints and seeds.
 
-## Key Finding: Contraction Enforcement Saturates
+## Recorded Target-Sweep Behavior
 
 1. **Observation**: All target $L_z$ values achieve similar measured Lipschitz constants.
    **Evidence**: Achieved $\\hat{{L}}_z$ ranges from {min(achieved_lz_values):.3f} to {max(achieved_lz_values):.3f} (range: {achieved_lz_range:.3f})
-   **Interpretation**: The contraction enforcement mechanism saturates at $\\hat{{L}}_z \\approx {achieved_lz_mean:.2f}$
+   **Scope**: The recorded values cluster near $\\hat{{L}}_z \\approx {achieved_lz_mean:.2f}$; this finite sweep does not establish global saturation.
 
 2. **Observation**: Value stability ($\\Delta_V$) has high variance across seeds.
    **Evidence**: Standard deviations range from {min(delta_V_stds):.3f} to {max(delta_V_stds):.3f}
@@ -562,7 +562,7 @@ All claims are from the contraction-strength sweep on B0 (initial states).
 
 3. **Observation**: The monotonic dial relationship is {"supported" if is_monotonic else "NOT supported"} by this data.
    **Evidence**: $\\Delta_V$ values are {delta_V_values}
-   **Note**: {"Trend is monotonic as expected." if is_monotonic else "Non-monotonic pattern suggests high seed variance dominates the target_Lz effect."}
+   **Note**: {"The recorded ordering is monotonic." if is_monotonic else "The recorded ordering is non-monotonic; no causal explanation is inferred."}
 
 ## Sweep Results Summary
 
@@ -576,11 +576,7 @@ All claims are from the contraction-strength sweep on B0 (initial states).
     content += f"""
 ## Scoped Interpretation
 
-Given that achieved $\\hat{{L}}_z$ is similar across all targets (~{achieved_lz_mean:.2f}), the primary effect of varying target $L_z^*$ is:
-- **Indirect**: Different optimization trajectories lead to different models
-- **High variance**: Seed-to-seed variation in $\\Delta_V$ exceeds target-to-target variation
-
-**Conservative claim**: Contraction enforcement achieves $\\hat{{L}}_z \\approx {achieved_lz_mean:.2f}$ regardless of target, with $\\Delta_V$ varying significantly (range: {min(delta_V_values):.3f} to {max(delta_V_values):.3f}).
+Across these recorded checkpoints, $\\hat{{L}}_z$ clusters near {achieved_lz_mean:.2f} and $\\Delta_V$ ranges from {min(delta_V_values):.3f} to {max(delta_V_values):.3f}. The finite sweep establishes neither a uniform contraction premise nor a causal target-response relationship.
 """
 
     out_path.write_text(content)

@@ -169,9 +169,9 @@ def save_csv(all_results: Dict[str, Dict], output_path: str, seed: int):
 
 
 def generate_conclusion(all_results: Dict[str, Dict]) -> str:
-    """Generate a brief conclusion based on the results."""
+    """Generate a finite-run comparison without causal attribution."""
     lines = []
-    lines.append("CONCLUSION")
+    lines.append("FINITE-RUN COMPARISON")
     lines.append("=" * 50)
 
     # Get success rates
@@ -183,29 +183,25 @@ def generate_conclusion(all_results: Dict[str, Dict]) -> str:
     if no_contraction_sr is not None and standard_sr is not None:
         diff = no_contraction_sr - standard_sr
         if diff > 0.05:
-            lines.append(f"✓ No contraction outperforms standard contraction by {diff:.1%}")
-            lines.append("  → Supports Brett's hypothesis: contraction fights SGD")
+            lines.append(f"No-contraction final success is {diff:.1%} higher than standard-contraction success.")
         elif diff < -0.05:
-            lines.append(f"✗ Standard contraction outperforms no contraction by {-diff:.1%}")
-            lines.append("  → Does not support hypothesis: contraction helps")
+            lines.append(f"Standard-contraction final success is {-diff:.1%} higher than no-contraction success.")
         else:
-            lines.append(f"○ No clear difference between no contraction and standard ({abs(diff):.1%})")
-            lines.append("  → Need more seeds to determine")
+            lines.append(f"No-contraction and standard-contraction final success differ by {abs(diff):.1%}.")
 
     if weak_sr is not None and standard_sr is not None:
         diff = weak_sr - standard_sr
         if diff > 0.02:
-            lines.append(f"✓ Weaker contraction (0.99) beats stronger (0.90) by {diff:.1%}")
-            lines.append("  → Supports: stronger contraction hurts more")
+            lines.append(f"Weak-contraction (0.99) final success is {diff:.1%} higher than standard (0.90).")
         elif diff < -0.02:
-            lines.append(f"○ Stronger contraction (0.90) beats weaker (0.99) by {-diff:.1%}")
+            lines.append(f"Standard-contraction (0.90) final success is {-diff:.1%} higher than weak (0.99).")
 
     if scheduled_sr is not None and standard_sr is not None:
         diff = scheduled_sr - standard_sr
         if diff > 0.02:
-            lines.append(f"✓ Scheduled contraction beats always-on by {diff:.1%}")
-            lines.append("  → Schedule helps: delay contraction until later training")
+            lines.append(f"Scheduled-contraction final success is {diff:.1%} higher than always-on standard contraction.")
 
+    lines.append("These single-seed log comparisons do not establish causality or a necessary SGD tradeoff.")
     lines.append("")
     return "\n".join(lines)
 

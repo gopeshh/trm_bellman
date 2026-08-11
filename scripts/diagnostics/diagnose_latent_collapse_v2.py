@@ -8,7 +8,7 @@ This diagnostic creates a 2×2 factorial design:
 
 Conditions:
   A: zcon_OFF + vhead_OFF
-  B: zcon_ON  + vhead_OFF  (isolates z→z effect)
+  B: zcon_ON  + vhead_OFF  (paired comparison with A)
   C: zcon_OFF + vhead_ON
   D: zcon_ON  + vhead_ON   (matches "contraction ON" behavior)
 
@@ -108,7 +108,8 @@ def build_base_model(seed: int = 42) -> TinyRecursiveReasoningModel_ACTV1:
         rl_target_Lv=1.0,
         rl_value_hidden_dim=128,
         # KEY: Disable projection in model - we'll compute pre/post ourselves
-        rl_latent_ball_radius=0.0,
+        rl_latent_projection_mode="disabled",
+        rl_latent_ball_radius=None,
         forward_dtype="float32",
     )
 
@@ -161,10 +162,11 @@ def unroll_latent_with_pre_post(
     """
     Run latent unrolling and return both pre-projection and post-projection z.
 
-    The model is built with rl_latent_ball_radius=0 so no internal projection happens.
+    The model is built with explicit identity projection mode, so no internal
+    projection happens.
     We manually compute both versions.
     """
-    # Initialize z^(0) - no projection since radius=0 in model
+    # Initialize z^(0); the model projection operator is the identity.
     z = model.init_latent(batch, y)
 
     # Pre-compute context
@@ -175,7 +177,7 @@ def unroll_latent_with_pre_post(
     for _ in range(n):
         context = model._resolve_latent_context(batch_internal)
         input_embeds = context["input_embeddings_with_plan"]
-        # This runs without projection since radius=0
+        # This runs with the recurrent projection operator set to identity.
         z = model.inner.latent_step(z, input_embeds, context["seq_info"])
 
     # z is now pre-projection
@@ -355,7 +357,7 @@ pre-projection vs post-projection latents.
 
 ## Pre-Projection Latent Norms (z_H)
 
-Shows ||z|| BEFORE applying the ball projection. If contraction causes collapse,
+Shows ||z|| BEFORE applying the ball projection. If the sampled contracted run is more clustered,
 we expect lower norms / less diversity here.
 
 | n | Condition | mean ||z|| | std ||z|| | Total Var | Cos Sim |
@@ -385,7 +387,8 @@ Shows ||z|| AFTER applying the ball projection (radius=10.0).
     report += """
 ## Value Head Statistics
 
-Shows V(z) statistics. Comparing B vs A isolates z→z effect on value (same value head).
+Shows V(z) statistics. B versus A is a finite paired comparison with the same
+value-head setting; it does not identify a causal effect.
 
 | n | Condition | V_mean | V_std | V_min | V_max | V_var |
 |---|-----------|--------|-------|-------|-------|-------|
@@ -466,31 +469,32 @@ How much does projection clip the norm? (pre vs post at n={max_n})
     dc_var_ratio = D_pre_var / (C_pre_var + 1e-10)
 
     if ba_var_ratio < 0.5 and dc_var_ratio < 0.5:
-        report += """**EVIDENCE OF COLLAPSE IN PRE-PROJECTION Z**
+        report += """**LOWER PRE-PROJECTION VARIANCE IN THE SAMPLED RUNS**
 
-z→z contraction significantly reduces latent variance before projection:
+The sampled contracted conditions have lower latent variance before projection:
 - B/A variance ratio: {:.3f} (< 0.5)
 - D/C variance ratio: {:.3f} (< 0.5)
 
-This suggests contraction causes the latent representations to cluster together.
+This finite pattern is consistent with more clustered latent representations;
+it does not establish that contraction causes the difference.
 """.format(ba_var_ratio, dc_var_ratio)
     elif ba_var_ratio > 1.5 and dc_var_ratio > 1.5:
-        report += """**NO COLLAPSE - CONTRACTION INCREASES DIVERSITY**
+        report += """**HIGHER PRE-PROJECTION VARIANCE IN THE SAMPLED RUNS**
 
-z→z contraction actually increases latent variance before projection:
+The sampled contracted conditions have higher latent variance before projection:
 - B/A variance ratio: {:.3f} (> 1.5)
 - D/C variance ratio: {:.3f} (> 1.5)
 
-Collapse is NOT the mechanism by which contraction affects learning.
+This finite comparison does not identify a learning mechanism.
 """.format(ba_var_ratio, dc_var_ratio)
     else:
         report += """**MIXED/INCONCLUSIVE RESULTS**
 
-z→z contraction has inconsistent effects on latent variance:
+The sampled conditions have inconsistent latent-variance differences:
 - B/A variance ratio: {:.3f}
 - D/C variance ratio: {:.3f}
 
-The effect of contraction on latent diversity is unclear.
+This finite comparison does not establish an effect on latent diversity.
 """.format(ba_var_ratio, dc_var_ratio)
 
     # Projection saturation

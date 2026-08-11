@@ -49,7 +49,7 @@ LZ_TARGETS = [0.9, 0.95, 0.99, 0.999]
 SEEDS = [41, 42, 43]
 
 # Eval-time radii to test (without retraining)
-EVAL_RADII = [10.0, 100.0, 1000.0, 0.0]  # 0.0 = disabled
+EVAL_RADII: List[Optional[float]] = [10.0, 100.0, 1000.0, None]
 
 # Lipschitz estimation params
 NUM_SAMPLES = 64
@@ -74,7 +74,7 @@ class NormStats:
 class DiagnosticResult:
     target_lz: float
     seed: int
-    eval_radius: float
+    eval_radius: Optional[float]
 
     # Lipschitz estimates
     L_hat_preproj_mean: float
@@ -135,17 +135,8 @@ def load_batch(batch_path: Path) -> List[Any]:
 
 
 # =============================================================================
-# Projection Utilities
+# Norm Utilities
 # =============================================================================
-
-def project_to_ball(z: torch.Tensor, radius: float) -> torch.Tensor:
-    """Project z to ball of given radius."""
-    if radius <= 0:
-        return z
-    z_norm = z.norm(p=2, dim=(1, 2), keepdim=True).clamp(min=1e-8)
-    scale = torch.clamp(radius / z_norm, max=1.0)
-    return z * scale
-
 
 def compute_norm(z: torch.Tensor) -> float:
     """Compute L2 norm of z."""
@@ -167,7 +158,7 @@ def apply_latent_step_with_projection_control(
     x: Dict[str, torch.Tensor],
     y: torch.Tensor,
     apply_projection: bool,
-    projection_radius: float,
+    projection_radius: Optional[float],
 ) -> Tuple[TinyRecursiveReasoningModel_ACTV1InnerCarry, torch.Tensor, torch.Tensor]:
     """
     Apply one latent step with explicit control over projection.
@@ -198,9 +189,14 @@ def apply_latent_step_with_projection_control(
     fz_preproj_norm = torch.sqrt(fz_preproj_H_norm**2 + fz_preproj_L_norm**2)
 
     # Apply projection if requested
-    if apply_projection and projection_radius > 0:
-        z_H_proj = project_to_ball(z_H, projection_radius)
-        z_L_proj = project_to_ball(z_L, projection_radius)
+    if apply_projection:
+        if projection_radius is None or projection_radius <= 0.0:
+            raise ValueError("Enabled projection requires a finite radius > 0.")
+        z_H_proj, z_L_proj = inner._project_carry_to_ball(
+            z_H,
+            z_L,
+            projection_radius,
+        )
     else:
         z_H_proj = z_H
         z_L_proj = z_L
@@ -220,7 +216,7 @@ def estimate_lipschitz_with_projection_control(
     states: List[Any],
     n_train: int,
     device: str,
-    eval_radius: float,
+    eval_radius: Optional[float],
     num_samples: int = NUM_SAMPLES,
     num_perturbations: int = NUM_PERTURBATIONS,
     eps: float = EPS,
@@ -280,24 +276,27 @@ def estimate_lipschitz_with_projection_control(
                 z_next_no_proj, fz_pre_norm, _ = apply_latent_step_with_projection_control(
                     model, z_base, x, y,
                     apply_projection=False,
-                    projection_radius=0,
+                    projection_radius=None,
                 )
                 fz_preproj_norms.append(fz_pre_norm.item())
 
                 # Apply one step WITH projection
                 z_next_with_proj, _, fz_post_norm = apply_latent_step_with_projection_control(
                     model, z_base, x, y,
-                    apply_projection=True,
+                    apply_projection=eval_radius is not None,
                     projection_radius=eval_radius,
                 )
                 fz_postproj_norms.append(fz_post_norm.item())
 
                 # Check if projection is active
-                is_active = fz_pre_norm.item() > eval_radius if eval_radius > 0 else False
+                is_active = (
+                    eval_radius is not None
+                    and fz_pre_norm.item() > eval_radius
+                )
                 projection_active_samples.append(is_active)
 
                 # Distance beyond radius
-                if eval_radius > 0:
+                if eval_radius is not None:
                     dist = max(0, fz_pre_norm.item() - eval_radius)
                 else:
                     dist = 0
@@ -323,7 +322,7 @@ def estimate_lipschitz_with_projection_control(
                     z_next_pert_no_proj, _, _ = apply_latent_step_with_projection_control(
                         model, z_pert, x, y,
                         apply_projection=False,
-                        projection_radius=0,
+                        projection_radius=None,
                     )
 
                     # L_preproj = ||f(z+δ) - f(z)|| / ||δ||
@@ -338,7 +337,7 @@ def estimate_lipschitz_with_projection_control(
                     # Apply step WITH projection
                     z_next_pert_with_proj, _, _ = apply_latent_step_with_projection_control(
                         model, z_pert, x, y,
-                        apply_projection=True,
+                        apply_projection=eval_radius is not None,
                         projection_radius=eval_radius,
                     )
 
@@ -452,7 +451,10 @@ def run_diagnostics(device: str = "cuda") -> List[DiagnosticResult]:
             print(f"  Clamp activity: {clamp_rate:.2%}")
 
             for eval_radius in EVAL_RADII:
-                print(f"  Eval radius: {eval_radius}")
+                print(
+                    "  Eval projection: "
+                    f"{'disabled' if eval_radius is None else f'R={eval_radius:g}'}"
+                )
 
                 # Run Lipschitz estimation
                 diag = estimate_lipschitz_with_projection_control(
@@ -532,7 +534,15 @@ This diagnostic investigates WHY achieved_Lz saturates at ~0.23 across all targe
 |-----------|---|-----------|------------|-------------|--------------|
 """
 
-    for (target_lz, eval_radius), group in sorted(by_target.items()):
+    sorted_groups = sorted(
+        by_target.items(),
+        key=lambda item: (
+            item[0][0],
+            item[0][1] is None,
+            item[0][1] if item[0][1] is not None else 0.0,
+        ),
+    )
+    for (target_lz, eval_radius), group in sorted_groups:
         L_pre_vals = [r.L_hat_preproj_mean for r in group]
         L_post_vals = [r.L_hat_postproj_mean for r in group]
         proj_rates = [r.projection_active_rate for r in group]
@@ -543,7 +553,7 @@ This diagnostic investigates WHY achieved_Lz saturates at ~0.23 across all targe
         proj_mean = np.mean(proj_rates)
         clamp_mean = np.mean(clamp_rates)
 
-        R_str = "∞" if eval_radius == 0 else f"{eval_radius:.0f}"
+        R_str = "disabled" if eval_radius is None else f"{eval_radius:.0f}"
         content += f"| {target_lz} | {R_str} | {L_pre_mean:.3f} | {L_post_mean:.3f} | {proj_mean:.1%} | {clamp_mean:.1%} |\n"
 
     # Decision gate analysis
@@ -554,7 +564,7 @@ This diagnostic investigates WHY achieved_Lz saturates at ~0.23 across all targe
 
     # Check if L_preproj varies but L_postproj saturates
     R10_results = [r for r in results if r.eval_radius == 10.0]
-    R_disabled = [r for r in results if r.eval_radius == 0.0]
+    R_disabled = [r for r in results if r.eval_radius is None]
 
     if R10_results and R_disabled:
         L_pre_by_target = {}
@@ -583,18 +593,15 @@ This diagnostic investigates WHY achieved_Lz saturates at ~0.23 across all targe
 """
 
         if L_pre_range > 0.05 and L_post_range < 0.05 and proj_rate_mean > 0.8:
-            content += "**DIAGNOSIS: Projection dominates** - L_preproj varies but L_postproj saturates with high projection rate.\n\n"
-            content += "**RECOMMENDATION**: Increase R or disable projection for dial experiments.\n"
+            content += "**FINITE PATTERN:** The sampled pre-projection estimates vary while the post-projection estimates cluster and the projection-active rate is high.\n"
         elif L_pre_range < 0.05 and L_post_range < 0.05:
             clamp_mean = np.mean([r.clamp_activity_rate for r in R10_results])
             if clamp_mean > 0.5:
-                content += "**DIAGNOSIS: Clamp/enforcement saturates** - Both L values saturate with high clamp activity.\n\n"
-                content += "**RECOMMENDATION**: Add explicit z→z scaling knob.\n"
+                content += "**FINITE PATTERN:** Both sampled estimates cluster and the recorded clamp-active rate is high.\n"
             else:
-                content += "**DIAGNOSIS: Architecture naturally contracts** - Both L values saturate without external enforcement dominating.\n\n"
-                content += "**RECOMMENDATION**: The dial may be ineffective; document as negative result.\n"
+                content += "**FINITE PATTERN:** Both sampled estimates cluster while the recorded clamp-active rate is low. This does not establish a global contraction property.\n"
         else:
-            content += "**DIAGNOSIS: Inconclusive** - Neither projection nor clamping fully explains saturation.\n"
+            content += "**FINITE PATTERN:** The sampled metrics do not show either threshold pattern above. No causal mechanism is identified.\n"
 
     # Norm distributions
     content += """
@@ -604,7 +611,7 @@ This diagnostic investigates WHY achieved_Lz saturates at ~0.23 across all targe
 |-----------|------------|--------------|---------------|----------|
 """
 
-    for (target_lz, eval_radius), group in sorted(by_target.items()):
+    for (target_lz, eval_radius), group in sorted_groups:
         if eval_radius != 10.0:
             continue
         z_norms = [r.z_norm.mean for r in group]

@@ -63,10 +63,10 @@ OUT_DIR = PROJECT_ROOT / "results/paper_ready/exp3_projection_ablation"
 CONDITIONS = [
     ("nc_r10", False, 10.0),     # No contraction, R=10
     ("nc_r100", False, 100.0),   # No contraction, R=100
-    ("nc_rdis", False, 0.0),     # No contraction, R=disabled
+    ("nc_rdis", False, None),    # No contraction, identity projection mode
     ("c_r10", True, 10.0),       # Contraction, R=10
     ("c_r100", True, 100.0),     # Contraction, R=100
-    ("c_rdis", True, 0.0),       # Contraction, R=disabled
+    ("c_rdis", True, None),      # Contraction, identity projection mode
 ]
 
 SEEDS = [42]  # Start with 1 seed, expand to [41, 42, 43] if stable
@@ -115,7 +115,7 @@ class ConditionResult:
     """Results for a single condition."""
     name: str
     enable_contraction: bool
-    latent_ball_radius: float
+    latent_ball_radius: Optional[float]
     seeds: List[int]
 
     # Training metrics (averaged over seeds)
@@ -209,7 +209,7 @@ def find_checkpoint(condition_name: str, seed: int) -> Optional[Path]:
 def evaluate_condition(
     name: str,
     enable_contraction: bool,
-    radius: float,
+    radius: Optional[float],
     seeds: List[int],
 ) -> ConditionResult:
     """Evaluate a single condition across seeds."""
@@ -306,7 +306,8 @@ def generate_claims(results: List[ConditionResult]) -> str:
             g1_status = "N/A"
 
         lines.append(
-            f"| {r.name} | {r.enable_contraction} | {r.latent_ball_radius} | "
+            f"| {r.name} | {r.enable_contraction} | "
+            f"{r.latent_ball_radius if r.latent_ball_radius is not None else 'disabled'} | "
             f"{success} | {nan_status} | {g1_status} |"
         )
 
@@ -322,18 +323,19 @@ def generate_claims(results: List[ConditionResult]) -> str:
         lines.append("")
 
     # Check if projection-disabled conditions are stable
-    rdis_conditions = [r for r in results if r.latent_ball_radius == 0.0]
+    rdis_conditions = [r for r in results if r.latent_ball_radius is None]
     rdis_passed = [r for r in rdis_conditions if r.g1_passed]
 
     if rdis_passed:
         lines.append(
-            "**Claim 2 (Positive):** Training without projection (R=disabled) is stable "
+            "**Finite-run observation 2:** The projection-disabled runs met G1 "
             f"for conditions: {', '.join(r.name for r in rdis_passed)}"
         )
     elif rdis_conditions:
         lines.append(
-            "**Claim 2 (Negative):** Training without projection (R=disabled) is unstable. "
-            "Projection is required for stable training in this architecture."
+            "**Finite-run observation 2:** The sampled projection-disabled "
+            "conditions did not meet G1. This does not establish that projection "
+            "is necessary for stability."
         )
 
     lines.append("")
@@ -467,11 +469,20 @@ def main():
         if r.training:
             print(
                 f"{r.name:<12} {str(r.enable_contraction):<12} "
-                f"{r.latent_ball_radius:<8.1f} {r.training.final_success_rate:<10.3f} "
+                f"{r.latent_ball_radius if r.latent_ball_radius is not None else 'disabled':<8} "
+                f"{r.training.final_success_rate:<10.3f} "
                 f"{'PASS' if r.g1_passed else 'FAIL':<6}"
             )
         else:
-            print(f"{r.name:<12} {str(r.enable_contraction):<12} {r.latent_ball_radius:<8.1f} {'N/A':<10} {'N/A':<6}")
+            radius_label = (
+                f"{r.latent_ball_radius:.1f}"
+                if r.latent_ball_radius is not None
+                else "disabled"
+            )
+            print(
+                f"{r.name:<12} {str(r.enable_contraction):<12} "
+                f"{radius_label:<8} {'N/A':<10} {'N/A':<6}"
+            )
 
 
 if __name__ == "__main__":

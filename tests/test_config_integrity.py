@@ -110,6 +110,20 @@ class TestConfigIntegrity(unittest.TestCase):
             parsed = RLConfig(**cfg)
             self.assertIsInstance(parsed, RLConfig, f"Failed to parse {config_path}")
 
+    def test_projection_disabled_configs_use_explicit_identity_mode(self):
+        for config_path in self.rl_config_paths:
+            cfg = _load_yaml(config_path)
+            self.assertNotIn(
+                cfg.get("latent_ball_radius"),
+                (0, 0.0),
+                f"{config_path} must not use R=0 to disable projection",
+            )
+            if cfg.get("latent_projection_mode") == "disabled":
+                self.assertIsNone(
+                    cfg.get("latent_ball_radius"),
+                    f"{config_path} disabled projection must have no radius",
+                )
+
     def test_revision_exact_config_uses_fixed_base_protocol(self):
         config_path = (
             self.config_dir

@@ -80,13 +80,13 @@ fi
 # ===================================================================
 # Format: "config_name:wandb_group:description"
 EXPERIMENTS=(
-    # Main theory-exact configs
-    "configs/rl_sudoku_shaped_theory_exact.yaml:shaped-theory-exact:Theory-exact shaped rewards"
-    "configs/rl_sudoku_sparse_theory_exact.yaml:sparse-theory-exact:Theory-exact sparse rewards (baseline)"
+    # Main paper-facing configurations; runtime settings do not certify premises.
+    "configs/rl_sudoku_shaped_theory_exact.yaml:shaped-theory-exact:Paper-facing shaped-reward configuration"
+    "configs/rl_sudoku_sparse_theory_exact.yaml:sparse-theory-exact:Paper-facing sparse-reward configuration"
 
     # Ablations (remove one feature at a time)
-    "configs/ablations/ablation_no_contraction.yaml:ablation-no-contraction:No contraction (Assumption 4.2)"
-    "configs/ablations/ablation_no_exact_baseline.yaml:ablation-no-exact-baseline:No exact baseline (Theorem 5.9 KEY)"
+    "configs/ablations/ablation_no_contraction.yaml:ablation-no-contraction:No contraction-oriented intervention"
+    "configs/ablations/ablation_no_exact_baseline.yaml:ablation-no-exact-baseline:Approximate rather than exact statewise centering"
     "configs/ablations/ablation_no_conservative_mixture.yaml:ablation-no-conservative-mixture:No conservative mixture (α=1.0)"
     "configs/ablations/ablation_no_projection.yaml:ablation-no-projection:No forward-invariant projection"
 
@@ -177,10 +177,10 @@ echo "  - View all runs: wandb project UPI-TRM-ICML-Shaped-Rewards"
 echo "  - Compare groups: Use W&B comparison view"
 echo "  - Download data: wandb export UPI-TRM-ICML-Shaped-Rewards"
 echo ""
-echo "Expected ablation results:"
-echo "  1. shaped-theory-exact: BEST (all features enabled)"
-echo "  2. ablation-no-contraction: Worse (higher variance, instability)"
-echo "  3. ablation-no-exact-baseline: Worse (weaker improvement guarantee)"
-echo "  4. ablation-no-conservative-mixture: Worse (policy oscillation)"
-echo "  5. ablation-all-off: Baseline RL (worst among shaped configs)"
-echo "  6. sparse-no-theory: Hardest (sparse + no theory)"
+echo "Ablation conditions:"
+echo "  1. shaped-theory-exact: all configured paper-facing mechanisms"
+echo "  2. ablation-no-contraction: contraction-oriented intervention disabled"
+echo "  3. ablation-no-exact-baseline: approximate rather than exact statewise centering"
+echo "  4. ablation-no-conservative-mixture: full candidate step"
+echo "  5. ablation-all-off: shaped-reward baseline configuration"
+echo "  6. sparse-no-theory: sparse-reward baseline configuration"

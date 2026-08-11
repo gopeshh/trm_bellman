@@ -210,6 +210,7 @@ class TestUtilities(unittest.TestCase):
         self.assertEqual(agg["median"], 5.5)
         self.assertEqual(agg["max"], 10.0)
         self.assertAlmostEqual(agg["p90"], 9.1, places=1)
+        self.assertAlmostEqual(agg["p99"], 9.91, places=2)
 
     def test_aggregate_metrics_empty(self):
         """aggregate_metrics should handle empty list."""
@@ -342,6 +343,33 @@ class TestProjectionInstrumentation(unittest.TestCase):
             places=6,
         )
 
+    def test_saturation_uses_ninety_five_percent_radius_threshold(self):
+        from scripts.eval.unroll_sensitivity import ProjectionStatsWrapper
+
+        class Inner:
+            @staticmethod
+            def _project_carry_to_ball(z_h, z_l, radius):
+                norm = torch.sqrt(
+                    z_h.pow(2).sum(dim=(1, 2), keepdim=True)
+                    + z_l.pow(2).sum(dim=(1, 2), keepdim=True)
+                )
+                scale = torch.clamp(radius / norm, max=1.0)
+                return z_h * scale, z_l * scale
+
+        class Model:
+            inner = Inner()
+
+        model = Model()
+        for pre_norm, expected_saturated in ((9.6, True), (5.0, False)):
+            z_h = torch.tensor([[[pre_norm]]])
+            z_l = torch.zeros_like(z_h)
+            with ProjectionStatsWrapper(model, radius=10.0) as stats:
+                model.inner._project_carry_to_ball(z_h, z_l, 10.0)
+
+            measured_pre, _, saturated = stats.get_stats()
+            self.assertAlmostEqual(measured_pre, pre_norm, places=6)
+            self.assertEqual(saturated, expected_saturated)
+
     def test_joint_delta_detects_l_component_only_change(self):
         from scripts.eval.unroll_sensitivity import joint_latent_delta
 
@@ -350,6 +378,36 @@ class TestProjectionInstrumentation(unittest.TestCase):
         z_l_b = torch.ones(1, 2, 2)
         delta = joint_latent_delta(z_h, z_l_a, z_h, z_l_b)
         self.assertAlmostEqual(delta.item(), 2.0, places=6)
+
+
+class TestSaturationSummary(unittest.TestCase):
+    def test_summary_rate_excludes_disabled_projection_sentinel(self):
+        from scripts.eval.unroll_sensitivity import EvalMetrics, write_summary_csv
+
+        metrics = [
+            EvalMetrics(
+                state_id=f"state_{index}",
+                n1=1,
+                n2=2,
+                delta_V=0.0,
+                delta_pi=0.0,
+                delta_z=0.0,
+                argmax_agree=1,
+                z_pre_norm=0.0,
+                z_post_norm=0.0,
+                saturated=saturated,
+            )
+            for index, saturated in enumerate((-1, -1, 1, 0, 1))
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "summary.csv"
+            write_summary_csv(metrics, "test", str(output))
+            header, row = output.read_text().splitlines()
+
+        columns = header.split(",")
+        values = row.split(",")
+        saturation_rate = float(values[columns.index("saturation_rate")])
+        self.assertAlmostEqual(saturation_rate, 2.0 / 3.0, places=4)
 
 
 class TestModelLoading(unittest.TestCase):
@@ -527,6 +585,24 @@ class TestIntegration(unittest.TestCase):
 
             dist, z = model.policy_dist(x, y, n=4)
             self.assertTrue(torch.isfinite(dist.probs).all(), "Policy probs should be finite")
+
+    def test_values_at_shallow_and_deep_unrolls_are_finite(self):
+        model = self._get_dummy_model()
+        if model is None:
+            self.skipTest("Model imports not available")
+
+        x = {
+            "inputs": torch.full((1, 16), 2, dtype=torch.long),
+            "puzzle_identifiers": torch.zeros(1, dtype=torch.long),
+        }
+        y = torch.full((1, 16), 2, dtype=torch.long)
+
+        with torch.no_grad():
+            shallow_value, _ = model.used_value(x, y, n=1)
+            deep_value, _ = model.used_value(x, y, n=4)
+
+        self.assertTrue(torch.isfinite(shallow_value).all())
+        self.assertTrue(torch.isfinite(deep_value).all())
 
     def test_disabled_projection_evaluation_marks_saturation_na(self):
         from scripts.eval_unroll_sensitivity import (

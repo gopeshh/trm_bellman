@@ -126,6 +126,24 @@ def _is_behavior_python_archive_member(relative_path: str) -> bool:
     return path.parts[0] in _SOURCE_DIRECTORIES
 
 
+def _is_behavior_bytecode_archive_member(relative_path: str) -> bool:
+    path = PurePosixPath(relative_path)
+    if path.is_absolute() or ".." in path.parts or path.suffix not in {
+        ".pyc",
+        ".pyo",
+    }:
+        return False
+    if path.parts[0] in _SOURCE_DIRECTORIES:
+        return True
+    root_stems = tuple(PurePosixPath(source).stem for source in _ROOT_SOURCES)
+    if len(path.parts) == 1:
+        return path.stem in root_stems
+    return (
+        path.parts[0] == "__pycache__"
+        and any(path.name.startswith(f"{stem}.") for stem in root_stems)
+    )
+
+
 def assert_runtime_archive_sources_match_manifest(
     archive: ZipFile,
     manifest: object,
@@ -146,6 +164,14 @@ def assert_runtime_archive_sources_match_manifest(
     if len(runtime_names) != len(set(runtime_names)):
         raise SourceIdentityError(
             "Runtime archive contains duplicate behavior-source members."
+        )
+    if any(
+        _is_behavior_bytecode_archive_member(info.filename)
+        for info in archive.infolist()
+        if not info.is_dir()
+    ):
+        raise SourceIdentityError(
+            "Runtime archive contains unverified behavior bytecode."
         )
     if set(runtime_names) != set(expected):
         raise SourceIdentityError(

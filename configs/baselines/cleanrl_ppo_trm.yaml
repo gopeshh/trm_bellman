@@ -55,7 +55,8 @@ inner_unroll_n: 2
 enable_contraction: false
 target_Lz: 0.9
 target_Lv: 5.0
-latent_ball_radius: 0.0
+latent_projection_mode: disabled
+latent_ball_radius: null
 
 # Training pool
 batch_size: 256

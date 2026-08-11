@@ -117,7 +117,10 @@ def evaluate_model_batched(
     device: str,
     eval_batch_size: int,
 ) -> List[EvalMetrics]:
-    radius = float(config.get("latent_ball_radius", 0.0))
+    raw_radius = config.get("latent_ball_radius")
+    if raw_radius is None or float(raw_radius) <= 0.0:
+        raise ValueError("The finite-R evaluator requires an explicit radius R > 0.")
+    radius = float(raw_radius)
     vocab_size = int(config["vocab_size"])
     num_actions = int(config["num_actions"])
     stop_action_id = num_actions - 1
@@ -175,7 +178,7 @@ def evaluate_model_batched(
                     argmax_agree = int(p.argmax().item() == q.argmax().item())
                     z_pre = float(pre_norms[n1][idx].item())
                     z_post = float(post_norms[n1][idx].item())
-                    saturated = -1 if radius <= 0 else int(z_pre >= 0.95 * radius)
+                    saturated = int(z_pre >= 0.95 * radius)
                     all_metrics.append(
                         EvalMetrics(
                             state_id=state_id,
@@ -215,6 +218,9 @@ def compute_model_theory_summary(
         unroll_n=theory_unroll_n,
         batch_size=min(32, max(4, len(dataset))),
     )
+    if radius <= 0.0:
+        raise ValueError("The finite-R evaluator requires an explicit radius R > 0.")
+    rl_cfg.latent_projection_mode = "enabled"
     rl_cfg.latent_ball_radius = float(radius)
     checker = make_checker(rl_cfg)
     metrics = compute_heldout_theory_metrics(
@@ -267,6 +273,9 @@ def main() -> int:
     parser.add_argument("--theory_collection_passes", type=int, default=1)
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
+
+    if args.radius <= 0.0:
+        parser.error("--radius must be greater than zero")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

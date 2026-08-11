@@ -147,6 +147,7 @@ python_binary(
     name = "upi_trm_train",
     srcs = ["upi_trm_train.py"],
     base_module = "",
+    compile = False,
     keep_gpu_sections = True,
     main_module = "upi_trm_train",
     resources = glob([
@@ -535,6 +536,7 @@ python_unittest(
     base_module = "",
     deps = [
         ":rl",
+        ":utils",
         ":evaluators",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
@@ -851,6 +853,8 @@ python_unittest(
     srcs = [
         "tests/__init__.py",
         "tests/test_persistent_checkpoint_diagnostics_unittest.py",
+        "scripts/episodic_z_hard_suite_diagnostics.py",
+        "scripts/eval_theorem_facing_ordinal_check.py",
         "scripts/persistent_checkpoint_diagnostics.py",
     ],
     base_module = "",
@@ -858,9 +862,12 @@ python_unittest(
         ":models",
         ":puzzle_dataset_lib",
         ":rl",
+        ":script_eval_unroll_sensitivity_lib",
         ":utils",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -1070,6 +1077,8 @@ python_unittest(
     base_module = "",
     deps = [
         ":eval_unroll_sensitivity_lib",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
     ],
 )
 

@@ -58,7 +58,7 @@ def audit_g1_stability(summary: dict) -> tuple:
     if not nan_found and not passed:
         return False, "G1 marked as failed but no NaN found"
 
-    return True, f"G1 {'passed' if passed else 'failed'}: stability check"
+    return True, f"G1 {'passed' if passed else 'failed'}: recorded no-NaN gate"
 
 
 def audit_g2_dial_range(summary: dict) -> tuple:
@@ -102,31 +102,47 @@ def audit_value_head_norm_off(summary: dict) -> tuple:
 
 
 def audit_projection_disabled(summary: dict) -> tuple:
-    """Verify latent_ball_radius: 0 (projection disabled)."""
+    """Verify explicit disabled mode, with a frozen-artifact fallback."""
     config = summary["config"]
-    R = config.get("latent_ball_radius", -1)
+    projection_mode = config.get("latent_projection_mode")
+    radius = config.get("latent_ball_radius", -1)
 
-    if R != 0.0:
-        return False, f"latent_ball_radius={R} != 0.0 (projection not disabled)"
+    if (
+        projection_mode == "disabled"
+        and "latent_ball_radius" in config
+        and radius is None
+    ):
+        return True, "latent_projection_mode: disabled, latent_ball_radius: null (verified)"
+    if "latent_projection_mode" not in config and radius == 0.0:
+        return True, "legacy frozen artifact: latent_ball_radius: 0.0 (accepted)"
 
-    return True, "latent_ball_radius: 0.0 (projection disabled)"
+    return False, (
+        "projection must use latent_projection_mode=disabled with "
+        f"latent_ball_radius=None; got mode={projection_mode}, radius={radius}"
+    )
 
 
-def audit_no_overclaim(summary: dict, claims: str) -> tuple:
-    """Verify claims match actual gate results."""
+def audit_decision_claim_consistency(summary: dict, claims: str) -> tuple:
+    """Verify selected decision keywords match gate results."""
     g2_passed = summary["gates"]["g2_dial_range"]["passed"]
     decision = summary["decision"]
 
     if not g2_passed:
-        # Should explicitly state dial-range failure
-        if "insufficient range" not in decision.lower() and "insufficient range" not in claims.lower():
-            return False, "G2 failed but 'insufficient range' not mentioned in claims"
+        # Accept current threshold wording and the frozen artifact's old phrase.
+        combined_text = f"{decision}\n{claims}".lower()
+        failure_phrases = (
+            "insufficient range",
+            "below the configured threshold",
+            "below 0.10",
+        )
+        if not any(phrase in combined_text for phrase in failure_phrases):
+            return False, "G2 failed but the sampled spread-threshold failure is not stated"
     else:
         # Should NOT claim negative if G2 passed
         if "NEGATIVE" in decision:
             return False, "G2 passed but decision is NEGATIVE"
 
-    return True, f"No overclaim detected (G2={'passed' if g2_passed else 'failed'})"
+    return True, f"Decision/claim keywords consistent (G2={'passed' if g2_passed else 'failed'})"
 
 
 def main():
@@ -163,7 +179,7 @@ def main():
         ("G3 (Monotonicity)", audit_g3_monotonicity(summary)),
         ("Value-head norm OFF", audit_value_head_norm_off(summary)),
         ("Projection disabled", audit_projection_disabled(summary)),
-        ("No overclaim", audit_no_overclaim(summary, claims)),
+        ("Decision/claim keyword consistency", audit_decision_claim_consistency(summary, claims)),
     ]
 
     print("AUDIT RESULTS")

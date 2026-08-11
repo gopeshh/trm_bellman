@@ -3082,7 +3082,7 @@ class UPITrmTrainer:
                     hat_Lv = estimate_Lv(self.model.value_head, z_vec, combined_embed, num_samples=4)
                     metrics["hat_Lv"] = hat_Lv
                     
-                    # Compute unrolling term proxy (Eq. 10)
+                    # Compute the finite unrolling-discrepancy proxy.
                     n = self.rl_cfg.inner_unroll_n
                     unrolling_term = compute_unrolling_term_proxy(hat_Lv, hat_Lz, hat_Cz, n)
                     metrics["unrolling_term"] = unrolling_term

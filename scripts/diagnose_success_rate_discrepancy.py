@@ -2,18 +2,18 @@
 """
 Diagnostic Script: Success Rate Discrepancy Reconciliation
 
-This script resolves the discrepancy between:
+This script investigates the discrepancy between:
 - Exp5 "trivial suite success" (~5%)
 - Baseline "trivial suite success" (~93%)
 
-Root causes to investigate:
+Candidate differences to investigate:
 1. Different checkpoints (nc_rdis vs contraction-enabled)
 2. Different evaluation depths (n=2 vs n=4)
-3. Different projection settings (R=0 vs R=10)
+3. Different projection settings (disabled vs enabled at R=10)
 4. Buggy compute_success_rate() in Exp5 script (only checks rows, not columns/boxes)
 
-This script uses the PROPER evaluator (rl/evaluator.py) with sudoku_is_solved()
-to produce a definitive comparison table.
+This script uses the canonical evaluator (rl/evaluator.py) with
+sudoku_is_solved() to produce a finite comparison table.
 
 Usage:
     python scripts/diagnose_success_rate_discrepancy.py \
@@ -45,9 +45,23 @@ def load_model(
     checkpoint_path: str,
     device: str = "cuda",
     enable_contraction: bool = False,
-    latent_ball_radius: float = 10.0,
+    latent_projection_mode: str = "enabled",
+    latent_ball_radius: Optional[float] = 10.0,
 ) -> Tuple[TinyRecursiveReasoningModel_ACTV1, Dict[str, Any]]:
     """Load model with explicit settings."""
+    if latent_projection_mode == "enabled":
+        if (
+            latent_ball_radius is None
+            or latent_ball_radius <= 0.0
+            or not np.isfinite(latent_ball_radius)
+        ):
+            raise ValueError("Enabled projection requires latent_ball_radius > 0")
+    elif latent_projection_mode == "disabled":
+        if latent_ball_radius is not None:
+            raise ValueError("Disabled projection requires latent_ball_radius=None")
+    else:
+        raise ValueError("latent_projection_mode must be 'enabled' or 'disabled'")
+
     state_dict = torch.load(checkpoint_path, map_location=device)
     if isinstance(state_dict, dict) and "model_state_dict" in state_dict:
         model_state = state_dict["model_state_dict"]
@@ -104,6 +118,7 @@ def load_model(
         rl_enable_contraction=enable_contraction,
         rl_target_Lz=0.9,
         rl_disable_value_head_norm=True,  # Always OFF for stability experiments
+        rl_latent_projection_mode=latent_projection_mode,
         rl_latent_ball_radius=latent_ball_radius,
     )
 
@@ -118,6 +133,7 @@ def load_model(
         "seq_len": seq_len,
         "num_actions": num_actions,
         "enable_contraction": enable_contraction,
+        "latent_projection_mode": latent_projection_mode,
         "latent_ball_radius": latent_ball_radius,
     }
 
@@ -209,12 +225,13 @@ def run_diagnostic(
 
     # Test configurations
     configs = [
-        # (label, n_eval, R, description)
-        ("n=2, R=0", 2, 0.0, "Exp5 setting (projection disabled, low unroll)"),
-        ("n=4, R=0", 4, 0.0, "Standard unroll, projection disabled"),
-        ("n=2, R=10", 2, 10.0, "Low unroll with projection"),
-        ("n=4, R=10", 4, 10.0, "Standard training evaluation setting"),
-        ("n=8, R=10", 8, 10.0, "Deep unroll with projection"),
+        # Legacy R=0 text is retained only as an output label. Execution uses
+        # the canonical projection mode and nullable radius fields.
+        ("n=2, R=0", 2, "disabled", None, "Exp5 setting (projection disabled, low unroll)"),
+        ("n=4, R=0", 4, "disabled", None, "Standard unroll, projection disabled"),
+        ("n=2, R=10", 2, "enabled", 10.0, "Low unroll with projection"),
+        ("n=4, R=10", 4, "enabled", 10.0, "Standard training evaluation setting"),
+        ("n=8, R=10", 8, "enabled", 10.0, "Deep unroll with projection"),
     ]
 
     results: List[Dict[str, Any]] = []
@@ -226,14 +243,15 @@ def run_diagnostic(
 
         ckpt_results: Dict[str, Any] = {"checkpoint": ckpt_path}
 
-        for label, n_eval, R, desc in configs:
+        for label, n_eval, projection_mode, radius, desc in configs:
             print(f"\n[{label}] {desc}")
 
-            # Load model with this R setting
+            # Load model with this explicit projection setting.
             model, config = load_model(
                 ckpt_path, device,
                 enable_contraction=False,  # nc_rdis checkpoints
-                latent_ball_radius=R,
+                latent_projection_mode=projection_mode,
+                latent_ball_radius=radius,
             )
 
             # Create env config
@@ -279,23 +297,35 @@ def run_diagnostic(
     print(f"{'Setting':<20} | {'Success Rate':<15} | {'Description'}")
     print("-" * 70)
 
-    for label, n_eval, R, desc in configs:
+    for label, n_eval, projection_mode, radius, desc in configs:
         rates = [r[label]["success_rate"] for r in results if label in r]
         mean_rate = np.mean(rates) if rates else 0.0
         print(f"{label:<20} | {mean_rate:>12.1%}   | {desc}")
 
     print("-" * 70)
     print()
-    print("KEY FINDINGS:")
-    print("- Exp5 uses n=2, R=0 which produces low success rates")
-    print("- Training evaluation uses n=4, R=10 which produces high success rates")
-    print("- The discrepancy is NOT a bug, but different evaluation settings")
+    print("FINITE COMPARISON:")
+    print("- Compare n=2 with projection disabled against enabled R=10 settings")
+    print("- Compare n=4 with projection disabled against enabled R=10 settings")
+    print("- Recorded differences are consistent with setting sensitivity but do not exclude other causes")
     print()
 
     return {
         "results": results,
-        "configs": [{"label": l, "n_eval": n, "R": r, "desc": d} for l, n, r, d in configs],
-        "summary": "Success rate depends on evaluation settings (n_eval and R)",
+        "configs": [
+            {
+                "legacy_label": label,
+                "n_eval": n_eval,
+                "projection_mode": projection_mode,
+                "radius": radius,
+                "description": description,
+            }
+            for label, n_eval, projection_mode, radius, description in configs
+        ],
+        "summary": (
+            "Finite success-rate comparisons across evaluation depths and "
+            "explicit projection settings"
+        ),
     }
 
 

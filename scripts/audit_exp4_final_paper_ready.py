@@ -57,7 +57,7 @@ def audit_g1_stability(summary: dict) -> tuple:
     if not nan_found and not passed:
         return False, "G1 marked as failed but no NaN found"
 
-    return True, f"G1 {'passed' if passed else 'failed'}: stability check"
+    return True, f"G1 {'passed' if passed else 'failed'}: recorded no-NaN gate"
 
 
 def audit_g2_dial_range(summary: dict) -> tuple:
@@ -105,14 +105,24 @@ def audit_value_head_norm_off(summary: dict) -> tuple:
 
 
 def audit_projection_disabled(summary: dict) -> tuple:
-    """Verify latent_ball_radius: 0 (projection disabled)."""
+    """Verify explicit disabled mode, with a frozen-artifact fallback."""
     config = summary["config"]
-    R = config.get("latent_ball_radius", -1)
+    projection_mode = config.get("latent_projection_mode")
+    radius = config.get("latent_ball_radius", -1)
 
-    if R != 0.0:
-        return False, f"latent_ball_radius={R} != 0.0 (projection not disabled)"
+    if (
+        projection_mode == "disabled"
+        and "latent_ball_radius" in config
+        and radius is None
+    ):
+        return True, "latent_projection_mode: disabled, latent_ball_radius: null (verified)"
+    if "latent_projection_mode" not in config and radius == 0.0:
+        return True, "legacy frozen artifact: latent_ball_radius: 0.0 (accepted)"
 
-    return True, "latent_ball_radius: 0.0 (projection disabled)"
+    return False, (
+        "projection must use latent_projection_mode=disabled with "
+        f"latent_ball_radius=None; got mode={projection_mode}, radius={radius}"
+    )
 
 
 def audit_multi_seed(summary: dict) -> tuple:
@@ -152,8 +162,8 @@ def audit_dial_scales(summary: dict) -> tuple:
     return True, f"Dial scales verified ({len(scales)} scales)"
 
 
-def audit_no_overclaim(summary: dict, claims: str) -> tuple:
-    """Verify claims match actual gate results."""
+def audit_decision_claim_consistency(summary: dict, claims: str) -> tuple:
+    """Verify selected decision keywords match gate results."""
     decision = summary["decision"]
 
     # Check decision matches gates
@@ -173,7 +183,7 @@ def audit_no_overclaim(summary: dict, claims: str) -> tuple:
     if "POSITIVE" in decision and "Positive" not in claims and "positive" not in claims:
         return False, "Decision is POSITIVE but claims don't mention it"
 
-    return True, f"No overclaim detected (decision={decision.split(':')[0]})"
+    return True, f"Decision/claim keywords consistent (decision={decision.split(':')[0]})"
 
 
 def main():
@@ -212,7 +222,7 @@ def main():
         ("Projection disabled", audit_projection_disabled(summary)),
         ("Multi-seed evaluation", audit_multi_seed(summary)),
         ("Dial scales", audit_dial_scales(summary)),
-        ("No overclaim", audit_no_overclaim(summary, claims)),
+        ("Decision/claim keyword consistency", audit_decision_claim_consistency(summary, claims)),
     ]
 
     print("AUDIT RESULTS")

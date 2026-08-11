@@ -285,14 +285,17 @@ def write_unroll_sensitivity_table(
                 f.write(f"| {batch_name} | {label} | {dV_str} | {dpi_str} | {dz_str} | {argmax_str} |\n")
                 batch_name = ""  # Don't repeat batch name
 
-        # Improvement summary
-        f.write("\n## Key Finding\n\n")
+        # Finite comparison summary
+        f.write("\n## Recorded Comparison\n\n")
 
         dV_a = data_b0["model_a"].get(deepest_n2, {}).get("delta_V", AggregatedStats(0, 0, 0))
         dV_b = data_b0["model_b"].get(deepest_n2, {}).get("delta_V", AggregatedStats(0, 0, 0))
         if dV_b.mean > 0:
             improvement = dV_a.mean / dV_b.mean
-            f.write(f"- **Value stability improvement (B0)**: {improvement:.1f}× (Δ_V: {dV_a.mean:.3f} → {dV_b.mean:.3f})\n")
+            f.write(
+                f"- **Observed B0 value-drift ratio**: {improvement:.1f}× "
+                f"(Δ_V: {dV_a.mean:.3f} → {dV_b.mean:.3f})\n"
+            )
 
         argmax_a = data_b0["model_a"].get(deepest_n2, {}).get("argmax_agree", AggregatedStats(0, 0, 0))
         argmax_b = data_b0["model_b"].get(deepest_n2, {}).get("argmax_agree", AggregatedStats(0, 0, 0))
@@ -309,7 +312,10 @@ def write_radius_sweep_table(
     """Write paper-ready radius sweep table."""
     with open(out_path, "w") as f:
         f.write("# Experiment 1: Projection Radius Sweep\n\n")
-        f.write("**Purpose**: Demonstrate that stability comes from contraction, not projection clipping.\n\n")
+        f.write(
+            "**Purpose**: Compare observed finite-sample stability with projection "
+            "disabled across the two checkpoint conditions.\n\n"
+        )
         f.write("**Configuration**: Both models use value-head spectral norm OFF.\n\n")
         f.write(
             f"**Delta definition**: fixed mismatch Δ(n_train={N_TRAIN}, n₂={RADIUS_SWEEP_N2}) "
@@ -352,18 +358,23 @@ def write_radius_sweep_table(
         # Key finding
         f.write("\n## Key Finding\n\n")
 
-        # R=0 comparison
+        # Projection-disabled comparison, stored under the legacy R0 artifact tag.
         if 0.0 in data_b0:
             dV_a_r0 = data_b0[0.0]["model_a"].get("delta_V", AggregatedStats(0, 0, 0))
             dV_b_r0 = data_b0[0.0]["model_b"].get("delta_V", AggregatedStats(0, 0, 0))
             if dV_b_r0.mean > 0:
                 improvement = dV_a_r0.mean / dV_b_r0.mean
                 f.write(
-                    f"- **R=0 (projection disabled, fixed n={N_TRAIN}→{RADIUS_SWEEP_N2})**: "
-                    f"Contraction still provides {improvement:.1f}× improvement\n"
+                    f"- **Projection disabled (legacy artifact tag R0, fixed n={N_TRAIN}→{RADIUS_SWEEP_N2})**: "
+                    f"the contraction-oriented checkpoint has {improvement:.1f}× "
+                    "lower observed Δ_V than the no-contraction checkpoint\n"
                 )
                 f.write(f"  - Δ_V: No Contraction = {dV_a_r0.mean:.3f}, Contraction = {dV_b_r0.mean:.3f}\n")
-                f.write("  - This proves stability comes from contraction enforcement, not projection clipping.\n")
+                f.write(
+                    "  - In these sampled states and checkpoints, the observed "
+                    "difference remains with projection disabled; this finite "
+                    "diagnostic does not establish a uniform contraction guarantee.\n"
+                )
 
     print(f"[Table] {out_path}")
 
@@ -617,73 +628,102 @@ def write_claims(
         f.write("# Experiment 1: Paper Claims\n\n")
         f.write("Copy-paste ready for paper text.\n\n")
 
-        # Claim 1: Value stability improvement
+        # Observation 1: finite value-drift comparison
         dV_a = data_unroll_b0["model_a"].get(deepest_n2, {}).get("delta_V", AggregatedStats(0, 0, 0))
         dV_b = data_unroll_b0["model_b"].get(deepest_n2, {}).get("delta_V", AggregatedStats(0, 0, 0))
         if dV_b.mean > 0:
             improvement = dV_a.mean / dV_b.mean
-            f.write(f"1. **Claim**: Contraction enforcement reduces value instability by {improvement:.1f}× at {deepest_n2//n_train}× depth.\n")
+            f.write(
+                f"1. **Observation**: At {deepest_n2//n_train}× depth on the "
+                f"sampled states, the contraction-oriented checkpoint has "
+                f"{improvement:.1f}× lower observed Δ_V.\n"
+            )
             f.write(f"   **Evidence**: Table 1, Fig 1. Δ_V at n₂={deepest_n2}: No Contraction = {dV_a.mean:.3f}±{dV_a.std:.3f}, ")
             f.write(f"Contraction = {dV_b.mean:.3f}±{dV_b.std:.3f}.\n\n")
 
-        # Claim 2: Policy stability
+        # Observation 2: finite policy-difference comparison
         dpi_a = data_unroll_b0["model_a"].get(deepest_n2, {}).get("delta_pi", AggregatedStats(0, 0, 0))
         dpi_b = data_unroll_b0["model_b"].get(deepest_n2, {}).get("delta_pi", AggregatedStats(0, 0, 0))
         if dpi_b.mean > 0:
             pi_improvement = dpi_a.mean / dpi_b.mean
-            f.write(f"2. **Claim**: Policy KL divergence reduced by {pi_improvement:.0f}× with contraction.\n")
+            f.write(
+                f"2. **Observation**: The contraction-oriented checkpoint has "
+                f"{pi_improvement:.0f}× lower observed policy KL on these samples.\n"
+            )
             f.write(f"   **Evidence**: Table 1. Δ_π: {dpi_a.mean:.4f} → {dpi_b.mean:.4f}.\n\n")
 
-        # Claim 3: Action consistency
+        # Observation 3: finite action-agreement comparison
         argmax_a = data_unroll_b0["model_a"].get(deepest_n2, {}).get("argmax_agree", AggregatedStats(0, 0, 0, 0, 1))
         argmax_b = data_unroll_b0["model_b"].get(deepest_n2, {}).get("argmax_agree", AggregatedStats(0, 0, 0, 0, 1))
-        f.write(f"3. **Claim**: Action consistency improves from {argmax_a.mean:.1%} to {argmax_b.mean:.1%} (Wilson 95% CI).\n")
+        f.write(
+            f"3. **Observation**: Sampled action agreement is {argmax_a.mean:.1%} "
+            f"for the no-contraction checkpoint and {argmax_b.mean:.1%} for the "
+            "contraction-oriented checkpoint (Wilson 95% CI).\n"
+        )
         f.write(f"   **Evidence**: Table 1. No Contraction: [{argmax_a.ci_lower:.3f}, {argmax_a.ci_upper:.3f}], ")
         f.write(f"Contraction: [{argmax_b.ci_lower:.3f}, {argmax_b.ci_upper:.3f}].\n\n")
 
-        # Claim 4: R=0 proves contraction, not clipping
+        # Observation 4: finite disabled-projection comparison.
         if 0.0 in data_radius_b0:
             dV_a_r0 = data_radius_b0[0.0]["model_a"].get("delta_V", AggregatedStats(0, 0, 0))
             dV_b_r0 = data_radius_b0[0.0]["model_b"].get("delta_V", AggregatedStats(0, 0, 0))
             if dV_b_r0.mean > 0:
                 r0_improvement = dV_a_r0.mean / dV_b_r0.mean
                 f.write(
-                    f"4. **Claim**: With projection disabled (R=0), at fixed {RADIUS_SWEEP_N2 // n_train}× mismatch "
-                    f"(n={n_train}→{RADIUS_SWEEP_N2}), contraction still provides {r0_improvement:.1f}× stability improvement.\n"
+                    f"4. **Observation**: With projection disabled (legacy artifact "
+                    f"tag R0), at fixed "
+                    f"{RADIUS_SWEEP_N2 // n_train}× mismatch "
+                    f"(n={n_train}→{RADIUS_SWEEP_N2}), the contraction-oriented "
+                    f"checkpoint has {r0_improvement:.1f}× lower observed Δ_V.\n"
                 )
                 f.write(
-                    f"   **Evidence**: Table 2, Fig 2. R=0 Δ_V (pooled over all states and seeds): "
+                    f"   **Evidence**: Table 2, Fig 2. Disabled-condition Δ_V "
+                    f"(legacy tag R0; pooled over all states and seeds): "
                     f"{dV_a_r0.mean:.3f} → {dV_b_r0.mean:.3f}.\n"
                 )
-                f.write("   This proves stability comes from contraction enforcement, not projection clipping.\n\n")
+                f.write(
+                    "   In these sampled states and checkpoints, the observed "
+                    "difference remains with projection disabled. This finite "
+                    "diagnostic does not establish a uniform contraction guarantee.\n\n"
+                )
 
-        # Claim 5: Saturation behavior
+        # Observations 5--6: finite saturation behavior
         if 10.0 in data_radius_b0:
             sat_r10 = data_radius_b0[10.0]["model_a"].get("saturated", AggregatedStats(0, 0, 0))
             if sat_r10.n > 0:
-                f.write(f"5. **Claim**: At R=10, projection is always active (saturation rate = {sat_r10.mean:.0%}).\n")
-                f.write(f"   **Evidence**: Table 2. z_pre_norm >> R=10 causes 100% saturation.\n\n")
+                f.write(
+                    f"5. **Observation**: At R=10, the recorded projection-active "
+                    f"rate is {sat_r10.mean:.0%}.\n"
+                )
+                f.write("   **Evidence**: Table 2 reports the sampled pre-projection norms.\n\n")
 
         if 100.0 in data_radius_b0:
             sat_r100 = data_radius_b0[100.0]["model_a"].get("saturated", AggregatedStats(0, 0, 0))
             if sat_r100.n > 0:
-                f.write(f"6. **Claim**: At R=100, projection is never needed (saturation rate = {sat_r100.mean:.0%}).\n")
-                f.write(f"   **Evidence**: Table 2. R=100 > z_pre_norm means no clipping.\n\n")
+                f.write(
+                    f"6. **Observation**: At R=100, the recorded projection-active "
+                    f"rate is {sat_r100.mean:.0%}.\n"
+                )
+                f.write("   **Evidence**: Table 2 reports the sampled pre-projection norms.\n\n")
 
-        # Claim 6: Latent drift
+        # Observation 7: finite latent-drift comparison
         dz_a = data_unroll_b0["model_a"].get(deepest_n2, {}).get("delta_z", AggregatedStats(0, 0, 0))
         dz_b = data_unroll_b0["model_b"].get(deepest_n2, {}).get("delta_z", AggregatedStats(0, 0, 0))
         if dz_b.mean > 0:
             z_improvement = dz_a.mean / dz_b.mean
-            f.write(f"7. **Claim**: Latent drift (Δ_z) reduced by {z_improvement:.1f}× with contraction.\n")
+            f.write(
+                f"7. **Observation**: The contraction-oriented checkpoint has "
+                f"{z_improvement:.1f}× lower observed Δ_z on these samples.\n"
+            )
             f.write(f"   **Evidence**: Fig 1. Δ_z: {dz_a.mean:.2f} → {dz_b.mean:.2f}.\n\n")
 
         # Summary
         f.write("## One-Sentence Summary\n\n")
         f.write(
-            f"Contraction enforcement provides mathematical stability guarantees that are independent "
-            f"of projection radius, as demonstrated at fixed {RADIUS_SWEEP_N2 // n_train}× mismatch "
-            f"(n={n_train}→{RADIUS_SWEEP_N2}) even when projection is completely disabled (R=0).\n"
+            "Across the sampled states and checkpoints, the contraction-oriented "
+            f"condition has lower observed value drift at fixed {RADIUS_SWEEP_N2 // n_train}× "
+            f"mismatch (n={n_train}→{RADIUS_SWEEP_N2}) with projection disabled. "
+            "This finite diagnostic does not establish a uniform stability guarantee.\n"
         )
 
     print(f"[Claims] {out_path}")
@@ -774,9 +814,9 @@ def main():
     print(f"  Contraction:    {dV_b.mean:.4f} ± {dV_b.std:.4f} (n={dV_b.n})")
 
     if dV_a.n > 0 and dV_b.n > 0 and dV_b.mean < dV_a.mean:
-        print("  ✓ Contraction reduces instability")
+        print("  ✓ Lower observed Δ_V for the contraction-oriented checkpoint")
     else:
-        print("  ✗ UNEXPECTED: Contraction does not reduce instability")
+        print("  ✗ UNEXPECTED: no lower observed Δ_V for the contraction-oriented checkpoint")
 
     # Saturation check
     if 10.0 in radius_b0:
@@ -790,7 +830,7 @@ def main():
     if 0.0 in radius_b0:
         sat_r0 = radius_b0[0.0]["model_a"].get("saturated", AggregatedStats(0, 0, 0))
         if sat_r0.n == 0:
-            print(f"\nSaturation at R=0: N/A (projection disabled)")
+            print("\nProjection-active rate: N/A for disabled mode (legacy tag R0)")
             print("  ✓ Correctly excluded from averages")
 
     print("\n" + "=" * 60)

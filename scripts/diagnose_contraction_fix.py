@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Diagnostic script to validate the operator-norm clamp fix for contraction.
+Diagnostic script comparing sampled local-Lz estimates across norm treatments.
 
 Tests the new opnorm_clamp approach vs the old spectral_norm approach.
 
@@ -8,15 +8,13 @@ Variants tested:
   (i) OFF: no clamping, no scaling
   (ii) CLAMP-only: opnorm clamp, no scaling
   (iii) CLAMP+SCALE: opnorm clamp + enforce_global_contraction (restricted)
-  (iv) SN-only: spectral_norm (baseline, expected to explode)
-  (v) SN+SCALE: spectral_norm + scaling (baseline, expected to explode)
+  (iv) SN-only: spectral_norm baseline
+  (v) SN+SCALE: spectral_norm + scaling baseline
 
-Expected results:
-  - OFF: Lz ~ 0.8-1.0 (natural network behavior)
-  - CLAMP-only: Lz ~ 0.8-1.0 (per-layer norm ≤ 1)
-  - CLAMP+SCALE: Lz ≈ target_Lz (goal!)
-  - SN-only: Lz >> 1 (explosion)
-  - SN+SCALE: Lz >> 1 (explosion)
+Prior-run reference patterns, not guarantees:
+  - OFF and CLAMP-only local estimates were near 0.8-1.0
+  - CLAMP+SCALE local estimates were near target_Lz
+  - SN-only and SN+SCALE local estimates sometimes exceeded 10
 
 Usage:
     buck2 run //buiksat_trm:diagnose_contraction_fix -- \\
@@ -138,7 +136,8 @@ def build_base_model(
         rl_target_Lv=0.9,
         rl_enable_policy_head=True,
         rl_num_actions=num_actions,
-        rl_latent_ball_radius=0.0,
+        rl_latent_projection_mode="disabled",
+        rl_latent_ball_radius=None,
     )
 
     model = TinyRecursiveReasoningModel_ACTV1(cfg_dict)
@@ -262,20 +261,20 @@ def print_table(results: List[Dict], title: str = ""):
         target_str = f"{target:.2f}" if isinstance(target, float) else target
         scale_str = f"scale={r['sample_scale']:.4f}" if r['sample_scale'] else "no scale"
         notes = f"SN:{r['sn_count']}, scaled:{r['scale_count']}, {scale_str}"
-        status = "EXPLODED" if r["lz_mean"] > 10 else ("OK" if r["lz_mean"] < 1.5 else "HIGH")
+        status = "MEAN_LOCAL_LZ_GT_10" if r["lz_mean"] > 10 else ("OK" if r["lz_mean"] < 1.5 else "HIGH")
         print(f"{r['variant']:<14} {r['eps']:<10.0e} {target_str:<10} {r['lz_mean']:<14.4f} {r['lz_std']:<12.4f} {r['max_layer_norm']:<12.4f} [{status}]")
     print("=" * 120)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate contraction fix with opnorm clamping")
+    parser = argparse.ArgumentParser(description="Compare sampled local Lz under norm treatments")
     parser.add_argument("--dataset", type=str, required=True, help="Path to Sudoku dataset")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--num-repeats", type=int, default=10)
     parser.add_argument("--target-lz", type=float, default=0.9)
     parser.add_argument("--eps-list", type=str, default="1e-3", help="Comma-separated eps values")
     parser.add_argument("--hidden-size", type=int, default=64)
-    parser.add_argument("--skip-sn", action="store_true", help="Skip spectral_norm variants (known to explode)")
+    parser.add_argument("--skip-sn", action="store_true", help="Skip spectral_norm variants")
     args = parser.parse_args()
 
     eps_values = [float(e) for e in args.eps_list.split(",")]
@@ -290,7 +289,7 @@ def main():
         variants = new_variants + old_variants
 
     print("=" * 120)
-    print("CONTRACTION FIX VALIDATION (opnorm clamp vs spectral_norm)")
+    print("SAMPLED LOCAL-LZ COMPARISON (opnorm clamp vs spectral_norm)")
     print("=" * 120)
     print(f"Dataset: {args.dataset}")
     print(f"Batch size: {args.batch_size}")
@@ -326,7 +325,7 @@ def main():
                 variant, args.target_lz, args.num_repeats, eps
             )
             all_results.append(result)
-            status = "EXPLODED" if result["lz_mean"] > 10 else "OK"
+            status = "MEAN_LOCAL_LZ_GT_10" if result["lz_mean"] > 10 else "OK"
             print(f"  {variant}: Lz={result['lz_mean']:.4f} [{status}]")
 
     # Print summary tables grouped by eps
@@ -359,21 +358,21 @@ def main():
             status = "GOOD" if diff < 0.2 else ("OK" if diff < 0.5 else "NEEDS TUNING")
             print(f"  CLAMP+SCALE:  Lz={clamp_scale_lz:.2f} (target={expected:.2f}) [{status}]")
         if sn_lz is not None:
-            print(f"  SN-only:      Lz={sn_lz:.2f} {'<-- EXPLODED!' if sn_lz > 10 else ''}")
+            print(f"  SN-only:      Lz={sn_lz:.2f} {'<-- MEAN LOCAL Lz > 10' if sn_lz > 10 else ''}")
         if sn_scale_lz is not None:
-            print(f"  SN+SCALE:     Lz={sn_scale_lz:.2f} {'<-- EXPLODED!' if sn_scale_lz > 10 else ''}")
+            print(f"  SN+SCALE:     Lz={sn_scale_lz:.2f} {'<-- MEAN LOCAL Lz > 10' if sn_scale_lz > 10 else ''}")
 
     # Summary
     print("\n" + "=" * 120)
     print("SUMMARY")
     print("=" * 120)
-    print("If CLAMP+SCALE shows Lz close to target_Lz and SN variants explode,")
-    print("the operator-norm clamp fix is working correctly.")
+    print("These values describe this initialization, batch, eps, and sampled perturbations.")
+    print("They do not establish global contraction or causal superiority of one treatment.")
     print()
-    print("Recommendations:")
-    print("  1. Use apply_opnorm_clamp_to_trm() instead of apply_spectral_norm_to_trm()")
-    print("  2. Use enforce_global_contraction(..., restrict_to_reasoning_layers=True)")
-    print("  3. Re-apply opnorm clamp periodically during training if weights drift")
+    print("Follow-up candidates if the sampled pattern is repeatable:")
+    print("  1. Evaluate apply_opnorm_clamp_to_trm() in controlled training runs")
+    print("  2. Evaluate enforce_global_contraction(..., restrict_to_reasoning_layers=True)")
+    print("  3. Measure weight drift before choosing a clamp schedule")
 
 
 if __name__ == "__main__":

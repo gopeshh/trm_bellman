@@ -150,6 +150,29 @@ class TestSourceIdentity(unittest.TestCase):
                             manifest,
                         )
 
+    def test_runtime_archive_rejects_unverified_behavior_bytecode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._source_tree(root)
+            manifest = build_producer_source_manifest(root)
+            archive_path = root / "runtime.par"
+            self._runtime_archive(archive_path, root, manifest)
+            with ZipFile(archive_path, "a") as archive:
+                archive.writestr(
+                    "rl/__pycache__/module.cpython-312.pyc",
+                    b"unverified bytecode",
+                )
+
+            with ZipFile(archive_path, "r") as archive:
+                with self.assertRaisesRegex(
+                    SourceIdentityError,
+                    "unverified behavior bytecode",
+                ):
+                    assert_runtime_archive_sources_match_manifest(
+                        archive,
+                        manifest,
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()

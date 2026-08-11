@@ -34,17 +34,13 @@ class PlanEditEnvConfig:
             UNDO is valid when history > 1 (at least one edit has been made).
             UNDO pops the last plan from history and returns the previous state.
 
-        RUSH-TO-FAIL MITIGATION (Paper Remark 2.6):
+        TERMINAL OUTCOME REWARDS:
         fail_terminal_reward: Terminal reward for failing (not solving) the puzzle.
-            Set to a sufficiently negative value (e.g., -C_max) to prevent the
-            agent from "rushing to fail" under potential-based shaping.
-
-            Theory: With Φ(s_abs) = C_max and shaping r = γΦ(s') - Φ(s),
-            the condition r_term_fail ≤ -γC_max ensures that failing from
-            any state yields non-positive total reward.
-
-            Default is 0.0 (no extra penalty), which may allow rush-to-fail
-            in some edge cases. Set to -C_max for theory alignment.
+            Under shaping, a failed terminal transition has reward
+            fail_terminal_reward - Phi(s) plus any STOP penalty after folding
+            the common absorbing boundary. A global reward-sign claim therefore
+            requires an established lower bound on Phi(s); C_max alone is not
+            such a certificate.
 
         solve_terminal_reward: Terminal reward bonus for solving the puzzle.
             Default is 0.0 (rely on shaping). Can be positive for extra incentive.
@@ -61,8 +57,8 @@ class PlanEditEnvConfig:
     C_max: float = 10.0
     # UNDO action support (Phase 5.4)
     enable_undo: bool = False
-    # Terminal rewards (Paper Remark 2.6: rush-to-fail mitigation)
-    fail_terminal_reward: float = 0.0   # Set to -C_max for theory alignment
+    # Additive base rewards selected by terminal outcome.
+    fail_terminal_reward: float = 0.0
     solve_terminal_reward: float = 0.0  # Optional bonus for solving
     disable_constraint_masking: bool = False
 
@@ -832,22 +828,21 @@ class PlanEditEnv:
         - step() for actual environment transitions
         - compute_exact_baseline_summation() for theory-exact Q estimation
         
-        Implements Paper Eq. 4: r = r_0 + γ·Φ(s') - Φ(s) when reward_shaping=True.
-        
-        RUSH-TO-FAIL MITIGATION (Paper Remark 2.6):
-            Terminal transitions receive r_0 based on outcome:
+        Implements the canonical edit-MDP reward convention. Nonterminal shaped
+        transitions use r_0 + gamma*Phi(s') - Phi(s). Terminal transitions fold
+        the common absorbing boundary into the stored reward exactly once.
+
+        Terminal transitions select r_0 by outcome:
             - Solved: r_0 = solve_terminal_reward (default 0)
-            - Failed: r_0 = fail_terminal_reward (set to -C_max for theory)
-            
-            The condition r_term_fail ≤ -γC_max guarantees that failing from
-            any state yields non-positive total reward, preventing "rush to fail".
+            - Failed: r_0 = fail_terminal_reward
         
         Args:
             phi_old: Checker score Φ(s) = c(x, y_old)
             phi_new: Checker score Φ(s') = c(x, y_new)
             is_stop_action: Whether the action was STOP
             is_terminal: Whether this transition ends the episode
-            is_solved: Whether the puzzle was solved (phi_new >= solved_threshold)
+            is_solved: Whether the configured threshold or structural predicate
+                declares the successor solved
             
         Returns:
             Reward value matching the environment's reward semantics.
@@ -865,14 +860,13 @@ class PlanEditEnv:
         if is_stop_action and self._stop_mode != "terminal":
             stop_penalty = self._stop_penalty_value
         
-        # Compute terminal reward r_0 (Paper Remark 2.6)
+        # Select terminal base reward r_0 by outcome.
         r_0 = 0.0
         if is_terminal:
             if is_solved:
                 r_0 = getattr(self.config, "solve_terminal_reward", 0.0)
             else:
                 # Failed termination (budget exhausted, STOP with terminal mode, etc.)
-                # Set to negative value to prevent "rush to fail"
                 r_0 = getattr(self.config, "fail_terminal_reward", 0.0)
         
         if self.config.reward_shaping:
@@ -1121,8 +1115,13 @@ class PlanEditEnv:
             else:
                 phi_old = float(self.checker(self.x, self.y))
 
+        plan_tensor = self._standardize_plan(y_next)
+        solved_without_checker_score = self.is_plan_solved(plan_tensor)
         needs_phi_new = (
-            done or self.config.reward_shaping or self.config.solved_threshold is not None
+            done
+            or self.config.reward_shaping
+            or self.config.solved_threshold is not None
+            or solved_without_checker_score
         )
         if needs_phi_new:
             phi_new = float(self.checker(self.x, y_next))
@@ -1130,8 +1129,13 @@ class PlanEditEnv:
             if self.config.reward_shaping and not done:
                 self._cached_phi = phi_new
 
-        plan_tensor = self._standardize_plan(y_next)
-        if self.is_plan_solved(plan_tensor, checker_score=phi_new):
+        is_solved = solved_without_checker_score
+        if not is_solved and self.config.solved_threshold is not None:
+            is_solved = self.is_plan_solved(
+                plan_tensor,
+                checker_score=phi_new,
+            )
+        if is_solved:
             done = True
             if done_reason is None:
                 done_reason = "solved"

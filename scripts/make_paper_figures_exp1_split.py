@@ -2,7 +2,7 @@
 """
 Create Main vs Appendix split for ICML Experiment 1.
 
-Main paper: B0-only (cleanly supports R=0 claim for Δ_V)
+Main paper: B0-only finite comparison for the disabled-projection condition
 Appendix: B1 data (with note about Δ_V behavior)
 
 Usage:
@@ -160,14 +160,20 @@ def write_radius_sweep_table_single_batch(
         if is_main:
             f.write("# Experiment 1: Projection Radius Sweep (Main Paper)\n\n")
             f.write("**Batch**: B0 (initial states only)\n\n")
-            f.write("**Purpose**: Demonstrate that stability comes from contraction, not projection clipping.\n\n")
+            f.write(
+                "**Purpose**: Compare observed finite-sample stability with projection "
+                "disabled across the two checkpoint conditions.\n\n"
+            )
         else:
             f.write("# Experiment 1: Projection Radius Sweep (Appendix)\n\n")
             f.write("**Batch**: B1 (one-step successor closure)\n\n")
-            f.write("**Note**: On B1 with R=0, contraction improves Δ_z and argmax agreement, ")
+            f.write(
+                "**Note**: On B1 with projection disabled (legacy artifact tag "
+                "R0), the contraction-oriented checkpoint "
+                "has lower observed Δ_z and higher argmax agreement, "
+            )
             f.write("but Δ_V shows higher variance and does not improve. ")
-            f.write("This suggests that without projection, value estimates on successor states ")
-            f.write("can exhibit increased instability even under contraction.\n\n")
+            f.write("This statement is limited to the recorded successor-state samples.\n\n")
 
         f.write("**Configuration**: Both models use value-head spectral norm OFF.\n\n")
         f.write(
@@ -217,10 +223,16 @@ def write_radius_sweep_table_single_batch(
                 if dV_b_r0.mean > 0:
                     improvement = dV_a_r0.mean / dV_b_r0.mean
                     f.write(
-                        f"With projection disabled (R=0), at fixed n={N_TRAIN}→{RADIUS_SWEEP_N2}, "
-                        f"contraction provides **{improvement:.1f}× improvement** in Δ_V.\n"
+                        f"With projection disabled (legacy artifact tag R0), at "
+                        f"fixed n={N_TRAIN}→{RADIUS_SWEEP_N2}, "
+                        f"the contraction-oriented checkpoint has **{improvement:.1f}× "
+                        "lower observed Δ_V** than the no-contraction checkpoint.\n"
                     )
-                    f.write(f"This proves stability comes from contraction enforcement, not projection clipping.\n")
+                    f.write(
+                        "In these sampled states and checkpoints, the observed "
+                        "difference remains with projection disabled; this finite "
+                        "diagnostic does not establish a uniform contraction guarantee.\n"
+                    )
 
     print(f"[Table] {out_path}")
 
@@ -329,7 +341,7 @@ def write_fixed_claims(
     data_b0: Dict[float, Dict[str, Dict[str, AggregatedStats]]],
     data_b1: Dict[float, Dict[str, Dict[str, AggregatedStats]]],
 ):
-    """Write corrected CLAIMS.md with properly scoped R=0 statements."""
+    """Write scoped observations for the legacy-tagged disabled condition."""
     with open(out_path, "w") as f:
         r0_improvement = 0.0
         f.write("# Experiment 1: Paper Claims\n\n")
@@ -337,22 +349,22 @@ def write_fixed_claims(
 
         # Claim 1: Unroll sensitivity (from unroll table, B0)
         f.write("## Unroll Sensitivity (Main Result)\n\n")
-        f.write("1. **Claim**: Contraction enforcement reduces value instability by 4.1× at 8× depth on initial states (B0).\n")
+        f.write("1. **Observation**: On sampled B0 states at 8× depth, the contraction-oriented checkpoint has 4.1× lower observed Δ_V.\n")
         f.write("   **Evidence**: Table 1, Fig 1. Δ_V at n₂=16: No Contraction = 0.156±0.225, Contraction = 0.038±0.055.\n\n")
 
-        f.write("2. **Claim**: Policy KL divergence reduced by 33× with contraction (B0).\n")
+        f.write("2. **Observation**: On sampled B0 states, the contraction-oriented checkpoint has 33× lower observed policy KL.\n")
         f.write("   **Evidence**: Table 1. Δ_π: 0.0063 → 0.0002.\n\n")
 
-        f.write("3. **Claim**: Action consistency improves from 96.0% to 99.0% (Wilson 95% CI) on B0.\n")
+        f.write("3. **Observation**: Sampled B0 action agreement is 96.0% and 99.0% for the two checkpoint conditions (Wilson 95% CI).\n")
         f.write("   **Evidence**: Table 1. No Contraction: [0.931, 0.977], Contraction: [0.971, 0.997].\n\n")
 
-        f.write("4. **Claim**: Latent drift (Δ_z) reduced by 3.1× with contraction on B0.\n")
+        f.write("4. **Observation**: On sampled B0 states, the contraction-oriented checkpoint has 3.1× lower observed Δ_z.\n")
         f.write("   **Evidence**: Table 1. Δ_z: 4.16 → 1.33.\n\n")
 
         # Claim 2: Radius sweep - CAREFULLY SCOPED
         f.write("## Radius Sweep (Isolation of Contraction vs. Projection)\n\n")
 
-        # B0 R=0 claim
+        # B0 disabled-projection observation.
         if 0.0 in data_b0:
             dV_a = data_b0[0.0]["model_a"].get("delta_V", AggregatedStats(0, 0, 0))
             dV_b = data_b0[0.0]["model_b"].get("delta_V", AggregatedStats(0, 0, 0))
@@ -364,17 +376,24 @@ def write_fixed_claims(
             z_improvement = dz_a.mean / dz_b.mean if dz_b.mean > 0 else 0
 
             f.write(
-                f"5. **Claim**: On initial states (B0), with projection disabled (R=0), at fixed "
-                f"{RADIUS_SWEEP_N2 // N_TRAIN}× mismatch (n={N_TRAIN}→{RADIUS_SWEEP_N2}), contraction provides "
-                f"{improvement:.1f}× value stability improvement.\n"
+                f"5. **Observation**: On initial states (B0), with projection disabled "
+                f"(legacy artifact tag R0), at fixed "
+                f"{RADIUS_SWEEP_N2 // N_TRAIN}× mismatch "
+                f"(n={N_TRAIN}→{RADIUS_SWEEP_N2}), the contraction-oriented checkpoint "
+                f"has {improvement:.1f}× lower observed Δ_V.\n"
             )
             f.write(
-                f"   **Evidence**: Table 2 (main). R=0 B0 Δ_V (pooled over all states and seeds): "
+                f"   **Evidence**: Table 2 (main). Disabled-condition B0 Δ_V "
+                f"(legacy tag R0; pooled over all states and seeds): "
                 f"No Contraction = {dV_a.mean:.3f}±{dV_a.std:.3f}, Contraction = {dV_b.mean:.3f}±{dV_b.std:.3f}.\n"
             )
-            f.write("   **Interpretation**: This demonstrates that stability on initial states comes from contraction enforcement, not projection clipping.\n\n")
+            f.write(
+                "   **Interpretation**: In these sampled initial states and checkpoints, "
+                "the observed difference remains with projection disabled. This finite "
+                "diagnostic does not establish a uniform contraction guarantee.\n\n"
+            )
 
-        # B1 R=0 - what actually improves
+        # B1 disabled-projection observations.
         if 0.0 in data_b1:
             dV_a_b1 = data_b1[0.0]["model_a"].get("delta_V", AggregatedStats(0, 0, 0))
             dV_b_b1 = data_b1[0.0]["model_b"].get("delta_V", AggregatedStats(0, 0, 0))
@@ -385,30 +404,49 @@ def write_fixed_claims(
 
             z_improvement_b1 = dz_a_b1.mean / dz_b_b1.mean if dz_b_b1.mean > 0 else 0
 
-            f.write(f"6. **Claim**: On successor states (B1), with projection disabled (R=0), contraction reduces latent drift by {z_improvement_b1:.1f}× and improves action agreement from {argmax_a_b1.mean:.1%} to {argmax_b_b1.mean:.1%}.\n")
-            f.write(f"   **Evidence**: Table 2 (appendix). R=0 B1: Δ_z {dz_a_b1.mean:.2f} → {dz_b_b1.mean:.2f}; Argmax {argmax_a_b1.mean:.3f} → {argmax_b_b1.mean:.3f}.\n\n")
+            f.write(
+                f"6. **Observation**: On successor states (B1), with projection disabled "
+                f"(legacy artifact tag R0), the contraction-oriented checkpoint "
+                f"has {z_improvement_b1:.1f}× "
+                f"lower observed latent drift and action agreement changes from "
+                f"{argmax_a_b1.mean:.1%} to {argmax_b_b1.mean:.1%}.\n"
+            )
+            f.write(f"   **Evidence**: Table 2 (appendix), disabled condition (legacy tag R0), B1: Δ_z {dz_a_b1.mean:.2f} → {dz_b_b1.mean:.2f}; Argmax {argmax_a_b1.mean:.3f} → {argmax_b_b1.mean:.3f}.\n\n")
 
-            f.write(f"7. **Observation (NOT a claim)**: On B1 with R=0, value drift Δ_V does not improve with contraction ")
+            f.write(
+                "7. **Observation (NOT a claim)**: On B1 with projection "
+                "disabled (legacy artifact tag R0), the "
+                "contraction-oriented checkpoint does not have lower observed Δ_V "
+            )
             f.write(f"({dV_a_b1.mean:.3f} → {dV_b_b1.mean:.3f}).\n")
-            f.write("   This suggests that successor states may exhibit value-function instability ")
-            f.write("that projection normally helps control. The main R=0 claim (item 5) is therefore scoped to B0.\n\n")
+            f.write(
+                "   In these sampled successor states, projection-disabled evaluation "
+                "coincides with higher value-estimate variance. Item 5 is therefore "
+                "scoped to the sampled B0 states.\n\n"
+            )
 
-        # Saturation claims
-        f.write("8. **Claim**: At R=10, projection is always active (100% saturation).\n")
-        f.write("   **Evidence**: Table 2. z_pre_norm ≈ 32 >> R=10 causes 100% saturation.\n\n")
+        # Finite saturation observations
+        f.write("8. **Observation**: The recorded projection-active rate at R=10 is 100%.\n")
+        f.write("   **Evidence**: Table 2 reports the sampled pre-projection norms.\n\n")
 
-        f.write("9. **Claim**: At R=100, projection is never needed (0% saturation).\n")
-        f.write("   **Evidence**: Table 2. R=100 > z_pre_norm means no clipping.\n\n")
+        f.write("9. **Observation**: The recorded projection-active rate at R=100 is 0%.\n")
+        f.write("   **Evidence**: Table 2 reports the sampled pre-projection norms.\n\n")
 
         # Summary
         f.write("## One-Sentence Summary (for paper)\n\n")
-        f.write("On initial states, contraction enforcement provides value stability guarantees ")
         f.write(
-            f"independent of projection radius ({r0_improvement:.1f}× improvement at fixed "
-            f"n={N_TRAIN}→{RADIUS_SWEEP_N2} even at R=0); "
+            "On the sampled initial states and checkpoints, the contraction-oriented "
+            "condition has lower observed value drift "
         )
-        f.write("on successor states, contraction consistently improves latent stability and action agreement, ")
-        f.write("though value-function estimates require projection to avoid increased variance.\n")
+        f.write(
+            f"with projection disabled ({r0_improvement:.1f}× improvement at fixed "
+            f"n={N_TRAIN}→{RADIUS_SWEEP_N2} in the disabled condition); "
+        )
+        f.write(
+            "on the sampled successor states, it has lower observed latent drift and "
+            "higher action agreement, while value-estimate variance is higher without "
+            "projection. These finite diagnostics establish no uniform guarantee.\n"
+        )
 
     print(f"[Claims] {out_path}")
 

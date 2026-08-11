@@ -2,7 +2,7 @@
 """
 Exp5: Stability–Expressivity Tradeoff Curve (Submission-Critical)
 
-This experiment produces the "stability dial" tradeoff plot:
+This experiment plots finite stability and success measurements by dial scale:
 - X-axis: Stability (argmax agreement at depth mismatch)
 - Y-axis: Expressivity (Sudoku solve success rate at matched compute)
 
@@ -11,7 +11,7 @@ existing projection-free checkpoints.
 
 Non-negotiables:
 - disable_value_head_norm: true
-- latent_ball_radius: 0.0 (projection disabled)
+- latent_projection_mode: disabled with latent_ball_radius: null
 - projection_active_rate < 1%
 
 Usage:
@@ -174,12 +174,17 @@ def load_model_strict(
 
     # Verify non-negotiables
     disable_value_head_norm = yaml_config.get("disable_value_head_norm", False)
-    latent_ball_radius = yaml_config.get("latent_ball_radius", 10.0)
+    latent_projection_mode = yaml_config.get("latent_projection_mode")
+    latent_ball_radius = yaml_config.get("latent_ball_radius")
 
     if not disable_value_head_norm:
         raise ValueError("NON-NEGOTIABLE: disable_value_head_norm must be True")
-    if latent_ball_radius != 0.0:
-        raise ValueError(f"NON-NEGOTIABLE: latent_ball_radius must be 0.0, got {latent_ball_radius}")
+    if latent_projection_mode != "disabled" or latent_ball_radius is not None:
+        raise ValueError(
+            "NON-NEGOTIABLE: projection must use latent_projection_mode='disabled' "
+            "with latent_ball_radius=None; "
+            f"got mode={latent_projection_mode}, radius={latent_ball_radius}"
+        )
 
     # Load state dict
     state_dict = torch.load(checkpoint_path, map_location=device)
@@ -242,7 +247,8 @@ def load_model_strict(
         rl_enable_contraction=enable_contraction,
         rl_target_Lz=float(target_Lz),
         rl_disable_value_head_norm=True,
-        rl_latent_ball_radius=0.0,
+        rl_latent_projection_mode="disabled",
+        rl_latent_ball_radius=None,
     )
 
     model = TinyRecursiveReasoningModel_ACTV1(model_config.model_dump())
@@ -259,7 +265,8 @@ def load_model_strict(
         "enable_contraction": enable_contraction,
         "target_Lz": target_Lz,
         "disable_value_head_norm": True,
-        "latent_ball_radius": 0.0,
+        "latent_projection_mode": "disabled",
+        "latent_ball_radius": None,
     }
 
     return model, config_dict
@@ -715,7 +722,7 @@ def run_exp5(
                 entropy_train=stab_b0["entropy"],
                 success_trivial=success_trivial,
                 success_hard=success_hard,
-                projection_active_rate=0.0,  # Projection disabled
+                projection_active_rate=0.0,  # Explicit identity projection mode
             )
             all_results.append(result)
 
@@ -769,14 +776,14 @@ def run_exp5(
     g2_passed = L_spread >= 0.10
     print(f"G2 (Dial range, inherited): {'PASS' if g2_passed else 'FAIL'} (spread={L_spread:.4f})")
 
-    # G3: tradeoff exists
+    # G3: finite success-rate variation across evaluated scales
     success_range = max(s["success_trivial_mean"] for s in scale_summaries) - min(s["success_trivial_mean"] for s in scale_summaries)
     g3_passed = success_range > 0.01  # Some variation in success
-    print(f"G3 (Tradeoff exists): {'PASS' if g3_passed else 'FAIL'} (success range={success_range:.4f})")
+    print(f"G3 (Observed success variation): {'PASS' if g3_passed else 'FAIL'} (range={success_range:.4f})")
 
     # Overall decision
     if g0_passed and g1_passed and g2_passed:
-        decision = "POSITIVE: Tradeoff curve generated successfully"
+        decision = "POSITIVE: Finite scale-comparison gates met"
     else:
         decision = "FAIL: Gate conditions not met"
 
@@ -847,7 +854,7 @@ def generate_claims(summary: Dict[str, Any], out_path: Path) -> None:
 - **G0 (Projection inactive):** {'PASS' if gates['g0_projection_inactive']['passed'] else 'FAIL'}
 - **G1 (Stability):** {'PASS' if gates['g1_stability']['passed'] else 'FAIL'}
 - **G2 (Dial range):** {'PASS' if gates['g2_dial_range']['passed'] else 'FAIL'} (spread={gates['g2_dial_range']['spread']:.4f})
-- **G3 (Tradeoff exists):** {'PASS' if gates['g3_tradeoff_exists']['passed'] else 'FAIL'}
+- **G3 (Observed success variation):** {'PASS' if gates['g3_tradeoff_exists']['passed'] else 'FAIL'}
 
 ## Tradeoff Results
 
@@ -861,13 +868,12 @@ def generate_claims(summary: Dict[str, Any], out_path: Path) -> None:
         content += f"{s['delta_V_b0_8x_mean']:.3f} |\n"
 
     content += f"""
-## Scoped Claim
+## Scoped Observation
 
-**Claim:** Inference-time contraction scaling provides a controllable tradeoff between
-stability (policy consistency under depth mismatch) and expressivity (task success rate).
-
-- Higher contraction (lower scale) → higher stability, potentially lower success
-- Lower contraction (higher scale) → lower stability, potentially higher success
+Across these checkpoints, Sudoku states, and four inference-time scales, the table reports
+the observed association among scale, local L_preproj estimates, depth-mismatch metrics,
+and greedy-policy success. It does not establish that scaling causes the metric differences
+or that a stability-expressivity tradeoff is necessary or general.
 
 ## Scope Limitations
 
@@ -875,11 +881,12 @@ stability (policy consistency under depth mismatch) and expressivity (task succe
 - Success measured with greedy policy at matched compute (n={summary['parameters']['n_train']})
 - Stability measured as argmax agreement at n2=8 (4× mismatch)
 - {len(summary['checkpoints'])} independently trained checkpoints
+- Finite local L_preproj estimates do not establish a global Lipschitz bound
 
 ## Non-Negotiables Verified
 
 - `disable_value_head_norm: true`
-- `latent_ball_radius: 0.0` (projection disabled)
+- `latent_projection_mode: disabled` and `latent_ball_radius: null`
 """
 
     claims_path = out_path / "CLAIMS.md"
@@ -913,7 +920,7 @@ def generate_provenance(
 ## Config
 
 - **YAML:** {config_yaml_path}
-- **Non-negotiables:** disable_value_head_norm=true, latent_ball_radius=0.0
+- **Non-negotiables:** disable_value_head_norm=true, latent_projection_mode=disabled, latent_ball_radius=null
 
 ## Parameters
 

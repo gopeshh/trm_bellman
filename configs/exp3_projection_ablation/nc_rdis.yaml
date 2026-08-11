@@ -44,8 +44,9 @@ eval_num_episodes: 50
 
 episodic_latent: true
 
-# PROJECTION: Disabled (R=0 means no projection)
-latent_ball_radius: 0.0
+# PROJECTION: Explicit identity mode
+latent_projection_mode: disabled
+latent_ball_radius: null
 
 # Feasibility checker
 use_feasibility_checker: true
