@@ -118,6 +118,19 @@ python_library(
 )
 
 python_library(
+    name = "confirmatory_runtime_launcher_lib",
+    srcs = ["confirmatory_runtime_launcher.py"],
+    base_module = "",
+)
+
+python_binary(
+    name = "confirmatory_runtime_launcher",
+    srcs = ["confirmatory_runtime_launcher.py"],
+    base_module = "",
+    main_module = "confirmatory_runtime_launcher",
+)
+
+python_library(
     name = "upi_trm_train_lib",
     srcs = ["upi_trm_train.py"],
     base_module = "",
@@ -126,6 +139,7 @@ python_library(
         "configs/iclr_confirmatory/*.yaml",
     ]),
     deps = [
+        ":confirmatory_runtime_launcher_lib",
         ":models",
         ":rl",
         ":utils",
@@ -155,6 +169,7 @@ python_binary(
         "configs/iclr_confirmatory/*.yaml",
     ]),
     deps = [
+        ":confirmatory_runtime_launcher_lib",
         ":models",
         ":rl",
         ":utils",
@@ -395,12 +410,14 @@ python_unittest(
     srcs = [
         "tests/__init__.py",
         "tests/test_compute_accounting_unittest.py",
+        "tests/test_confirmatory_runtime_launcher_unittest.py",
         "tests/test_evaluation_artifacts_unittest.py",
         "tests/test_run_identity_unittest.py",
         "tests/test_source_identity_unittest.py",
     ],
     base_module = "",
     deps = [
+        ":confirmatory_runtime_launcher_lib",
         ":utils",
     ],
 )

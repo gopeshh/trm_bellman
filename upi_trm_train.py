@@ -1,6 +1,8 @@
 
 import argparse
+import atexit
 import copy
+import fcntl
 import hashlib
 import importlib.metadata
 import json
@@ -10,12 +12,276 @@ import os
 import platform
 import random
 import re
-import tempfile
+import shutil
+import stat
 import sys
+import tempfile
 import zipfile
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, MutableMapping, Optional, Tuple
+
+
+_VERIFIED_RUNTIME_PATH_ENV = "UPI_TRM_VERIFIED_RUNTIME_PATH"
+_VERIFIED_RUNTIME_SHA256_ENV = "UPI_TRM_VERIFIED_RUNTIME_SHA256"
+_VERIFIED_RUNTIME_FD_ENV = "UPI_TRM_VERIFIED_RUNTIME_FD"
+_PRIVATE_UNPACK_BASE_ENV = "UPI_TRM_PRIVATE_UNPACK_BASE"
+_LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_MEMFD_SEALING_AVAILABLE = all(
+    hasattr(fcntl, name)
+    for name in (
+        "F_GET_SEALS",
+        "F_SEAL_GROW",
+        "F_SEAL_SEAL",
+        "F_SEAL_SHRINK",
+        "F_SEAL_WRITE",
+    )
+)
+_F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 0)
+_REQUIRED_MEMFD_SEALS = sum(
+    getattr(fcntl, name, 0)
+    for name in (
+        "F_SEAL_WRITE",
+        "F_SEAL_SHRINK",
+        "F_SEAL_GROW",
+        "F_SEAL_SEAL",
+    )
+)
+
+
+@dataclass(frozen=True)
+class _PrivateUnpackDirectory:
+    path: Path
+    device: int
+    inode: int
+
+
+def _hash_preimport_runtime(path: Path) -> str:
+    """Hash the packaged runtime before any behavior module is imported."""
+
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError as exc:
+        raise RuntimeError("Verified runtime artifact cannot be read.") from exc
+    return digest.hexdigest()
+
+
+def _preflight_confirmatory_runtime(
+    *,
+    argv: List[str],
+    module_file: str,
+    environ: MutableMapping[str, str],
+) -> Tuple[Optional[str], Optional[_PrivateUnpackDirectory], Optional[int]]:
+    """Reject confirmatory execution before importing behavior-bearing code."""
+
+    confirmatory = "--confirmatory" in argv
+    attested_path_raw = environ.pop(_VERIFIED_RUNTIME_PATH_ENV, None)
+    attested_sha256 = environ.pop(_VERIFIED_RUNTIME_SHA256_ENV, None)
+    attested_fd_raw = environ.pop(_VERIFIED_RUNTIME_FD_ENV, None)
+    private_unpack_raw = environ.pop(_PRIVATE_UNPACK_BASE_ENV, None)
+    if not confirmatory:
+        if (
+            attested_path_raw is not None
+            or attested_sha256 is not None
+            or attested_fd_raw is not None
+            or private_unpack_raw is not None
+        ):
+            raise RuntimeError(
+                "Packaged-runtime attestation is valid only for --confirmatory."
+            )
+        return None, None, None
+    if (
+        attested_path_raw is None
+        or attested_sha256 is None
+        or attested_fd_raw is None
+        or private_unpack_raw is None
+    ):
+        raise RuntimeError(
+            "Confirmatory execution requires the verified packaged-runtime launcher."
+        )
+    if not _LOWER_SHA256.fullmatch(attested_sha256):
+        raise RuntimeError(
+            "Verified runtime SHA-256 must be 64 lowercase hexadecimal characters."
+        )
+    if not _MEMFD_SEALING_AVAILABLE:
+        raise RuntimeError(
+            "This host cannot inspect a sealed confirmatory runtime."
+        )
+
+    if not re.fullmatch(r"[0-9]+", attested_fd_raw):
+        raise RuntimeError("Verified runtime descriptor must be a decimal integer.")
+    attested_fd = int(attested_fd_raw)
+    if attested_fd < 3:
+        raise RuntimeError("Verified runtime descriptor is reserved or invalid.")
+
+    descriptor_path = Path(f"/proc/self/fd/{attested_fd}")
+    par_filename_raw = environ.get("FB_PAR_FILENAME")
+    if (
+        attested_path_raw != str(descriptor_path)
+        or par_filename_raw != str(descriptor_path)
+    ):
+        raise RuntimeError("Confirmatory runtime attestation has an invalid path.")
+
+    module_path = Path(module_file)
+    module_descriptor_match = re.fullmatch(
+        r"/proc/self/fd/([0-9]+)/upi_trm_train\.py",
+        module_path.as_posix(),
+    )
+    if module_descriptor_match is None:
+        raise RuntimeError(
+            "Confirmatory entrypoint was not imported from the attested PAR."
+        )
+    module_fd = int(module_descriptor_match.group(1))
+    if module_fd < 3:
+        raise RuntimeError("Confirmatory module descriptor is reserved or invalid.")
+
+    try:
+        before = os.fstat(attested_fd)
+        module_before = os.fstat(module_fd)
+        attested_seals = fcntl.fcntl(attested_fd, _F_GET_SEALS)
+        module_seals = fcntl.fcntl(module_fd, _F_GET_SEALS)
+    except OSError as exc:
+        raise RuntimeError(
+            "Confirmatory runtime descriptor cannot be inspected."
+        ) from exc
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or not stat.S_ISREG(module_before.st_mode)
+        or not os.get_inheritable(attested_fd)
+        or attested_seals & _REQUIRED_MEMFD_SEALS != _REQUIRED_MEMFD_SEALS
+        or module_seals & _REQUIRED_MEMFD_SEALS != _REQUIRED_MEMFD_SEALS
+        or (before.st_dev, before.st_ino, before.st_size)
+        != (module_before.st_dev, module_before.st_ino, module_before.st_size)
+        or not zipfile.is_zipfile(descriptor_path)
+    ):
+        raise RuntimeError(
+            "Confirmatory execution requires the immutable attested PAR artifact."
+        )
+
+    private_unpack = Path(private_unpack_raw)
+    par_unpack_raw = environ.get("FB_PAR_UNPACK_BASEDIR")
+    actual_sha256 = _hash_preimport_runtime(descriptor_path)
+    try:
+        after = os.fstat(attested_fd)
+        module_after = os.fstat(module_fd)
+        unpack_status = private_unpack.lstat()
+        unpack_path = private_unpack.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError(
+            "Confirmatory runtime or private unpack directory changed during preflight."
+        ) from exc
+    before_identity = (
+        before.st_dev,
+        before.st_ino,
+        stat.S_IFMT(before.st_mode),
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    after_identity = (
+        after.st_dev,
+        after.st_ino,
+        stat.S_IFMT(after.st_mode),
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    module_before_identity = (
+        module_before.st_dev,
+        module_before.st_ino,
+        stat.S_IFMT(module_before.st_mode),
+        module_before.st_size,
+        module_before.st_mtime_ns,
+        module_before.st_ctime_ns,
+    )
+    module_after_identity = (
+        module_after.st_dev,
+        module_after.st_ino,
+        stat.S_IFMT(module_after.st_mode),
+        module_after.st_size,
+        module_after.st_mtime_ns,
+        module_after.st_ctime_ns,
+    )
+    if (
+        len(
+            {
+                before_identity,
+                after_identity,
+                module_before_identity,
+                module_after_identity,
+            }
+        )
+        != 1
+        or actual_sha256 != attested_sha256
+    ):
+        raise RuntimeError(
+            "Confirmatory runtime artifact differs from its launcher attestation."
+        )
+    if (
+        not private_unpack.is_absolute()
+        or unpack_path != private_unpack
+        or par_unpack_raw != str(private_unpack)
+        or stat.S_ISLNK(unpack_status.st_mode)
+        or not stat.S_ISDIR(unpack_status.st_mode)
+        or unpack_status.st_uid != os.geteuid()
+        or stat.S_IMODE(unpack_status.st_mode) != 0o700
+    ):
+        raise RuntimeError(
+            "Confirmatory private unpack directory has an invalid identity or mode."
+        )
+    try:
+        os.set_inheritable(attested_fd, False)
+        if module_fd != attested_fd:
+            os.set_inheritable(module_fd, False)
+    except OSError as exc:
+        raise RuntimeError(
+            "Confirmatory runtime descriptor cannot be isolated from child processes."
+        ) from exc
+    return (
+        actual_sha256,
+        _PrivateUnpackDirectory(
+            path=unpack_path,
+            device=unpack_status.st_dev,
+            inode=unpack_status.st_ino,
+        ),
+        attested_fd,
+    )
+
+
+(
+    _PREVERIFIED_RUNTIME_SHA256,
+    _PRIVATE_UNPACK_BASE,
+    _PREVERIFIED_RUNTIME_FD,
+) = _preflight_confirmatory_runtime(
+    argv=list(sys.argv[1:]),
+    module_file=__file__,
+    environ=os.environ,
+)
+
+
+def _remove_private_unpack_base(directory: _PrivateUnpackDirectory) -> None:
+    """Remove only the exact launcher-created directory validated at startup."""
+
+    try:
+        status = directory.path.lstat()
+    except OSError:
+        return
+    if (
+        stat.S_ISDIR(status.st_mode)
+        and not stat.S_ISLNK(status.st_mode)
+        and status.st_uid == os.geteuid()
+        and stat.S_IMODE(status.st_mode) == 0o700
+        and status.st_dev == directory.device
+        and status.st_ino == directory.inode
+    ):
+        shutil.rmtree(directory.path, ignore_errors=True)
+
+
+if _PRIVATE_UNPACK_BASE is not None:
+    atexit.register(_remove_private_unpack_base, _PRIVATE_UNPACK_BASE)
 
 # Force subsequent imports to compile from the manifest-covered source files.
 # A process-unique cache prevents timestamp-valid bytecode in the checkout from
@@ -842,7 +1108,7 @@ def _validate_registered_confirmatory_assignment(
 def _validate_evidence_identity(value: object) -> Dict[str, Any]:
     """Validate the checkpoint-visible identity for every confirmatory method."""
 
-    required = {
+    historical_required = {
         "schema_version",
         "run_id",
         "algorithm",
@@ -852,15 +1118,20 @@ def _validate_evidence_identity(value: object) -> Dict[str, Any]:
         "effective_config",
         "dataset_provenance_sha256",
     }
-    if not isinstance(value, dict) or set(value) != required:
+    if not isinstance(value, dict):
         raise RuntimeError("Confirmatory evidence identity has an invalid field inventory.")
-    schema_version = value["schema_version"]
+    schema_version = value.get("schema_version")
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version != 1
+        or schema_version not in {1, 2}
     ):
         raise RuntimeError("Unsupported confirmatory evidence identity schema.")
+    required = set(historical_required)
+    if schema_version == 2:
+        required.add("runtime_artifact_sha256")
+    if set(value) != required:
+        raise RuntimeError("Confirmatory evidence identity has an invalid field inventory.")
     try:
         validate_run_id(value["run_id"])
     except RunIdentityError as exc:
@@ -884,6 +1155,20 @@ def _validate_evidence_identity(value: object) -> Dict[str, Any]:
         value["dataset_provenance_sha256"],
         field="evidence_identity.dataset_provenance_sha256",
     )
+    if schema_version == 2:
+        runtime_artifact_sha256 = _validate_expected_sha256(
+            value["runtime_artifact_sha256"],
+            field="evidence_identity.runtime_artifact_sha256",
+        )
+        effective_config = value["effective_config"]
+        if (
+            not isinstance(effective_config, dict)
+            or effective_config.get("runtime_artifact_sha256")
+            != runtime_artifact_sha256
+        ):
+            raise RuntimeError(
+                "Confirmatory evidence identity runtime artifact is inconsistent."
+            )
     if canonical_json_sha256(value["effective_config"]) != config_sha256:
         raise RuntimeError(
             "Confirmatory evidence identity effective configuration hash is inconsistent."
@@ -970,10 +1255,16 @@ def _verify_producer_source_matches_runtime(lookup_root: str | Path) -> None:
     """Require producer bytes to match the manifest embedded in this runtime."""
 
     producer_root = Path(lookup_root).expanduser().resolve()
-    runtime_root = Path(__file__).resolve().parent
     try:
-        if runtime_root.is_file() and zipfile.is_zipfile(runtime_root):
-            with zipfile.ZipFile(runtime_root, "r") as archive:
+        if _PREVERIFIED_RUNTIME_SHA256 is not None:
+            if _PREVERIFIED_RUNTIME_FD is None:
+                raise SourceIdentityError(
+                    "Verified runtime descriptor is unavailable."
+                )
+            with zipfile.ZipFile(
+                f"/proc/self/fd/{_PREVERIFIED_RUNTIME_FD}",
+                "r",
+            ) as archive:
                 manifest_bytes = archive.read(SOURCE_MANIFEST_RELATIVE_PATH)
                 embedded_manifest = validate_producer_source_manifest(
                     json.loads(manifest_bytes.decode("ascii"))
@@ -983,22 +1274,37 @@ def _verify_producer_source_matches_runtime(lookup_root: str | Path) -> None:
                     embedded_manifest,
                 )
         else:
-            if Path(sys.pycache_prefix or "").resolve() != _RUNTIME_BYTECODE_CACHE_ROOT:
-                raise SourceIdentityError(
-                    "Runtime bytecode cache isolation is not active."
+            runtime_root = Path(__file__).resolve().parent
+            if runtime_root.is_file() and zipfile.is_zipfile(runtime_root):
+                with zipfile.ZipFile(runtime_root, "r") as archive:
+                    manifest_bytes = archive.read(SOURCE_MANIFEST_RELATIVE_PATH)
+                    embedded_manifest = validate_producer_source_manifest(
+                        json.loads(manifest_bytes.decode("ascii"))
+                    )
+                    assert_runtime_archive_sources_match_manifest(
+                        archive,
+                        embedded_manifest,
+                    )
+            else:
+                if (
+                    Path(sys.pycache_prefix or "").resolve()
+                    != _RUNTIME_BYTECODE_CACHE_ROOT
+                ):
+                    raise SourceIdentityError(
+                        "Runtime bytecode cache isolation is not active."
+                    )
+                manifest_bytes = (
+                    runtime_root / SOURCE_MANIFEST_RELATIVE_PATH
+                ).read_bytes()
+                embedded_manifest = validate_producer_source_manifest(
+                    json.loads(manifest_bytes.decode("ascii"))
                 )
-            manifest_bytes = (
-                runtime_root / SOURCE_MANIFEST_RELATIVE_PATH
-            ).read_bytes()
-            embedded_manifest = validate_producer_source_manifest(
-                json.loads(manifest_bytes.decode("ascii"))
-            )
-            runtime_manifest = build_producer_source_manifest(runtime_root)
-            if runtime_manifest != embedded_manifest:
-                raise SourceIdentityError(
-                    "Runtime directory source bytes differ from the embedded "
-                    "manifest."
-                )
+                runtime_manifest = build_producer_source_manifest(runtime_root)
+                if runtime_manifest != embedded_manifest:
+                    raise SourceIdentityError(
+                        "Runtime directory source bytes differ from the embedded "
+                        "manifest."
+                    )
         producer_manifest = build_producer_source_manifest(producer_root)
         behavior_sources = behavior_source_relative_paths(producer_root)
     except (
@@ -1402,12 +1708,13 @@ def _fixed_base_effective_config(
     initialization_kind: str,
     initialization_artifact_sha256: Optional[str],
     registered_assignment: Dict[str, Any],
+    runtime_artifact_sha256: str,
 ) -> Dict[str, Any]:
     """Build path-free behavior and schedule identity for one registered run."""
 
     config_source_sha256s = [file_sha256(path) for path in (args.config or [])]
     return {
-        "effective_config_schema_version": 3,
+        "effective_config_schema_version": 4,
         "algorithm": "upi_trm",
         "training_protocol": "fixed_base_exact",
         "registration": {
@@ -1425,6 +1732,7 @@ def _fixed_base_effective_config(
         "runtime_fingerprint_sha256": canonical_json_sha256(
             _runtime_fingerprint()
         ),
+        "runtime_artifact_sha256": runtime_artifact_sha256,
         "dataset": {
             "train_split": args.train_split,
             "eval_split": args.eval_split,
@@ -1477,6 +1785,7 @@ def _validate_run_identity_bindings(
     dataset_provenance: Dict[str, Any],
     execution_device: str,
     runtime_fingerprint: Optional[Dict[str, Any]] = None,
+    runtime_artifact_sha256: Optional[str] = None,
 ) -> Dict[str, Any]:
     try:
         canonical = validate_run_identity(identity)
@@ -1509,6 +1818,15 @@ def _validate_run_identity_bindings(
         raise RuntimeError(
             "Schema-v5 runtime settings changed after run identity construction."
         )
+    if effective["effective_config_schema_version"] == 4:
+        if (
+            runtime_artifact_sha256 is None
+            or effective["runtime_artifact_sha256"]
+            != runtime_artifact_sha256
+        ):
+            raise RuntimeError(
+                "Schema-v5 runtime artifact differs from the run identity."
+            )
     if canonical["dataset_provenance_sha256"] != canonical_json_sha256(
         dataset_provenance
     ):
@@ -1844,6 +2162,7 @@ def save_checkpoint(
             dataset_provenance=canonical_dataset_provenance,
             execution_device=execution_device,
             runtime_fingerprint=runtime_fingerprint,
+            runtime_artifact_sha256=_PREVERIFIED_RUNTIME_SHA256,
         )
         if checkpoint_lineage is None:
             raise RuntimeError(
@@ -2364,6 +2683,7 @@ def resume_from_checkpoint(
             dataset_provenance=checkpoint_provenance,
             execution_device=_canonical_device(device),
             runtime_fingerprint=active_runtime_fingerprint,
+            runtime_artifact_sha256=_PREVERIFIED_RUNTIME_SHA256,
         )
         if checkpoint.get("checkpoint_phase") != "idle_between_training_calls":
             raise RuntimeError("Schema-v5 checkpoint has an invalid training phase.")
@@ -3836,6 +4156,10 @@ def main():
     initial_producer_identity: Optional[Dict[str, Any]] = None
     registered_assignment: Optional[Dict[str, Any]] = None
     if strict_evidence_run:
+        if _PREVERIFIED_RUNTIME_SHA256 is None:
+            raise RuntimeError(
+                "Strict evidence requires the pre-import packaged-runtime gate."
+            )
         if args.seed is None:
             raise RuntimeError(
                 "Confirmatory execution requires an explicit --seed."
@@ -4417,6 +4741,7 @@ def main():
         assert args.seed is not None
         assert args.run_id is not None
         assert registered_assignment is not None
+        assert _PREVERIFIED_RUNTIME_SHA256 is not None
         effective_config = _fixed_base_effective_config(
             args=args,
             rl_config=_config_dict(rl_cfg),
@@ -4428,6 +4753,7 @@ def main():
             initialization_kind=initialization_kind,
             initialization_artifact_sha256=initialization_artifact_sha256,
             registered_assignment=registered_assignment,
+            runtime_artifact_sha256=_PREVERIFIED_RUNTIME_SHA256,
         )
         try:
             producer_before_identity = discover_clean_git_source(
@@ -4472,6 +4798,7 @@ def main():
         assert args.run_id is not None
         assert initial_producer_identity is not None
         assert registered_assignment is not None
+        assert _PREVERIFIED_RUNTIME_SHA256 is not None
         if run_identity is not None:
             evidence_effective_config = run_identity["effective_config"]
             evidence_effective_config_sha256 = run_identity[
@@ -4488,7 +4815,7 @@ def main():
                     ) from exc
             runtime_fingerprint = _runtime_fingerprint()
             evidence_effective_config = {
-                "schema_version": 3,
+                "schema_version": 4,
                 "registration": {
                     "cell": args.confirmatory_cell,
                     "tier": args.confirmatory_tier,
@@ -4520,6 +4847,7 @@ def main():
                 "runtime_fingerprint_sha256": canonical_json_sha256(
                     runtime_fingerprint
                 ),
+                "runtime_artifact_sha256": _PREVERIFIED_RUNTIME_SHA256,
                 "initialization": {
                     "kind": initialization_kind,
                     "artifact_sha256": initialization_artifact_sha256,
@@ -4549,7 +4877,7 @@ def main():
         ):
             raise RuntimeError("Effective configuration hash is internally inconsistent.")
         evidence_identity = {
-            "schema_version": 1,
+            "schema_version": 2,
             "run_id": args.run_id,
             "algorithm": (
                 f"trm_{selected_baseline}"
@@ -4563,10 +4891,11 @@ def main():
             "dataset_provenance_sha256": canonical_json_sha256(
                 dataset_provenance
             ),
+            "runtime_artifact_sha256": _PREVERIFIED_RUNTIME_SHA256,
         }
         if args.prepare_confirmatory_lock:
             lock = {
-                "lock_schema_version": 3,
+                "lock_schema_version": 4,
                 "confirmatory_cell": args.confirmatory_cell,
                 "confirmatory_tier": args.confirmatory_tier,
                 "run_id": args.run_id,
@@ -4576,6 +4905,7 @@ def main():
                 "producer_git_commit": initial_producer_identity["git_commit"],
                 "effective_config_sha256": evidence_effective_config_sha256,
                 "effective_config": evidence_effective_config,
+                "runtime_artifact_sha256": _PREVERIFIED_RUNTIME_SHA256,
             }
             print(
                 "[CONFIRMATORY_LOCK] "

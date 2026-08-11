@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Generate ablation configs for diagnostic comparisons.
+Generate legacy feature-on ablation configs for diagnostic comparisons.
 
 Creates configs that remove one implementation feature at a time. Results from
 these finite comparisons describe only the evaluated runs; they do not establish
-that a feature is necessary or sufficient for stability.
+that a feature is necessary or sufficient for stability. Generated runs use the
+legacy training protocol and are not theorem-facing.
 """
 
 import os
@@ -15,8 +16,10 @@ from pathlib import Path
 ABLATIONS_DIR = Path("configs/ablations")
 ABLATIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Base theory-exact config (all features ON)
+# Legacy feature-on ablation baseline. This is not a theorem-facing configuration.
 BASE_CONFIG = {
+    "training_protocol": "legacy",
+
     # Shaped rewards with explicit terminal-outcome terms
     "reward_shaping": True,
     "fail_terminal_reward": -10.0,
@@ -28,7 +31,7 @@ BASE_CONFIG = {
     "inner_unroll_n": 4,
     "max_edits": 120,
 
-    # Theory-exact features (ALL ON in base)
+    # Feature-dial settings enabled in the legacy baseline
     "exact_k_step_targets": True,
     "exact_baseline_summation": True,
     "theory_exact_mixture": True,
@@ -92,7 +95,8 @@ def create_ablation(name: str, changes: dict, description: str):
 #
 # {description}
 #
-# Changes from base theory-exact config:
+# Legacy feature-on ablation configuration. Not theorem-facing.
+# Changes from the legacy feature-on ablation baseline:
 """
     for key, value in changes.items():
         header += f"#   - {key}: {value}\n"
@@ -174,7 +178,7 @@ create_ablation(
 )
 
 # ===================================================================
-# ABLATION 5: Remove Theory-Exact Mixture (Parameter-space interpolation)
+# ABLATION 5: Replace exact probability mixture with parameter interpolation
 # ===================================================================
 create_ablation(
     name="no_theory_exact_mixture",
@@ -189,7 +193,7 @@ create_ablation(
 )
 
 # ===================================================================
-# ABLATION 6: ALL theory features disabled (baseline RL)
+# ABLATION 6: All selected feature dials disabled (baseline RL)
 # ===================================================================
 create_ablation(
     name="no_theory_features",
@@ -212,7 +216,7 @@ create_ablation(
 )
 
 # ===================================================================
-# ABLATION 7: Sparse rewards WITHOUT theory features
+# ABLATION 7: Sparse rewards without the selected feature dials
 # ===================================================================
 create_ablation(
     name="sparse_no_theory",
@@ -236,9 +240,10 @@ create_ablation(
 )
 
 print("\n" + "="*70)
-print("Ablation configs generated successfully!")
+print("Legacy feature-on ablation configs generated successfully!")
 print("="*70)
 print(f"\nGenerated {len(list(ABLATIONS_DIR.glob('*.yaml')))} ablation configs in {ABLATIONS_DIR}/")
+print("These generated configurations use training_protocol=legacy and are not theorem-facing.")
 print("\nTo run ablations:")
 print("  python upi_trm_train.py --config configs/ablations/ablation_<name>.yaml")
 print("\nRecommended ablation sweep:")

@@ -261,7 +261,7 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
             "debug_checks",
             "config_source_sha256s",
     }
-    if schema_version in {2, 3}:
+    if schema_version in {2, 3, 4}:
         expected_fields.update(
             {
                 "registration",
@@ -269,6 +269,8 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
                 "initialization",
             }
         )
+        if schema_version == 4:
+            expected_fields.add("runtime_artifact_sha256")
     elif schema_version != 1:
         raise RunIdentityError("Unsupported effective configuration schema.")
     config = _require_exact_fields(
@@ -336,7 +338,7 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
         config["runtime_fingerprint_sha256"],
         path="effective_config.runtime_fingerprint_sha256",
     )
-    if schema_version in {2, 3}:
+    if schema_version in {2, 3, 4}:
         registration_fields = {
             "cell",
             "tier",
@@ -344,7 +346,7 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
             "training_seed",
             "registry_sha256",
         }
-        if schema_version == 3:
+        if schema_version in {3, 4}:
             registration_fields.add("attempt_index")
         registration = _require_exact_fields(
             config["registration"],
@@ -358,7 +360,7 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
             )
         _validate_run_id(registration["run_id"])
         _validate_training_seed(registration["training_seed"])
-        if schema_version == 3:
+        if schema_version in {3, 4}:
             _require_nonnegative_int(
                 registration["attempt_index"],
                 path="effective_config.registration.attempt_index",
@@ -371,6 +373,11 @@ def validate_upi_effective_config(value: object) -> dict[str, Any]:
             config["dataset_provenance_sha256"],
             path="effective_config.dataset_provenance_sha256",
         )
+        if schema_version == 4:
+            _require_sha256(
+                config["runtime_artifact_sha256"],
+                path="effective_config.runtime_artifact_sha256",
+            )
         initialization = _require_exact_fields(
             config["initialization"],
             expected={"kind", "artifact_sha256"},
@@ -592,7 +599,7 @@ def validate_run_identity(identity: object) -> dict[str, Any]:
             path="run_identity.initialization.artifact_sha256",
         )
 
-    if effective_config["effective_config_schema_version"] in {2, 3}:
+    if effective_config["effective_config_schema_version"] in {2, 3, 4}:
         registration = effective_config["registration"]
         if not isinstance(registration, Mapping):
             raise RunIdentityError("effective_config.registration is invalid.")

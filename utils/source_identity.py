@@ -13,7 +13,11 @@ SOURCE_MANIFEST_SCHEMA_VERSION = 1
 SOURCE_MANIFEST_RELATIVE_PATH = (
     "configs/iclr_confirmatory/producer_source_manifest.json"
 )
-_ROOT_SOURCES = ("upi_trm_train.py", "puzzle_dataset.py")
+_ROOT_SOURCES = (
+    "confirmatory_runtime_launcher.py",
+    "puzzle_dataset.py",
+    "upi_trm_train.py",
+)
 _SOURCE_DIRECTORIES = ("dataset", "evaluators", "models", "rl", "utils")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 

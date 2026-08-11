@@ -14,6 +14,7 @@
     "configs/iclr_confirmatory/debug_smoke.yaml": "56a48ad52e6a8c74c3e57d52d282bcc9b8676a2c9a24a321692f5985f25ba081",
     "configs/iclr_confirmatory/persistent_diagnostics.json": "d9b2f39bb3843eaf7e5d4633db5ecaa27dd2e5062caef8acb2c4e830116c3b7e",
     "configs/iclr_confirmatory/run_matrix.json": "13a9145e4af4011a1691ba35d8f0344078c787b83e472b6f7456480552f6c721",
+    "confirmatory_runtime_launcher.py": "635ae04ee41d66acd24b76e136f78e09e2fbf78ef1f626a40f67e2d87d9bd92e",
     "dataset/__init__.py": "b5e0e8c6c99d4cf503ff5c82f352003c9ae7ef4c2263aeb7b97928591cd7a73e",
     "dataset/build_4x4_sudoku.py": "2809903efec8fda4efef8d62be675dda2f613134afc5041d474b6459b053eeb5",
     "dataset/build_4x4_trivial.py": "69c691a1af07d1ad08654a3a89665d5496a6989cd8cadf08ae38640a38c031b6",
@@ -67,17 +68,17 @@
     "rl/task_config.py": "4bdd133ddd3317c59182c0d302147000f5290cb2a1e62ee06d3ed3bf31dffb5d",
     "rl/theory_diagnostics.py": "de31d81b14a0589c2bf692fd07f24697bc8a195b71fb1a9031107d892e6a1467",
     "rl/training_setup.py": "4665a2c49bbf53fb44febbd131b8c01cef2c4801bf2e1986f9480a8f728a04de",
-    "rl/upi_trm_trainer.py": "b4516707b02745b943777c0674356a5a664b1b9e40059f7d8fb6cf2a7e0791ff",
+    "rl/upi_trm_trainer.py": "3b21283e53850a1941f6f7e66d752659ee51ba99baaa39e08eea3596969922af",
     "rl/value_targets.py": "8b935cb7c7dadf95ebb62887167217a66ed3f7d9d70f46c63d1e170cbad4baf9",
-    "upi_trm_train.py": "08f2fbeb7466f43b86a6a1939ce282acd2dfb39c6c769b0d040acef18f075426",
+    "upi_trm_train.py": "fda5b0df5e001ea28b909dfaef04635705bb723ad5a2c1784193b889f747c59b",
     "utils/__init__.py": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
     "utils/compute_accounting.py": "b1367ee405611914bc6e3d2c4c319992eb4c2b657ead4f4de994d5a2f98efe9d",
     "utils/dataset_provenance.py": "5e74124dbc672d9184d84dd2ddac7a46e1ba348e8a32a3a3d52f74edb340133e",
     "utils/evaluation_artifacts.py": "d5fc640c7ca0f238a5819ba2ae0e3d2454c7e9011818ed3cc29276ef42f79146",
     "utils/functions.py": "a7c54723be9ade0317afd1fe42d42da5e7a33e1b5cffbf9bdfc66f3791a3caef",
     "utils/lipschitz.py": "361254016d0bab61a07e8e8ae7a9a84403784755eae50e243cc310c590268fbc",
-    "utils/run_identity.py": "39cfb79c8fa43611aaa714858ebdc06fb2abb1dbbb3170c52fbd670c3495fb60",
+    "utils/run_identity.py": "936245f66c3715b179412f4d56dc9b2407e118657e61b3b3c8ed2647c340990b",
     "utils/seeding.py": "1ed299ba22625bbe0e0056d4a3daca463c82c06436663a53817e1f6a83141265",
-    "utils/source_identity.py": "b3bb8fd5344bdb0b0c33ec8e7e5a3ab392d653f130696f38482ca29f7fb50e9b"
+    "utils/source_identity.py": "d8f2741c7263ab7e0a953dde409a75f04e6db39f8ded72e2abf813017b2a18d1"
   }
 }

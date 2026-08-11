@@ -164,7 +164,7 @@ from utils.lipschitz import (
     estimate_Cz,
     estimate_Lv,
     compute_unrolling_term_proxy,
-    # Theory-exact components (Sections 4.2, 5.4 of paper)
+    # Exact-centering and persistent finite-batch diagnostic helpers
     estimate_Cdrift,
     estimate_plan_change,
     compute_value_of_memory_residual,

@@ -74,6 +74,48 @@ Preserve those lines with every result artifact. Legacy smoke-only paths may
 omit `--dataset-paths` to use `DummyPuzzleDataset`; `fixed_base_exact` requires
 materialized, disjoint train and evaluation splits.
 
+## Confirmatory runtime boundary
+
+Source-tree execution is development-only. A run using `--confirmatory` must
+execute the standalone `upi_trm_train` PAR through
+`confirmatory_runtime_launcher`. The launcher takes an absolute PAR path and
+an externally frozen SHA-256, validates the whole artifact plus its embedded
+source manifest before importing training code, copies the verified bytes into
+a sealed anonymous file, and starts that immutable descriptor as a supervised
+child process. Each launch also uses a fresh private PAR unpack directory
+instead of a shared extraction cache. This prevents path replacement, in-place
+artifact mutation, and stale extracted-code reuse between validation and
+execution. Direct unattested PAR execution and source-tree confirmatory
+execution fail before model or RL modules are imported. The launcher removes
+the private unpack directory when the child exits, including startup failures.
+
+Build both artifacts, freeze the training PAR digest outside the PAR, then use
+the launcher as follows:
+
+```bash
+buck2 build --local-only @fbcode//mode/opt --show-output \
+  fbcode//buiksat_trm:upi_trm_train \
+  fbcode//buiksat_trm:confirmatory_runtime_launcher
+sha256sum /absolute/path/to/upi_trm_train.par
+buck2 run --local-only @fbcode//mode/opt \
+  fbcode//buiksat_trm:confirmatory_runtime_launcher -- \
+  --runtime-archive /absolute/path/to/upi_trm_train.par \
+  --expected-runtime-sha256 <64-lowercase-hex-digest> -- \
+  --confirmatory <registered-run-arguments>
+```
+
+The current effective configuration, checkpoint evidence identity, and
+confirmatory lock all record the verified PAR digest. Do not put that digest
+inside `run_matrix.json` or another PAR input because doing so creates a
+self-hash cycle.
+
+The launcher executable, operating system, and launcher process environment
+are the external root of trust. Start the launcher from a controlled process
+without loader, Python-path, or PAR override hooks. The launcher removes those
+hooks before executing the training PAR. Its inherited descriptor and
+attestation variables are capabilities for the verified bytes, not a claim
+that environment variables are cryptographically unforgeable.
+
 ## Tests
 
 From an fbcode checkout where this repository is available as `buiksat_trm`:

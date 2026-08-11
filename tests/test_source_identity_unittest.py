@@ -18,7 +18,11 @@ from utils.source_identity import (
 
 class TestSourceIdentity(unittest.TestCase):
     def _source_tree(self, root: Path) -> None:
-        for relative_path in ("upi_trm_train.py", "puzzle_dataset.py"):
+        for relative_path in (
+            "confirmatory_runtime_launcher.py",
+            "puzzle_dataset.py",
+            "upi_trm_train.py",
+        ):
             destination = root / relative_path
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(f"# {relative_path}\n", encoding="ascii")

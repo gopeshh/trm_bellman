@@ -222,6 +222,35 @@ class RunIdentityTest(unittest.TestCase):
                 2,
             )
 
+            current_schema_four = copy.deepcopy(effective)
+            current_schema_four["effective_config_schema_version"] = 4
+            current_schema_four["runtime_artifact_sha256"] = "e" * 64
+            current_identity = build_run_identity(
+                run_id="confirmatory.seed7",
+                training_seed=7,
+                git_lookup_root=root,
+                effective_config=current_schema_four,
+                dataset_provenance=provenance,
+                initialization_kind="random",
+                initialization_artifact_sha256=None,
+            )
+            self.assertEqual(
+                current_identity["effective_config"][
+                    "runtime_artifact_sha256"
+                ],
+                "e" * 64,
+            )
+
+            for invalid in (None, "E" * 64):
+                with self.subTest(runtime_artifact_sha256=invalid):
+                    invalid_schema_four = copy.deepcopy(current_schema_four)
+                    if invalid is None:
+                        invalid_schema_four.pop("runtime_artifact_sha256")
+                    else:
+                        invalid_schema_four["runtime_artifact_sha256"] = invalid
+                    with self.assertRaises(RunIdentityError):
+                        validate_upi_effective_config(invalid_schema_four)
+
             wrong_seed = copy.deepcopy(effective)
             wrong_seed["registration"]["training_seed"] = 8
             with self.assertRaisesRegex(RunIdentityError, "seed differs"):

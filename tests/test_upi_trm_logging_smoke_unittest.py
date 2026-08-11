@@ -4,6 +4,7 @@ Converts pytest-style tests to unittest.TestCase for Buck2 compatibility.
 """
 
 import copy
+import fcntl
 import hashlib
 import importlib
 import json
@@ -38,6 +39,7 @@ from upi_trm_train import (
     _claim_confirmatory_attempt_paths,
     _config_dict,
     _fixed_base_effective_config,
+    _preflight_confirmatory_runtime,
     _remember_latest_optimization_metrics,
     _reject_confirmatory_resume,
     _resolve_train_pool_size,
@@ -49,6 +51,7 @@ from upi_trm_train import (
     _validate_evidence_identity,
     _validate_confirmatory_attempt_index,
     _validate_expected_producer_commit,
+    _validate_run_identity_bindings,
     _verify_producer_source_matches_runtime,
     resume_from_checkpoint,
     save_checkpoint,
@@ -103,6 +106,144 @@ def _tiny_trm_cfg(seq_len: int, vocab_size: int, num_identifiers: int, batch_siz
 
 
 class TestUPITrmLoggingSmoke(unittest.TestCase):
+    def test_confirmatory_preflight_requires_packaged_launcher(self):
+        with self.assertRaisesRegex(RuntimeError, "packaged-runtime launcher"):
+            _preflight_confirmatory_runtime(
+                argv=["--confirmatory"],
+                module_file=__file__,
+                environ={},
+            )
+
+    def test_confirmatory_preflight_rejects_unsealed_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.par"
+            with zipfile.ZipFile(runtime, "w") as archive:
+                archive.writestr("upi_trm_train.py", b"# packaged\n")
+            descriptor = os.memfd_create(
+                "upi_trm_unsealed_preflight_test",
+                os.MFD_ALLOW_SEALING,
+            )
+            os.write(descriptor, runtime.read_bytes())
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            os.set_inheritable(descriptor, True)
+            descriptor_path = f"/proc/self/fd/{descriptor}"
+            private_unpack = Path(directory) / "private-unpack"
+            private_unpack.mkdir(mode=0o700)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "immutable attested"):
+                    _preflight_confirmatory_runtime(
+                        argv=["--confirmatory"],
+                        module_file=f"{descriptor_path}/upi_trm_train.py",
+                        environ={
+                            "UPI_TRM_VERIFIED_RUNTIME_PATH": descriptor_path,
+                            "UPI_TRM_VERIFIED_RUNTIME_SHA256": hashlib.sha256(
+                                runtime.read_bytes()
+                            ).hexdigest(),
+                            "UPI_TRM_VERIFIED_RUNTIME_FD": str(descriptor),
+                            "UPI_TRM_PRIVATE_UNPACK_BASE": str(private_unpack),
+                            "FB_PAR_FILENAME": descriptor_path,
+                            "FB_PAR_UNPACK_BASEDIR": str(private_unpack),
+                        },
+                    )
+            finally:
+                os.close(descriptor)
+
+    def test_confirmatory_preflight_binds_and_consumes_runtime_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.par"
+            with zipfile.ZipFile(runtime, "w") as archive:
+                archive.writestr("upi_trm_train.py", b"# packaged\n")
+            digest = hashlib.sha256(runtime.read_bytes()).hexdigest()
+            descriptor = os.memfd_create(
+                "upi_trm_preflight_test",
+                os.MFD_ALLOW_SEALING,
+            )
+            os.write(descriptor, runtime.read_bytes())
+            os.fchmod(descriptor, 0o500)
+            fcntl.fcntl(
+                descriptor,
+                fcntl.F_ADD_SEALS,
+                fcntl.F_SEAL_WRITE
+                | fcntl.F_SEAL_SHRINK
+                | fcntl.F_SEAL_GROW
+                | fcntl.F_SEAL_SEAL,
+            )
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            os.set_inheritable(descriptor, True)
+            descriptor_path = f"/proc/self/fd/{descriptor}"
+            private_unpack = Path(directory) / "private-unpack"
+            private_unpack.mkdir(mode=0o700)
+            try:
+                environment = {
+                    "UPI_TRM_VERIFIED_RUNTIME_PATH": descriptor_path,
+                    "UPI_TRM_VERIFIED_RUNTIME_SHA256": digest,
+                    "UPI_TRM_VERIFIED_RUNTIME_FD": str(descriptor),
+                    "FB_PAR_FILENAME": descriptor_path,
+                    "FB_PAR_UNPACK_BASEDIR": str(private_unpack),
+                    "UPI_TRM_PRIVATE_UNPACK_BASE": str(private_unpack),
+                }
+                preflight = _preflight_confirmatory_runtime(
+                    argv=[
+                        "--confirmatory",
+                        "--confirmatory-tier",
+                        "debug",
+                        "--prepare-confirmatory-lock",
+                    ],
+                    module_file=f"{descriptor_path}/upi_trm_train.py",
+                    environ=environment,
+                )
+                self.assertEqual(preflight[0], digest)
+                self.assertIsNotNone(preflight[1])
+                assert preflight[1] is not None
+                self.assertEqual(preflight[1].path, private_unpack)
+                self.assertEqual(preflight[2], descriptor)
+                self.assertNotIn("UPI_TRM_VERIFIED_RUNTIME_PATH", environment)
+                self.assertNotIn("UPI_TRM_VERIFIED_RUNTIME_SHA256", environment)
+                self.assertNotIn("UPI_TRM_VERIFIED_RUNTIME_FD", environment)
+                self.assertNotIn("UPI_TRM_PRIVATE_UNPACK_BASE", environment)
+                self.assertFalse(os.get_inheritable(descriptor))
+                os.set_inheritable(descriptor, True)
+
+                uppercase_environment = {
+                    "UPI_TRM_VERIFIED_RUNTIME_PATH": descriptor_path,
+                    "UPI_TRM_VERIFIED_RUNTIME_SHA256": digest.upper(),
+                    "UPI_TRM_VERIFIED_RUNTIME_FD": str(descriptor),
+                    "FB_PAR_FILENAME": descriptor_path,
+                    "FB_PAR_UNPACK_BASEDIR": str(private_unpack),
+                    "UPI_TRM_PRIVATE_UNPACK_BASE": str(private_unpack),
+                }
+                with self.assertRaisesRegex(RuntimeError, "lowercase"):
+                    _preflight_confirmatory_runtime(
+                        argv=["--confirmatory"],
+                        module_file=f"{descriptor_path}/upi_trm_train.py",
+                        environ=uppercase_environment,
+                    )
+
+                wrong_digest_environment = {
+                    "UPI_TRM_VERIFIED_RUNTIME_PATH": descriptor_path,
+                    "UPI_TRM_VERIFIED_RUNTIME_SHA256": "0" * 64,
+                    "UPI_TRM_VERIFIED_RUNTIME_FD": str(descriptor),
+                    "FB_PAR_FILENAME": descriptor_path,
+                    "FB_PAR_UNPACK_BASEDIR": str(private_unpack),
+                    "UPI_TRM_PRIVATE_UNPACK_BASE": str(private_unpack),
+                }
+                with self.assertRaisesRegex(RuntimeError, "differs"):
+                    _preflight_confirmatory_runtime(
+                        argv=["--confirmatory"],
+                        module_file=f"{descriptor_path}/upi_trm_train.py",
+                        environ=wrong_digest_environment,
+                    )
+            finally:
+                os.close(descriptor)
+
+    def test_preflight_rejects_attestation_without_confirmatory_mode(self):
+        with self.assertRaisesRegex(RuntimeError, "only for --confirmatory"):
+            _preflight_confirmatory_runtime(
+                argv=[],
+                module_file=__file__,
+                environ={"UPI_TRM_VERIFIED_RUNTIME_PATH": "/tmp/runtime.par"},
+            )
+
     def test_runtime_bytecode_cache_ignores_checkout_pyc(self):
         self.assertEqual(
             Path(sys.pycache_prefix or "").resolve(),
@@ -161,7 +302,11 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
     def test_source_tree_runtime_hashes_executing_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
             producer_root = Path(directory) / "producer"
-            for relative_path in ("upi_trm_train.py", "puzzle_dataset.py"):
+            for relative_path in (
+                "confirmatory_runtime_launcher.py",
+                "puzzle_dataset.py",
+                "upi_trm_train.py",
+            ):
                 destination = producer_root / relative_path
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_text(f"# {relative_path}\n", encoding="ascii")
@@ -213,7 +358,11 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
     def test_standalone_runtime_rejects_tampered_archive_source(self):
         with tempfile.TemporaryDirectory() as directory:
             producer_root = Path(directory) / "producer"
-            for relative_path in ("upi_trm_train.py", "puzzle_dataset.py"):
+            for relative_path in (
+                "confirmatory_runtime_launcher.py",
+                "puzzle_dataset.py",
+                "upi_trm_train.py",
+            ):
                 destination = producer_root / relative_path
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_text(f"# {relative_path}\n", encoding="ascii")
@@ -300,6 +449,27 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "inconsistent"):
             _validate_evidence_identity(mutated)
 
+        runtime_hash = "c" * 64
+        current_config = {
+            **config,
+            "runtime_artifact_sha256": runtime_hash,
+        }
+        current_identity = {
+            **identity,
+            "schema_version": 2,
+            "runtime_artifact_sha256": runtime_hash,
+            "effective_config": current_config,
+            "effective_config_sha256": canonical_json_sha256(current_config),
+        }
+        self.assertEqual(
+            _validate_evidence_identity(current_identity),
+            current_identity,
+        )
+        wrong_runtime = copy.deepcopy(current_identity)
+        wrong_runtime["runtime_artifact_sha256"] = "d" * 64
+        with self.assertRaisesRegex(RuntimeError, "runtime artifact"):
+            _validate_evidence_identity(wrong_runtime)
+
     def test_fixed_base_lock_binds_registration_data_and_initialization(self):
         args = SimpleNamespace(
             config=[],
@@ -324,7 +494,13 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         )
         provenance = {"ordered_records": {"train": ["a"], "eval": ["b"]}}
 
-        def build(*, args_overrides=None, dataset_provenance=None, **initialization):
+        def build(
+            *,
+            args_overrides=None,
+            dataset_provenance=None,
+            runtime_artifact_sha256="e" * 64,
+            **initialization,
+        ):
             local_args = SimpleNamespace(**vars(args))
             for name, value in (args_overrides or {}).items():
                 setattr(local_args, name, value)
@@ -348,9 +524,12 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                     "attempt_index": local_args.attempt_index,
                     "registry_sha256": "f" * 64,
                 },
+                runtime_artifact_sha256=runtime_artifact_sha256,
             )
 
         base = build()
+        self.assertEqual(base["effective_config_schema_version"], 4)
+        self.assertEqual(base["runtime_artifact_sha256"], "e" * 64)
         variants = (
             build(args_overrides={"seed": 102, "run_id": "c2-upi-seed102"}),
             build(args_overrides={"confirmatory_cell": "C2_TRM_PPO"}),
@@ -361,6 +540,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 }
             ),
             build(kind="weights_checkpoint", sha256="a" * 64),
+            build(runtime_artifact_sha256="d" * 64),
         )
         for variant in variants:
             self.assertNotEqual(
@@ -648,6 +828,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         run_id="unit.seed17",
         seed=17,
         environment_interactions=None,
+        runtime_artifact_sha256=None,
     ):
         rl_config = (
             trainer.rl_cfg.model_dump()
@@ -706,6 +887,28 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             "debug_checks": False,
             "config_source_sha256s": [],
         }
+        if runtime_artifact_sha256 is not None:
+            effective_config.update(
+                {
+                    "effective_config_schema_version": 4,
+                    "registration": {
+                        "cell": "C2_UPI_TRM",
+                        "tier": "debug",
+                        "run_id": run_id,
+                        "training_seed": seed,
+                        "attempt_index": 0,
+                        "registry_sha256": "f" * 64,
+                    },
+                    "dataset_provenance_sha256": canonical_json_sha256(
+                        provenance
+                    ),
+                    "initialization": {
+                        "kind": "random",
+                        "artifact_sha256": None,
+                    },
+                    "runtime_artifact_sha256": runtime_artifact_sha256,
+                }
+            )
         return {
             "run_identity_schema_version": 1,
             "run_id": run_id,
@@ -716,6 +919,44 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             "dataset_provenance_sha256": canonical_json_sha256(provenance),
             "initialization": {"kind": "random", "artifact_sha256": None},
         }
+
+    def test_schema_four_run_identity_binds_active_runtime_artifact(self):
+        model, trainer, _ = self._make_persistent_budget_trainer(
+            "fixed_base_exact"
+        )
+        provenance = self._checkpoint_provenance(trainer)
+        runtime_sha256 = "e" * 64
+        identity = self._run_identity(
+            model,
+            trainer,
+            provenance,
+            runtime_artifact_sha256=runtime_sha256,
+        )
+        rl_config = _config_dict(trainer.rl_cfg)
+        model_config = _config_dict(model.config)
+        runtime_fingerprint = upi_trm_train._runtime_fingerprint()
+        self.assertEqual(
+            _validate_run_identity_bindings(
+                identity,
+                rl_config=rl_config,
+                model_config=model_config,
+                dataset_provenance=provenance,
+                execution_device="cpu",
+                runtime_fingerprint=runtime_fingerprint,
+                runtime_artifact_sha256=runtime_sha256,
+            ),
+            identity,
+        )
+        with self.assertRaisesRegex(RuntimeError, "runtime artifact differs"):
+            _validate_run_identity_bindings(
+                identity,
+                rl_config=rl_config,
+                model_config=model_config,
+                dataset_provenance=provenance,
+                execution_device="cpu",
+                runtime_fingerprint=runtime_fingerprint,
+                runtime_artifact_sha256="d" * 64,
+            )
 
     @staticmethod
     def _root_lineage():

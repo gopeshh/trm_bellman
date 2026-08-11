@@ -88,6 +88,23 @@ the executable run matrix: after target-network synchronization it no longer
 changed the bootstrap evaluator, so retaining it as a one-factor contrast
 would have been false. Its old config remains as historical source only.
 
+Confirmatory execution also has a pre-import artifact boundary. The trusted
+stdlib-only launcher authenticates an absolute standalone PAR against an
+externally frozen SHA-256 and validates the embedded source/config manifest
+before it copies the verified bytes into a sealed anonymous file and executes
+the training entry point as a supervised child through that immutable
+descriptor. Every launch uses a fresh private PAR unpack directory rather than
+a shared extraction cache, and the launcher removes it when the child exits.
+The entry point independently verifies the descriptor seals, rehashes its
+bytes, and validates the private unpack directory before importing model or RL
+modules. Source-tree runs and direct unattested PAR runs cannot enter
+`--confirmatory` mode. Effective
+configuration schema 4, evidence-identity schema 2, and lock schema 4 bind the
+verified PAR digest without embedding that self-referential digest in the PAR.
+The trusted launcher process, host, and initial environment remain the
+external trust root; the launcher strips loader, Python-path, and PAR override
+hooks before it starts the training artifact.
+
 ## Conditional theorem premises not certified by execution
 
 An invocation of the paper's certificates must separately establish, on the

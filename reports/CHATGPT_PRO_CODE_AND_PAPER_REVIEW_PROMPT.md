@@ -57,6 +57,35 @@ Treat the paper as the semantic oracle for paper-parity claims. Treat
 implementation tests, handoffs, and prior reviews as hypotheses and evidence,
 not as authority.
 
+## Post-fix review focus
+
+This review follows repairs for `UPITRM-UPD-001` through `UPITRM-UPD-003`.
+Do not assume those repairs are correct merely because tests or prior reviewers
+accepted them. Reconstruct and challenge each contract from current source:
+
+1. Confirmatory execution must authenticate the complete packaged runtime
+   before any behavior-bearing model or RL module is imported.
+2. Validation and execution must be bound to one immutable runtime object, with
+   no path-replacement, same-inode mutation, stale bytecode, duplicate archive
+   member, unsafe member path, or shared extraction-cache gap.
+3. The launcher must copy verified bytes into a sealed anonymous file, execute
+   that exact descriptor as a supervised child, use a fresh private unpack
+   directory, and remove the directory after success and startup failure.
+4. The packaged entry point must independently verify descriptor identity,
+   seals, whole-artifact SHA-256, module origin, and private-unpack ownership
+   before project imports.
+5. The verified runtime SHA-256 must bind current effective configuration,
+   evidence identity, confirmatory lock, checkpoint save, and resume. Historical
+   schemas must remain readable only under their exact historical contracts,
+   and the digest must remain outside PAR inputs to avoid a self-hash cycle.
+6. The trainer comment must no longer contain the stale numeric paper mapping.
+7. The ablation generator must explicitly emit legacy, non-theorem-facing
+   configurations rather than calling its feature-on baseline theory-exact.
+
+Review the complete implementation change since the parent of the current
+implementation head, but do not limit the audit to that diff. The resulting
+tree and all reachable callers remain the source of truth.
+
 ## Non-negotiable scope
 
 The paper is conditional on:
@@ -119,6 +148,7 @@ files completely:
 - `upi_trm_train.py`;
 - `utils/lipschitz.py`;
 - `utils/run_identity.py`;
+- `confirmatory_runtime_launcher.py`;
 - every importing caller, affected test, owning Buck target, launcher,
   evaluator, diagnostic, and documentation claim reached from those files.
 
@@ -150,7 +180,7 @@ contexts:
 4. exact probability mixing, exact centering, CPI bounds, signed defects, and
    deployment perturbation;
 5. configuration, checkpoint identity, source provenance, build ownership,
-   launch safety, and test coverage;
+   sealed-runtime launch safety, schema compatibility, and test coverage;
 6. citations, stale references, unsupported claims, and source/PDF
    consistency.
 
@@ -427,6 +457,14 @@ Establish or refute each item with exact paper and implementation anchors:
 - the fixed-base path does not recursively promote mixtures or mutate the
   recurrent map;
 - checkpoint and source identity bind the bytes and objects that executed;
+- confirmatory execution verifies the complete PAR before behavior imports,
+  launches a sealed immutable descriptor, and cannot reuse a shared unpack
+  cache;
+- the entry point verifies the same sealed runtime object that supplied its
+  module before importing model or RL code;
+- the verified runtime digest is present in every current evidence identity,
+  effective configuration, lock, save, and resume binding without changing the
+  historical schema contracts;
 - the canonical config is registered but not treated as authorized evidence;
 - diagnostics and documentation do not claim that finite observations prove
   uniform mathematical premises.
@@ -516,6 +554,41 @@ buck2 test --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_augmented_replay_diagnostics-library-type-checking
 ```
 
+Also run the type-check targets generated for the new launcher library and
+binary. Do not treat failures from an optional repository-wide type target as
+part of this required gate; if such a target is run, report its complete output
+and distinguish pre-existing errors from errors on changed lines.
+
+Build and exercise the real packaged-runtime boundary without starting
+training:
+
+```bash
+buck2 build --local-only @fbcode//mode/opt --show-output \
+  fbcode//buiksat_trm:upi_trm_train \
+  fbcode//buiksat_trm:confirmatory_runtime_launcher
+
+sha256sum /absolute/path/to/upi_trm_train.par
+
+/absolute/path/to/confirmatory_runtime_launcher.par \
+  --runtime-archive /absolute/path/to/upi_trm_train.par \
+  --expected-runtime-sha256 <actual-lowercase-sha256> -- \
+  --confirmatory --help
+```
+
+Record both artifact paths, the actual training-PAR SHA-256, exit codes,
+stderr, and the count of `upi_trm_confirmatory_unpack.*` directories before
+and after. Also require all of these negative cases to fail before training:
+
+- direct `upi_trm_train.par --confirmatory --help` execution;
+- a wrong, uppercase, or malformed expected SHA-256;
+- an unsealed or unavailable descriptor;
+- source/config inventory tampering, extra or missing behavior sources,
+  duplicate members, unsafe paths, and behavior bytecode;
+- child startup failure, with private-unpack cleanup.
+
+Inspect environment sanitization for loader, Python-path, shell-function, and
+PAR override hooks. Do not call a unit-test mock a real launcher integration.
+
 Record exact commands, resolved repository link, Buck version, exit codes,
 pass/fail/timeout/infrastructure/build counts, and warnings. If the Buck
 checkout or exact anchor mapping is unavailable, do not silently test another
@@ -587,7 +660,8 @@ contain:
 8. verified findings;
 9. rejected candidates and cleared risks;
 10. validation commands and exact results;
-11. prior-report reconciliation for every `UPITRM-REV-*` item;
+11. prior-report reconciliation for every `UPITRM-REV-*` and
+    `UPITRM-UPD-*` item;
 12. claim, citation, and stale-reference audit;
 13. recommended repairs in priority order;
 14. initial and final worktree attestation for both repositories;
