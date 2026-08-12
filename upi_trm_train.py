@@ -1,6 +1,5 @@
 
 import argparse
-import atexit
 import copy
 import fcntl
 import hashlib
@@ -12,7 +11,6 @@ import os
 import platform
 import random
 import re
-import shutil
 import stat
 import sys
 import tempfile
@@ -26,6 +24,7 @@ _VERIFIED_RUNTIME_PATH_ENV = "UPI_TRM_VERIFIED_RUNTIME_PATH"
 _VERIFIED_RUNTIME_SHA256_ENV = "UPI_TRM_VERIFIED_RUNTIME_SHA256"
 _VERIFIED_RUNTIME_FD_ENV = "UPI_TRM_VERIFIED_RUNTIME_FD"
 _PRIVATE_UNPACK_BASE_ENV = "UPI_TRM_PRIVATE_UNPACK_BASE"
+_PRIVATE_UNPACK_FD_ENV = "UPI_TRM_PRIVATE_UNPACK_FD"
 _LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MEMFD_SEALING_AVAILABLE = all(
     hasattr(fcntl, name)
@@ -49,13 +48,6 @@ _REQUIRED_MEMFD_SEALS = sum(
 )
 
 
-@dataclass(frozen=True)
-class _PrivateUnpackDirectory:
-    path: Path
-    device: int
-    inode: int
-
-
 def _hash_preimport_runtime(path: Path) -> str:
     """Hash the packaged runtime before any behavior module is imported."""
 
@@ -74,7 +66,7 @@ def _preflight_confirmatory_runtime(
     argv: List[str],
     module_file: str,
     environ: MutableMapping[str, str],
-) -> Tuple[Optional[str], Optional[_PrivateUnpackDirectory], Optional[int]]:
+) -> Tuple[Optional[str], Optional[int], Optional[int]]:
     """Reject confirmatory execution before importing behavior-bearing code."""
 
     confirmatory = "--confirmatory" in argv
@@ -82,12 +74,14 @@ def _preflight_confirmatory_runtime(
     attested_sha256 = environ.pop(_VERIFIED_RUNTIME_SHA256_ENV, None)
     attested_fd_raw = environ.pop(_VERIFIED_RUNTIME_FD_ENV, None)
     private_unpack_raw = environ.pop(_PRIVATE_UNPACK_BASE_ENV, None)
+    private_unpack_fd_raw = environ.pop(_PRIVATE_UNPACK_FD_ENV, None)
     if not confirmatory:
         if (
             attested_path_raw is not None
             or attested_sha256 is not None
             or attested_fd_raw is not None
             or private_unpack_raw is not None
+            or private_unpack_fd_raw is not None
         ):
             raise RuntimeError(
                 "Packaged-runtime attestation is valid only for --confirmatory."
@@ -98,6 +92,7 @@ def _preflight_confirmatory_runtime(
         or attested_sha256 is None
         or attested_fd_raw is None
         or private_unpack_raw is None
+        or private_unpack_fd_raw is None
     ):
         raise RuntimeError(
             "Confirmatory execution requires the verified packaged-runtime launcher."
@@ -116,6 +111,11 @@ def _preflight_confirmatory_runtime(
     attested_fd = int(attested_fd_raw)
     if attested_fd < 3:
         raise RuntimeError("Verified runtime descriptor is reserved or invalid.")
+    if not re.fullmatch(r"[0-9]+", private_unpack_fd_raw):
+        raise RuntimeError("Private unpack descriptor must be a decimal integer.")
+    private_unpack_fd = int(private_unpack_fd_raw)
+    if private_unpack_fd < 3 or private_unpack_fd == attested_fd:
+        raise RuntimeError("Private unpack descriptor is reserved or invalid.")
 
     descriptor_path = Path(f"/proc/self/fd/{attested_fd}")
     par_filename_raw = environ.get("FB_PAR_FILENAME")
@@ -161,14 +161,26 @@ def _preflight_confirmatory_runtime(
             "Confirmatory execution requires the immutable attested PAR artifact."
         )
 
-    private_unpack = Path(private_unpack_raw)
-    par_unpack_raw = environ.get("FB_PAR_UNPACK_BASEDIR")
+    private_unpack_path = Path(f"/proc/self/fd/{private_unpack_fd}")
+    par_unpack_raw = environ.pop("FB_PAR_UNPACK_BASEDIR", None)
+    if (
+        private_unpack_raw != str(private_unpack_path)
+        or par_unpack_raw != str(private_unpack_path)
+    ):
+        raise RuntimeError(
+            "Confirmatory private unpack attestation has an invalid path."
+        )
+    try:
+        unpack_before = os.fstat(private_unpack_fd)
+    except OSError as exc:
+        raise RuntimeError(
+            "Confirmatory private unpack descriptor cannot be inspected."
+        ) from exc
     actual_sha256 = _hash_preimport_runtime(descriptor_path)
     try:
         after = os.fstat(attested_fd)
         module_after = os.fstat(module_fd)
-        unpack_status = private_unpack.lstat()
-        unpack_path = private_unpack.resolve(strict=True)
+        unpack_after = os.fstat(private_unpack_fd)
     except OSError as exc:
         raise RuntimeError(
             "Confirmatory runtime or private unpack directory changed during preflight."
@@ -220,14 +232,22 @@ def _preflight_confirmatory_runtime(
         raise RuntimeError(
             "Confirmatory runtime artifact differs from its launcher attestation."
         )
+    unpack_before_identity = (
+        unpack_before.st_dev,
+        unpack_before.st_ino,
+        stat.S_IFMT(unpack_before.st_mode),
+    )
+    unpack_after_identity = (
+        unpack_after.st_dev,
+        unpack_after.st_ino,
+        stat.S_IFMT(unpack_after.st_mode),
+    )
     if (
-        not private_unpack.is_absolute()
-        or unpack_path != private_unpack
-        or par_unpack_raw != str(private_unpack)
-        or stat.S_ISLNK(unpack_status.st_mode)
-        or not stat.S_ISDIR(unpack_status.st_mode)
-        or unpack_status.st_uid != os.geteuid()
-        or stat.S_IMODE(unpack_status.st_mode) != 0o700
+        unpack_before_identity != unpack_after_identity
+        or not stat.S_ISDIR(unpack_after.st_mode)
+        or unpack_after.st_uid != os.geteuid()
+        or stat.S_IMODE(unpack_after.st_mode) != 0o700
+        or not os.get_inheritable(private_unpack_fd)
     ):
         raise RuntimeError(
             "Confirmatory private unpack directory has an invalid identity or mode."
@@ -236,52 +256,27 @@ def _preflight_confirmatory_runtime(
         os.set_inheritable(attested_fd, False)
         if module_fd != attested_fd:
             os.set_inheritable(module_fd, False)
+        os.set_inheritable(private_unpack_fd, False)
     except OSError as exc:
         raise RuntimeError(
             "Confirmatory runtime descriptor cannot be isolated from child processes."
         ) from exc
     return (
         actual_sha256,
-        _PrivateUnpackDirectory(
-            path=unpack_path,
-            device=unpack_status.st_dev,
-            inode=unpack_status.st_ino,
-        ),
+        private_unpack_fd,
         attested_fd,
     )
 
 
 (
     _PREVERIFIED_RUNTIME_SHA256,
-    _PRIVATE_UNPACK_BASE,
+    _PREVERIFIED_PRIVATE_UNPACK_FD,
     _PREVERIFIED_RUNTIME_FD,
 ) = _preflight_confirmatory_runtime(
     argv=list(sys.argv[1:]),
     module_file=__file__,
     environ=os.environ,
 )
-
-
-def _remove_private_unpack_base(directory: _PrivateUnpackDirectory) -> None:
-    """Remove only the exact launcher-created directory validated at startup."""
-
-    try:
-        status = directory.path.lstat()
-    except OSError:
-        return
-    if (
-        stat.S_ISDIR(status.st_mode)
-        and not stat.S_ISLNK(status.st_mode)
-        and status.st_uid == os.geteuid()
-        and stat.S_IMODE(status.st_mode) == 0o700
-        and status.st_dev == directory.device
-        and status.st_ino == directory.inode
-    ):
-        shutil.rmtree(directory.path, ignore_errors=True)
-
-
-if _PRIVATE_UNPACK_BASE is not None:
-    atexit.register(_remove_private_unpack_base, _PRIVATE_UNPACK_BASE)
 
 # Force subsequent imports to compile from the manifest-covered source files.
 # A process-unique cache prevents timestamp-valid bytecode in the checkout from

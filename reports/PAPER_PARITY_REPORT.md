@@ -1,11 +1,13 @@
 # UPI-TRM paper parity report
 
-Date: 2026-08-06
+Date: 2026-08-11
 
 - Paper anchor: `/home/buiksat/UPI_TRM`, commit `2107125a50df1471393bc9a5e387c3005d7db112`
 - Paper branch at inspection: `iclr-evidence-aligned-revision`
-- Implementation anchor: branch `full-implementation`
-- Implementation scope: the current working tree, including uncommitted repairs
+- Implementation base: branch `full-implementation`, commit
+  `d9ccad73fb58998ccaed609b5e957d29b7878da6`
+- Implementation scope: the current working tree with the descriptor-bound
+  unpack-root, canonical archive-path, and validation-document repairs applied
 
 ## Result
 
@@ -93,17 +95,18 @@ stdlib-only launcher authenticates an absolute standalone PAR against an
 externally frozen SHA-256 and validates the embedded source/config manifest
 before it copies the verified bytes into a sealed anonymous file and executes
 the training entry point as a supervised child through that immutable
-descriptor. Every launch uses a fresh private PAR unpack directory rather than
-a shared extraction cache, and the launcher removes it when the child exits.
-The entry point independently verifies the descriptor seals, rehashes its
-bytes, and validates the private unpack directory before importing model or RL
-modules. Source-tree runs and direct unattested PAR runs cannot enter
+descriptor. Every launch binds its private PAR unpack directory to an inherited
+directory descriptor rather than a shared extraction cache. The entry point
+independently verifies both descriptors, rehashes the runtime bytes, and
+validates the unpack-directory identity before importing model or RL modules.
+Source-tree runs and direct unattested PAR runs cannot enter
 `--confirmatory` mode. Effective
 configuration schema 4, evidence-identity schema 2, and lock schema 4 bind the
 verified PAR digest without embedding that self-referential digest in the PAR.
-The trusted launcher process, host, and initial environment remain the
-external trust root; the launcher strips loader, Python-path, and PAR override
-hooks before it starts the training artifact.
+The trusted launcher process, operating system, host namespace, other same-UID
+processes, and initial environment remain the external trust root. The launcher
+is not a sandbox against that root. It strips loader, Python-path, and PAR
+override hooks before it starts the training artifact.
 
 ## Conditional theorem premises not certified by execution
 
@@ -163,8 +166,8 @@ buck2 test --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_unroll_sensitivity
 ```
 
-Result: 243 passed, 0 failed, 0 timed out, 0 infra failures, and 0 build
-failures. Buck emitted one `slow_snapshot` soft warning during the run.
+Result: 289 passed, 0 failed, 0 timed out, 0 fatal, 0 infra failures, and 0
+build failures.
 
 After restarting Buck to invalidate its symlink cache, the final type gate for
 the synchronization-touched model, evaluator, utility, and checkpoint targets
@@ -180,7 +183,15 @@ buck2 test --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_augmented_replay_diagnostics-library-type-checking
 ```
 
-A repository-wide diagnostic command,
+The two launcher type targets also passed 2/2:
+
+```text
+buck2 test --local-only @fbcode//mode/opt \
+  fbcode//buiksat_trm:confirmatory_runtime_launcher_lib-type-checking \
+  fbcode//buiksat_trm:confirmatory_runtime_launcher-library-type-checking
+```
+
+A historical pre-repair repository-wide diagnostic command,
 `buck2 test --local-only @fbcode//mode/opt 'fbcode//buiksat_trm:'`, reported
 554 passes and 26 failures before the final type-only cleanup. All 26 failures
 were generated Python type-check targets; runtime tests had no failures. Six
@@ -191,8 +202,14 @@ scripts outside the six cleared targets, so the all-target package command is
 not claimed green.
 
 The checked producer manifest equals a fresh mechanical regeneration and
-contains 78 source entries. `git diff --check` passes. The complete diff,
-including both new files, was inspected after the final repairs.
+contains 79 source entries. The final training PAR SHA-256 is
+`c03ab186add45656079c550d5d84224e332e0370ad2e966802d9c18ef5a985c1`.
+The real launcher help path exited 0 with zero private unpack directories before
+and after. Wrong-digest and direct-PAR confirmatory invocations exited 2 and 1,
+respectively. All 46 tracked shell scripts passed `bash -n`; 625 tracked JSON
+files and 96 tracked YAML files parsed successfully. The retired launcher
+exited 2 without changing the worktree. `git diff --check` passes. The complete
+working-tree diff was inspected after the final repairs.
 
 ## Experiment status
 

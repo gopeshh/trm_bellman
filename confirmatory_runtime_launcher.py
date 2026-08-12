@@ -34,6 +34,7 @@ VERIFIED_RUNTIME_PATH_ENV = "UPI_TRM_VERIFIED_RUNTIME_PATH"
 VERIFIED_RUNTIME_SHA256_ENV = "UPI_TRM_VERIFIED_RUNTIME_SHA256"
 VERIFIED_RUNTIME_FD_ENV = "UPI_TRM_VERIFIED_RUNTIME_FD"
 PRIVATE_UNPACK_BASE_ENV = "UPI_TRM_PRIVATE_UNPACK_BASE"
+PRIVATE_UNPACK_FD_ENV = "UPI_TRM_PRIVATE_UNPACK_FD"
 PAR_FILENAME_ENV = "FB_PAR_FILENAME"
 
 _ROOT_SOURCES = (
@@ -109,12 +110,27 @@ def _is_safe_relative_path(relative_path: str) -> bool:
     path = PurePosixPath(relative_path)
     return (
         bool(relative_path)
+        and bool(path.parts)
         and "\\" not in relative_path
         and not path.is_absolute()
         and relative_path == path.as_posix()
         and "." not in path.parts
         and ".." not in path.parts
     )
+
+
+def _canonical_archive_member_path(member_name: str) -> str | None:
+    """Return one canonical extraction path, rejecting aliases and roots."""
+
+    is_directory = member_name.endswith("/")
+    relative_path = member_name[:-1] if is_directory else member_name
+    if not _is_safe_relative_path(relative_path):
+        return None
+    canonical_path = PurePosixPath(relative_path).as_posix()
+    canonical_member = f"{canonical_path}/" if is_directory else canonical_path
+    if member_name != canonical_member:
+        return None
+    return canonical_path
 
 
 def _is_behavior_python_source(relative_path: str) -> bool:
@@ -348,14 +364,26 @@ def _validate_archive_sources(archive: ZipFile) -> None:
         raise ConfirmatoryRuntimeError(
             "Runtime archive contains duplicate member names."
         )
-    if any(
-        not _is_safe_relative_path(info.filename.rstrip("/"))
-        for info in infos
-        if info.filename.rstrip("/")
-    ):
-        raise ConfirmatoryRuntimeError(
-            "Runtime archive contains an unsafe member path."
-        )
+    canonical_members: dict[str, bool] = {}
+    for info in infos:
+        canonical_path = _canonical_archive_member_path(info.filename)
+        if canonical_path is None:
+            raise ConfirmatoryRuntimeError(
+                "Runtime archive contains an unsafe member path."
+            )
+        if canonical_path in canonical_members:
+            raise ConfirmatoryRuntimeError(
+                "Runtime archive contains canonical member-path aliases."
+            )
+        canonical_members[canonical_path] = info.is_dir()
+    for canonical_path in canonical_members:
+        parts = PurePosixPath(canonical_path).parts
+        for prefix_length in range(1, len(parts)):
+            prefix = PurePosixPath(*parts[:prefix_length]).as_posix()
+            if prefix in canonical_members and not canonical_members[prefix]:
+                raise ConfirmatoryRuntimeError(
+                    "Runtime archive contains a file/directory path collision."
+                )
 
     sources = _load_embedded_manifest(archive)
     expected = dict(sources)
@@ -477,6 +505,79 @@ def validate_runtime_archive(
     )
 
 
+def _directory_identity(status: os.stat_result) -> tuple[int, int, int]:
+    return (
+        status.st_dev,
+        status.st_ino,
+        stat.S_IFMT(status.st_mode),
+    )
+
+
+def _open_private_unpack_directory(
+    path: Path,
+    created_status: os.stat_result,
+) -> int:
+    """Bind an empty unpack directory to one inherited descriptor."""
+
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ConfirmatoryRuntimeError(
+            "Private confirmatory unpack directory cannot be opened."
+        ) from exc
+    try:
+        opened_status = os.fstat(descriptor)
+        current_status = path.lstat()
+        if (
+            len(
+                {
+                    _directory_identity(created_status),
+                    _directory_identity(opened_status),
+                    _directory_identity(current_status),
+                }
+            )
+            != 1
+            or not stat.S_ISDIR(opened_status.st_mode)
+            or stat.S_ISLNK(current_status.st_mode)
+            or opened_status.st_uid != os.geteuid()
+            or stat.S_IMODE(opened_status.st_mode) != 0o700
+            or os.listdir(descriptor)
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Private confirmatory unpack directory has an invalid identity."
+            )
+        os.set_inheritable(descriptor, True)
+    except ConfirmatoryRuntimeError:
+        os.close(descriptor)
+        raise
+    except OSError as exc:
+        os.close(descriptor)
+        raise ConfirmatoryRuntimeError(
+            "Private confirmatory unpack directory cannot be attested."
+        ) from exc
+    return descriptor
+
+
+def _remove_private_unpack_directory(path: Path, descriptor: int) -> None:
+    """Best-effort cleanup while the trusted namespace still names the object."""
+
+    try:
+        path_status = path.lstat()
+        descriptor_status = os.fstat(descriptor)
+    except OSError:
+        return
+    if (
+        _directory_identity(path_status) == _directory_identity(descriptor_status)
+        and stat.S_ISDIR(path_status.st_mode)
+        and not stat.S_ISLNK(path_status.st_mode)
+        and path_status.st_uid == os.geteuid()
+        and stat.S_IMODE(path_status.st_mode) == 0o700
+    ):
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def launch_verified_runtime(
     runtime: VerifiedRuntime,
     runtime_args: Sequence[str],
@@ -550,24 +651,40 @@ def launch_verified_runtime(
     child_environment[VERIFIED_RUNTIME_PATH_ENV] = exec_path
     child_environment[PAR_FILENAME_ENV] = exec_path
     private_unpack_base: Path | None = None
+    private_unpack_descriptor: int | None = None
     try:
+        # The host namespace is trusted until this descriptor is acquired.
+        # Execution and extraction use only the descriptor-backed path afterward.
         private_unpack_base = Path(
             tempfile.mkdtemp(prefix="upi_trm_confirmatory_unpack.")
-        ).resolve()
-        private_unpack_base.chmod(0o700)
-    except OSError as exc:
+        )
+        if not private_unpack_base.is_absolute():
+            raise ConfirmatoryRuntimeError(
+                "Private confirmatory unpack directory must be absolute."
+            )
+        created_status = private_unpack_base.lstat()
+        private_unpack_descriptor = _open_private_unpack_directory(
+            private_unpack_base,
+            created_status,
+        )
+    except (ConfirmatoryRuntimeError, OSError) as exc:
         try:
             os.close(runtime.descriptor)
         except OSError:
             pass
         if private_unpack_base is not None:
             shutil.rmtree(private_unpack_base, ignore_errors=True)
+        if isinstance(exc, ConfirmatoryRuntimeError):
+            raise
         raise ConfirmatoryRuntimeError(
             "Private confirmatory unpack directory cannot be created."
         ) from exc
     assert private_unpack_base is not None
-    child_environment["FB_PAR_UNPACK_BASEDIR"] = str(private_unpack_base)
-    child_environment[PRIVATE_UNPACK_BASE_ENV] = str(private_unpack_base)
+    assert private_unpack_descriptor is not None
+    private_unpack_path = f"/proc/self/fd/{private_unpack_descriptor}"
+    child_environment["FB_PAR_UNPACK_BASEDIR"] = private_unpack_path
+    child_environment[PRIVATE_UNPACK_BASE_ENV] = private_unpack_path
+    child_environment[PRIVATE_UNPACK_FD_ENV] = str(private_unpack_descriptor)
     argv = [exec_path, *arguments]
     process: subprocess.Popen[bytes] | None = None
     try:
@@ -576,11 +693,15 @@ def launch_verified_runtime(
             executable=exec_path,
             env=child_environment,
             close_fds=True,
-            pass_fds=(runtime.descriptor,),
+            pass_fds=(runtime.descriptor, private_unpack_descriptor),
         )
     except (OSError, ValueError) as exc:
         os.close(runtime.descriptor)
-        shutil.rmtree(private_unpack_base, ignore_errors=True)
+        _remove_private_unpack_directory(
+            private_unpack_base,
+            private_unpack_descriptor,
+        )
+        os.close(private_unpack_descriptor)
         raise ConfirmatoryRuntimeError(
             "Verified runtime could not be executed."
         ) from exc
@@ -597,7 +718,11 @@ def launch_verified_runtime(
                 process.wait()
         raise
     finally:
-        shutil.rmtree(private_unpack_base, ignore_errors=True)
+        _remove_private_unpack_directory(
+            private_unpack_base,
+            private_unpack_descriptor,
+        )
+        os.close(private_unpack_descriptor)
     return return_code
 
 

@@ -16,6 +16,7 @@ from zipfile import ZipFile
 from confirmatory_runtime_launcher import (
     PAR_FILENAME_ENV,
     PRIVATE_UNPACK_BASE_ENV,
+    PRIVATE_UNPACK_FD_ENV,
     SOURCE_MANIFEST_RELATIVE_PATH,
     VERIFIED_RUNTIME_PATH_ENV,
     VERIFIED_RUNTIME_SHA256_ENV,
@@ -213,6 +214,57 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
             ):
                 validate_runtime_archive(path, expected)
 
+    def test_rejects_root_aliases_and_noncanonical_directory_members(self) -> None:
+        for member_name in (".", "./", "/", "//", "foo//"):
+            with (
+                self.subTest(member_name=member_name),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                path = Path(directory) / "runtime.par"
+                self._archive(path)
+                with ZipFile(path, "a") as archive:
+                    archive.writestr(member_name, b"")
+                expected = hashlib.sha256(path.read_bytes()).hexdigest()
+                with self.assertRaisesRegex(
+                    ConfirmatoryRuntimeError,
+                    "unsafe member path",
+                ):
+                    validate_runtime_archive(path, expected)
+
+    def test_rejects_canonical_member_path_collisions(self) -> None:
+        cases = (
+            (("alias", b"file"), ("alias/", b"")),
+            (("prefix", b"file"), ("prefix/child", b"child")),
+            (("prefix/child", b"child"), ("prefix", b"file")),
+        )
+        for members in cases:
+            with (
+                self.subTest(members=members),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                path = Path(directory) / "runtime.par"
+                self._archive(path)
+                with ZipFile(path, "a") as archive:
+                    for member_name, content in members:
+                        archive.writestr(member_name, content)
+                expected = hashlib.sha256(path.read_bytes()).hexdigest()
+                with self.assertRaisesRegex(
+                    ConfirmatoryRuntimeError,
+                    "aliases|collision",
+                ):
+                    validate_runtime_archive(path, expected)
+
+    def test_accepts_canonical_directory_with_child_member(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runtime.par"
+            self._archive(path)
+            with ZipFile(path, "a") as archive:
+                archive.writestr("canonical/", b"")
+                archive.writestr("canonical/child", b"child")
+            expected = hashlib.sha256(path.read_bytes()).hexdigest()
+            runtime = validate_runtime_archive(path, expected)
+            os.close(runtime.descriptor)
+
     def test_identity_check_detects_replaced_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -301,6 +353,8 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
             executable = popen.call_args.kwargs["executable"]
             environment = popen.call_args.kwargs["env"]
             descriptor_path = f"/proc/self/fd/{descriptor}"
+            private_unpack_descriptor = int(environment[PRIVATE_UNPACK_FD_ENV])
+            private_unpack_path = f"/proc/self/fd/{private_unpack_descriptor}"
             self.assertEqual(executable, descriptor_path)
             self.assertEqual(
                 argv,
@@ -322,11 +376,74 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
             self.assertEqual(environment[PAR_FILENAME_ENV], descriptor_path)
             self.assertEqual(
                 environment["FB_PAR_UNPACK_BASEDIR"],
-                environment[PRIVATE_UNPACK_BASE_ENV],
+                private_unpack_path,
             )
-            self.assertFalse(
-                Path(environment[PRIVATE_UNPACK_BASE_ENV]).exists()
+            self.assertEqual(environment[PRIVATE_UNPACK_BASE_ENV], private_unpack_path)
+            self.assertEqual(
+                popen.call_args.kwargs["pass_fds"],
+                (descriptor, private_unpack_descriptor),
             )
+            self.assertFalse(Path(private_unpack_path).exists())
+
+    def test_unpack_descriptor_survives_path_replacement_at_exec(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "runtime.par"
+            expected = self._archive(path)
+            runtime = validate_runtime_archive(path, expected)
+            private_unpack = root / "private-unpack"
+            private_unpack.mkdir(mode=0o700)
+            moved_unpack = root / "moved-unpack"
+            process = mock.Mock()
+            process.wait.return_value = 0
+
+            def replace_path_at_exec(
+                _argv: list[str],
+                **kwargs: object,
+            ) -> mock.Mock:
+                environment = kwargs["env"]
+                assert isinstance(environment, dict)
+                unpack_descriptor = int(environment[PRIVATE_UNPACK_FD_ENV])
+                descriptor_status = os.fstat(unpack_descriptor)
+                private_unpack.rename(moved_unpack)
+                private_unpack.mkdir(mode=0o700)
+                moved_status = moved_unpack.stat()
+                replacement_status = private_unpack.stat()
+                self.assertEqual(
+                    (descriptor_status.st_dev, descriptor_status.st_ino),
+                    (moved_status.st_dev, moved_status.st_ino),
+                )
+                self.assertNotEqual(
+                    (descriptor_status.st_dev, descriptor_status.st_ino),
+                    (replacement_status.st_dev, replacement_status.st_ino),
+                )
+                descriptor_path = environment["FB_PAR_UNPACK_BASEDIR"]
+                descriptor_path_status = os.stat(descriptor_path)
+                self.assertEqual(
+                    (
+                        descriptor_path_status.st_dev,
+                        descriptor_path_status.st_ino,
+                    ),
+                    (moved_status.st_dev, moved_status.st_ino),
+                )
+                return process
+
+            with (
+                mock.patch(
+                    "confirmatory_runtime_launcher.tempfile.mkdtemp",
+                    return_value=str(private_unpack),
+                ),
+                mock.patch(
+                    "confirmatory_runtime_launcher.subprocess.Popen",
+                    side_effect=replace_path_at_exec,
+                ),
+            ):
+                self.assertEqual(
+                    launch_verified_runtime(runtime, ["--confirmatory"]),
+                    0,
+                )
+            self.assertTrue(private_unpack.is_dir())
+            self.assertTrue(moved_unpack.is_dir())
 
     def test_exec_requires_confirmatory_argument(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

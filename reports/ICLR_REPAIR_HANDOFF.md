@@ -1,8 +1,10 @@
 # ICLR repair handoff
 
-Date: 2026-08-06
+Date: 2026-08-11
 
 Implementation branch: `full-implementation`
+
+Implementation base: `d9ccad73fb58998ccaed609b5e957d29b7878da6`
 
 Paper anchor: UPI-TRM commit `2107125`
 
@@ -11,7 +13,7 @@ completed confirmatory experiment and must not be cited as one. The detailed
 Algorithm 1/2 mapping and the boundary between executable parity and
 conditional theorem premises are in `reports/PAPER_PARITY_REPORT.md`.
 
-## Implemented in the working diff
+## Implemented at the current validated source state
 
 - Clock-complete persistent replay with carried input/successor latents,
   remaining-edit clocks, transition and segment validation, and terminal
@@ -41,6 +43,11 @@ conditional theorem premises are in `reports/PAPER_PARITY_REPORT.md`.
 - Persistent-checkpoint diagnostics report finite-batch quantities only. They
   are not uniform residual, bounded-head, contraction, overlap, or safe-step
   certificates.
+- Confirmatory execution verifies and seals the complete PAR before behavior
+  imports, passes the private unpack root through an inherited directory
+  descriptor, and rejects noncanonical or colliding archive paths. The host
+  namespace and other same-UID processes remain part of the external trust
+  root.
 - Current-source parity runtime and affected type-check gates are green; exact
   commands and counts are recorded below.
 
@@ -76,22 +83,33 @@ shadow objects before mutating live state.
 
 The schema-v5 design is recorded in
 `reports/CHECKPOINT_SCHEMA_V5_REPORT.md`. Historical execution reports describe
-earlier revisions and are not validation of the current working diff.
+earlier revisions and are not validation of the current validated source state.
 
 ## Current validation status
 
 The final 13-target parity runtime command recorded in
-`reports/PAPER_PARITY_REPORT.md` passed 243/243. The final six-target type gate
+`reports/PAPER_PARITY_REPORT.md` passed 289/289. The final six-target type gate
 for synchronization-touched model, evaluator, utility, and checkpoint code
-passed 6/6 after a Buck daemon restart. The producer manifest matches a fresh
-78-source regeneration, and `git diff --check` passes.
+passed 6/6 after a Buck daemon restart. The launcher library and binary type
+targets passed 2/2. The producer manifest matches a fresh 79-source
+regeneration, and `git diff --check` passes.
 
-The repository-wide package diagnostic passed 554 targets and failed 26
-generated type-check targets before the final type cleanup. It had no runtime,
-timeout, infra, or build failures. Six synchronization-touched type targets
-were fixed and cleared afterward. Other pre-existing generated type-check debt
-outside the six cleared targets remains, so there is no green all-package
-claim.
+The final training PAR SHA-256 is
+`c03ab186add45656079c550d5d84224e332e0370ad2e966802d9c18ef5a985c1`.
+The real launcher help path exited 0 with no private unpack directory left
+behind. Wrong-digest and direct-PAR confirmatory invocations failed closed with
+exit codes 2 and 1.
+
+All 46 tracked shell scripts passed `bash -n`; 625 tracked JSON files and 96
+tracked YAML files parsed successfully. The retired launcher exited 2 without
+changing the worktree.
+
+The historical repository-wide package diagnostic passed 554 targets and
+failed 26 generated type-check targets before the final type cleanup. It had no
+runtime, timeout, infra, or build failures. Six synchronization-touched type
+targets were fixed and cleared afterward. Other pre-existing generated
+type-check debt outside the six cleared targets remains, so there is no green
+all-package claim.
 
 ## Theory boundary
 

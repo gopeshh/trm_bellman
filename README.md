@@ -83,10 +83,11 @@ an externally frozen SHA-256, validates the whole artifact plus its embedded
 source manifest before importing training code, copies the verified bytes into
 a sealed anonymous file, and starts that immutable descriptor as a supervised
 child process. Each launch also uses a fresh private PAR unpack directory
-instead of a shared extraction cache. This prevents path replacement, in-place
-artifact mutation, and stale extracted-code reuse between validation and
-execution. Direct unattested PAR execution and source-tree confirmatory
-execution fail before model or RL modules are imported. The launcher removes
+instead of a shared extraction cache. The launcher passes that directory as an
+inherited directory descriptor, so path replacement after descriptor binding
+cannot redirect extraction or entrypoint validation. Direct unattested PAR
+execution and source-tree confirmatory execution fail before model or RL
+modules are imported. Under the trusted host namespace, the launcher removes
 the private unpack directory when the child exits, including startup failures.
 
 Build both artifacts, freeze the training PAR digest outside the PAR, then use
@@ -109,12 +110,14 @@ confirmatory lock all record the verified PAR digest. Do not put that digest
 inside `run_matrix.json` or another PAR input because doing so creates a
 self-hash cycle.
 
-The launcher executable, operating system, and launcher process environment
-are the external root of trust. Start the launcher from a controlled process
-without loader, Python-path, or PAR override hooks. The launcher removes those
-hooks before executing the training PAR. Its inherited descriptor and
-attestation variables are capabilities for the verified bytes, not a claim
-that environment variables are cryptographically unforgeable.
+The launcher executable, operating system, host namespace, other same-UID
+processes, and launcher process environment are the external root of trust.
+The launcher is not a sandbox against a compromised host or hostile same-UID
+process. Start it from a controlled process without loader, Python-path, or PAR
+override hooks. The launcher removes those hooks before executing the training
+PAR. Its inherited descriptors and attestation variables are capabilities for
+the verified runtime and unpack directory, not a claim that environment
+variables are cryptographically unforgeable.
 
 ## Tests
 
@@ -133,11 +136,12 @@ buck2 test --local-only @fbcode//mode/opt 'fbcode//buiksat_trm:'
 ```
 
 That package pattern also runs Buck's generated Python type-check targets.
-The final paper-parity runtime selection passed 243/243, and the six generated
-type-check targets touched by the synchronization passed 6/6. Exact commands,
-the repository-wide diagnostic result, and the scope of the executable parity
-claim are recorded in `reports/PAPER_PARITY_REPORT.md`. The full package pattern
-is not green because pre-existing aggregate libraries, tests, runners,
+The final paper-parity runtime selection passed 289/289. The six generated
+type-check targets touched by the synchronization passed 6/6, and the launcher
+library and binary type targets passed 2/2. Exact commands, the historical
+repository-wide diagnostic result, and the scope of the executable parity
+claim are recorded in `reports/PAPER_PARITY_REPORT.md`. The full package
+pattern is not green because pre-existing aggregate libraries, tests, runners,
 diagnostics, and experiment scripts retain unrelated type-check debt.
 
 In a standard environment with the dependencies installed:

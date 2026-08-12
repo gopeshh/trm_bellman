@@ -59,21 +59,23 @@ not as authority.
 
 ## Post-fix review focus
 
-This review follows repairs for `UPITRM-UPD-001` through `UPITRM-UPD-003`.
+This review follows repairs for `UPITRM-UPD-001` through `UPITRM-UPD-006`.
 Do not assume those repairs are correct merely because tests or prior reviewers
 accepted them. Reconstruct and challenge each contract from current source:
 
 1. Confirmatory execution must authenticate the complete packaged runtime
    before any behavior-bearing model or RL module is imported.
 2. Validation and execution must be bound to one immutable runtime object, with
-   no path-replacement, same-inode mutation, stale bytecode, duplicate archive
-   member, unsafe member path, or shared extraction-cache gap.
+   no post-binding path redirection, same-inode mutation, stale bytecode,
+   duplicate archive member, unsafe member path, or shared extraction-cache
+   gap.
 3. The launcher must copy verified bytes into a sealed anonymous file, execute
-   that exact descriptor as a supervised child, use a fresh private unpack
-   directory, and remove the directory after success and startup failure.
+   that exact descriptor as a supervised child, bind the private unpack
+   directory to an inherited directory descriptor, and avoid a shared
+   extraction cache.
 4. The packaged entry point must independently verify descriptor identity,
-   seals, whole-artifact SHA-256, module origin, and private-unpack ownership
-   before project imports.
+   seals, whole-artifact SHA-256, module origin, and the inherited private
+   unpack descriptor before project imports.
 5. The verified runtime SHA-256 must bind current effective configuration,
    evidence identity, confirmatory lock, checkpoint save, and resume. Historical
    schemas must remain readable only under their exact historical contracts,
@@ -81,6 +83,17 @@ accepted them. Reconstruct and challenge each contract from current source:
 6. The trainer comment must no longer contain the stale numeric paper mapping.
 7. The ablation generator must explicitly emit legacy, non-theorem-facing
    configurations rather than calling its feature-on baseline theory-exact.
+8. Archive validation must reject root aliases, noncanonical member names,
+   canonical path aliases, and file/directory prefix collisions before the PAR
+   bootstrap sees them.
+9. Current validation documents must distinguish the required six-target type
+   gate from the two launcher type targets and must not retain stale test or
+   manifest counts.
+10. Treat the launcher executable, operating system, host namespace, other
+    same-UID processes, and initial launcher environment as the external root
+    of trust. Verify descriptor binding after acquisition. Do not demand or
+    credit isolation from a compromised host, and do not describe best-effort
+    pathname cleanup as a security boundary.
 
 Review the complete implementation change since the parent of the current
 implementation head, but do not limit the audit to that diff. The resulting
@@ -554,10 +567,17 @@ buck2 test --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_augmented_replay_diagnostics-library-type-checking
 ```
 
-Also run the type-check targets generated for the new launcher library and
-binary. Do not treat failures from an optional repository-wide type target as
-part of this required gate; if such a target is run, report its complete output
-and distinguish pre-existing errors from errors on changed lines.
+Also run the two launcher type-check targets:
+
+```bash
+buck2 test --local-only @fbcode//mode/opt \
+  fbcode//buiksat_trm:confirmatory_runtime_launcher_lib-type-checking \
+  fbcode//buiksat_trm:confirmatory_runtime_launcher-library-type-checking
+```
+
+Do not treat failures from an optional repository-wide type target as part of
+this required gate; if such a target is run, report its complete output and
+distinguish pre-existing errors from errors on changed lines.
 
 Build and exercise the real packaged-runtime boundary without starting
 training:
@@ -583,7 +603,8 @@ and after. Also require all of these negative cases to fail before training:
 - a wrong, uppercase, or malformed expected SHA-256;
 - an unsealed or unavailable descriptor;
 - source/config inventory tampering, extra or missing behavior sources,
-  duplicate members, unsafe paths, and behavior bytecode;
+  duplicate members, root aliases, noncanonical or colliding paths, and
+  behavior bytecode;
 - child startup failure, with private-unpack cleanup.
 
 Inspect environment sanitization for loader, Python-path, shell-function, and

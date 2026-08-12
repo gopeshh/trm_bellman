@@ -106,6 +106,15 @@ def _tiny_trm_cfg(seq_len: int, vocab_size: int, num_identifiers: int, batch_siz
 
 
 class TestUPITrmLoggingSmoke(unittest.TestCase):
+    @staticmethod
+    def _open_private_unpack(path: Path) -> tuple[int, str]:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+        )
+        os.set_inheritable(descriptor, True)
+        return descriptor, f"/proc/self/fd/{descriptor}"
+
     def test_confirmatory_preflight_requires_packaged_launcher(self):
         with self.assertRaisesRegex(RuntimeError, "packaged-runtime launcher"):
             _preflight_confirmatory_runtime(
@@ -129,6 +138,9 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             descriptor_path = f"/proc/self/fd/{descriptor}"
             private_unpack = Path(directory) / "private-unpack"
             private_unpack.mkdir(mode=0o700)
+            private_descriptor, private_descriptor_path = self._open_private_unpack(
+                private_unpack
+            )
             try:
                 with self.assertRaisesRegex(RuntimeError, "immutable attested"):
                     _preflight_confirmatory_runtime(
@@ -140,13 +152,15 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                                 runtime.read_bytes()
                             ).hexdigest(),
                             "UPI_TRM_VERIFIED_RUNTIME_FD": str(descriptor),
-                            "UPI_TRM_PRIVATE_UNPACK_BASE": str(private_unpack),
+                            "UPI_TRM_PRIVATE_UNPACK_BASE": private_descriptor_path,
+                            "UPI_TRM_PRIVATE_UNPACK_FD": str(private_descriptor),
                             "FB_PAR_FILENAME": descriptor_path,
-                            "FB_PAR_UNPACK_BASEDIR": str(private_unpack),
+                            "FB_PAR_UNPACK_BASEDIR": private_descriptor_path,
                         },
                     )
             finally:
                 os.close(descriptor)
+                os.close(private_descriptor)
 
     def test_confirmatory_preflight_binds_and_consumes_runtime_hash(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -173,14 +187,18 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             descriptor_path = f"/proc/self/fd/{descriptor}"
             private_unpack = Path(directory) / "private-unpack"
             private_unpack.mkdir(mode=0o700)
+            private_descriptor, private_descriptor_path = self._open_private_unpack(
+                private_unpack
+            )
             try:
                 environment = {
                     "UPI_TRM_VERIFIED_RUNTIME_PATH": descriptor_path,
                     "UPI_TRM_VERIFIED_RUNTIME_SHA256": digest,
                     "UPI_TRM_VERIFIED_RUNTIME_FD": str(descriptor),
                     "FB_PAR_FILENAME": descriptor_path,
-                    "FB_PAR_UNPACK_BASEDIR": str(private_unpack),
-                    "UPI_TRM_PRIVATE_UNPACK_BASE": str(private_unpack),
+                    "FB_PAR_UNPACK_BASEDIR": private_descriptor_path,
+                    "UPI_TRM_PRIVATE_UNPACK_BASE": private_descriptor_path,
+                    "UPI_TRM_PRIVATE_UNPACK_FD": str(private_descriptor),
                 }
                 preflight = _preflight_confirmatory_runtime(
                     argv=[
@@ -193,24 +211,27 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                     environ=environment,
                 )
                 self.assertEqual(preflight[0], digest)
-                self.assertIsNotNone(preflight[1])
-                assert preflight[1] is not None
-                self.assertEqual(preflight[1].path, private_unpack)
+                self.assertEqual(preflight[1], private_descriptor)
                 self.assertEqual(preflight[2], descriptor)
                 self.assertNotIn("UPI_TRM_VERIFIED_RUNTIME_PATH", environment)
                 self.assertNotIn("UPI_TRM_VERIFIED_RUNTIME_SHA256", environment)
                 self.assertNotIn("UPI_TRM_VERIFIED_RUNTIME_FD", environment)
                 self.assertNotIn("UPI_TRM_PRIVATE_UNPACK_BASE", environment)
+                self.assertNotIn("UPI_TRM_PRIVATE_UNPACK_FD", environment)
+                self.assertNotIn("FB_PAR_UNPACK_BASEDIR", environment)
                 self.assertFalse(os.get_inheritable(descriptor))
+                self.assertFalse(os.get_inheritable(private_descriptor))
                 os.set_inheritable(descriptor, True)
+                os.set_inheritable(private_descriptor, True)
 
                 uppercase_environment = {
                     "UPI_TRM_VERIFIED_RUNTIME_PATH": descriptor_path,
                     "UPI_TRM_VERIFIED_RUNTIME_SHA256": digest.upper(),
                     "UPI_TRM_VERIFIED_RUNTIME_FD": str(descriptor),
                     "FB_PAR_FILENAME": descriptor_path,
-                    "FB_PAR_UNPACK_BASEDIR": str(private_unpack),
-                    "UPI_TRM_PRIVATE_UNPACK_BASE": str(private_unpack),
+                    "FB_PAR_UNPACK_BASEDIR": private_descriptor_path,
+                    "UPI_TRM_PRIVATE_UNPACK_BASE": private_descriptor_path,
+                    "UPI_TRM_PRIVATE_UNPACK_FD": str(private_descriptor),
                 }
                 with self.assertRaisesRegex(RuntimeError, "lowercase"):
                     _preflight_confirmatory_runtime(
@@ -224,8 +245,9 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                     "UPI_TRM_VERIFIED_RUNTIME_SHA256": "0" * 64,
                     "UPI_TRM_VERIFIED_RUNTIME_FD": str(descriptor),
                     "FB_PAR_FILENAME": descriptor_path,
-                    "FB_PAR_UNPACK_BASEDIR": str(private_unpack),
-                    "UPI_TRM_PRIVATE_UNPACK_BASE": str(private_unpack),
+                    "FB_PAR_UNPACK_BASEDIR": private_descriptor_path,
+                    "UPI_TRM_PRIVATE_UNPACK_BASE": private_descriptor_path,
+                    "UPI_TRM_PRIVATE_UNPACK_FD": str(private_descriptor),
                 }
                 with self.assertRaisesRegex(RuntimeError, "differs"):
                     _preflight_confirmatory_runtime(
@@ -235,6 +257,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                     )
             finally:
                 os.close(descriptor)
+                os.close(private_descriptor)
 
     def test_preflight_rejects_attestation_without_confirmatory_mode(self):
         with self.assertRaisesRegex(RuntimeError, "only for --confirmatory"):
