@@ -1529,14 +1529,63 @@ python_library(
     base_module = "",
 )
 
+python_library(
+    name = "phase4_diagnostic_inputs",
+    srcs = ["scripts/phase4_diagnostic_inputs.py"],
+    base_module = "",
+    deps = [
+        ":phase4_result_schema",
+        ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_library(
+    name = "phase4_source",
+    srcs = ["scripts/phase4_source.py"],
+    base_module = "",
+    deps = [
+        ":utils",
+    ],
+)
+
+python_library(
+    name = "phase4_checkpoint",
+    srcs = ["scripts/phase4_checkpoint.py"],
+    base_module = "",
+    deps = [
+        ":models",
+        ":phase4_result_schema",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_binary(
+    name = "run_phase4_training",
+    srcs = ["scripts/run_phase4_training.py"],
+    base_module = "",
+    main_module = "scripts.run_phase4_training",
+    deps = [
+        ":phase4_result_schema",
+        ":phase4_source",
+    ],
+)
+
 python_binary(
     name = "eval_phase4_2x2_norm_ablation",
     srcs = ["scripts/eval_phase4_2x2_norm_ablation.py"],
     base_module = "",
+    compile = False,
     main_module = "scripts.eval_phase4_2x2_norm_ablation",
     deps = [
         ":models",
+        ":phase4_checkpoint",
+        ":phase4_diagnostic_inputs",
         ":phase4_result_schema",
+        ":phase4_source",
         ":rl",
         ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
@@ -1550,9 +1599,14 @@ python_binary(
     name = "make_paper_figures_phase4",
     srcs = ["scripts/make_paper_figures_phase4.py"],
     base_module = "",
+    compile = False,
     main_module = "scripts.make_paper_figures_phase4",
     deps = [
+        ":phase4_checkpoint",
+        ":phase4_diagnostic_inputs",
         ":phase4_result_schema",
+        ":phase4_source",
+        ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
@@ -1562,9 +1616,17 @@ python_binary(
     name = "audit_phase4_paper_ready",
     srcs = ["scripts/audit_phase4_paper_ready.py"],
     base_module = "",
+    compile = False,
     main_module = "scripts.audit_phase4_paper_ready",
     deps = [
+        ":phase4_checkpoint",
+        ":phase4_diagnostic_inputs",
         ":phase4_result_schema",
+        ":phase4_source",
+        ":models",
+        ":rl",
+        ":utils",
+        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
@@ -1577,10 +1639,18 @@ python_unittest(
         "scripts/audit_phase4_paper_ready.py",
         "scripts/eval_phase4_2x2_norm_ablation.py",
         "scripts/make_paper_figures_phase4.py",
+        "scripts/phase4_diagnostic_inputs.py",
+        "scripts/run_phase4_training.py",
     ],
     base_module = "",
     deps = [
+        ":models",
+        ":phase4_checkpoint",
+        ":phase4_diagnostic_inputs",
         ":phase4_result_schema",
+        ":phase4_source",
+        ":rl",
+        ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pyyaml:pyyaml",

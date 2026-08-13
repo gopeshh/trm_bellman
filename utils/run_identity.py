@@ -157,6 +157,37 @@ def assert_git_files_match_head(
             )
 
 
+def git_files_at_head(
+    lookup_root: str | Path,
+    pathspecs: list[str],
+) -> list[str]:
+    """Return the exact tracked-file inventory at HEAD for safe pathspecs."""
+
+    root = Path(lookup_root).expanduser().resolve()
+    top_level = Path(_run_git(root, "rev-parse", "--show-toplevel")).resolve()
+    if top_level != root:
+        raise RunIdentityError("Git lookup root must be the repository top level.")
+    if not pathspecs:
+        raise RunIdentityError("At least one Git pathspec must be provided.")
+    for pathspec in pathspecs:
+        path = Path(pathspec)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise RunIdentityError("Git pathspecs must be repository-relative.")
+    output = _run_git(
+        root,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "HEAD",
+        "--",
+        *pathspecs,
+    )
+    paths = output.splitlines() if output else []
+    if len(paths) != len(set(paths)):
+        raise RunIdentityError("Git HEAD file inventory contains duplicates.")
+    return sorted(paths)
+
+
 def _require_exact_fields(
     value: object,
     *,

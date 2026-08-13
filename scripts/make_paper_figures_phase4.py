@@ -8,31 +8,72 @@ Produces:
 
 Usage:
     buck2 run //buiksat_trm:make_paper_figures_phase4 -- \
-        --summary_json results/paper_ready/phase4_2x2_norm_ablation/v2/summary.json
+        --summary_json results/paper_ready/phase4_2x2_norm_ablation/v3/summary.json
+        --checkpoint_dir results/phase4_2x2_norm_ablation
 """
 
 import argparse
 import json
-import sys
 from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
 
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
 from scripts.phase4_result_schema import (  # noqa: E402
     Phase4SummaryValidationError,
     validate_phase4_summary,
 )
+from scripts.phase4_checkpoint import (  # noqa: E402
+    Phase4CheckpointError,
+    verify_phase4_summary_checkpoints,
+)
+from scripts.phase4_diagnostic_inputs import (  # noqa: E402
+    Phase4DiagnosticInputError,
+    verify_phase4_diagnostic_inputs,
+)
+from scripts.phase4_source import (  # noqa: E402
+    PHASE4_FIGURE_SOURCE_PROFILE,
+    Phase4SourceError,
+    phase4_evaluator_source_manifest_sha256,
+    resolve_phase4_source_roots,
+    verify_phase4_runtime_sources,
+)
+from utils.run_identity import (  # noqa: E402
+    RunIdentityError,
+    discover_clean_git_source,
+)
 
 
-def load_summary(summary_path: str) -> Dict[str, Any]:
-    """Load and validate a publication-eligible summary.json."""
+def load_summary(
+    summary_path: str,
+    checkpoint_dir: str,
+    config_dir: str,
+    data_dir: str,
+    project_root: str | Path,
+) -> Dict[str, Any]:
+    """Load a summary and revalidate every checkpoint before publication."""
     with open(summary_path, "r") as f:
         summary = json.load(f)
     validate_phase4_summary(summary)
+    source_identity = discover_clean_git_source(project_root)
+    if summary["evaluator_git_commit"] != source_identity["git_commit"]:
+        raise Phase4SourceError(
+            "Summary evaluator commit differs from the clean project checkout."
+        )
+    expected_source_digest = phase4_evaluator_source_manifest_sha256(
+        project_root
+    )
+    if summary["evaluator_source_manifest_sha256"] != expected_source_digest:
+        raise Phase4SourceError(
+            "Summary evaluator source digest differs from the project checkout."
+        )
+    verify_phase4_summary_checkpoints(
+        summary,
+        checkpoint_dir,
+        config_dir,
+        device="cpu",
+    )
+    verify_phase4_diagnostic_inputs(summary, data_dir)
     return summary
 
 
@@ -65,7 +106,7 @@ def generate_2x2_plot(summary: Dict[str, Any], out_path: Path) -> None:
 
     metrics = [
         ("var_V_mean", "Var(V)", "steelblue"),
-        ("argmax_4x_mean", "Argmax@4×", "darkgreen"),
+        ("argmax_n4_mean", "Argmax@n=4", "darkgreen"),
     ]
 
     for i, contraction in enumerate(["OFF", "ON"]):
@@ -140,12 +181,12 @@ def generate_bar_comparison(summary: Dict[str, Any], out_path: Path) -> None:
 
     # Plot 2: Argmax Agreement
     ax = axes[1]
-    vals = [a["argmax_4x_mean"] for a in aggregates]
-    stds = [a["argmax_4x_std"] for a in aggregates]
+    vals = [a["argmax_n4_mean"] for a in aggregates]
+    stds = [a["argmax_n4_std"] for a in aggregates]
     ax.bar(x, vals, yerr=stds, color='darkgreen', alpha=0.7, capsize=3)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=45, ha='right')
-    ax.set_ylabel("Argmax Agreement @4×")
+    ax.set_ylabel("Argmax Agreement at n=4")
     ax.set_title("Policy Stability")
     ax.set_ylim(0, 1.05)
     ax.grid(True, alpha=0.3)
@@ -171,7 +212,7 @@ def generate_latex_table(summary: Dict[str, Any], out_path: Path) -> None:
 \label{tab:phase4-2x2-ablation}
 \begin{tabular}{lcccc}
 \toprule
-Condition & C & V & Var($V$) & Argmax@4$\times$ \\
+Condition & C & V & Var($V$) & Argmax at $n=4$ \\
 \midrule
 """
 
@@ -180,7 +221,7 @@ Condition & C & V & Var($V$) & Argmax@4$\times$ \\
         v_status = "OFF" if a["disable_value_head_norm"] else "ON"
         content += f"{a['label']} & {c_status} & {v_status} & "
         content += f"${a['var_V_mean']:.3f} \\pm {a['var_V_std']:.3f}$ & "
-        content += f"${a['argmax_4x_mean']:.3f} \\pm {a['argmax_4x_std']:.3f}$ \\\\\n"
+        content += f"${a['argmax_n4_mean']:.3f} \\pm {a['argmax_n4_std']:.3f}$ \\\\\n"
 
     content += r"""\bottomrule
 \end{tabular}
@@ -196,6 +237,18 @@ Condition & C & V & Var($V$) & Argmax@4$\times$ \\
 def main():
     parser = argparse.ArgumentParser(description="Generate Phase 4 figures")
     parser.add_argument(
+        "--project_root",
+        type=str,
+        required=True,
+        help="Exact clean implementation checkout used by the evaluator",
+    )
+    parser.add_argument(
+        "--fbcode_root",
+        type=str,
+        required=True,
+        help="fbcode root whose buiksat_trm cell resolves to project_root",
+    )
+    parser.add_argument(
         "--summary_json",
         type=str,
         required=True,
@@ -207,6 +260,24 @@ def main():
         default=None,
         help="Output directory (defaults to same as summary.json)",
     )
+    parser.add_argument(
+        "--checkpoint_dir",
+        type=str,
+        required=True,
+        help="Trusted root containing the 12 full Phase 4 checkpoints",
+    )
+    parser.add_argument(
+        "--config_dir",
+        type=str,
+        required=True,
+        help="Trusted root containing the four Phase 4 condition configs",
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        required=True,
+        help="Trusted root containing the recorded Phase 4 diagnostic arrays",
+    )
 
     args = parser.parse_args()
 
@@ -216,8 +287,30 @@ def main():
         return 1
 
     try:
-        summary = load_summary(str(summary_path))
-    except (OSError, json.JSONDecodeError, Phase4SummaryValidationError) as error:
+        project_root, _ = resolve_phase4_source_roots(
+            args.project_root,
+            args.fbcode_root,
+        )
+        runtime_source_digest = verify_phase4_runtime_sources(
+            project_root,
+            PHASE4_FIGURE_SOURCE_PROFILE,
+        )
+        summary = load_summary(
+            str(summary_path),
+            args.checkpoint_dir,
+            args.config_dir,
+            args.data_dir,
+            project_root,
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+        Phase4CheckpointError,
+        Phase4DiagnosticInputError,
+        Phase4SourceError,
+        Phase4SummaryValidationError,
+        RunIdentityError,
+    ) as error:
         print(f"ERROR: Summary is not publishable: {error}")
         return 1
 
@@ -231,6 +324,23 @@ def main():
     generate_2x2_plot(summary, out_path)
     generate_bar_comparison(summary, out_path)
     generate_latex_table(summary, out_path)
+
+    try:
+        if verify_phase4_runtime_sources(
+            project_root,
+            PHASE4_FIGURE_SOURCE_PROFILE,
+        ) != runtime_source_digest:
+            raise Phase4SourceError(
+                "Figure-generator runtime source changed during generation."
+            )
+        final_identity = discover_clean_git_source(project_root)
+        if final_identity["git_commit"] != summary["evaluator_git_commit"]:
+            raise Phase4SourceError(
+                "Project source identity changed during figure generation."
+            )
+    except (OSError, Phase4SourceError, RunIdentityError) as error:
+        print(f"ERROR: Figure generation source changed: {error}")
+        return 1
 
     print("\nDone!")
     return 0

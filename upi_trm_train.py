@@ -1691,6 +1691,205 @@ def _atomic_torch_save(value: Any, destination: str) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
+def _checkpoint_training_invocation(
+    *,
+    training_seed: Optional[int],
+    training_run_id: Optional[str],
+    config_source_paths: Optional[List[str]],
+    rl_config: Dict[str, Any],
+    model_config: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build checkpoint-bound invocation identity for downstream attribution."""
+
+    if isinstance(training_seed, bool) or (
+        training_seed is not None
+        and (not isinstance(training_seed, int) or training_seed < 0)
+    ):
+        raise RuntimeError("Checkpoint training seed must be a nonnegative integer.")
+    if training_run_id is not None and (
+        not isinstance(training_run_id, str) or not training_run_id
+    ):
+        raise RuntimeError("Checkpoint training run ID must be a non-empty string.")
+    config_sources = []
+    for source in config_source_paths or []:
+        source_path = Path(source).expanduser().resolve()
+        if not source_path.is_file() or source_path.is_symlink():
+            raise RuntimeError("Checkpoint config source must be a regular file.")
+        try:
+            source_sha256 = file_sha256(source_path)
+        except RunIdentityError as exc:
+            raise RuntimeError("Checkpoint config source cannot be hashed.") from exc
+        config_sources.append(
+            {
+                "name": source_path.name,
+                "sha256": source_sha256,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "training_seed": training_seed,
+        "run_id": training_run_id,
+        "config_sources": config_sources,
+        "rl_config_sha256": canonical_json_sha256(rl_config),
+        "model_config_sha256": canonical_json_sha256(model_config),
+    }
+
+
+def _phase4_condition_from_run_id(
+    run_id: Optional[str],
+    training_seed: Optional[int],
+) -> Optional[str]:
+    """Recognize and validate one Phase 4 publication run identifier."""
+
+    prefix = "phase4_2x2_norm_ablation."
+    if run_id is None or not run_id.startswith(prefix):
+        return None
+    if training_seed is None:
+        raise RuntimeError("Phase 4 publication runs require an explicit seed.")
+    if training_seed not in (41, 42, 43):
+        raise RuntimeError(
+            "Phase 4 publication runs require registered seed 41, 42, or 43."
+        )
+    for condition in ("nc_nv", "nc_yv", "yc_nv", "yc_yv"):
+        if run_id == f"{prefix}{condition}.seed{training_seed}":
+            return condition
+    raise RuntimeError("Phase 4 publication run ID does not match its seed and cell.")
+
+
+def _prepare_phase4_publication_source(
+    *,
+    args: argparse.Namespace,
+    rl_cfg: "RLConfig",
+    selected_baseline: Optional[str],
+    producer_repo_root: str,
+) -> Optional[Dict[str, Any]]:
+    """Freeze the clean source and invocation-time config for Phase 4."""
+
+    condition = _phase4_condition_from_run_id(args.run_id, args.seed)
+    if condition is None:
+        return None
+    disallowed = {
+        "baseline": selected_baseline,
+        "dataset_paths": args.dataset_paths,
+        "load_checkpoint": args.load_checkpoint,
+        "resume_checkpoint": args.resume_checkpoint,
+        "confirmatory": args.confirmatory,
+        "train_pool_size": args.train_pool_size,
+        "eval_pool_size": args.eval_pool_size,
+        "env_step_budget": args.env_step_budget,
+        "log_env_interval": args.log_env_interval,
+        "eval_env_interval": args.eval_env_interval,
+        "save_env_interval": args.save_env_interval,
+        "imitation_pretrain": args.imitation_pretrain,
+        "wandb": args.wandb,
+        "tqdm": args.tqdm,
+        "debug_checks": args.debug_checks,
+    }
+    active_disallowed = sorted(
+        name for name, value in disallowed.items() if value not in (None, False)
+    )
+    if active_disallowed:
+        raise RuntimeError(
+            "Phase 4 publication run has disallowed options: "
+            f"{active_disallowed}."
+        )
+    expected_cli = {
+        "backbone": (args.backbone, "trm"),
+        "hidden_size": (args.hidden_size, 64),
+        "h_cycles": (args.h_cycles, 2),
+        "l_cycles": (args.l_cycles, 2),
+        "l_layers": (args.l_layers, 1),
+        "puzzle_emb_ndim": (args.puzzle_emb_ndim, 0),
+        "train_steps": (args.train_steps, 200),
+        "batch_size": (args.batch_size, 32),
+        "rollouts_per_step": (args.rollouts_per_step, 1),
+        "max_edits": (args.max_edits, 8),
+        "save_interval": (args.save_interval, 1000),
+        "train_split": (args.train_split, "train"),
+        "eval_split": (args.eval_split, "test"),
+        "log_interval": (args.log_interval, 10),
+        "eval_interval": (args.eval_interval, 50),
+        "eval_episodes": (args.eval_episodes, 50),
+        "eval_seed": (args.eval_seed, 1729),
+    }
+    mismatched_cli = sorted(
+        name for name, values in expected_cli.items() if values[0] != values[1]
+    )
+    if mismatched_cli:
+        raise RuntimeError(
+            "Phase 4 publication run changes registered CLI defaults: "
+            f"{mismatched_cli}."
+        )
+    if rl_cfg.training_protocol != "legacy" or rl_cfg.num_train_steps != 5000:
+        raise RuntimeError(
+            "Phase 4 publication requires the registered 5000-step legacy protocol."
+        )
+
+    producer_root = Path(producer_repo_root).expanduser().resolve()
+    expected_config_path = (
+        producer_root
+        / "configs"
+        / "phase4_2x2_norm_ablation"
+        / f"{condition}.yaml"
+    )
+    config_paths = [Path(path).expanduser().resolve() for path in (args.config or [])]
+    if config_paths != [expected_config_path]:
+        raise RuntimeError(
+            "Phase 4 publication requires its one committed condition config."
+        )
+    try:
+        _verify_producer_source_matches_runtime(producer_root)
+        producer_identity = discover_clean_git_source(producer_root)
+        config_sha256 = file_sha256(expected_config_path)
+        source_manifest_sha256 = file_sha256(
+            producer_root / SOURCE_MANIFEST_RELATIVE_PATH
+        )
+    except (OSError, RunIdentityError, RuntimeError) as exc:
+        raise RuntimeError(
+            "Phase 4 publication source identity cannot be established."
+        ) from exc
+    return {
+        "condition": condition,
+        "config_source_paths": [str(expected_config_path)],
+        "config_sources": [
+            {"name": expected_config_path.name, "sha256": config_sha256}
+        ],
+        "producer_source": {
+            **producer_identity,
+            "source_manifest_sha256": source_manifest_sha256,
+        },
+    }
+
+
+def _phase4_training_invocation(
+    *,
+    source_context: Dict[str, Any],
+    training_seed: int,
+    run_id: str,
+    rl_config: Dict[str, Any],
+    model_config: Dict[str, Any],
+    dataset_provenance: Dict[str, Any],
+    initialization_kind: str,
+    initialization_artifact_sha256: Optional[str],
+) -> Dict[str, Any]:
+    """Build the complete checkpoint-bound Phase 4 training identity."""
+
+    return {
+        "schema_version": 2,
+        "training_seed": training_seed,
+        "run_id": run_id,
+        "config_sources": list(source_context["config_sources"]),
+        "rl_config_sha256": canonical_json_sha256(rl_config),
+        "model_config_sha256": canonical_json_sha256(model_config),
+        "dataset_provenance_sha256": canonical_json_sha256(dataset_provenance),
+        "initialization": {
+            "kind": initialization_kind,
+            "artifact_sha256": initialization_artifact_sha256,
+        },
+        "producer_source": dict(source_context["producer_source"]),
+    }
+
+
 def _fixed_base_effective_config(
     *,
     args: argparse.Namespace,
@@ -2018,6 +2217,10 @@ def save_checkpoint(
     run_identity: Optional[Dict[str, Any]] = None,
     checkpoint_lineage: Optional[Dict[str, Any]] = None,
     evidence_identity: Optional[Dict[str, Any]] = None,
+    training_seed: Optional[int] = None,
+    training_run_id: Optional[str] = None,
+    config_source_paths: Optional[List[str]] = None,
+    checkpoint_training_invocation: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Save full training state for resumable RL training.
@@ -2032,6 +2235,10 @@ def save_checkpoint(
         dataset_provenance: Content-based train/eval dataset identity
         run_identity: Required clean-source identity for fixed-base checkpoints
         checkpoint_lineage: Content-addressed parent checkpoint, or a root marker
+        training_seed: Optional invocation seed recorded for downstream attribution
+        training_run_id: Optional invocation identifier recorded for attribution
+        config_source_paths: Ordered configuration sources bound by SHA-256
+        checkpoint_training_invocation: Pre-captured publication identity
 
     Returns:
         Path to saved checkpoint
@@ -2138,6 +2345,57 @@ def save_checkpoint(
         raise RuntimeError("Checkpoint requires the active model configuration.")
     model_config = _config_dict(model_config_object)
     rl_config = _config_dict(effective_rl_cfg)
+    if checkpoint_training_invocation is None:
+        training_invocation = _checkpoint_training_invocation(
+            training_seed=training_seed,
+            training_run_id=training_run_id,
+            config_source_paths=config_source_paths,
+            rl_config=rl_config,
+            model_config=model_config,
+        )
+    else:
+        training_invocation = dict(checkpoint_training_invocation)
+        expected_fields = {
+            "schema_version",
+            "training_seed",
+            "run_id",
+            "config_sources",
+            "rl_config_sha256",
+            "model_config_sha256",
+            "dataset_provenance_sha256",
+            "initialization",
+            "producer_source",
+        }
+        if set(training_invocation) != expected_fields:
+            raise RuntimeError(
+                "Checkpoint publication training identity has an invalid inventory."
+            )
+        if training_invocation["schema_version"] != 2:
+            raise RuntimeError(
+                "Checkpoint publication training identity must use schema 2."
+            )
+        if training_invocation["training_seed"] != training_seed:
+            raise RuntimeError(
+                "Checkpoint publication training identity has the wrong seed."
+            )
+        if training_invocation["run_id"] != training_run_id:
+            raise RuntimeError(
+                "Checkpoint publication training identity has the wrong run ID."
+            )
+        if training_invocation["rl_config_sha256"] != canonical_json_sha256(
+            rl_config
+        ) or training_invocation["model_config_sha256"] != canonical_json_sha256(
+            model_config
+        ):
+            raise RuntimeError(
+                "Checkpoint publication training identity has stale configs."
+            )
+        if canonical_dataset_provenance is None or training_invocation[
+            "dataset_provenance_sha256"
+        ] != canonical_json_sha256(canonical_dataset_provenance):
+            raise RuntimeError(
+                "Checkpoint publication training identity has stale dataset provenance."
+            )
     runtime_fingerprint = _runtime_fingerprint()
     canonical_run_identity: Optional[Dict[str, Any]] = None
     if training_protocol == "fixed_base_exact":
@@ -2305,6 +2563,7 @@ def save_checkpoint(
         "progress": progress,
         "model_state_dict": model.state_dict(),
         "rng_state": rng_state,
+        "training_invocation": training_invocation,
     }
     if canonical_run_identity is not None:
         checkpoint["run_identity"] = canonical_run_identity
@@ -4158,6 +4417,12 @@ def main():
     if args.prepare_confirmatory_lock and not confirmatory_run:
         raise RuntimeError("--prepare-confirmatory-lock requires --confirmatory.")
     producer_repo_root = args.producer_repo_root or os.getcwd()
+    phase4_publication_source = _prepare_phase4_publication_source(
+        args=args,
+        rl_cfg=rl_cfg,
+        selected_baseline=selected_baseline,
+        producer_repo_root=producer_repo_root,
+    )
     initial_producer_identity: Optional[Dict[str, Any]] = None
     registered_assignment: Optional[Dict[str, Any]] = None
     if strict_evidence_run:
@@ -4690,6 +4955,23 @@ def main():
             ),
         )
 
+    phase4_training_invocation: Optional[Dict[str, Any]] = None
+    if phase4_publication_source is not None:
+        if args.seed is None or args.run_id is None:
+            raise RuntimeError(
+                "Phase 4 publication requires a checkpoint-bound seed and run ID."
+            )
+        phase4_training_invocation = _phase4_training_invocation(
+            source_context=phase4_publication_source,
+            training_seed=args.seed,
+            run_id=args.run_id,
+            rl_config=_config_dict(rl_cfg),
+            model_config=_config_dict(model.config),
+            dataset_provenance=dataset_provenance,
+            initialization_kind=initialization_kind,
+            initialization_artifact_sha256=initialization_artifact_sha256,
+        )
+
     # Debug: verify policy head initialization
     if hasattr(model, 'edit_policy') and model.edit_policy is not None:
         stop_bias = model.edit_policy.mlp[-1].bias[-1].item()
@@ -4971,7 +5253,49 @@ def main():
         )
 
     def revalidate_producer_source(context: str) -> None:
-        if not strict_evidence_run:
+        if not strict_evidence_run and phase4_publication_source is None:
+            return
+        if phase4_publication_source is not None:
+            expected_source = phase4_publication_source["producer_source"]
+            expected_config_sources = phase4_publication_source["config_sources"]
+            try:
+                producer_identity_before_hash = discover_clean_git_source(
+                    producer_repo_root
+                )
+                _verify_producer_source_matches_runtime(producer_repo_root)
+                producer_identity_after_hash = discover_clean_git_source(
+                    producer_repo_root
+                )
+                config_sources = [
+                    {
+                        "name": Path(path).name,
+                        "sha256": file_sha256(path),
+                    }
+                    for path in phase4_publication_source["config_source_paths"]
+                ]
+                source_manifest_sha256 = file_sha256(
+                    Path(producer_repo_root) / SOURCE_MANIFEST_RELATIVE_PATH
+                )
+            except (OSError, RunIdentityError, RuntimeError) as exc:
+                raise RuntimeError(
+                    f"Cannot revalidate Phase 4 producer source {context}."
+                ) from exc
+            if (
+                producer_identity_before_hash
+                != {
+                    "git_commit": expected_source["git_commit"],
+                    "git_clean": expected_source["git_clean"],
+                }
+                or producer_identity_after_hash
+                != {
+                    "git_commit": expected_source["git_commit"],
+                    "git_clean": expected_source["git_clean"],
+                }
+                or config_sources != expected_config_sources
+                or source_manifest_sha256
+                != expected_source["source_manifest_sha256"]
+            ):
+                raise RuntimeError(f"Phase 4 producer identity changed {context}.")
             return
         assert initial_producer_identity is not None
         try:
@@ -4997,7 +5321,7 @@ def main():
         if checkpoint_dir is None:
             raise RuntimeError("Checkpoint directory is not configured.")
         lineage_for_save: Optional[Dict[str, Any]] = None
-        if strict_evidence_run:
+        if strict_evidence_run or phase4_publication_source is not None:
             revalidate_producer_source("before checkpoint publication")
             if confirmatory_fixed_base:
                 lineage_for_save = checkpoint_lineage
@@ -5012,6 +5336,10 @@ def main():
             run_identity,
             lineage_for_save,
             evidence_identity,
+            training_seed=args.seed,
+            training_run_id=args.run_id,
+            config_source_paths=args.config,
+            checkpoint_training_invocation=phase4_training_invocation,
         )
         if confirmatory_fixed_base:
             try:

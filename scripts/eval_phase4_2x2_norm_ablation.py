@@ -3,7 +3,7 @@
 Phase 4: 2x2 Norm Ablation Evaluation Script.
 
 Evaluates all 12 checkpoints (4 conditions × 3 seeds) and generates:
-- schema-v2 summary.json with measured per-condition/per-seed metrics
+- schema-v3 summary.json with measured per-condition/per-seed metrics
 - CLAIMS.md, PROVENANCE.md
 
 Metrics:
@@ -15,13 +15,13 @@ metrics as unavailable instead of emitting placeholder values.
 
 Usage:
     buck2 run //buiksat_trm:eval_phase4_2x2_norm_ablation -- \
-        --out_dir results/paper_ready/phase4_2x2_norm_ablation/v2
+        --project_root /absolute/path/to/trm_bellman \
+        --fbcode_root /absolute/path/to/fbsource/fbcode \
+        --out_dir results/paper_ready/phase4_2x2_norm_ablation/v3
 """
 
 import argparse
 import json
-import os
-import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -30,16 +30,30 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-import yaml
-
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.phase4_result_schema import (  # noqa: E402
+    PHASE4_LIPSCHITZ_PERTURBATION_SCHEME,
+    PHASE4_LIPSCHITZ_PERTURBATION_SEED,
     PHASE4_SCHEMA_VERSION,
     phase4_metric_availability,
     write_phase4_summary,
+)
+from scripts.phase4_diagnostic_inputs import (  # noqa: E402
+    load_phase4_diagnostic_states,
+)
+from utils.run_identity import (  # noqa: E402
+    canonical_json_sha256,
+    discover_clean_git_source,
+)
+from scripts.phase4_checkpoint import (  # noqa: E402
+    Phase4CheckpointIdentity,
+    load_phase4_checkpoint,
+    phase4_checkpoint_relpath,
+)
+from scripts.phase4_source import (  # noqa: E402
+    PHASE4_EVALUATOR_SOURCE_PROFILE,
+    resolve_phase4_source_roots,
+    verify_phase4_runtime_sources,
 )
 
 
@@ -68,6 +82,19 @@ class ConditionResult:
     condition: str
     seed: int
     checkpoint_path: str
+    checkpoint_sha256: str
+    model_state_sha256: str
+    checkpoint_step: int
+    training_run_id: str
+    config_sha256: str
+    rl_config_sha256: str
+    model_config_sha256: str
+    dataset_provenance_sha256: str
+    producer_git_commit: str
+    producer_source_manifest_sha256: str
+    initialization_kind: str
+    checkpoint_schema_version: int
+    training_invocation_schema_version: int
     # Config verification
     enable_contraction: bool
     disable_value_head_norm: bool
@@ -79,10 +106,13 @@ class ConditionResult:
     # Stability metrics
     var_V: float
     projection_active_rate: float
-    argmax_agreement_4x: float
-    argmax_agreement_8x: float
-    delta_V_4x: float
-    delta_V_8x: float
+    argmax_agreement_n4: float
+    argmax_agreement_n8: float
+    delta_V_n4: float
+    delta_V_n8: float
+    lipschitz_sample_count: int
+    stability_sample_count: int
+    projection_sample_count: int
 
 
 @dataclass
@@ -102,262 +132,240 @@ class ConditionAggregate:
     var_V_mean: float
     var_V_std: float
     projection_active_rate_mean: float
-    argmax_4x_mean: float
-    argmax_4x_std: float
-    argmax_8x_mean: float
-    argmax_8x_std: float
-    delta_V_4x_mean: float
-    delta_V_8x_mean: float
-
-
-# =============================================================================
-# Model Loading
-# =============================================================================
-
-def load_checkpoint(ckpt_path: str, config_path: str, device: str = "cuda"):
-    """Load model from checkpoint with config.
-
-    Uses rl_checkpoint_step_*.pt which contains both model weights and rl_config.
-    Falls back to loading model_step_*.pt and constructing config from YAML.
-    """
-    from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
-
-    # Load YAML config for ablation settings
-    with open(config_path, "r") as f:
-        yaml_config = yaml.safe_load(f)
-
-    # Check for rl_checkpoint which has the full config
-    rl_ckpt_path = ckpt_path.replace("model_step_", "rl_checkpoint_step_")
-
-    if os.path.exists(rl_ckpt_path):
-        ckpt = torch.load(rl_ckpt_path, map_location=device, weights_only=False)
-        saved_rl_config = ckpt.get("rl_config", {})
-    else:
-        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-        saved_rl_config = {}
-
-    # Use saved rl_config if available, otherwise construct from YAML and defaults
-    # Key parameters from saved config
-    seq_len = saved_rl_config.get("max_edits", 16)
-    vocab_size = 32  # The model was trained with extended vocab for position info
-    hidden_size = saved_rl_config.get("hidden_size", 64)
-    rl_num_actions = saved_rl_config.get("num_actions", 513)  # Trained with 513 actions
-
-    projection_mode = yaml_config.get("latent_projection_mode", "enabled")
-    if projection_mode == "enabled":
-        projection_radius = yaml_config.get("latent_ball_radius", 10.0)
-        if (
-            projection_radius is None
-            or projection_radius <= 0.0
-            or not np.isfinite(projection_radius)
-        ):
-            raise ValueError("Enabled projection requires latent_ball_radius > 0")
-    elif projection_mode == "disabled":
-        projection_radius = yaml_config.get("latent_ball_radius")
-        if projection_radius is not None:
-            raise ValueError("Disabled projection requires latent_ball_radius=None")
-    else:
-        raise ValueError("latent_projection_mode must be 'enabled' or 'disabled'")
-
-    # Return the normalized pair so serialized results expose canonical state.
-    yaml_config = dict(yaml_config)
-    yaml_config["latent_projection_mode"] = projection_mode
-    yaml_config["latent_ball_radius"] = projection_radius
-
-    # Build TRM config dict (matching upi_trm_train.py structure)
-    trm_cfg_dict = dict(
-        batch_size=32,
-        seq_len=seq_len,
-        puzzle_emb_ndim=0,
-        puzzle_emb_len=0,
-        num_puzzle_identifiers=500,
-        vocab_size=vocab_size,
-        H_cycles=2,
-        L_cycles=2,
-        H_layers=0,
-        L_layers=1,  # Only 1 L layer (matching the checkpoint)
-        hidden_size=hidden_size,
-        expansion=2.0,
-        num_heads=max(4, hidden_size // 16),
-        pos_encodings="rope",
-        rms_norm_eps=1e-5,
-        rope_theta=10000.0,
-        halt_max_steps=2,
-        halt_exploration_prob=0.0,
-        forward_dtype="float32",
-        mlp_t=False,
-        no_ACT_continue=True,
-        rl_enable_value_head=True,
-        rl_enable_contraction=yaml_config.get("enable_contraction", False),
-        rl_target_Lz=yaml_config.get("target_Lz", 0.9),
-        rl_target_Lv=yaml_config.get("target_Lv", 1.0),
-        rl_disable_value_head_norm=yaml_config.get("disable_value_head_norm", True),
-        rl_enable_policy_head=True,
-        rl_num_actions=rl_num_actions,
-        rl_latent_projection_mode=projection_mode,
-        rl_latent_ball_radius=projection_radius,
-    )
-
-    # Create model
-    model = TinyRecursiveReasoningModel_ACTV1(trm_cfg_dict).to(device)
-
-    # Load weights with strict=False to allow some mismatches
-    if "model_state_dict" in ckpt:
-        model.load_state_dict(ckpt["model_state_dict"], strict=False)
-    else:
-        model.load_state_dict(ckpt, strict=False)
-
-    model.eval()
-    return model, yaml_config
+    argmax_n4_mean: float
+    argmax_n4_std: float
+    argmax_n8_mean: float
+    argmax_n8_std: float
+    delta_V_n4_mean: float
+    delta_V_n8_mean: float
 
 
 # =============================================================================
 # Evaluation Functions
 # =============================================================================
 
-def compute_lipschitz(model, states: List[Dict], n_steps: int = 2, device: str = "cuda") -> Tuple[float, float]:
-    """Compute L_preproj using finite differences.
-
-    Uses the correct model API: model.used_value(x, y, n) and inner.latent_step().
-    """
+def compute_lipschitz(
+    model,
+    states: List[Dict],
+    n_steps: int = 2,
+    device: str = "cuda",
+    perturbation_seed: int = PHASE4_LIPSCHITZ_PERTURBATION_SEED,
+) -> Tuple[float, float, int]:
+    """Compute finite differences of the production pre-projection map."""
     from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1InnerCarry
 
+    if not states:
+        raise ValueError("L_preproj requires at least one diagnostic state")
     model.eval()
-    inner = model.inner
     all_estimates = []
     eps = 0.01
+    if isinstance(perturbation_seed, bool) or not isinstance(
+        perturbation_seed, int
+    ):
+        raise ValueError("L_preproj perturbation seed must be an integer")
+    perturbation_generator = torch.Generator(device="cpu")
+    perturbation_generator.manual_seed(perturbation_seed)
 
     with torch.no_grad():
         for state in states[:50]:
             x = {
                 "inputs": torch.tensor(state["inputs"], dtype=torch.long, device=device).unsqueeze(0),
-                "puzzle_identifiers": torch.tensor([0], dtype=torch.long, device=device),
+                "puzzle_identifiers": torch.tensor(
+                    [state["puzzle_identifier"]],
+                    dtype=torch.long,
+                    device=device,
+                ),
             }
             y = torch.tensor(state.get("plan", state["inputs"]), dtype=torch.long, device=device).unsqueeze(0)
 
             # Get latent after n_steps
             _, z_carry = model.used_value(x, y, n=n_steps)
             if z_carry is None:
-                continue
+                raise RuntimeError("L_preproj model did not return a latent carry")
 
-            # Get inner model and carry (handle different model structures)
-            inner = getattr(model, 'inner', model)
+            inner = model.inner
             inner_carry = z_carry.inner_carry if hasattr(z_carry, 'inner_carry') else z_carry
-
-            if not hasattr(inner_carry, 'z_H'):
-                continue
-
-            # Get input embeddings for latent step
-            input_embeddings = inner._input_embeddings(x["inputs"], x["puzzle_identifiers"])
-            seq_info = inner.build_seq_info()
+            batch = model._standardize_latent_batch(x, y)
+            context = model._resolve_latent_context(batch)
+            input_embeddings = context["input_embeddings_with_plan"]
+            seq_info = context["seq_info"]
 
             # Baseline step
-            baseline = inner.latent_step(inner_carry, input_embeddings, seq_info)
+            baseline = inner.latent_step_pre_projection(
+                inner_carry,
+                input_embeddings,
+                seq_info,
+            )
 
             # Perturbed step
             for _ in range(3):  # Multiple perturbation trials
-                noise_h = torch.randn_like(inner_carry.z_H)
-                noise_l = torch.randn_like(inner_carry.z_L)
-                scale = eps / max(
-                    noise_h.norm().item(),
-                    noise_l.norm().item(),
-                    1e-8,
+                noise_h = torch.randn(
+                    inner_carry.z_H.shape,
+                    dtype=torch.float32,
+                    device="cpu",
+                    generator=perturbation_generator,
+                ).to(
+                    device=inner_carry.z_H.device,
+                    dtype=inner_carry.z_H.dtype,
                 )
+                noise_l = torch.randn(
+                    inner_carry.z_L.shape,
+                    dtype=torch.float32,
+                    device="cpu",
+                    generator=perturbation_generator,
+                ).to(
+                    device=inner_carry.z_L.device,
+                    dtype=inner_carry.z_L.dtype,
+                )
+                noise_norm = inner._joint_carry_geometry(noise_h, noise_l)[0]
+                if not bool(torch.isfinite(noise_norm).all().item()) or bool(
+                    (noise_norm <= 0.0).any().item()
+                ):
+                    raise RuntimeError("L_preproj sampled an invalid perturbation")
+                scale = noise_norm.new_tensor(eps) / noise_norm
+                delta_h = noise_h * scale
+                delta_l = noise_l * scale
 
                 perturbed = TinyRecursiveReasoningModel_ACTV1InnerCarry(
-                    z_H=inner_carry.z_H + noise_h * scale,
-                    z_L=inner_carry.z_L + noise_l * scale,
+                    z_H=inner_carry.z_H + delta_h,
+                    z_L=inner_carry.z_L + delta_l,
                 )
-                out = inner.latent_step(perturbed, input_embeddings, seq_info)
-
-                diff = torch.sqrt(
-                    (out.z_H - baseline.z_H).pow(2).sum() +
-                    (out.z_L - baseline.z_L).pow(2).sum()
+                out = inner.latent_step_pre_projection(
+                    perturbed,
+                    input_embeddings,
+                    seq_info,
                 )
-                all_estimates.append(diff.item() / eps)
+                denominator = inner._joint_carry_geometry(delta_h, delta_l)[0]
+                numerator = inner._joint_carry_geometry(
+                    out.z_H - baseline.z_H,
+                    out.z_L - baseline.z_L,
+                )[0]
+                quotient = numerator / denominator
+                if not bool(torch.isfinite(quotient).all().item()):
+                    raise RuntimeError("L_preproj produced a non-finite quotient")
+                all_estimates.extend(quotient.reshape(-1).tolist())
 
     if not all_estimates:
-        return 0.0, 0.0
-    return float(np.mean(all_estimates)), float(np.std(all_estimates))
+        raise RuntimeError("L_preproj produced no observations")
+    return (
+        float(np.mean(all_estimates)),
+        float(np.std(all_estimates)),
+        len(all_estimates),
+    )
 
 
 def compute_stability_metrics(
-    model, states: List[Dict], n_train: int = 2, device: str = "cuda"
-) -> Dict[str, float]:
-    """Compute stability metrics at depth mismatch."""
+    model,
+    states: List[Dict],
+    rl_config: Dict,
+    n_train: int = 2,
+    device: str = "cuda",
+) -> Dict[str, float | int]:
+    """Compute value and production-policy stability at depth mismatch."""
+    from rl.task_config import get_task_config
+
+    if not states:
+        raise ValueError("Stability metrics require at least one diagnostic state")
+    if rl_config.get("task_name", "sudoku") != "sudoku":
+        raise ValueError("Phase 4 stability requires the Sudoku task")
+    if rl_config.get("stop_action_mode") != "disabled":
+        raise ValueError("Phase 4 stability requires disabled STOP actions")
+    task_config = get_task_config(
+        "sudoku",
+        disable_constraint_masking=bool(
+            rl_config.get("disable_constraint_masking", False)
+        ),
+    )
     model.eval()
-    results = {"var_V": 0.0, "argmax_4x": 0.0, "argmax_8x": 0.0, "delta_V_4x": 0.0, "delta_V_8x": 0.0}
 
     V_train_all = []
-    agreements_4x = []
-    agreements_8x = []
-    delta_V_4x = []
-    delta_V_8x = []
+    agreements_n4 = []
+    agreements_n8 = []
+    delta_V_n4 = []
+    delta_V_n8 = []
 
     with torch.no_grad():
         for state in states[:100]:
             y = torch.tensor(state.get("plan", state["inputs"]), dtype=torch.long, device=device).unsqueeze(0)
             x = {
                 "inputs": torch.tensor(state["inputs"], dtype=torch.long, device=device).unsqueeze(0),
-                "puzzle_identifiers": torch.tensor([0], dtype=torch.long, device=device),
-                "plan": y,  # Add plan to batch for _resolve_latent_context
+                "puzzle_identifiers": torch.tensor(
+                    [state["puzzle_identifier"]],
+                    dtype=torch.long,
+                    device=device,
+                ),
             }
+            stop_action_id = model.config.rl_num_actions - 1
+            action_mask = task_config.compute_batch_action_mask(
+                x["inputs"],
+                model.config.vocab_size,
+                stop_action_id,
+                current_state=y,
+            ).clone()
+            action_mask[:, stop_action_id] = False
+            expected_shape = (x["inputs"].shape[0], model.config.rl_num_actions)
+            if action_mask.dtype != torch.bool or tuple(action_mask.shape) != expected_shape:
+                raise RuntimeError("Phase 4 action mask has the wrong type or shape")
+            if bool((~action_mask.any(dim=-1)).any().item()):
+                raise RuntimeError("Phase 4 action mask has an empty support row")
 
-            # Get value and policy at training depth
-            V_train, carry_train = model.used_value(x, y, n=n_train)
+            V_train, _ = model.used_value(x, y, n=n_train)
             if V_train is None:
-                continue
-            V_train_all.append(V_train.item())
+                raise RuntimeError("Phase 4 model did not produce a value")
+            dist_train, _ = model.policy_dist(
+                x,
+                y,
+                n=n_train,
+                action_mask=action_mask,
+            )
+            V_4x, _ = model.used_value(x, y, n=4)
+            V_8x, _ = model.used_value(x, y, n=8)
+            if V_4x is None or V_8x is None:
+                raise RuntimeError("Phase 4 model did not produce depth-mismatch values")
+            dist_4x, _ = model.policy_dist(x, y, n=4, action_mask=action_mask)
+            dist_8x, _ = model.policy_dist(x, y, n=8, action_mask=action_mask)
 
-            # Get policy at training depth
-            if model.edit_policy is not None:
-                # Get embeddings for policy head
-                latent_ctx = model._resolve_latent_context(x)
-                # Get inner carry (handle different model structures)
-                inner_carry_train = carry_train.inner_carry if hasattr(carry_train, 'inner_carry') else carry_train
-                z_flat = inner_carry_train.z_L.flatten(start_dim=1) if hasattr(inner_carry_train, 'z_L') else None
-                if z_flat is None:
-                    continue
-                x_embed_flat = latent_ctx["input_embeddings"].flatten(start_dim=1)
-                y_embed_flat = model.encode_plan(y, x).flatten(start_dim=1)
-                dist_train = model.edit_policy(z_flat, x_embed_flat, y_embed_flat)
-                action_train = dist_train.logits.argmax(dim=-1)
+            value_train = float(V_train.item())
+            value_4x = float(V_4x.item())
+            value_8x = float(V_8x.item())
+            values = (value_train, value_4x, value_8x)
+            if not all(np.isfinite(value) for value in values):
+                raise RuntimeError("Phase 4 stability produced a non-finite value")
+            action_train = dist_train.logits.argmax(dim=-1)
+            action_4x = dist_4x.logits.argmax(dim=-1)
+            action_8x = dist_8x.logits.argmax(dim=-1)
+            V_train_all.append(value_train)
+            agreements_n4.append((action_train == action_4x).float().item())
+            agreements_n8.append((action_train == action_8x).float().item())
+            delta_V_n4.append(abs(value_train - value_4x))
+            delta_V_n8.append(abs(value_train - value_8x))
 
-                # Compare at different depths
-                for n_eval, key_suffix in [(4, "4x"), (8, "8x")]:
-                    V_eval, carry_eval = model.used_value(x, y, n=n_eval)
-                    if V_eval is not None:
-                        inner_carry_eval = carry_eval.inner_carry if hasattr(carry_eval, 'inner_carry') else carry_eval
-                        z_flat_eval = inner_carry_eval.z_L.flatten(start_dim=1) if hasattr(inner_carry_eval, 'z_L') else None
-                        if z_flat_eval is None:
-                            continue
-                        dist_eval = model.edit_policy(z_flat_eval, x_embed_flat, y_embed_flat)
-                        action_eval = dist_eval.logits.argmax(dim=-1)
-
-                        if key_suffix == "4x":
-                            agreements_4x.append((action_train == action_eval).float().item())
-                            delta_V_4x.append(abs(V_train.item() - V_eval.item()))
-                        else:
-                            agreements_8x.append((action_train == action_eval).float().item())
-                            delta_V_8x.append(abs(V_train.item() - V_eval.item()))
-
-    if V_train_all:
-        results["var_V"] = float(np.var(V_train_all))
-    if agreements_4x:
-        results["argmax_4x"] = float(np.mean(agreements_4x))
-    if agreements_8x:
-        results["argmax_8x"] = float(np.mean(agreements_8x))
-    if delta_V_4x:
-        results["delta_V_4x"] = float(np.mean(delta_V_4x))
-    if delta_V_8x:
-        results["delta_V_8x"] = float(np.mean(delta_V_8x))
-
-    return results
+    sample_count = len(V_train_all)
+    if sample_count == 0 or any(
+        len(values) != sample_count
+        for values in (agreements_n4, agreements_n8, delta_V_n4, delta_V_n8)
+    ):
+        raise RuntimeError("Phase 4 stability produced an incomplete sample set")
+    return {
+        "var_V": float(np.var(V_train_all)),
+        "argmax_n4": float(np.mean(agreements_n4)),
+        "argmax_n8": float(np.mean(agreements_n8)),
+        "delta_V_n4": float(np.mean(delta_V_n4)),
+        "delta_V_n8": float(np.mean(delta_V_n8)),
+        "sample_count": sample_count,
+    }
 
 
-def compute_projection_rate(model, states: List[Dict], n_steps: int = 2, device: str = "cuda") -> float:
+def compute_projection_rate(
+    model,
+    states: List[Dict],
+    n_steps: int = 2,
+    device: str = "cuda",
+) -> Tuple[float, int]:
     """Compute next-step activation using production projection instrumentation."""
     model.eval()
+    if not states:
+        raise ValueError("Projection rate requires at least one diagnostic state")
     if not hasattr(model, "config"):
         raise ValueError("Model config is required for projection diagnostics")
     projection_mode = model.config.rl_latent_projection_mode
@@ -365,7 +373,7 @@ def compute_projection_rate(model, states: List[Dict], n_steps: int = 2, device:
     if projection_mode == "disabled":
         if radius is not None:
             raise ValueError("Disabled projection must not have a radius")
-        return 0.0
+        raise ValueError("Phase 4 publication requires enabled projection")
     if (
         projection_mode != "enabled"
         or radius is None
@@ -381,25 +389,25 @@ def compute_projection_rate(model, states: List[Dict], n_steps: int = 2, device:
         for state in states[:50]:
             x = {
                 "inputs": torch.tensor(state["inputs"], dtype=torch.long, device=device).unsqueeze(0),
-                "puzzle_identifiers": torch.tensor([0], dtype=torch.long, device=device),
+                "puzzle_identifiers": torch.tensor(
+                    [state["puzzle_identifier"]],
+                    dtype=torch.long,
+                    device=device,
+                ),
             }
             y = torch.tensor(state.get("plan", state["inputs"]), dtype=torch.long, device=device).unsqueeze(0)
 
             _, carry = model.used_value(x, y, n=n_steps)
             if carry is None:
-                continue
+                raise RuntimeError("Projection diagnostic did not return a latent carry")
 
             inner_carry = carry.inner_carry if hasattr(carry, 'inner_carry') else carry
             if not hasattr(inner_carry, 'z_H'):
-                continue
+                raise RuntimeError("Projection diagnostic returned an invalid carry")
 
             batch = model._standardize_latent_batch(x, y)
             context = model._resolve_latent_context(batch)
-            input_embeddings = (
-                context["input_embeddings_with_plan"]
-                if "input_embeddings_with_plan" in context
-                else context["input_embeddings"]
-            )
+            input_embeddings = context["input_embeddings_with_plan"]
             _, _, projection_active = model.inner.latent_step_with_projection_info(
                 inner_carry,
                 input_embeddings,
@@ -408,7 +416,9 @@ def compute_projection_rate(model, states: List[Dict], n_steps: int = 2, device:
             active_count += projection_active.sum().item()
             total_count += projection_active.numel()
 
-    return active_count / total_count if total_count > 0 else 0.0
+    if total_count <= 0:
+        raise RuntimeError("Projection rate produced no observations")
+    return active_count / total_count, total_count
 
 
 # =============================================================================
@@ -420,11 +430,12 @@ def evaluate_condition(
     seed: int,
     checkpoint_dir: Path,
     config_dir: Path,
-    data_dir: Path,
+    diagnostic_states: List[Dict],
     device: str = "cuda",
 ) -> Optional[ConditionResult]:
     """Evaluate a single condition-seed pair."""
-    ckpt_path = checkpoint_dir / f"{condition}_s{seed}" / "model_step_5000.pt"
+    checkpoint_relpath = phase4_checkpoint_relpath(condition, seed)
+    ckpt_path = checkpoint_dir / checkpoint_relpath
     config_path = config_dir / f"{condition}.yaml"
 
     if not ckpt_path.exists():
@@ -433,63 +444,76 @@ def evaluate_condition(
 
     print(f"  Evaluating {condition} seed={seed}...")
 
-    # Load model and config
-    model, config = load_checkpoint(str(ckpt_path), str(config_path), device)
+    loaded = load_phase4_checkpoint(
+        ckpt_path,
+        config_path,
+        condition=condition,
+        seed=seed,
+        device=device,
+    )
+    model = loaded.model
+    config = loaded.rl_config
+    identity: Phase4CheckpointIdentity = loaded.identity
 
-    # Load the inputs used by the finite checkpoint diagnostics. This is not an
-    # environment rollout and therefore does not produce a success metric.
-    trivial_puzzles = []
-
-    for dataset_name in ["sudoku-4x4-trivial"]:
-        dataset_path = data_dir / dataset_name
-        if not dataset_path.exists():
-            continue
-
-        for split in ["train", "test"]:
-            split_dir = dataset_path / split
-            if not split_dir.exists():
-                continue
-            inputs_path = split_dir / "all__inputs.npy"
-            if not inputs_path.exists():
-                continue
-
-            inputs = np.load(inputs_path)
-            pids_path = split_dir / "all__puzzle_identifiers.npy"
-            puzzle_ids = np.load(pids_path) if pids_path.exists() else np.arange(len(inputs))
-
-            for i in range(min(len(inputs), 50)):
-                puzzle = {
-                    "inputs": inputs[i].astype(np.int64).tolist(),
-                    "puzzle_identifier": int(puzzle_ids[i]),
-                    "plan": inputs[i].astype(np.int64).tolist(),
-                }
-                trivial_puzzles.append(puzzle)
-
-    if not trivial_puzzles:
-        print(f"  [Skip] No puzzles found in {data_dir}")
-        return None
-
-    # Compute metrics using list of puzzle dicts
-    L_preproj, L_preproj_std = compute_lipschitz(model, trivial_puzzles, N_TRAIN, device)
-    stability = compute_stability_metrics(model, trivial_puzzles, N_TRAIN, device)
-    proj_rate = compute_projection_rate(model, trivial_puzzles, N_TRAIN, device)
+    # Compute finite diagnostics on the single input population loaded before
+    # any checkpoint. Every design cell therefore sees identical ordered states.
+    L_preproj, L_preproj_std, lipschitz_sample_count = compute_lipschitz(
+        model,
+        diagnostic_states,
+        N_TRAIN,
+        device,
+        PHASE4_LIPSCHITZ_PERTURBATION_SEED,
+    )
+    stability = compute_stability_metrics(
+        model,
+        diagnostic_states,
+        config,
+        N_TRAIN,
+        device,
+    )
+    proj_rate, projection_sample_count = compute_projection_rate(
+        model,
+        diagnostic_states,
+        N_TRAIN,
+        device,
+    )
 
     return ConditionResult(
         condition=condition,
         seed=seed,
-        checkpoint_path=str(ckpt_path),
-        enable_contraction=config.get("enable_contraction", False),
-        disable_value_head_norm=config.get("disable_value_head_norm", True),
+        checkpoint_path=checkpoint_relpath,
+        checkpoint_sha256=identity.checkpoint_sha256,
+        model_state_sha256=identity.model_state_sha256,
+        checkpoint_step=identity.checkpoint_step,
+        training_run_id=identity.training_run_id,
+        config_sha256=identity.config_sha256,
+        rl_config_sha256=identity.rl_config_sha256,
+        model_config_sha256=identity.model_config_sha256,
+        dataset_provenance_sha256=identity.dataset_provenance_sha256,
+        producer_git_commit=identity.producer_git_commit,
+        producer_source_manifest_sha256=(
+            identity.producer_source_manifest_sha256
+        ),
+        initialization_kind=identity.initialization_kind,
+        checkpoint_schema_version=identity.checkpoint_schema_version,
+        training_invocation_schema_version=(
+            identity.training_invocation_schema_version
+        ),
+        enable_contraction=config["enable_contraction"],
+        disable_value_head_norm=config["disable_value_head_norm"],
         latent_projection_mode=config["latent_projection_mode"],
         latent_ball_radius=config["latent_ball_radius"],
         L_preproj=L_preproj,
         L_preproj_std=L_preproj_std,
         var_V=stability["var_V"],
         projection_active_rate=proj_rate,
-        argmax_agreement_4x=stability["argmax_4x"],
-        argmax_agreement_8x=stability["argmax_8x"],
-        delta_V_4x=stability["delta_V_4x"],
-        delta_V_8x=stability["delta_V_8x"],
+        argmax_agreement_n4=stability["argmax_n4"],
+        argmax_agreement_n8=stability["argmax_n8"],
+        delta_V_n4=stability["delta_V_n4"],
+        delta_V_n8=stability["delta_V_n8"],
+        lipschitz_sample_count=lipschitz_sample_count,
+        stability_sample_count=int(stability["sample_count"]),
+        projection_sample_count=projection_sample_count,
     )
 
 
@@ -518,41 +542,37 @@ def aggregate_results(results: List[ConditionResult]) -> List[ConditionAggregate
             projection_active_rate_mean=float(
                 np.mean([r.projection_active_rate for r in cond_results])
             ),
-            argmax_4x_mean=float(
-                np.mean([r.argmax_agreement_4x for r in cond_results])
+            argmax_n4_mean=float(
+                np.mean([r.argmax_agreement_n4 for r in cond_results])
             ),
-            argmax_4x_std=float(
-                np.std([r.argmax_agreement_4x for r in cond_results])
+            argmax_n4_std=float(
+                np.std([r.argmax_agreement_n4 for r in cond_results])
             ),
-            argmax_8x_mean=float(
-                np.mean([r.argmax_agreement_8x for r in cond_results])
+            argmax_n8_mean=float(
+                np.mean([r.argmax_agreement_n8 for r in cond_results])
             ),
-            argmax_8x_std=float(
-                np.std([r.argmax_agreement_8x for r in cond_results])
+            argmax_n8_std=float(
+                np.std([r.argmax_agreement_n8 for r in cond_results])
             ),
-            delta_V_4x_mean=float(
-                np.mean([r.delta_V_4x for r in cond_results])
+            delta_V_n4_mean=float(
+                np.mean([r.delta_V_n4 for r in cond_results])
             ),
-            delta_V_8x_mean=float(
-                np.mean([r.delta_V_8x for r in cond_results])
+            delta_V_n8_mean=float(
+                np.mean([r.delta_V_n8 for r in cond_results])
             ),
         ))
 
     return aggregates
 
 
-def get_git_sha() -> str:
-    """Get current git SHA."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=str(PROJECT_ROOT),
-        )
-        return result.stdout.strip()
-    except Exception:
-        return "unknown"
+def get_evaluator_git_commit(project_root: Path) -> str:
+    """Require and return the clean evaluator repository commit."""
+
+    identity = discover_clean_git_source(project_root)
+    commit = identity["git_commit"]
+    if not isinstance(commit, str):
+        raise RuntimeError("Evaluator Git identity did not contain a commit")
+    return commit
 
 
 def generate_claims_md(aggregates: List[ConditionAggregate], out_path: Path) -> None:
@@ -567,7 +587,7 @@ by the values themselves.
 
 ## Evidence
 
-| Condition | z→z | V-head | Var(V) | Argmax@4× |
+| Condition | z→z | V-head | Var(V) | Argmax@n=4 |
 |-----------|-----|--------|--------|-----------|
 """
     for agg in aggregates:
@@ -575,7 +595,7 @@ by the values themselves.
         v_status = "OFF" if agg.disable_value_head_norm else "ON"
         content += f"| {agg.label} | {c_status} | {v_status} | "
         content += f"{agg.var_V_mean:.3f}±{agg.var_V_std:.3f} | "
-        content += f"{agg.argmax_4x_mean:.3f}±{agg.argmax_4x_std:.3f} |\n"
+        content += f"{agg.argmax_n4_mean:.3f}±{agg.argmax_n4_std:.3f} |\n"
 
     content += """
 ## Scope
@@ -615,7 +635,7 @@ def generate_provenance_md(
 ## Metric availability
 
 The evaluator did not run an environment rollout or load a training log or
-training history. New schema-v2 summaries omit the retired numeric fields and
+training history. New schema-v3 summaries omit the retired numeric fields and
 record their availability as follows:
 
 ```json
@@ -639,10 +659,12 @@ record their availability as follows:
 
 def main():
     parser = argparse.ArgumentParser(description="Phase 4 Evaluation")
+    parser.add_argument("--project_root", type=str, required=True)
+    parser.add_argument("--fbcode_root", type=str, required=True)
     parser.add_argument(
         "--out_dir",
         type=str,
-        default="results/paper_ready/phase4_2x2_norm_ablation/v2",
+        default="results/paper_ready/phase4_2x2_norm_ablation/v3",
     )
     parser.add_argument("--checkpoint_dir", type=str, default="results/phase4_2x2_norm_ablation")
     parser.add_argument("--config_dir", type=str, default="configs/phase4_2x2_norm_ablation")
@@ -651,10 +673,19 @@ def main():
 
     args = parser.parse_args()
 
-    out_path = PROJECT_ROOT / args.out_dir
-    checkpoint_dir = PROJECT_ROOT / args.checkpoint_dir
-    config_dir = PROJECT_ROOT / args.config_dir
-    data_dir = PROJECT_ROOT / args.data_dir
+    project_root, _ = resolve_phase4_source_roots(
+        args.project_root,
+        args.fbcode_root,
+    )
+    evaluator_git_commit = get_evaluator_git_commit(project_root)
+    evaluator_source_manifest_sha256 = verify_phase4_runtime_sources(
+        project_root,
+        PHASE4_EVALUATOR_SOURCE_PROFILE,
+    )
+    out_path = project_root / args.out_dir
+    checkpoint_dir = project_root / args.checkpoint_dir
+    config_dir = project_root / args.config_dir
+    data_dir = project_root / args.data_dir
 
     out_path.mkdir(parents=True, exist_ok=True)
 
@@ -668,13 +699,22 @@ def main():
     print("=" * 60)
     print()
 
+    diagnostic_states, diagnostic_dataset = load_phase4_diagnostic_states(
+        data_dir
+    )
+
     # Evaluate all conditions
     results = []
     for condition in CONDITIONS:
         print(f"\n[{condition}] {CONDITION_LABELS[condition]}")
         for seed in SEEDS:
             result = evaluate_condition(
-                condition, seed, checkpoint_dir, config_dir, data_dir, device
+                condition,
+                seed,
+                checkpoint_dir,
+                config_dir,
+                diagnostic_states,
+                device,
             )
             if result:
                 results.append(result)
@@ -687,7 +727,15 @@ def main():
     aggregates = aggregate_results(results)
 
     # Generate outputs
-    git_sha = get_git_sha()
+    git_sha = get_evaluator_git_commit(project_root)
+    if git_sha != evaluator_git_commit:
+        raise RuntimeError("Evaluator source identity changed during evaluation.")
+    final_source_manifest_sha256 = verify_phase4_runtime_sources(
+        project_root,
+        PHASE4_EVALUATOR_SOURCE_PROFILE,
+    )
+    if final_source_manifest_sha256 != evaluator_source_manifest_sha256:
+        raise RuntimeError("Evaluator runtime source changed during evaluation.")
 
     summary = {
         "schema_version": PHASE4_SCHEMA_VERSION,
@@ -695,7 +743,20 @@ def main():
         "experiment": "Phase4_2x2_norm_ablation",
         "description": "Multi-seed 2×2 norm ablation (z→z contraction × value-head norm)",
         "generated_at": datetime.now().isoformat(),
-        "git_sha": git_sha,
+        "evaluator_git_commit": git_sha,
+        "evaluator_source_manifest_sha256": (
+            evaluator_source_manifest_sha256
+        ),
+        "diagnostic_dataset": diagnostic_dataset,
+        "diagnostic_dataset_sha256": canonical_json_sha256(
+            diagnostic_dataset
+        ),
+        "lipschitz_perturbation_seed": (
+            PHASE4_LIPSCHITZ_PERTURBATION_SEED
+        ),
+        "lipschitz_perturbation_scheme": (
+            PHASE4_LIPSCHITZ_PERTURBATION_SCHEME
+        ),
         "conditions": CONDITIONS,
         "seeds": SEEDS,
         "all_results": [asdict(r) for r in results],

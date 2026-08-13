@@ -369,15 +369,16 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
     ]:
         """Apply one step and expose pre-projection norm and activation."""
 
-        z_H, z_L = carry.z_H, carry.z_L
-        for _L_step in range(self.config.L_cycles):
-            z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
-        z_H = self.L_level(z_H, z_L, **seq_info)
-
+        pre_projection_carry = self.latent_step_pre_projection(
+            carry,
+            input_embeddings,
+            seq_info,
+        )
+        z_H, z_L = pre_projection_carry.z_H, pre_projection_carry.z_L
         pre_projection_norm = (
             self._joint_carry_geometry(z_H, z_L)[0].squeeze(-1).squeeze(-1)
         )
-        
+
         # === Forward-invariant recurrent projection ===
         # Enabled: Euclidean Pi_R for a validated finite R > 0.
         # Disabled: the recurrent projection operator is exactly the identity.
@@ -390,11 +391,28 @@ class TinyRecursiveReasoningModel_ACTV1_Inner(nn.Module):
             assert R is not None
             projection_active = pre_projection_norm > R
             z_H, z_L = self._project_carry_to_ball(z_H, z_L, R)
-        
+
         return (
             TinyRecursiveReasoningModel_ACTV1InnerCarry(z_H=z_H, z_L=z_L),
             pre_projection_norm,
             projection_active,
+        )
+
+    def latent_step_pre_projection(
+        self,
+        carry: TinyRecursiveReasoningModel_ACTV1InnerCarry,
+        input_embeddings: torch.Tensor,
+        seq_info: Dict[str, Optional[CosSin]],
+    ) -> TinyRecursiveReasoningModel_ACTV1InnerCarry:
+        """Apply the production recurrent update before radial projection."""
+
+        z_H, z_L = carry.z_H, carry.z_L
+        for _L_step in range(self.config.L_cycles):
+            z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
+        z_H = self.L_level(z_H, z_L, **seq_info)
+        return TinyRecursiveReasoningModel_ACTV1InnerCarry(
+            z_H=z_H,
+            z_L=z_L,
         )
     
     def _project_carry_to_ball(

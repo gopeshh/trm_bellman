@@ -642,6 +642,48 @@ class TestForwardInvariantProjection(unittest.TestCase):
         torch.testing.assert_close(actual.z_L, expected_l)
         self.assertFalse(bool(active.any().item()))
 
+    def test_preprojection_helper_composes_with_production_projection(self):
+        model = TinyRecursiveReasoningModel_ACTV1(
+            {
+                **self.config,
+                "rl_latent_projection_mode": "enabled",
+                "rl_latent_ball_radius": 0.1,
+            }
+        )
+        carry = model.init_latent(self.sample_batch, self.sample_plan)
+        batch = model._standardize_latent_batch(
+            self.sample_batch,
+            self.sample_plan,
+        )
+        context = model._resolve_latent_context(batch)
+        embeddings = context["input_embeddings_with_plan"]
+
+        with torch.no_grad():
+            raw = model.inner.latent_step_pre_projection(
+                carry,
+                embeddings,
+                context["seq_info"],
+            )
+            expected_h, expected_l = model.inner._project_carry_to_ball(
+                raw.z_H,
+                raw.z_L,
+                0.1,
+            )
+            actual, pre_norm, active = model.inner.latent_step_with_projection_info(
+                carry,
+                embeddings,
+                context["seq_info"],
+            )
+            expected_norm = model.inner._joint_carry_geometry(
+                raw.z_H,
+                raw.z_L,
+            )[0].squeeze(-1).squeeze(-1)
+
+        torch.testing.assert_close(actual.z_H, expected_h)
+        torch.testing.assert_close(actual.z_L, expected_l)
+        torch.testing.assert_close(pre_norm, expected_norm)
+        torch.testing.assert_close(active, expected_norm > 0.1)
+
     def test_model_projection_contract_and_legacy_migration(self):
         with self.assertRaises(ValueError):
             TinyRecursiveReasoningModel_ACTV1Config(

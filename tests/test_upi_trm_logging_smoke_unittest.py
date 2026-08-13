@@ -36,9 +36,11 @@ from rl.upi_trm_trainer import UPITrmTrainer
 import upi_trm_train
 from upi_trm_train import (
     _capture_rng_state,
+    _checkpoint_training_invocation,
     _claim_confirmatory_attempt_paths,
     _config_dict,
     _fixed_base_effective_config,
+    _phase4_condition_from_run_id,
     _preflight_confirmatory_runtime,
     _remember_latest_optimization_metrics,
     _reject_confirmatory_resume,
@@ -114,6 +116,66 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         )
         os.set_inheritable(descriptor, True)
         return descriptor, f"/proc/self/fd/{descriptor}"
+
+    def test_checkpoint_invocation_binds_seed_run_and_config_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "condition.yaml"
+            config_path.write_text("enable_contraction: false\n")
+            rl_config = {"enable_contraction": False}
+            model_config = {"rl_enable_contraction": False}
+
+            invocation = _checkpoint_training_invocation(
+                training_seed=41,
+                training_run_id="phase4_2x2_norm_ablation.nc_nv.seed41",
+                config_source_paths=[str(config_path)],
+                rl_config=rl_config,
+                model_config=model_config,
+            )
+
+        self.assertEqual(invocation["schema_version"], 1)
+        self.assertEqual(invocation["training_seed"], 41)
+        self.assertEqual(
+            invocation["run_id"],
+            "phase4_2x2_norm_ablation.nc_nv.seed41",
+        )
+        self.assertEqual(
+            invocation["config_sources"],
+            [
+                {
+                    "name": "condition.yaml",
+                    "sha256": hashlib.sha256(
+                        b"enable_contraction: false\n"
+                    ).hexdigest(),
+                }
+            ],
+        )
+        self.assertEqual(
+            invocation["rl_config_sha256"],
+            canonical_json_sha256(rl_config),
+        )
+        self.assertEqual(
+            invocation["model_config_sha256"],
+            canonical_json_sha256(model_config),
+        )
+
+    def test_phase4_run_id_requires_registered_seed_and_cell(self):
+        self.assertEqual(
+            _phase4_condition_from_run_id(
+                "phase4_2x2_norm_ablation.yc_yv.seed42",
+                42,
+            ),
+            "yc_yv",
+        )
+        with self.assertRaisesRegex(RuntimeError, "registered seed"):
+            _phase4_condition_from_run_id(
+                "phase4_2x2_norm_ablation.yc_yv.seed44",
+                44,
+            )
+        with self.assertRaisesRegex(RuntimeError, "does not match"):
+            _phase4_condition_from_run_id(
+                "phase4_2x2_norm_ablation.nc_nv.seed42",
+                41,
+            )
 
     def test_confirmatory_preflight_requires_packaged_launcher(self):
         with self.assertRaisesRegex(RuntimeError, "packaged-runtime launcher"):

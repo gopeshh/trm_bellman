@@ -5,36 +5,57 @@ Phase 4 Audit Script: 2×2 Norm Ablation Paper-Ready Checks.
 Runs ≥9 automated checks to validate experimental integrity:
 1. Config integrity: all 4 condition YAMLs exist and are valid
 2. Correct toggle combinations: each condition has expected enable_contraction/disable_value_head_norm
-3. Seeds present: all 3 seeds (41, 42, 43) have checkpoints per condition
+3. Seeds present: all 3 seeds (41, 42, 43) have full checkpoints per condition
 4. No mislabeled conditions: checkpoint dirs match config names
 5. Summary.json exists and is readable JSON
-6. Summary uses the strict publication schema version 2
+6. Summary uses the strict publication schema version 3
 7. All 12 runs present in summary
 8. CLAIMS.md exists and is non-empty
 9. PROVENANCE.md exists and references correct configs
 10. Metric bounds: measured stability metrics are within valid ranges
 11. No non-finite values in measured metrics
 12. Statistical validity: means have std computed from correct seed count
+13. Checkpoint identity: every record revalidates against its full checkpoint
+14. Diagnostic input identity: the exact ordered input bytes are revalidated
+15. Evaluator source identity: runtime bytes match the claimed clean checkout
 
 Usage:
     buck2 run //buiksat_trm:audit_phase4_paper_ready -- \
-        --results_dir results/paper_ready/phase4_2x2_norm_ablation/v2
+        --results_dir results/paper_ready/phase4_2x2_norm_ablation/v3 \
+        --checkpoint_dir results/phase4_2x2_norm_ablation
 """
 
 import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import yaml
-
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.phase4_result_schema import (  # noqa: E402
     Phase4SummaryValidationError,
     validate_phase4_summary,
+)
+from scripts.phase4_checkpoint import (  # noqa: E402
+    Phase4CheckpointError,
+    phase4_checkpoint_relpath,
+    verify_phase4_summary_checkpoints,
+)
+from scripts.phase4_diagnostic_inputs import (  # noqa: E402
+    Phase4DiagnosticInputError,
+    verify_phase4_diagnostic_inputs,
+)
+from scripts.phase4_source import (  # noqa: E402
+    PHASE4_AUDIT_SOURCE_PROFILE,
+    Phase4SourceError,
+    phase4_evaluator_source_manifest_sha256,
+    resolve_phase4_source_roots,
+    verify_phase4_runtime_sources,
+)
+from utils.run_identity import (  # noqa: E402
+    RunIdentityError,
+    discover_clean_git_source,
 )
 
 
@@ -128,42 +149,15 @@ def check_correct_toggles(config_dir: Path) -> AuditResult:
 
 
 def check_seeds_present(
-    results_dir: Path,
-    summary: Optional[Dict[str, Any]] = None,
+    checkpoint_dir: Path,
 ) -> AuditResult:
-    """Check 3: All 3 seeds have results per condition (checks summary if available)."""
-    # If we have summary, check that all condition/seed combos are present
-    if summary:
-        runs = summary.get("all_results", [])
-        found = set()
-        for run in runs:
-            cond = run.get("condition")
-            seed = run.get("seed")
-            if cond and seed:
-                found.add((cond, seed))
-
-        expected = {(c, s) for c in EXPECTED_CONDITIONS for s in EXPECTED_SEEDS}
-        missing = expected - found
-
-        if missing:
-            return AuditResult(
-                "Seeds Present",
-                False,
-                f"Missing condition/seed combos in summary: {list(missing)[:5]}{'...' if len(missing) > 5 else ''}",
-            )
-        return AuditResult(
-            "Seeds Present",
-            True,
-            f"All {len(EXPECTED_CONDITIONS) * len(EXPECTED_SEEDS)} condition/seed combinations found in summary",
-        )
-
-    # Fall back to checking directories if no summary
+    """Check 3: Every design cell has its exact full checkpoint path."""
     missing = []
 
     for cond in EXPECTED_CONDITIONS:
         for seed in EXPECTED_SEEDS:
-            ckpt_dir = results_dir / f"{cond}_s{seed}"
-            if not ckpt_dir.exists():
+            checkpoint_path = checkpoint_dir / phase4_checkpoint_relpath(cond, seed)
+            if not checkpoint_path.is_file() or checkpoint_path.is_symlink():
                 missing.append(f"{cond}_s{seed}")
 
     if missing:
@@ -179,13 +173,13 @@ def check_seeds_present(
     )
 
 
-def check_no_mislabeled(results_dir: Path) -> AuditResult:
+def check_no_mislabeled(checkpoint_dir: Path) -> AuditResult:
     """Check 4: Checkpoint dirs match expected naming pattern."""
     unexpected = []
     expected_pattern = {f"{c}_s{s}" for c in EXPECTED_CONDITIONS for s in EXPECTED_SEEDS}
 
-    if results_dir.exists():
-        for item in results_dir.iterdir():
+    if checkpoint_dir.exists():
+        for item in checkpoint_dir.iterdir():
             if item.is_dir() and item.name not in expected_pattern:
                 # Allow summary files and documentation
                 if not item.name.endswith(".json") and not item.name.endswith(".md"):
@@ -230,7 +224,7 @@ def check_summary_exists(results_dir: Path) -> Tuple[AuditResult, Dict[str, Any]
 
 
 def check_publication_schema(summary: Dict[str, Any]) -> AuditResult:
-    """Check 6: summary is a publishable Phase 4 schema-v2 artifact."""
+    """Check 6: summary is a publishable Phase 4 schema-v3 artifact."""
     try:
         validate_phase4_summary(summary)
     except Phase4SummaryValidationError as error:
@@ -243,7 +237,7 @@ def check_publication_schema(summary: Dict[str, Any]) -> AuditResult:
     return AuditResult(
         "Publication Schema",
         True,
-        "Strict schema version 2 is valid; unavailable metrics are explicit",
+        "Strict schema version 3 is valid; checkpoint identity is explicit",
     )
 
 
@@ -351,9 +345,9 @@ def check_metric_bounds(summary: Dict[str, Any]) -> AuditResult:
             issues.append(f"{cond}: var_V_mean={var_v} out of bounds [0, 1000]")
 
         # Argmax agreement should be in [0, 1]
-        argmax = agg["argmax_4x_mean"]
+        argmax = agg["argmax_n4_mean"]
         if argmax < 0 or argmax > 1:
-            issues.append(f"{cond}: argmax_4x_mean={argmax} out of bounds [0, 1]")
+            issues.append(f"{cond}: argmax_n4_mean={argmax} out of bounds [0, 1]")
 
         projection_rate = agg["projection_active_rate_mean"]
         if projection_rate < 0 or projection_rate > 1:
@@ -447,7 +441,83 @@ def check_statistical_validity(summary: Dict[str, Any]) -> AuditResult:
     )
 
 
-def run_audit(results_dir: Path, config_dir: Path) -> Tuple[List[AuditResult], bool]:
+def check_checkpoint_identities(
+    summary: Dict[str, Any],
+    checkpoint_dir: Path,
+    config_dir: Path,
+) -> AuditResult:
+    """Check 13: Rehash and strictly reload every recorded full checkpoint."""
+
+    try:
+        count = verify_phase4_summary_checkpoints(
+            summary,
+            checkpoint_dir,
+            config_dir,
+            device="cpu",
+        )
+    except (OSError, Phase4CheckpointError) as error:
+        return AuditResult("Checkpoint Identity", False, str(error))
+    return AuditResult(
+        "Checkpoint Identity",
+        True,
+        f"Revalidated {count} checkpoint, model-state, seed, and config identities",
+    )
+
+
+def check_diagnostic_input_identity(
+    summary: Dict[str, Any],
+    data_dir: Path,
+) -> AuditResult:
+    """Check 14: Rehash the exact ordered finite-diagnostic input population."""
+
+    try:
+        count = verify_phase4_diagnostic_inputs(summary, data_dir)
+    except (OSError, Phase4DiagnosticInputError) as error:
+        return AuditResult("Diagnostic Input Identity", False, str(error))
+    return AuditResult(
+        "Diagnostic Input Identity",
+        True,
+        f"Revalidated the exact ordered {count}-state diagnostic population",
+    )
+
+
+def check_evaluator_source_identity(
+    summary: Dict[str, Any],
+    project_root: Path,
+) -> AuditResult:
+    """Check 15: Bind evaluator bytes and commit to the clean checkout."""
+
+    try:
+        source_identity = discover_clean_git_source(project_root)
+        expected_digest = phase4_evaluator_source_manifest_sha256(project_root)
+    except (OSError, Phase4SourceError, RunIdentityError) as error:
+        return AuditResult("Evaluator Source Identity", False, str(error))
+    if summary.get("evaluator_git_commit") != source_identity["git_commit"]:
+        return AuditResult(
+            "Evaluator Source Identity",
+            False,
+            "Summary evaluator commit differs from the clean project checkout",
+        )
+    if summary.get("evaluator_source_manifest_sha256") != expected_digest:
+        return AuditResult(
+            "Evaluator Source Identity",
+            False,
+            "Summary evaluator source digest differs from the project checkout",
+        )
+    return AuditResult(
+        "Evaluator Source Identity",
+        True,
+        "Evaluator source digest and commit match the clean project checkout",
+    )
+
+
+def run_audit(
+    results_dir: Path,
+    config_dir: Path,
+    checkpoint_dir: Path,
+    data_dir: Path,
+    project_root: Path,
+) -> Tuple[List[AuditResult], bool]:
     """Run all audit checks."""
     results = []
 
@@ -459,9 +529,9 @@ def run_audit(results_dir: Path, config_dir: Path) -> Tuple[List[AuditResult], b
     summary_result, summary = check_summary_exists(results_dir)
     publication_schema_result = check_publication_schema(summary)
 
-    # Check 3-4: Seeds and directories (pass summary if available)
-    results.append(check_seeds_present(results_dir, summary))
-    results.append(check_no_mislabeled(results_dir))
+    # Check 3-4: Check the distinct full-checkpoint root, not publication output.
+    results.append(check_seeds_present(checkpoint_dir))
+    results.append(check_no_mislabeled(checkpoint_dir))
 
     # Add summary check result
     results.append(summary_result)
@@ -477,8 +547,20 @@ def run_audit(results_dir: Path, config_dir: Path) -> Tuple[List[AuditResult], b
         results.append(check_metric_bounds(summary))
         results.append(check_no_nan_inf(summary))
         results.append(check_statistical_validity(summary))
+        results.append(
+            check_checkpoint_identities(summary, checkpoint_dir, config_dir)
+        )
+        results.append(check_diagnostic_input_identity(summary, data_dir))
+        results.append(check_evaluator_source_identity(summary, project_root))
     else:
-        for name in ("Metric Bounds", "Finite Metrics", "Statistical Validity"):
+        for name in (
+            "Metric Bounds",
+            "Finite Metrics",
+            "Statistical Validity",
+            "Checkpoint Identity",
+            "Diagnostic Input Identity",
+            "Evaluator Source Identity",
+        ):
             results.append(
                 AuditResult(
                     name,
@@ -531,29 +613,64 @@ def write_audit_md(results_dir: Path, results: List[AuditResult], all_passed: bo
 def main():
     parser = argparse.ArgumentParser(description="Phase 4 Audit Script")
     parser.add_argument(
+        "--project_root",
+        type=str,
+        required=True,
+        help="Exact clean implementation checkout used by the evaluator",
+    )
+    parser.add_argument(
+        "--fbcode_root",
+        type=str,
+        required=True,
+        help="fbcode root whose buiksat_trm cell resolves to project_root",
+    )
+    parser.add_argument(
         "--results_dir",
         type=str,
         required=True,
         help=(
             "Path to results directory "
-            "(e.g., results/paper_ready/phase4_2x2_norm_ablation/v2)"
+            "(e.g., results/paper_ready/phase4_2x2_norm_ablation/v3)"
         ),
+    )
+    parser.add_argument(
+        "--checkpoint_dir",
+        type=str,
+        required=True,
+        help="Trusted root containing the 12 full Phase 4 checkpoints",
     )
     parser.add_argument(
         "--config_dir",
         type=str,
-        default=None,
-        help="Path to config directory (defaults to configs/phase4_2x2_norm_ablation)",
+        required=True,
+        help="Trusted root containing the four Phase 4 condition configs",
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        required=True,
+        help="Trusted root containing the recorded Phase 4 diagnostic arrays",
     )
 
     args = parser.parse_args()
 
+    try:
+        project_root, _ = resolve_phase4_source_roots(
+            args.project_root,
+            args.fbcode_root,
+        )
+        runtime_source_digest = verify_phase4_runtime_sources(
+            project_root,
+            PHASE4_AUDIT_SOURCE_PROFILE,
+        )
+    except (OSError, Phase4SourceError) as error:
+        print(f"ERROR: Audit runtime source is not authenticated: {error}")
+        return 1
+
     results_dir = Path(args.results_dir)
-    config_dir = (
-        Path(args.config_dir)
-        if args.config_dir
-        else Path(__file__).parent.parent / "configs" / "phase4_2x2_norm_ablation"
-    )
+    checkpoint_dir = Path(args.checkpoint_dir)
+    data_dir = Path(args.data_dir)
+    config_dir = Path(args.config_dir)
 
     print("=" * 60)
     print("Phase 4: 2×2 Norm Ablation - Audit")
@@ -562,7 +679,41 @@ def main():
     print(f"Config dir: {config_dir}")
     print()
 
-    results, all_passed = run_audit(results_dir, config_dir)
+    results, all_passed = run_audit(
+        results_dir,
+        config_dir,
+        checkpoint_dir,
+        data_dir,
+        project_root,
+    )
+
+    try:
+        final_runtime_source_digest = verify_phase4_runtime_sources(
+            project_root,
+            PHASE4_AUDIT_SOURCE_PROFILE,
+        )
+        if final_runtime_source_digest != runtime_source_digest:
+            raise Phase4SourceError(
+                "Audit runtime source changed during validation."
+            )
+        final_identity = discover_clean_git_source(project_root)
+        summary_result, final_summary = check_summary_exists(results_dir)
+        if not summary_result.passed or final_summary.get(
+            "evaluator_git_commit"
+        ) != final_identity["git_commit"]:
+            raise Phase4SourceError(
+                "Project or summary source identity changed during audit."
+            )
+        results.append(
+            AuditResult(
+                "Audit Runtime Source",
+                True,
+                "Audit runtime bytes match the explicit project checkout",
+            )
+        )
+    except (OSError, Phase4SourceError, RunIdentityError) as error:
+        results.append(AuditResult("Audit Runtime Source", False, str(error)))
+    all_passed = all(result.passed for result in results)
 
     print("Audit Results:")
     print("-" * 40)

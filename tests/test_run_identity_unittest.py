@@ -20,6 +20,7 @@ from utils.run_identity import (
     canonical_json_sha256,
     discover_clean_git_source,
     file_sha256,
+    git_files_at_head,
     run_identity_sha256,
     validate_checkpoint_lineage,
     validate_run_identity,
@@ -308,6 +309,17 @@ class RunIdentityTest(unittest.TestCase):
                     "--no-assume-unchanged",
                     "tracked.txt",
                 )
+
+    def test_git_files_at_head_uses_committed_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._clean_repository(root)
+            (root / "ignored.py").write_text("ignored\n", encoding="ascii")
+
+            self.assertEqual(
+                git_files_at_head(root, ["tracked.txt"]),
+                ["tracked.txt"],
+            )
 
     def test_initialization_artifact_is_content_addressed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

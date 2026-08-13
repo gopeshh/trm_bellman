@@ -33,6 +33,7 @@ tensorboard/
 tmp/
 temp/
 outputs/
+results/
 logs/
 *.profraw
 *.pid
