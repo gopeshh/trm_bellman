@@ -21,6 +21,26 @@ Prefer these local repositories:
 - canonical paper: `/home/buiksat/UPI_TRM`, branch
   `iclr-evidence-aligned-revision`.
 
+The intended frozen source anchors for this review are:
+
+- implementation behavior-source commit
+  `f86bddb607adcd24eba65fd5869af58f91742a52`, parent
+  `e4edcb2107c0f3e7ac0e691bd9dc828c5c6f38a0`;
+- paper branch head `071037929ed0a16eaf1d8b2f1169786a866eb8a5`;
+- canonical mathematical paper source commit
+  `5253692fea5e77cfde3a130c50351183dc0268e3`.
+
+Verify that the named branches contain those commits. Review implementation
+behavior at the exact source commit even if the branch has moved. Resolve the
+current implementation branch tip and prove that every commit after the source
+anchor changes only `README.md`, `reports/**`, or other handoff documentation.
+If any later commit changes behavior-bearing source, tests, configs, manifests,
+or build ownership, stop and request a new explicit source anchor. For the
+paper, prove whether the
+canonical paper source and its transitive dependencies differ between the
+mathematical source commit and the frozen paper branch head. Do not substitute
+a newer behavior-source revision without explicit user authorization.
+
 For each target branch, record:
 
 - absolute repository path;
@@ -31,9 +51,11 @@ For each target branch, record:
 - recent history sufficient to locate the implementation synchronization
   commit and any later documentation-only commits.
 
-Resolve the two target branch tips at review time and freeze those full SHAs as
-the review anchors. Do not substitute a remembered SHA. If a local checkout is
-on another branch, inspect the named branch with `git show` or `git archive`.
+Resolve and record the two target branch tips at review time, but use the exact
+source commits above as the review anchors. The implementation prompt may be in
+a later documentation-only commit because a commit cannot name its own SHA. Do not
+substitute a remembered or newer behavior-source SHA. If a local checkout is on
+another branch, inspect the frozen commit with `git show` or `git archive`.
 Do not checkout, reset, stash, clean, rebase, fetch into, or otherwise alter the
 user's repository or working-tree metadata.
 
@@ -59,7 +81,8 @@ not as authority.
 
 ## Post-fix review focus
 
-This review follows repairs for `UPITRM-UPD-001` through `UPITRM-UPD-006`.
+This review follows repairs for `UPITRM-UPD-001` through `UPITRM-UPD-006` and
+`UPITRM-GPT-001` through `UPITRM-GPT-007`.
 Do not assume those repairs are correct merely because tests or prior reviewers
 accepted them. Reconstruct and challenge each contract from current source:
 
@@ -94,10 +117,36 @@ accepted them. Reconstruct and challenge each contract from current source:
     of trust. Verify descriptor binding after acquisition. Do not demand or
     credit isolation from a compromised host, and do not describe best-effort
     pathname cleanup as a security boundary.
+11. The finite-reference theorem must state a premise sufficient to define the
+    ordinary discounted fixed-policy value, then prove that this value is the
+    unique fixed point of the `K`-step Bellman operator. Actively retry the
+    alternating-reward counterexample from the prior review.
+12. Both archive-validation layers must reject every member when
+    `ZipInfo.orig_filename != ZipInfo.filename`, including nonbehavior members
+    rewritten by Info-ZIP Unicode Path field `0x7075`. Trace raw central names,
+    effective CPython names, NUL truncation, duplicate aliases, and the actual
+    Buck PAR bootstrap importer.
+13. The schema-v5 checkpoint writer must accept only effective-config schema 4
+    for new writes. Historical schemas 1 through 3 may remain readable only
+    under their exact historical contracts and must not mint new schema-v5
+    evidence.
+14. Phase 4 schema-v2 output must mark success, final loss, and training-history
+    NaN status unavailable with exact reasons. Publication requires the exact
+    four-condition by three-seed design, fixed toggles and projection settings,
+    and aggregates recomputed from all 12 runs. Audit and figure consumers must
+    reject legacy, partial, inconsistent, nonfinite, or placeholder summaries
+    before creating output.
+15. CleanRL entry scripts must resolve one owned `cleanrl_runner` Buck target.
+    Verify PPO, A2C, CartPole DQN, and Sudoku DQN routing, rejection of unknown
+    algorithms, and the explicit Sudoku wrapper limitation for `n_step > 1`.
+16. The stochastic persistent-policy smoke test must establish
+    `len(replay) >= batch_size` before asserting update-only metrics.
+17. The four repaired arXiv bibliography entries must render a usable external
+    locator under the tracked bibliography style.
 
-Review the complete implementation change since the parent of the current
-implementation head, but do not limit the audit to that diff. The resulting
-tree and all reachable callers remain the source of truth.
+Review the complete implementation change from `e4edcb2` through `f86bddb`, but
+do not limit the audit to that diff. The resulting source tree and all reachable
+callers remain the source of truth.
 
 ## Non-negotiable scope
 
@@ -158,16 +207,27 @@ files completely:
 - `rl/persistent_diagnostic_checkpoint.py`;
 - `rl/persistent_diagnostics.py`;
 - `rl/cleanrl/trm_adapter.py`;
+- `rl/cleanrl/cleanrl_runner.py`;
 - `upi_trm_train.py`;
 - `utils/lipschitz.py`;
 - `utils/run_identity.py`;
+- `utils/source_identity.py`;
 - `confirmatory_runtime_launcher.py`;
+- `scripts/phase4_result_schema.py`;
+- `scripts/eval_phase4_2x2_norm_ablation.py`;
+- `scripts/audit_phase4_paper_ready.py`;
+- `scripts/make_paper_figures_phase4.py`;
+- `scripts/run_cleanrl_benchmark_hard4x4.sh`;
+- `tests/smoke_test_cartpole.sh`;
+- the Phase 4, CleanRL dispatcher, archive identity, source identity,
+  checkpoint logging, and trainer smoke tests;
 - every importing caller, affected test, owning Buck target, launcher,
   evaluator, diagnostic, and documentation claim reached from those files.
 
-Do not read `reports/CLAUDE_MULTI_AGENT_REPOSITORY_REVIEW_REPORT.md` until the
-blind review passes below are complete. Read it afterward and reconcile every
-finding and rejected candidate independently.
+Do not read `reports/CLAUDE_MULTI_AGENT_REPOSITORY_REVIEW_REPORT.md` or
+`reports/CHATGPT_PRO_CODE_AND_PAPER_REVIEW_REPORT.md` until the blind review
+passes below are complete. Read them afterward and reconcile every finding,
+repair claim, and rejected candidate independently.
 
 Enumerate every tracked file in both repositories. Fully read every
 behavior-bearing source, test, config, build, CI, manifest, instruction, and
@@ -201,9 +261,10 @@ Use independent agents if ChatGPT Pro exposes them. Otherwise perform genuinely
 separate passes and disclose that limitation. Do not claim an agent or model
 participated unless it returned usable work.
 
-After blind candidate generation, read the prior Claude report. Independently
-reverify every `UPITRM-REV-*` finding and every material rejected candidate
-against the frozen anchors. Do not inherit its verdict.
+After blind candidate generation, read the prior Claude and GPT Pro reports.
+Independently reverify every `UPITRM-REV-*`, `UPITRM-UPD-*`, and
+`UPITRM-GPT-*` item and every material rejected candidate against the frozen
+anchors. Do not inherit either verdict.
 
 For every candidate defect:
 
@@ -225,6 +286,24 @@ demonstrated mismatch are required.
 Re-derive all implementation-facing results and verify every domain,
 measurability, boundedness, and invariance premise. A strong explicit
 assumption is not itself a defect.
+
+### Ordinary policy value and block fixed point
+
+Verify the finite-reference theorem assumes a uniformly bounded measurable
+one-step reward under the fixed policy, or another premise that is genuinely
+sufficient for the ordinary discounted return to exist. Check that the proof
+constructs
+
+```text
+V^pi(s) = sum_{t>=0} gamma^t E[r_t | s_0=s]
+```
+
+by uniform convergence, establishes bounded measurability, and proves the
+`K`-step Bellman identity before invoking uniqueness of the block-operator
+fixed point. Do not accept boundedness of the grouped `K`-step reward alone.
+Retry the deterministic chain with
+`r_i=(-1)^i gamma^(-i)` and `K=2`: its grouped reward cancels while the ordinary
+discounted series diverges. Explain exactly which repaired premise excludes it.
 
 ### Bounded value heads
 
@@ -552,13 +631,14 @@ buck2 test --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_persistent_checkpoint_diagnostics \
   fbcode//buiksat_trm:test_upi_trm_logging_smoke \
   fbcode//buiksat_trm:test_cleanrl_regressions \
-  fbcode//buiksat_trm:test_unroll_sensitivity
+  fbcode//buiksat_trm:test_unroll_sensitivity \
+  fbcode//buiksat_trm:test_phase4_reporting
 ```
 
 Run the synchronization-touched type gate from the same workdir:
 
 ```bash
-buck2 test --local-only @fbcode//mode/opt \
+buck2 build --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:models-type-checking \
   fbcode//buiksat_trm:eval_unroll_sensitivity_lib-type-checking \
   fbcode//buiksat_trm:script_eval_unroll_sensitivity_lib-type-checking \
@@ -570,9 +650,21 @@ buck2 test --local-only @fbcode//mode/opt \
 Also run the two launcher type-check targets:
 
 ```bash
-buck2 test --local-only @fbcode//mode/opt \
+buck2 build --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:confirmatory_runtime_launcher_lib-type-checking \
   fbcode//buiksat_trm:confirmatory_runtime_launcher-library-type-checking
+```
+
+Run the repair-specific Phase 4 and CleanRL type targets:
+
+```bash
+buck2 build --local-only @fbcode//mode/opt \
+  fbcode//buiksat_trm:audit_phase4_paper_ready-library-type-checking \
+  fbcode//buiksat_trm:cleanrl_runner-library-type-checking \
+  fbcode//buiksat_trm:eval_phase4_2x2_norm_ablation-library-type-checking \
+  fbcode//buiksat_trm:make_paper_figures_phase4-library-type-checking \
+  fbcode//buiksat_trm:phase4_result_schema-type-checking \
+  fbcode//buiksat_trm:test_phase4_reporting-library-type-checking
 ```
 
 Do not treat failures from an optional repository-wide type target as part of
@@ -585,7 +677,8 @@ training:
 ```bash
 buck2 build --local-only @fbcode//mode/opt --show-output \
   fbcode//buiksat_trm:upi_trm_train \
-  fbcode//buiksat_trm:confirmatory_runtime_launcher
+  fbcode//buiksat_trm:confirmatory_runtime_launcher \
+  fbcode//buiksat_trm:cleanrl_runner
 
 sha256sum /absolute/path/to/upi_trm_train.par
 
@@ -593,11 +686,14 @@ sha256sum /absolute/path/to/upi_trm_train.par
   --runtime-archive /absolute/path/to/upi_trm_train.par \
   --expected-runtime-sha256 <actual-lowercase-sha256> -- \
   --confirmatory --help
+
+/absolute/path/to/cleanrl_runner.par --help
 ```
 
-Record both artifact paths, the actual training-PAR SHA-256, exit codes,
+Record all three artifact paths, the actual training-PAR SHA-256, exit codes,
 stderr, and the count of `upi_trm_confirmatory_unpack.*` directories before
-and after. Also require all of these negative cases to fail before training:
+and after. The CleanRL help command must dispatch no training. Also require all
+of these negative cases to fail before training:
 
 - direct `upi_trm_train.par --confirmatory --help` execution;
 - a wrong, uppercase, or malformed expected SHA-256;
@@ -681,8 +777,8 @@ contain:
 8. verified findings;
 9. rejected candidates and cleared risks;
 10. validation commands and exact results;
-11. prior-report reconciliation for every `UPITRM-REV-*` and
-    `UPITRM-UPD-*` item;
+11. prior-report reconciliation for every `UPITRM-REV-*`, `UPITRM-UPD-*`,
+    and `UPITRM-GPT-*` item;
 12. claim, citation, and stale-reference audit;
 13. recommended repairs in priority order;
 14. initial and final worktree attestation for both repositories;

@@ -1,13 +1,14 @@
 # UPI-TRM paper parity report
 
-Date: 2026-08-11
+Date: 2026-08-12
 
-- Paper anchor: `/home/buiksat/UPI_TRM`, commit `2107125a50df1471393bc9a5e387c3005d7db112`
+- Paper source anchor: `/home/buiksat/UPI_TRM`, commit
+  `5253692fea5e77cfde3a130c50351183dc0268e3`
+- Paper handoff head: `071037929ed0a16eaf1d8b2f1169786a866eb8a5`
 - Paper branch at inspection: `iclr-evidence-aligned-revision`
-- Implementation base: branch `full-implementation`, commit
-  `d9ccad73fb58998ccaed609b5e957d29b7878da6`
-- Implementation scope: the current working tree with the descriptor-bound
-  unpack-root, canonical archive-path, and validation-document repairs applied
+- Implementation source anchor: branch `full-implementation`, commit
+  `f86bddb607adcd24eba65fd5869af58f91742a52`
+- Implementation parent: `e4edcb2107c0f3e7ac0e691bd9dc828c5c6f38a0`
 
 ## Result
 
@@ -99,10 +100,16 @@ descriptor. Every launch binds its private PAR unpack directory to an inherited
 directory descriptor rather than a shared extraction cache. The entry point
 independently verifies both descriptors, rehashes the runtime bytes, and
 validates the unpack-directory identity before importing model or RL modules.
+Both archive-validation layers reject a member when its raw ZIP name differs
+from its effective CPython `ZipInfo.filename`, including Unicode Path extra
+field rewrites on nonbehavior members.
 Source-tree runs and direct unattested PAR runs cannot enter
 `--confirmatory` mode. Effective
 configuration schema 4, evidence-identity schema 2, and lock schema 4 bind the
 verified PAR digest without embedding that self-referential digest in the PAR.
+New checkpoint-schema-5 writes require effective-config schema 4. Historical
+effective-config schemas remain readable under their original contracts but
+cannot create new schema-5 evidence.
 The trusted launcher process, operating system, host namespace, other same-UID
 processes, and initial environment remain the external trust root. The launcher
 is not a sandbox against that root. It strips loader, Python-path, and PAR
@@ -142,6 +149,15 @@ optimization convergence. Schema-v5 checkpoints bind this protocol and its
 object roles so historical mutable checkpoints cannot be reinterpreted as
 theorem-facing runs.
 
+Phase 4 paper-facing summaries use strict schema version 2. They mark success,
+final loss, and training-history NaN status unavailable instead of serializing
+placeholder measurements. Publication requires the exact four-condition by
+three-seed design, fixed condition toggles and projection settings, and
+aggregates recomputed from all 12 measured records. Audit and figure consumers
+reject legacy, partial, inconsistent, or nonfinite summaries before writing
+output. This reporting contract does not turn the finite diagnostics into a
+uniform theorem certificate.
+
 ## Validation status
 
 Validation was run from `/data/users/buiksat/fbsource` with this repository
@@ -163,32 +179,38 @@ buck2 test --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_persistent_checkpoint_diagnostics \
   fbcode//buiksat_trm:test_upi_trm_logging_smoke \
   fbcode//buiksat_trm:test_cleanrl_regressions \
-  fbcode//buiksat_trm:test_unroll_sensitivity
+  fbcode//buiksat_trm:test_unroll_sensitivity \
+  fbcode//buiksat_trm:test_phase4_reporting
 ```
 
-Result: 289 passed, 0 failed, 0 timed out, 0 fatal, 0 infra failures, and 0
+Result: 308 passed, 0 failed, 0 timed out, 0 fatal, 0 infra failures, and 0
 build failures.
 
-After restarting Buck to invalidate its symlink cache, the final type gate for
-the synchronization-touched model, evaluator, utility, and checkpoint targets
-passed 6/6:
+The six synchronization-touched targets and two launcher targets were built
+together. The first group passed 6/6 and the launcher group passed 2/2:
 
 ```text
-buck2 test --local-only @fbcode//mode/opt \
+buck2 build --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:models-type-checking \
   fbcode//buiksat_trm:eval_unroll_sensitivity_lib-type-checking \
   fbcode//buiksat_trm:script_eval_unroll_sensitivity_lib-type-checking \
   fbcode//buiksat_trm:utils-type-checking \
   fbcode//buiksat_trm:test_persistent_checkpoint_diagnostics-library-type-checking \
-  fbcode//buiksat_trm:test_augmented_replay_diagnostics-library-type-checking
-```
-
-The two launcher type targets also passed 2/2:
-
-```text
-buck2 test --local-only @fbcode//mode/opt \
+  fbcode//buiksat_trm:test_augmented_replay_diagnostics-library-type-checking \
   fbcode//buiksat_trm:confirmatory_runtime_launcher_lib-type-checking \
   fbcode//buiksat_trm:confirmatory_runtime_launcher-library-type-checking
+```
+
+The repair-specific Phase 4 and CleanRL type targets passed 6/6:
+
+```text
+buck2 build --local-only @fbcode//mode/opt \
+  fbcode//buiksat_trm:audit_phase4_paper_ready-library-type-checking \
+  fbcode//buiksat_trm:cleanrl_runner-library-type-checking \
+  fbcode//buiksat_trm:eval_phase4_2x2_norm_ablation-library-type-checking \
+  fbcode//buiksat_trm:make_paper_figures_phase4-library-type-checking \
+  fbcode//buiksat_trm:phase4_result_schema-type-checking \
+  fbcode//buiksat_trm:test_phase4_reporting-library-type-checking
 ```
 
 A historical pre-repair repository-wide diagnostic command,
@@ -203,13 +225,15 @@ not claimed green.
 
 The checked producer manifest equals a fresh mechanical regeneration and
 contains 79 source entries. The final training PAR SHA-256 is
-`c03ab186add45656079c550d5d84224e332e0370ad2e966802d9c18ef5a985c1`.
+`bd10dda2afc422bd07751a02e1ed39ef164adf0d6a4241220db2b94f95e5cb67`.
 The real launcher help path exited 0 with zero private unpack directories before
-and after. Wrong-digest and direct-PAR confirmatory invocations exited 2 and 1,
-respectively. All 46 tracked shell scripts passed `bash -n`; 625 tracked JSON
-files and 96 tracked YAML files parsed successfully. The retired launcher
-exited 2 without changing the worktree. `git diff --check` passes. The complete
-working-tree diff was inspected after the final repairs.
+and after. Wrong-digest, uppercase-digest, and direct-PAR confirmatory
+invocations exited 2, 2, and 1, respectively. The packaged CleanRL dispatcher
+also built and its help path exited 0 without training. All 46 tracked shell
+scripts passed `bash -n`; 625 tracked JSON files and 96 tracked YAML files
+parsed successfully. The retired launcher exited 2 without changing the
+worktree. `git diff --check` passes. The complete source diff was inspected
+before commit.
 
 ## Experiment status
 

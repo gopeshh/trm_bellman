@@ -1,12 +1,17 @@
 # ICLR repair handoff
 
-Date: 2026-08-11
+Date: 2026-08-12
 
 Implementation branch: `full-implementation`
 
-Implementation base: `d9ccad73fb58998ccaed609b5e957d29b7878da6`
+Implementation source anchor: `f86bddb607adcd24eba65fd5869af58f91742a52`
 
-Paper anchor: UPI-TRM commit `2107125`
+Implementation parent: `e4edcb2107c0f3e7ac0e691bd9dc828c5c6f38a0`
+
+Paper source anchor: UPI-TRM commit
+`5253692fea5e77cfde3a130c50351183dc0268e3`
+
+Paper handoff head: `071037929ed0a16eaf1d8b2f1169786a866eb8a5`
 
 This branch contains the repaired implementation baseline. It is not a
 completed confirmatory experiment and must not be cited as one. The detailed
@@ -45,9 +50,17 @@ conditional theorem premises are in `reports/PAPER_PARITY_REPORT.md`.
   certificates.
 - Confirmatory execution verifies and seals the complete PAR before behavior
   imports, passes the private unpack root through an inherited directory
-  descriptor, and rejects noncanonical or colliding archive paths. The host
-  namespace and other same-UID processes remain part of the external trust
-  root.
+  descriptor, rejects noncanonical or colliding archive paths, and rejects any
+  raw/effective ZIP member-name mismatch. The host namespace and other same-UID
+  processes remain part of the external trust root.
+- The schema-v5 writer accepts only effective-config schema 4 for new
+  checkpoints. Historical schemas remain readable but cannot mint new
+  schema-v5 evidence.
+- Phase 4 schema-v2 summaries omit unmeasured success, loss, and NaN-history
+  fields, require the exact four-condition by three-seed design, and recompute
+  aggregates from all 12 runs before audit or figure output.
+- CleanRL scripts route through one owned dispatcher target, and dispatcher
+  tests cover every supported backend and fail-closed branch.
 - Current-source parity runtime and affected type-check gates are green; exact
   commands and counts are recorded below.
 
@@ -73,13 +86,13 @@ fact instead of advertising a no-op contrast.
 
 ## Schema-v5 evidence boundary
 
-Schema 4 remains part of the historical implementation chronology, but it is
-not sufficient for a new theorem-facing run. `fixed_base_exact` requires schema
-5, an explicit run ID and seed, clean source blobs equal to the recorded
-producer commit, exact effective-configuration identity, runtime identity,
-initialization and parent-checkpoint lineage, actual optimizer-step counters,
-and atomic no-overwrite publication. Restore validates the complete payload on
-shadow objects before mutating live state.
+Checkpoint schema 4 remains part of the historical implementation chronology,
+but it is not sufficient for a new theorem-facing run. `fixed_base_exact`
+requires checkpoint schema 5, an explicit run ID and seed, clean source blobs
+equal to the recorded producer commit, effective-config schema 4 with runtime
+identity, initialization and parent-checkpoint lineage, actual optimizer-step
+counters, and atomic no-overwrite publication. Restore validates the complete
+payload on shadow objects before mutating live state.
 
 The schema-v5 design is recorded in
 `reports/CHECKPOINT_SCHEMA_V5_REPORT.md`. Historical execution reports describe
@@ -87,18 +100,18 @@ earlier revisions and are not validation of the current validated source state.
 
 ## Current validation status
 
-The final 13-target parity runtime command recorded in
-`reports/PAPER_PARITY_REPORT.md` passed 289/289. The final six-target type gate
+The final 14-target parity runtime command recorded in
+`reports/PAPER_PARITY_REPORT.md` passed 308/308. The final six-target type gate
 for synchronization-touched model, evaluator, utility, and checkpoint code
-passed 6/6 after a Buck daemon restart. The launcher library and binary type
-targets passed 2/2. The producer manifest matches a fresh 79-source
-regeneration, and `git diff --check` passes.
+passed 6/6. The launcher library and binary type targets passed 2/2. Six
+repair-specific Phase 4 and CleanRL type targets passed 6/6. The producer
+manifest matches a fresh 79-source regeneration, and `git diff --check` passes.
 
 The final training PAR SHA-256 is
-`c03ab186add45656079c550d5d84224e332e0370ad2e966802d9c18ef5a985c1`.
+`bd10dda2afc422bd07751a02e1ed39ef164adf0d6a4241220db2b94f95e5cb67`.
 The real launcher help path exited 0 with no private unpack directory left
-behind. Wrong-digest and direct-PAR confirmatory invocations failed closed with
-exit codes 2 and 1.
+behind. Wrong-digest, uppercase-digest, and direct-PAR confirmatory invocations
+failed closed with exit codes 2, 2, and 1.
 
 All 46 tracked shell scripts passed `bash -n`; 625 tracked JSON files and 96
 tracked YAML files parsed successfully. The retired launcher exited 2 without

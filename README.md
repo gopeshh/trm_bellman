@@ -2,8 +2,9 @@
 
 This repository contains the plan-edit MDP, recurrent evaluator, training loops,
 baselines, diagnostics, and retained experiment outputs for the UPI-TRM paper.
-The implementation parity anchor is the manuscript at paper commit `2107125`
-and this repository's `full-implementation` branch. See
+The implementation parity anchor is the manuscript source at paper commit
+`5253692fea5e77cfde3a130c50351183dc0268e3` and implementation source commit
+`f86bddb607adcd24eba65fd5869af58f91742a52` on `full-implementation`. See
 `reports/PAPER_PARITY_REPORT.md` for the executable Algorithm 1/2 mapping and
 the theorem premises that remain conditional.
 
@@ -136,13 +137,15 @@ buck2 test --local-only @fbcode//mode/opt 'fbcode//buiksat_trm:'
 ```
 
 That package pattern also runs Buck's generated Python type-check targets.
-The final paper-parity runtime selection passed 289/289. The six generated
-type-check targets touched by the synchronization passed 6/6, and the launcher
-library and binary type targets passed 2/2. Exact commands, the historical
-repository-wide diagnostic result, and the scope of the executable parity
-claim are recorded in `reports/PAPER_PARITY_REPORT.md`. The full package
-pattern is not green because pre-existing aggregate libraries, tests, runners,
-diagnostics, and experiment scripts retain unrelated type-check debt.
+The final paper-parity runtime selection, including the Phase 4 reporting
+regressions, passed 308/308. The six generated type-check targets touched by
+the synchronization passed 6/6, the launcher library and binary type targets
+passed 2/2, and six repair-specific Phase 4 and CleanRL type targets passed
+6/6. Exact commands, the historical repository-wide diagnostic result, and
+the scope of the executable parity claim are recorded in
+`reports/PAPER_PARITY_REPORT.md`. The full package pattern is not claimed green
+because pre-existing aggregate libraries, tests, runners, diagnostics, and
+experiment scripts retain unrelated type-check debt.
 
 In a standard environment with the dependencies installed:
 
