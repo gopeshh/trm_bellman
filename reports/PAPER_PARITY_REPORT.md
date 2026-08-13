@@ -1,14 +1,15 @@
 # UPI-TRM paper parity report
 
-Date: 2026-08-12
+Date: 2026-08-13
 
 - Paper source anchor: `/home/buiksat/UPI_TRM`, commit
   `5253692fea5e77cfde3a130c50351183dc0268e3`
-- Paper handoff head: `071037929ed0a16eaf1d8b2f1169786a866eb8a5`
+- Paper handoff head: `7d58819e7f77ab1545b8f05d485df3f86c06ee8b`
 - Paper branch at inspection: `iclr-evidence-aligned-revision`
 - Implementation source anchor: branch `full-implementation`, commit
-  `f86bddb607adcd24eba65fd5869af58f91742a52`
-- Implementation parent: `e4edcb2107c0f3e7ac0e691bd9dc828c5c6f38a0`
+  `980f6ede14717e87ad68ceb32acc111bdd7fca1b`
+- Implementation parent: `86ec7363103b3d6a6a36fb25094ec1991cefd48e`
+- Previous behavior anchor: `f86bddb607adcd24eba65fd5869af58f91742a52`
 
 ## Result
 
@@ -149,14 +150,24 @@ optimization convergence. Schema-v5 checkpoints bind this protocol and its
 object roles so historical mutable checkpoints cannot be reinterpreted as
 theorem-facing runs.
 
-Phase 4 paper-facing summaries use strict schema version 2. They mark success,
+Phase 4 paper-facing summaries use strict schema version 3. They mark success,
 final loss, and training-history NaN status unavailable instead of serializing
-placeholder measurements. Publication requires the exact four-condition by
-three-seed design, fixed condition toggles and projection settings, and
-aggregates recomputed from all 12 measured records. Audit and figure consumers
-reject legacy, partial, inconsistent, or nonfinite summaries before writing
-output. This reporting contract does not turn the finite diagnostics into a
-uniform theorem certificate.
+placeholder measurements. `L_preproj` uses the exact plan-conditioned
+pre-projection map and actual joint perturbation norm. Policy stability calls
+the production masked `policy_dist` path on `z_H` at absolute depths 2, 4, and
+8. Publication requires the exact four-condition by three-seed design,
+registered sample counts, fixed toggles and projection settings, and aggregates
+recomputed from all 12 measured records.
+
+Each record binds a strict full checkpoint, complete model/config/run identity,
+checkpoint and model-state SHA-256 values, and the exact ordered diagnostic
+input population. The summary also records a canonical evaluator-source
+manifest digest. Evaluator, audit, and figure PARs compare their runtime source
+members with the explicit checkout, its complete Git `HEAD` inventory, safe
+index flags, and HEAD-identical worktree bytes. Audit and figure consumers
+reopen all 12 checkpoints and revalidate source, config, and input identities
+before consuming metrics. This reporting contract does not turn the finite
+diagnostics into a uniform theorem certificate.
 
 ## Validation status
 
@@ -183,11 +194,10 @@ buck2 test --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_phase4_reporting
 ```
 
-Result: 308 passed, 0 failed, 0 timed out, 0 fatal, 0 infra failures, and 0
+Result: 338 passed, 0 failed, 0 timed out, 0 fatal, 0 infra failures, and 0
 build failures.
 
-The six synchronization-touched targets and two launcher targets were built
-together. The first group passed 6/6 and the launcher group passed 2/2:
+The complete changed-surface type gate passed 24/24 targets:
 
 ```text
 buck2 build --local-only @fbcode//mode/opt \
@@ -198,19 +208,23 @@ buck2 build --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_persistent_checkpoint_diagnostics-library-type-checking \
   fbcode//buiksat_trm:test_augmented_replay_diagnostics-library-type-checking \
   fbcode//buiksat_trm:confirmatory_runtime_launcher_lib-type-checking \
-  fbcode//buiksat_trm:confirmatory_runtime_launcher-library-type-checking
-```
-
-The repair-specific Phase 4 and CleanRL type targets passed 6/6:
-
-```text
-buck2 build --local-only @fbcode//mode/opt \
+  fbcode//buiksat_trm:confirmatory_runtime_launcher-library-type-checking \
   fbcode//buiksat_trm:audit_phase4_paper_ready-library-type-checking \
   fbcode//buiksat_trm:cleanrl_runner-library-type-checking \
   fbcode//buiksat_trm:eval_phase4_2x2_norm_ablation-library-type-checking \
   fbcode//buiksat_trm:make_paper_figures_phase4-library-type-checking \
   fbcode//buiksat_trm:phase4_result_schema-type-checking \
-  fbcode//buiksat_trm:test_phase4_reporting-library-type-checking
+  fbcode//buiksat_trm:test_phase4_reporting-library-type-checking \
+  fbcode//buiksat_trm:phase4_checkpoint-type-checking \
+  fbcode//buiksat_trm:phase4_diagnostic_inputs-type-checking \
+  fbcode//buiksat_trm:phase4_source-type-checking \
+  fbcode//buiksat_trm:run_phase4_training-library-type-checking \
+  fbcode//buiksat_trm:upi_trm_train-library-type-checking \
+  fbcode//buiksat_trm:upi_trm_train_lib-type-checking \
+  fbcode//buiksat_trm:test_run_identity-library-type-checking \
+  fbcode//buiksat_trm:test_theory_exact_components-library-type-checking \
+  fbcode//buiksat_trm:test_upi_trm_logging_smoke-library-type-checking \
+  fbcode//buiksat_trm:test_upi_trm_trainer_smoke-library-type-checking
 ```
 
 A historical pre-repair repository-wide diagnostic command,
@@ -218,22 +232,42 @@ A historical pre-repair repository-wide diagnostic command,
 554 passes and 26 failures before the final type-only cleanup. All 26 failures
 were generated Python type-check targets; runtime tests had no failures. Six
 failures in synchronization-touched targets were then repaired and cleared by
-the final 6/6 type gate above. Other pre-existing generated type-check failures
-remain across aggregate libraries, tests, runners, diagnostics, and experiment
-scripts outside the six cleared targets, so the all-target package command is
-not claimed green.
+the changed-surface type gate above. Other pre-existing generated type-check
+failures remain across aggregate libraries, tests, runners, diagnostics, and
+experiment scripts outside the cleared targets, so the all-target package
+command is not claimed green.
 
 The checked producer manifest equals a fresh mechanical regeneration and
 contains 79 source entries. The final training PAR SHA-256 is
-`bd10dda2afc422bd07751a02e1ed39ef164adf0d6a4241220db2b94f95e5cb67`.
+`1a01d06695200a48b160b10d81fa7160750c3499a133b6cfcdda9b110a5ba577`.
+The launcher and CleanRL dispatcher SHA-256 values are
+`46cb7201226f39718ea83135e397ec6618b9ab344d7ed963a8c26ddf2d4d83ae` and
+`54cb744038a121ef5715c0d52cc87e6e9c7c19616a3a836bb3b96e3f3b8cc9ad`.
 The real launcher help path exited 0 with zero private unpack directories before
-and after. Wrong-digest, uppercase-digest, and direct-PAR confirmatory
-invocations exited 2, 2, and 1, respectively. The packaged CleanRL dispatcher
-also built and its help path exited 0 without training. All 46 tracked shell
-scripts passed `bash -n`; 625 tracked JSON files and 96 tracked YAML files
-parsed successfully. The retired launcher exited 2 without changing the
-worktree. `git diff --check` passes. The complete source diff was inspected
-before commit.
+and after. Wrong-digest, uppercase-digest, malformed-digest, and direct-PAR
+confirmatory invocations exited 2, 2, 2, and 1, respectively. The packaged
+CleanRL dispatcher also built and its help path exited 0 without training.
+
+The first post-repair Phase 4 PAR inspection rejected stale cached
+`phase4_source.py` and `run_identity.py` members. After a clean-daemon rebuild,
+the evaluator, audit, and figure PARs matched their exact committed source
+profiles. Their artifact SHA-256 values are, respectively,
+`e03022090542be8773069b7ba5ccf3e630b220b3f1ac943881394c3a81fc7dc0`,
+`50ccb5891320e9a1cd4455795a9da0896d54386850653278e233016ec492875f`, and
+`6bbedeebe4ce9b5d77581f5f3c5144868baf2b4e68ebe3410a530c3b6df33744`.
+Their canonical runtime source-profile digests are
+`99cdbf794b79e70e21cab59eeb4e0143042875a8a233f919075e3d3a24d38500`,
+`43211cb68189983870d8877424e840ce20364adec2dbda8dfbd5b1102c28c335`, and
+`246f9396498572487056f843d9699f2779adaea1440248bde7f8b4f899b61b08`.
+
+All 46 tracked shell scripts passed `bash -n`; 625 tracked JSON files and 96
+tracked YAML files parsed successfully; and 246 tracked Python files passed
+source compilation. The retired launcher exited 2 without changing the
+worktree. The canonical paper built 38 pages, all pages were inspected, and
+the PDF SHA-256 was
+`2b5a930136b7c81d2f3e8cc59ea7aa27ab837c913cf7cd2d07200b26a940a534`.
+`git diff --check` passes. The complete source diff was inspected before
+commit.
 
 ## Experiment status
 

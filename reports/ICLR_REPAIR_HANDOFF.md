@@ -1,17 +1,19 @@
 # ICLR repair handoff
 
-Date: 2026-08-12
+Date: 2026-08-13
 
 Implementation branch: `full-implementation`
 
-Implementation source anchor: `f86bddb607adcd24eba65fd5869af58f91742a52`
+Implementation source anchor: `980f6ede14717e87ad68ceb32acc111bdd7fca1b`
 
-Implementation parent: `e4edcb2107c0f3e7ac0e691bd9dc828c5c6f38a0`
+Implementation parent: `86ec7363103b3d6a6a36fb25094ec1991cefd48e`
+
+Previous behavior anchor: `f86bddb607adcd24eba65fd5869af58f91742a52`
 
 Paper source anchor: UPI-TRM commit
 `5253692fea5e77cfde3a130c50351183dc0268e3`
 
-Paper handoff head: `071037929ed0a16eaf1d8b2f1169786a866eb8a5`
+Paper handoff head: `7d58819e7f77ab1545b8f05d485df3f86c06ee8b`
 
 This branch contains the repaired implementation baseline. It is not a
 completed confirmatory experiment and must not be cited as one. The detailed
@@ -56,9 +58,17 @@ conditional theorem premises are in `reports/PAPER_PARITY_REPORT.md`.
 - The schema-v5 writer accepts only effective-config schema 4 for new
   checkpoints. Historical schemas remain readable but cannot mint new
   schema-v5 evidence.
-- Phase 4 schema-v2 summaries omit unmeasured success, loss, and NaN-history
-  fields, require the exact four-condition by three-seed design, and recompute
-  aggregates from all 12 runs before audit or figure output.
+- Phase 4 computes `L_preproj` from the exact plan-conditioned production
+  pre-projection recurrence and divides by the measured joint latent
+  perturbation norm. It fails closed unless every required directional sample
+  is present and finite.
+- Phase 4 policy stability calls the production `policy_dist` path with `z_H`
+  and the exact action mask at depths 2, 4, and 8.
+- Phase 4 schema-v3 summaries require the exact four-condition by three-seed
+  design, strict complete checkpoint loads, checkpoint/model/config/run/source/
+  data identities, and recomputed aggregates. Evaluator, audit, and figure
+  PARs bind their behavior-source bytes to a clean explicit Git checkout and
+  reject stale or hidden source state before consuming publication evidence.
 - CleanRL scripts route through one owned dispatcher target, and dispatcher
   tests cover every supported backend and fail-closed branch.
 - Current-source parity runtime and affected type-check gates are green; exact
@@ -101,28 +111,48 @@ earlier revisions and are not validation of the current validated source state.
 ## Current validation status
 
 The final 14-target parity runtime command recorded in
-`reports/PAPER_PARITY_REPORT.md` passed 308/308. The final six-target type gate
-for synchronization-touched model, evaluator, utility, and checkpoint code
-passed 6/6. The launcher library and binary type targets passed 2/2. Six
-repair-specific Phase 4 and CleanRL type targets passed 6/6. The producer
-manifest matches a fresh 79-source regeneration, and `git diff --check` passes.
+`reports/PAPER_PARITY_REPORT.md` passed 338/338. The final affected type gate
+passed all 24 synchronization, launcher, Phase 4, source-identity, training,
+and reporting targets. The producer manifest matches a fresh 79-source
+regeneration, and `git diff --check` passes.
 
 The final training PAR SHA-256 is
-`bd10dda2afc422bd07751a02e1ed39ef164adf0d6a4241220db2b94f95e5cb67`.
+`1a01d06695200a48b160b10d81fa7160750c3499a133b6cfcdda9b110a5ba577`.
+The launcher and CleanRL dispatcher SHA-256 values are
+`46cb7201226f39718ea83135e397ec6618b9ab344d7ed963a8c26ddf2d4d83ae` and
+`54cb744038a121ef5715c0d52cc87e6e9c7c19616a3a836bb3b96e3f3b8cc9ad`.
 The real launcher help path exited 0 with no private unpack directory left
-behind. Wrong-digest, uppercase-digest, and direct-PAR confirmatory invocations
-failed closed with exit codes 2, 2, and 1.
+behind. Wrong-digest, uppercase-digest, malformed-digest, and direct-PAR
+confirmatory invocations failed closed with exit codes 2, 2, 2, and 1.
+
+Cold rebuilt Phase 4 evaluator, audit, and figure PARs passed exact
+committed-source profile verification. Their artifact SHA-256 values are
+`e03022090542be8773069b7ba5ccf3e630b220b3f1ac943881394c3a81fc7dc0`,
+`50ccb5891320e9a1cd4455795a9da0896d54386850653278e233016ec492875f`, and
+`6bbedeebe4ce9b5d77581f5f3c5144868baf2b4e68ebe3410a530c3b6df33744`.
+The corresponding source-profile digests are
+`99cdbf794b79e70e21cab59eeb4e0143042875a8a233f919075e3d3a24d38500`,
+`43211cb68189983870d8877424e840ce20364adec2dbda8dfbd5b1102c28c335`, and
+`246f9396498572487056f843d9699f2779adaea1440248bde7f8b4f899b61b08`.
+The first post-repair inspection detected stale cached runtime bytes; the
+verifier rejected them, and all three artifacts were rebuilt from a cold Buck
+daemon before the successful checks above.
 
 All 46 tracked shell scripts passed `bash -n`; 625 tracked JSON files and 96
-tracked YAML files parsed successfully. The retired launcher exited 2 without
-changing the worktree.
+tracked YAML files parsed successfully, and all 246 tracked Python sources
+compiled. The retired launcher exited 2 without changing the worktree.
+
+The canonical paper rebuilt successfully at the frozen mathematical source:
+38 pages, 544,004 bytes, SHA-256
+`2b5a930136b7c81d2f3e8cc59ea7aa27ab837c913cf7cd2d07200b26a940a534`.
+All 38 rendered pages were inspected and the final log contained no matched
+warning, missing-reference, missing-citation, or fatal-error condition.
 
 The historical repository-wide package diagnostic passed 554 targets and
 failed 26 generated type-check targets before the final type cleanup. It had no
-runtime, timeout, infra, or build failures. Six synchronization-touched type
-targets were fixed and cleared afterward. Other pre-existing generated
-type-check debt outside the six cleared targets remains, so there is no green
-all-package claim.
+runtime, timeout, infra, or build failures. The targeted current-source gates
+above do not convert that historical diagnostic into an all-package green
+claim.
 
 ## Theory boundary
 

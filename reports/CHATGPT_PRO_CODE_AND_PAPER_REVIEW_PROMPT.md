@@ -24,9 +24,10 @@ Prefer these local repositories:
 The intended frozen source anchors for this review are:
 
 - implementation behavior-source commit
-  `f86bddb607adcd24eba65fd5869af58f91742a52`, parent
-  `e4edcb2107c0f3e7ac0e691bd9dc828c5c6f38a0`;
-- paper branch head `071037929ed0a16eaf1d8b2f1169786a866eb8a5`;
+  `980f6ede14717e87ad68ceb32acc111bdd7fca1b`, parent
+  `86ec7363103b3d6a6a36fb25094ec1991cefd48e`, with previous behavior anchor
+  `f86bddb607adcd24eba65fd5869af58f91742a52`;
+- paper branch head `7d58819e7f77ab1545b8f05d485df3f86c06ee8b`;
 - canonical mathematical paper source commit
   `5253692fea5e77cfde3a130c50351183dc0268e3`.
 
@@ -81,8 +82,9 @@ not as authority.
 
 ## Post-fix review focus
 
-This review follows repairs for `UPITRM-UPD-001` through `UPITRM-UPD-006` and
-`UPITRM-GPT-001` through `UPITRM-GPT-007`.
+This review follows repairs for `UPITRM-UPD-001` through `UPITRM-UPD-006`,
+`UPITRM-GPT-001` through `UPITRM-GPT-007`, and `UPITRM-POST-001` through
+`UPITRM-POST-003`.
 Do not assume those repairs are correct merely because tests or prior reviewers
 accepted them. Reconstruct and challenge each contract from current source:
 
@@ -109,9 +111,9 @@ accepted them. Reconstruct and challenge each contract from current source:
 8. Archive validation must reject root aliases, noncanonical member names,
    canonical path aliases, and file/directory prefix collisions before the PAR
    bootstrap sees them.
-9. Current validation documents must distinguish the required six-target type
-   gate from the two launcher type targets and must not retain stale test or
-   manifest counts.
+9. Current validation documents must identify the complete 24-target affected
+   type gate and must not retain stale test, manifest, artifact, or source
+   profile counts.
 10. Treat the launcher executable, operating system, host namespace, other
     same-UID processes, and initial launcher environment as the external root
     of trust. Verify descriptor binding after acquisition. Do not demand or
@@ -130,10 +132,11 @@ accepted them. Reconstruct and challenge each contract from current source:
     for new writes. Historical schemas 1 through 3 may remain readable only
     under their exact historical contracts and must not mint new schema-v5
     evidence.
-14. Phase 4 schema-v2 output must mark success, final loss, and training-history
-    NaN status unavailable with exact reasons. Publication requires the exact
-    four-condition by three-seed design, fixed toggles and projection settings,
-    and aggregates recomputed from all 12 runs. Audit and figure consumers must
+14. Phase 4 schema-v3 output must omit the retired numeric success, final-loss,
+    and training-history fields while retaining exact unavailability reasons.
+    Publication requires the exact four-condition by three-seed design, fixed
+    toggles and projection settings, complete finite metric samples, and
+    aggregates recomputed from all 12 runs. Audit and figure consumers must
     reject legacy, partial, inconsistent, nonfinite, or placeholder summaries
     before creating output.
 15. CleanRL entry scripts must resolve one owned `cleanrl_runner` Buck target.
@@ -143,10 +146,29 @@ accepted them. Reconstruct and challenge each contract from current source:
     `len(replay) >= batch_size` before asserting update-only metrics.
 17. The four repaired arXiv bibliography entries must render a usable external
     locator under the tracked bibliography style.
+18. Phase 4 `L_preproj` must use the exact plan-conditioned production
+    pre-projection recurrence. Its denominator must be the actual joint
+    `(z_H,z_L)` perturbation norm, not a component scale, and zero or missing
+    directional samples must fail closed.
+19. Phase 4 policy stability must use the production `policy_dist` path with
+    `z_H`, the exact action mask, and absolute unroll depths 2, 4, and 8. It
+    must not call the raw policy head on `z_L` or admit masked actions.
+20. Every Phase 4 result must be bound to a strict complete checkpoint and its
+    checkpoint bytes, model bytes, saved model/RL config, condition, seed, run
+    identity, producer source, dataset, and diagnostic input bytes. Audit and
+    figure consumers must independently revalidate those identities rather
+    than trusting summary strings.
+21. Phase 4 evaluator, audit, and figure PARs must authenticate all selected
+    runtime Python source bytes against one explicit clean Git checkout. Reject
+    stale PAR bytes, missing or extra selected sources, selected bytecode,
+    duplicate or raw/effective archive names, worktree bytes that differ from
+    HEAD, ignored additions, hidden deletions, and `skip-worktree` or
+    `assume-unchanged` index flags.
 
-Review the complete implementation change from `e4edcb2` through `f86bddb`, but
-do not limit the audit to that diff. The resulting source tree and all reachable
-callers remain the source of truth.
+Review the complete implementation change from `e4edcb2` through `980f6ede`,
+with special attention to `86ec7363..980f6ede`, but do not limit the audit to
+those diffs. The resulting source tree and all reachable callers remain the
+source of truth.
 
 ## Non-negotiable scope
 
@@ -189,14 +211,19 @@ Do not authenticate a mutable local PDF. Export the frozen paper commit to a
 temporary directory, build there through the repository's canonical path,
 record the exact command and exit code, and inspect every page.
 
-Read the implementation directly at its frozen commit. At minimum, read these
-files completely:
+Read behavior-bearing implementation source, tests, configs, manifests, and
+Buck ownership directly at the frozen source commit. After proving that later
+commits are documentation-only, read `README.md` and `reports/**` at the
+resolved documentation tip and diff them against their source-commit versions.
+At minimum, read these files completely at the applicable anchor:
 
 - `README.md`;
+- `.gitignore`;
 - `BUCK`;
 - `reports/PAPER_PARITY_REPORT.md`;
 - `reports/ICLR_REPAIR_HANDOFF.md`;
 - canonical ICLR configs and the run registry;
+- `configs/phase4_2x2_norm_ablation/*.yaml`;
 - the producer source manifest and its generator;
 - `models/recursive_reasoning/trm.py`;
 - `rl/config.py`;
@@ -213,12 +240,20 @@ files completely:
 - `utils/run_identity.py`;
 - `utils/source_identity.py`;
 - `confirmatory_runtime_launcher.py`;
+- `scripts/phase4_checkpoint.py`;
+- `scripts/phase4_diagnostic_inputs.py`;
 - `scripts/phase4_result_schema.py`;
+- `scripts/phase4_source.py`;
 - `scripts/eval_phase4_2x2_norm_ablation.py`;
 - `scripts/audit_phase4_paper_ready.py`;
 - `scripts/make_paper_figures_phase4.py`;
+- `scripts/run_phase4_training.py`;
 - `scripts/run_cleanrl_benchmark_hard4x4.sh`;
 - `tests/smoke_test_cartpole.sh`;
+- `tests/test_phase4_reporting_unittest.py`;
+- `tests/test_run_identity_unittest.py`;
+- `tests/test_theory_exact_components_unittest.py`;
+- `tests/test_upi_trm_logging_smoke_unittest.py`;
 - the Phase 4, CleanRL dispatcher, archive identity, source identity,
   checkpoint logging, and trainer smoke tests;
 - every importing caller, affected test, owning Buck target, launcher,
@@ -254,17 +289,18 @@ contexts:
    deployment perturbation;
 5. configuration, checkpoint identity, source provenance, build ownership,
    sealed-runtime launch safety, schema compatibility, and test coverage;
-6. citations, stale references, unsupported claims, and source/PDF
-   consistency.
+6. Phase 4 metric semantics, strict checkpoint and input identity, runtime
+   source binding, publication consumers, citations, stale references,
+   unsupported claims, and source/PDF consistency.
 
 Use independent agents if ChatGPT Pro exposes them. Otherwise perform genuinely
 separate passes and disclose that limitation. Do not claim an agent or model
 participated unless it returned usable work.
 
 After blind candidate generation, read the prior Claude and GPT Pro reports.
-Independently reverify every `UPITRM-REV-*`, `UPITRM-UPD-*`, and
-`UPITRM-GPT-*` item and every material rejected candidate against the frozen
-anchors. Do not inherit either verdict.
+Independently reverify every `UPITRM-REV-*`, `UPITRM-UPD-*`, `UPITRM-GPT-*`,
+and `UPITRM-POST-*` item and every material rejected candidate against the
+frozen anchors. Do not inherit either verdict.
 
 For every candidate defect:
 
@@ -563,6 +599,55 @@ Establish or refute each item with exact paper and implementation anchors:
 
 Keep executable parity separate from unproved theorem assumptions.
 
+## Phase 4 publication pipeline
+
+Treat Phase 4 as an optional publication pipeline, not as evidence for the
+paper's conditional theorem. Review its numerical semantics and provenance as
+strictly as any other paper-facing output.
+
+For `L_preproj`, trace the exact production latent context, including plan
+embeddings and puzzle identifiers, into the unprojected recurrent update.
+Prove that the diagnostic calls the same map before radial projection. Check
+that each perturbation is normalized in the joint Euclidean product space and
+that the quotient divides by the measured post-scaling joint norm. Reproduce
+the equal-component `sqrt(2)` case and a projection-saturation counterexample.
+Require the recorded sample count to equal the number of accepted finite
+directional quotients and reject an empty or partial sample set.
+
+For `argmax_agreement_n4` and `argmax_agreement_n8`, which the publication
+output labels at absolute `n=4` and `n=8`, trace each compared depth from the
+common initial carry. Prove that the diagnostic calls `model.policy_dist`,
+supplies the exact environment action mask, and uses the production `z_H`
+policy latent. Use a synthetic deterministic head where `z_H != z_L` and the
+largest raw logit is a masked action. A renamed alternative latent-head
+diagnostic is not a repair for a field published as executable-policy
+stability.
+
+For each of the 12 Phase 4 records, require strict loading of the complete
+checkpoint state and exact validation of the saved model config, RL config,
+condition, seed, run ID, step counters, source identity, dataset identity,
+random-initialization kind, execution device, exact replay capacity and
+transition types, replay/collector state, value and policy optimizer states,
+old/candidate/target model states, auxiliary model state, and RNG state required
+by the current checkpoint contract. Verify that checkpoint SHA-256, canonical
+model-state SHA-256, canonical config identities, and diagnostic-array hashes
+are recomputed from bytes. Reject missing or unexpected behavior keys, swapped
+conditions or seeds, nonexistent paths, path escape, edited identity fields,
+inconsistent metric aggregates, and payloads reconstructed from fallback
+architecture values. Confirm audit and figure consumers revalidate the same
+identity objects before writing output. Do not claim that they can detect an
+arbitrarily edited metric summary whose values and aggregates remain internally
+schema-consistent without recomputing the diagnostics.
+
+For Phase 4 source provenance, enumerate the exact source profile for each of
+the evaluator, audit, and figure tools. Compare the clean checkout inventory
+and bytes with Git `HEAD`, then compare those bytes with the actual PAR member
+inventory. Actively test stale runtime bytes, an ignored added `.py`, a hidden
+tracked deletion, `skip-worktree`, `assume-unchanged`, selected `.pyc/.pyo`, a
+missing or extra selected source, a duplicate member, and a raw/effective ZIP
+name mismatch. All tests must use temporary repositories or archives. Do not
+alter either reviewed worktree's Git index flags.
+
 ## Boundary cases
 
 Check at least:
@@ -587,6 +672,13 @@ Check at least:
 - zero, inside, boundary, outside, tiny, and huge projection inputs;
 - supported floating-point dtypes;
 - corrupt checkpoints;
+- missing and unexpected checkpoint keys;
+- swapped Phase 4 condition or seed;
+- nonexistent and escaping checkpoint paths;
+- `z_H != z_L` with a masked maximum-logit action;
+- equal and unequal joint latent perturbation component norms;
+- zero, partial, nonfinite, and complete Phase 4 metric samples;
+- stale Phase 4 PAR source bytes and hidden Git index/worktree state;
 - `delta_dep=0` and `delta_dep=1`.
 
 For each, cite the proof, code path, existing test, or temporary reproducer and
@@ -635,7 +727,7 @@ buck2 test --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_phase4_reporting
 ```
 
-Run the synchronization-touched type gate from the same workdir:
+Run the complete 24-target affected type gate from the same workdir:
 
 ```bash
 buck2 build --local-only @fbcode//mode/opt \
@@ -644,27 +736,25 @@ buck2 build --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:script_eval_unroll_sensitivity_lib-type-checking \
   fbcode//buiksat_trm:utils-type-checking \
   fbcode//buiksat_trm:test_persistent_checkpoint_diagnostics-library-type-checking \
-  fbcode//buiksat_trm:test_augmented_replay_diagnostics-library-type-checking
-```
-
-Also run the two launcher type-check targets:
-
-```bash
-buck2 build --local-only @fbcode//mode/opt \
+  fbcode//buiksat_trm:test_augmented_replay_diagnostics-library-type-checking \
   fbcode//buiksat_trm:confirmatory_runtime_launcher_lib-type-checking \
-  fbcode//buiksat_trm:confirmatory_runtime_launcher-library-type-checking
-```
-
-Run the repair-specific Phase 4 and CleanRL type targets:
-
-```bash
-buck2 build --local-only @fbcode//mode/opt \
+  fbcode//buiksat_trm:confirmatory_runtime_launcher-library-type-checking \
   fbcode//buiksat_trm:audit_phase4_paper_ready-library-type-checking \
   fbcode//buiksat_trm:cleanrl_runner-library-type-checking \
   fbcode//buiksat_trm:eval_phase4_2x2_norm_ablation-library-type-checking \
   fbcode//buiksat_trm:make_paper_figures_phase4-library-type-checking \
   fbcode//buiksat_trm:phase4_result_schema-type-checking \
-  fbcode//buiksat_trm:test_phase4_reporting-library-type-checking
+  fbcode//buiksat_trm:test_phase4_reporting-library-type-checking \
+  fbcode//buiksat_trm:phase4_checkpoint-type-checking \
+  fbcode//buiksat_trm:phase4_diagnostic_inputs-type-checking \
+  fbcode//buiksat_trm:phase4_source-type-checking \
+  fbcode//buiksat_trm:run_phase4_training-library-type-checking \
+  fbcode//buiksat_trm:upi_trm_train-library-type-checking \
+  fbcode//buiksat_trm:upi_trm_train_lib-type-checking \
+  fbcode//buiksat_trm:test_run_identity-library-type-checking \
+  fbcode//buiksat_trm:test_theory_exact_components-library-type-checking \
+  fbcode//buiksat_trm:test_upi_trm_logging_smoke-library-type-checking \
+  fbcode//buiksat_trm:test_upi_trm_trainer_smoke-library-type-checking
 ```
 
 Do not treat failures from an optional repository-wide type target as part of
@@ -690,10 +780,30 @@ sha256sum /absolute/path/to/upi_trm_train.par
 /absolute/path/to/cleanrl_runner.par --help
 ```
 
-Record all three artifact paths, the actual training-PAR SHA-256, exit codes,
-stderr, and the count of `upi_trm_confirmatory_unpack.*` directories before
-and after. The CleanRL help command must dispatch no training. Also require all
-of these negative cases to fail before training:
+Build the three Phase 4 publication tools without running an evaluator or
+loading a checkpoint:
+
+```bash
+buck2 build --local-only @fbcode//mode/opt --show-output \
+  fbcode//buiksat_trm:eval_phase4_2x2_norm_ablation \
+  fbcode//buiksat_trm:audit_phase4_paper_ready \
+  fbcode//buiksat_trm:make_paper_figures_phase4
+```
+
+Hash each artifact. Independently call
+`verify_phase4_runtime_sources(..., runtime_location=<artifact>)` with the
+matching evaluator, audit, or figure profile against the frozen clean checkout.
+Record the artifact SHA-256, canonical profile digest, selected member count,
+and exact result. A Buck success is not source-identity evidence by itself. If
+an artifact is stale, preserve the rejection, obtain a genuinely current
+rebuild without disturbing another user's active Buck session, and verify the
+new bytes. Do not execute the evaluator, load a checkpoint, or create a Phase 4
+summary as part of this audit.
+
+Record the training, launcher, and CleanRL artifact paths, their SHA-256 values,
+exit codes, stderr, and the count of `upi_trm_confirmatory_unpack.*`
+directories before and after. The CleanRL help command must dispatch no
+training. Also require all of these negative cases to fail before training:
 
 - direct `upi_trm_train.par --confirmatory --help` execution;
 - a wrong, uppercase, or malformed expected SHA-256;
@@ -723,9 +833,39 @@ Also:
 - syntax-check every tracked shell script;
 - capture state before and after executing the retired launcher, require its
   documented fail-closed exit, and prove it produced no side effects;
-- parse tracked JSON and YAML used by the canonical path;
+- parse every tracked JSON and YAML file;
+- compile every tracked Python source without importing or executing it;
 - inspect Buck ownership of every synchronization-touched test;
 - inspect the complete final report and verify every cited current line.
+
+The current handoffs record the following maintainer results at the frozen
+source anchors. Treat them only as claims to reproduce or refute:
+
+- parity runtime gate: 338 passed, with zero failures, timeouts, fatal errors,
+  infrastructure failures, or build failures;
+- affected type gate: 24 of 24 targets passed;
+- producer manifest: 79 entries;
+- training, launcher, and CleanRL artifact SHA-256 values:
+  `1a01d06695200a48b160b10d81fa7160750c3499a133b6cfcdda9b110a5ba577`,
+  `46cb7201226f39718ea83135e397ec6618b9ab344d7ed963a8c26ddf2d4d83ae`,
+  and `54cb744038a121ef5715c0d52cc87e6e9c7c19616a3a836bb3b96e3f3b8cc9ad`;
+- Phase 4 evaluator, audit, and figure artifact SHA-256 values:
+  `e03022090542be8773069b7ba5ccf3e630b220b3f1ac943881394c3a81fc7dc0`,
+  `50ccb5891320e9a1cd4455795a9da0896d54386850653278e233016ec492875f`,
+  and `6bbedeebe4ce9b5d77581f5f3c5144868baf2b4e68ebe3410a530c3b6df33744`;
+- corresponding Phase 4 source-profile digests:
+  `99cdbf794b79e70e21cab59eeb4e0143042875a8a233f919075e3d3a24d38500`,
+  `43211cb68189983870d8877424e840ce20364adec2dbda8dfbd5b1102c28c335`,
+  and `246f9396498572487056f843d9699f2779adaea1440248bde7f8b4f899b61b08`;
+- static gates: 46 shell, 625 JSON, 96 YAML, and 246 Python files;
+- canonical paper: 38 pages, 544,004 bytes, SHA-256
+  `2b5a930136b7c81d2f3e8cc59ea7aa27ab837c913cf7cd2d07200b26a940a534`.
+
+The maintainer also records that the first post-repair Phase 4 build returned
+stale `phase4_source.py` and `run_identity.py` members, that the new verifier
+rejected it, and that a cold-daemon rebuild produced the three accepted
+artifacts above. Reproduce the byte comparison. Do not erase this negative
+evidence by reporting only the final build exit code.
 
 Do not copy historical pass counts as current evidence. The repository-wide
 package diagnostic is optional because it includes known unrelated type debt.
@@ -778,7 +918,7 @@ contain:
 9. rejected candidates and cleared risks;
 10. validation commands and exact results;
 11. prior-report reconciliation for every `UPITRM-REV-*`, `UPITRM-UPD-*`,
-    and `UPITRM-GPT-*` item;
+    `UPITRM-GPT-*`, and `UPITRM-POST-*` item;
 12. claim, citation, and stale-reference audit;
 13. recommended repairs in priority order;
 14. initial and final worktree attestation for both repositories;

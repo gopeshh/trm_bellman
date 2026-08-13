@@ -4,7 +4,7 @@ This repository contains the plan-edit MDP, recurrent evaluator, training loops,
 baselines, diagnostics, and retained experiment outputs for the UPI-TRM paper.
 The implementation parity anchor is the manuscript source at paper commit
 `5253692fea5e77cfde3a130c50351183dc0268e3` and implementation source commit
-`f86bddb607adcd24eba65fd5869af58f91742a52` on `full-implementation`. See
+`980f6ede14717e87ad68ceb32acc111bdd7fca1b` on `full-implementation`. See
 `reports/PAPER_PARITY_REPORT.md` for the executable Algorithm 1/2 mapping and
 the theorem premises that remain conditional.
 
@@ -37,6 +37,14 @@ The July 2026 correctness audit repaired the following implementation paths:
   source revision instead of depending on ambient NumPy state;
 - baseline wrappers treat budget exhaustion as an MDP terminal;
 - aggregate scripts reject missing or mismatched evaluation provenance.
+- Phase 4 `L_preproj` uses the exact plan-conditioned pre-projection recurrent
+  map and the measured joint latent perturbation norm;
+- Phase 4 policy stability uses the production `policy_dist` path, `z_H`, and
+  the task action mask at absolute depths 2, 4, and 8; and
+- Phase 4 schema-v3 publication records bind all 12 strict full checkpoints,
+  configs, diagnostic input bytes, evaluator source bytes, and clean Git
+  identity. Audit and figure consumers revalidate those identities before
+  consuming a metric.
 
 The retained 57.4% UPI-TRM result was evaluated on the first 32 training
 instances. It is in-sample and must not be compared with the 50-instance SB3
@@ -138,10 +146,10 @@ buck2 test --local-only @fbcode//mode/opt 'fbcode//buiksat_trm:'
 
 That package pattern also runs Buck's generated Python type-check targets.
 The final paper-parity runtime selection, including the Phase 4 reporting
-regressions, passed 308/308. The six generated type-check targets touched by
-the synchronization passed 6/6, the launcher library and binary type targets
-passed 2/2, and six repair-specific Phase 4 and CleanRL type targets passed
-6/6. Exact commands, the historical repository-wide diagnostic result, and
+regressions, passed 338/338. The complete changed-surface type gate passed all
+24 targets, including synchronization, launcher, Phase 4, source-identity,
+checkpoint, trainer, and CleanRL targets. Exact commands, the historical
+repository-wide diagnostic result, and
 the scope of the executable parity claim are recorded in
 `reports/PAPER_PARITY_REPORT.md`. The full package pattern is not claimed green
 because pre-existing aggregate libraries, tests, runners, diagnostics, and
