@@ -13,7 +13,7 @@ Previous behavior anchor: `f86bddb607adcd24eba65fd5869af58f91742a52`
 Paper source anchor: UPI-TRM commit
 `5253692fea5e77cfde3a130c50351183dc0268e3`
 
-Paper handoff head: `7d58819e7f77ab1545b8f05d485df3f86c06ee8b`
+Paper handoff head: `a76eb29f2712042742fea738cdb859d354fafce2`
 
 This branch contains the repaired implementation baseline. It is not a
 completed confirmatory experiment and must not be cited as one. The detailed

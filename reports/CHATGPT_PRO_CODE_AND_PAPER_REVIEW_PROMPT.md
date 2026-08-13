@@ -27,7 +27,7 @@ The intended frozen source anchors for this review are:
   `980f6ede14717e87ad68ceb32acc111bdd7fca1b`, parent
   `86ec7363103b3d6a6a36fb25094ec1991cefd48e`, with previous behavior anchor
   `f86bddb607adcd24eba65fd5869af58f91742a52`;
-- paper branch head `7d58819e7f77ab1545b8f05d485df3f86c06ee8b`;
+- paper branch head `a76eb29f2712042742fea738cdb859d354fafce2`;
 - canonical mathematical paper source commit
   `5253692fea5e77cfde3a130c50351183dc0268e3`.
 
@@ -205,11 +205,15 @@ Read the canonical paper completely at the frozen paper commit:
 - the ICLR style and every local style or macro file;
 - README, Makefile, `latexmk` configuration, scripts, and CI files that define
   the canonical build;
-- the exact-source generated `main.pdf`.
+- the tracked `UPI_TRM_ICLR/main.pdf` at the frozen paper head;
+- the independently rebuilt exact-source `main.pdf`.
 
-Do not authenticate a mutable local PDF. Export the frozen paper commit to a
-temporary directory, build there through the repository's canonical path,
-record the exact command and exit code, and inspect every page.
+Hash and inspect every page of the tracked PDF so a repository-only review can
+read the rendered artifact. Do not treat that committed binary as independent
+build evidence. Export the frozen paper commit to a temporary directory, build
+there through the repository's canonical path, record the exact command and
+exit code, inspect every rebuilt page, and compare the rebuilt artifact with
+the tracked PDF.
 
 Read behavior-bearing implementation source, tests, configs, manifests, and
 Buck ownership directly at the frozen source commit. After proving that later
