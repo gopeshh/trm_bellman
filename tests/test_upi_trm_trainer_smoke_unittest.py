@@ -261,7 +261,8 @@ class TestUPITrmTrainerSmoke(unittest.TestCase):
             value_target_clip=None,
         )
         trainer.set_checker_fn(dummy_checker)
-        trainer.collect_episode()
+        while len(trainer.replay) < trainer.rl_cfg.batch_size:
+            trainer.collect_episode()
 
         result = trainer.policy_update()
 

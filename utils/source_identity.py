@@ -160,9 +160,14 @@ def assert_runtime_archive_sources_match_manifest(
         for relative_path, digest in validated["sources"].items()
         if relative_path.endswith(".py")
     }
+    infos = archive.infolist()
+    if any(info.orig_filename != info.filename for info in infos):
+        raise SourceIdentityError(
+            "Runtime archive raw and effective member names differ."
+        )
     runtime_names = [
         info.filename
-        for info in archive.infolist()
+        for info in infos
         if not info.is_dir() and _is_behavior_python_archive_member(info.filename)
     ]
     if len(runtime_names) != len(set(runtime_names)):
@@ -171,7 +176,7 @@ def assert_runtime_archive_sources_match_manifest(
         )
     if any(
         _is_behavior_bytecode_archive_member(info.filename)
-        for info in archive.infolist()
+        for info in infos
         if not info.is_dir()
     ):
         raise SourceIdentityError(

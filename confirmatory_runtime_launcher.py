@@ -359,6 +359,10 @@ def _sealed_runtime_copy(source_descriptor: int, expected_sha256: str) -> int:
 
 def _validate_archive_sources(archive: ZipFile) -> None:
     infos = archive.infolist()
+    if any(info.orig_filename != info.filename for info in infos):
+        raise ConfirmatoryRuntimeError(
+            "Runtime archive raw and effective member names differ."
+        )
     names = [info.filename for info in infos]
     if len(names) != len(set(names)):
         raise ConfirmatoryRuntimeError(

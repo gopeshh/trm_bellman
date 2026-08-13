@@ -1,7 +1,7 @@
 #!/bin/bash
 # Hard 4x4 baseline benchmark sweep: 3 algos × 10 seeds = 30 runs
 # PPO and A2C are CleanRL implementations; DQN is in-house DQNTrainer wrapper.
-# DQN n=5 is not included (in-house DQNTrainer lacks n-step support).
+# DQN n=5 is not included because the wrapper only configures one-step targets.
 # Protocol: 320k env interactions, no-mask, feasibility checker
 #
 # Queues at most 2 concurrent runs (one per GPU).
@@ -16,17 +16,24 @@ OUT_ROOT="$REPO_ROOT/results/cleanrl_benchmark/hard4x4"
 LOG_DIR="$OUT_ROOT/logs"
 FAILED_LOG="$OUT_ROOT/failed_jobs.txt"
 MANIFEST="$OUT_ROOT/manifest.txt"
+RUNNER_TARGET="fbcode//buiksat_trm:cleanrl_runner"
 
 # Build the runner fresh so we never use a stale artifact
 echo "Building cleanrl_runner..."
 cd "$HOME/fbsource" || exit 1
-RUNNER_OUTPUT=$(buck2 build fbcode//buiksat_trm_cleanrl:cleanrl_runner --show-output 2>&1)
+RUNNER_OUTPUT=$(buck2 build "$RUNNER_TARGET" --show-output 2>&1)
 if ! echo "$RUNNER_OUTPUT" | grep -q "BUILD SUCCEEDED"; then
     echo "ERROR: buck2 build failed"
     echo "$RUNNER_OUTPUT"
     exit 1
 fi
-RUNNER="$HOME/fbsource/$(echo "$RUNNER_OUTPUT" | grep cleanrl_runner.par | awk '{print $2}')"
+RUNNER_REL=$(echo "$RUNNER_OUTPUT" | awk '/cleanrl_runner/ {print $2}' | tail -n1)
+if [[ -z "$RUNNER_REL" ]]; then
+    echo "ERROR: could not resolve cleanrl_runner output path"
+    echo "$RUNNER_OUTPUT"
+    exit 1
+fi
+RUNNER="$HOME/fbsource/$RUNNER_REL"
 echo "Using runner: $RUNNER"
 cd "$REPO_ROOT" || exit 1
 
@@ -39,7 +46,7 @@ CONFIGS["cleanrl_a2c"]="$CONFIG_DIR/cleanrl_a2c_trm.yaml"
 CONFIGS["inhouse_dqn"]="$CONFIG_DIR/cleanrl_dqn_trm.yaml"
 
 # DQN uses in-house DQNTrainer wrapper (not independent CleanRL).
-# DQN n=5 dropped: in-house DQNTrainer lacks n-step support in this checkout.
+# DQN n=5 is dropped because the wrapper does not map n_step into DQNConfig yet.
 ALGOS=(cleanrl_ppo cleanrl_a2c inhouse_dqn)
 SEEDS=(0 1 2 3 4 5 6 7 8 9)
 

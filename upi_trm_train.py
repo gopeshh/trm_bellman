@@ -2159,6 +2159,16 @@ def save_checkpoint(
             runtime_fingerprint=runtime_fingerprint,
             runtime_artifact_sha256=_PREVERIFIED_RUNTIME_SHA256,
         )
+        if (
+            canonical_run_identity["effective_config"][
+                "effective_config_schema_version"
+            ]
+            != 4
+        ):
+            raise RuntimeError(
+                "Schema-v5 checkpoint save requires effective configuration "
+                "schema 4."
+            )
         if checkpoint_lineage is None:
             raise RuntimeError(
                 "Schema-v5 fixed-base checkpoints require checkpoint lineage."

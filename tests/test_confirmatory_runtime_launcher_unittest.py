@@ -6,12 +6,14 @@ import fcntl
 import hashlib
 import json
 import os
+import struct
 import tempfile
 import unittest
 import warnings
+import zlib
 from pathlib import Path
 from unittest import mock
-from zipfile import ZipFile
+from zipfile import ZipFile, ZipInfo
 
 from confirmatory_runtime_launcher import (
     PAR_FILENAME_ENV,
@@ -30,6 +32,20 @@ from confirmatory_runtime_launcher import (
 
 
 class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
+    @staticmethod
+    def _unicode_path_member(raw_name: str, effective_name: str) -> ZipInfo:
+        encoded_raw_name = raw_name.encode("ascii")
+        encoded_effective_name = effective_name.encode("utf-8")
+        info = ZipInfo(raw_name)
+        info.extra = struct.pack(
+            "<HHBL",
+            0x7075,
+            5 + len(encoded_effective_name),
+            1,
+            zlib.crc32(encoded_raw_name),
+        ) + encoded_effective_name
+        return info
+
     def _sources(self) -> dict[str, bytes]:
         sources = {
             "confirmatory_runtime_launcher.py": b"# launcher\n",
@@ -211,6 +227,25 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
             with self.assertRaisesRegex(
                 ConfirmatoryRuntimeError,
                 "bytecode",
+            ):
+                validate_runtime_archive(path, expected)
+
+    def test_rejects_raw_and_effective_name_mismatch_on_any_member(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runtime.par"
+            self._archive(path)
+            with ZipFile(path, "a") as archive:
+                archive.writestr(
+                    self._unicode_path_member(
+                        "metadata.raw",
+                        "metadata.effective",
+                    ),
+                    b"metadata",
+                )
+            expected = hashlib.sha256(path.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(
+                ConfirmatoryRuntimeError,
+                "raw and effective member names differ",
             ):
                 validate_runtime_archive(path, expected)
 

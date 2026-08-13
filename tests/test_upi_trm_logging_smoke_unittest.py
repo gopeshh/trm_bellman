@@ -842,8 +842,8 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             },
         )
 
-    @staticmethod
     def _run_identity(
+        self,
         model,
         trainer,
         provenance,
@@ -851,7 +851,8 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
         run_id="unit.seed17",
         seed=17,
         environment_interactions=None,
-        runtime_artifact_sha256=None,
+        effective_config_schema_version=4,
+        runtime_artifact_sha256="e" * 64,
     ):
         rl_config = (
             trainer.rl_cfg.model_dump()
@@ -864,7 +865,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             else model.config.dict()
         )
         effective_config = {
-            "effective_config_schema_version": 1,
+            "effective_config_schema_version": effective_config_schema_version,
             "algorithm": "upi_trm",
             "training_protocol": "fixed_base_exact",
             "backbone": "trm",
@@ -910,18 +911,19 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             "debug_checks": False,
             "config_source_sha256s": [],
         }
-        if runtime_artifact_sha256 is not None:
+        if effective_config_schema_version in {2, 3, 4}:
+            registration = {
+                "cell": "C2_UPI_TRM",
+                "tier": "debug",
+                "run_id": run_id,
+                "training_seed": seed,
+                "registry_sha256": "f" * 64,
+            }
+            if effective_config_schema_version in {3, 4}:
+                registration["attempt_index"] = 0
             effective_config.update(
                 {
-                    "effective_config_schema_version": 4,
-                    "registration": {
-                        "cell": "C2_UPI_TRM",
-                        "tier": "debug",
-                        "run_id": run_id,
-                        "training_seed": seed,
-                        "attempt_index": 0,
-                        "registry_sha256": "f" * 64,
-                    },
+                    "registration": registration,
                     "dataset_provenance_sha256": canonical_json_sha256(
                         provenance
                     ),
@@ -929,9 +931,19 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                         "kind": "random",
                         "artifact_sha256": None,
                     },
-                    "runtime_artifact_sha256": runtime_artifact_sha256,
                 }
             )
+        if effective_config_schema_version == 4:
+            if runtime_artifact_sha256 is None:
+                raise AssertionError("Schema-4 test identity requires a runtime hash.")
+            effective_config["runtime_artifact_sha256"] = runtime_artifact_sha256
+            runtime_patcher = patch.object(
+                upi_trm_train,
+                "_PREVERIFIED_RUNTIME_SHA256",
+                runtime_artifact_sha256,
+            )
+            runtime_patcher.start()
+            self.addCleanup(runtime_patcher.stop)
         return {
             "run_identity_schema_version": 1,
             "run_id": run_id,
@@ -942,6 +954,37 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             "dataset_provenance_sha256": canonical_json_sha256(provenance),
             "initialization": {"kind": "random", "artifact_sha256": None},
         }
+
+    def test_schema_v5_save_rejects_historical_effective_config_schemas(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer(
+            "fixed_base_exact"
+        )
+        provenance = self._checkpoint_provenance(trainer)
+        with tempfile.TemporaryDirectory() as tmp:
+            for schema_version in (1, 2, 3):
+                with self.subTest(schema_version=schema_version):
+                    identity = self._run_identity(
+                        model,
+                        trainer,
+                        provenance,
+                        effective_config_schema_version=schema_version,
+                        runtime_artifact_sha256=None,
+                    )
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "effective configuration schema 4",
+                    ):
+                        save_checkpoint(
+                            model,
+                            trainer,
+                            step=0,
+                            checkpoint_dir=tmp,
+                            rl_cfg=cfg,
+                            dataset_provenance=provenance,
+                            run_identity=identity,
+                            checkpoint_lineage=self._root_lineage(),
+                        )
+            self.assertEqual(list(Path(tmp).iterdir()), [])
 
     def test_schema_four_run_identity_binds_active_runtime_artifact(self):
         model, trainer, _ = self._make_persistent_budget_trainer(

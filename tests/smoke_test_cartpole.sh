@@ -17,30 +17,30 @@
 # spec exactly, change total_timesteps in the config to 200000.
 #
 # Usage:
-#   buck2 run fbcode//buiksat_trm_cleanrl:cleanrl_ppo -- --config configs/baselines/cleanrl_ppo_cartpole.yaml --seed 0
-#   buck2 run fbcode//buiksat_trm_cleanrl:cleanrl_a2c -- --config configs/baselines/cleanrl_a2c_cartpole.yaml --seed 0
-#   buck2 run fbcode//buiksat_trm_cleanrl:cleanrl_dqn -- --config configs/baselines/cleanrl_dqn_cartpole.yaml --seed 0
-#   buck2 run fbcode//buiksat_trm_cleanrl:cleanrl_dqn -- --config configs/baselines/cleanrl_dqn_n5_cartpole.yaml --seed 0
+#   buck2 run fbcode//buiksat_trm:cleanrl_runner -- --config configs/baselines/cleanrl_ppo_cartpole.yaml --seed 0
+#   buck2 run fbcode//buiksat_trm:cleanrl_runner -- --config configs/baselines/cleanrl_a2c_cartpole.yaml --seed 0
+#   buck2 run fbcode//buiksat_trm:cleanrl_runner -- --config configs/baselines/cleanrl_dqn_cartpole.yaml --seed 0
+#   buck2 run fbcode//buiksat_trm:cleanrl_runner -- --config configs/baselines/cleanrl_dqn_n5_cartpole.yaml --seed 0
 
 set -euo pipefail
 
 SEEDS="0 1 2"
 THRESHOLD=195
+CLEANRL_RUNNER_TARGET="fbcode//buiksat_trm:cleanrl_runner"
 
 echo "=== CleanRL CartPole Smoke Gates ==="
 echo ""
 
 run_gate() {
     local algo="$1"
-    local target="$2"
-    local config="$3"
-    local budget="$4"
+    local config="$2"
+    local budget="$3"
 
     echo "--- $algo ($budget env steps) ---"
     local all_pass=true
     for seed in $SEEDS; do
         local outdir="results/smoke_gate/${algo}/seed${seed}"
-        buck2 run "fbcode//buiksat_trm_cleanrl:${target}" -- \
+        buck2 run "$CLEANRL_RUNNER_TARGET" -- \
             --config "$config" --seed "$seed" --output-dir "$outdir" 2>/dev/null
 
         local final_return
@@ -61,9 +61,9 @@ run_gate() {
     echo ""
 }
 
-run_gate "PPO"     "cleanrl_ppo" "configs/baselines/cleanrl_ppo_cartpole.yaml"     "100k"
-run_gate "A2C"     "cleanrl_a2c" "configs/baselines/cleanrl_a2c_cartpole.yaml"     "100k"
-run_gate "DQN_n1"  "cleanrl_dqn" "configs/baselines/cleanrl_dqn_cartpole.yaml"     "500k"
-run_gate "DQN_n5"  "cleanrl_dqn" "configs/baselines/cleanrl_dqn_n5_cartpole.yaml"  "500k"
+run_gate "PPO"     "configs/baselines/cleanrl_ppo_cartpole.yaml"     "100k"
+run_gate "A2C"     "configs/baselines/cleanrl_a2c_cartpole.yaml"     "100k"
+run_gate "DQN_n1"  "configs/baselines/cleanrl_dqn_cartpole.yaml"     "500k"
+run_gate "DQN_n5"  "configs/baselines/cleanrl_dqn_n5_cartpole.yaml"  "500k"
 
 echo "=== All CartPole smoke gates PASSED ==="

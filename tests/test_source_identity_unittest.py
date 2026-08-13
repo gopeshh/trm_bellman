@@ -1,10 +1,12 @@
 """Tests for the source manifest embedded in confirmatory binaries."""
 
 import copy
+import struct
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import ZipFile, ZipInfo
 
 from utils.source_identity import (
     SOURCE_MANIFEST_RELATIVE_PATH,
@@ -17,6 +19,20 @@ from utils.source_identity import (
 
 
 class TestSourceIdentity(unittest.TestCase):
+    @staticmethod
+    def _unicode_path_member(raw_name: str, effective_name: str) -> ZipInfo:
+        encoded_raw_name = raw_name.encode("ascii")
+        encoded_effective_name = effective_name.encode("utf-8")
+        info = ZipInfo(raw_name)
+        info.extra = struct.pack(
+            "<HHBL",
+            0x7075,
+            5 + len(encoded_effective_name),
+            1,
+            zlib.crc32(encoded_raw_name),
+        ) + encoded_effective_name
+        return info
+
     def _source_tree(self, root: Path) -> None:
         for relative_path in (
             "confirmatory_runtime_launcher.py",
@@ -171,6 +187,34 @@ class TestSourceIdentity(unittest.TestCase):
                 with self.assertRaisesRegex(
                     SourceIdentityError,
                     "unverified behavior bytecode",
+                ):
+                    assert_runtime_archive_sources_match_manifest(
+                        archive,
+                        manifest,
+                    )
+
+    def test_runtime_archive_rejects_name_mismatch_on_nonbehavior_member(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._source_tree(root)
+            manifest = build_producer_source_manifest(root)
+            archive_path = root / "runtime.par"
+            self._runtime_archive(archive_path, root, manifest)
+            with ZipFile(archive_path, "a") as archive:
+                archive.writestr(
+                    self._unicode_path_member(
+                        "metadata.raw",
+                        "metadata.effective",
+                    ),
+                    b"metadata",
+                )
+
+            with ZipFile(archive_path, "r") as archive:
+                with self.assertRaisesRegex(
+                    SourceIdentityError,
+                    "raw and effective member names differ",
                 ):
                     assert_runtime_archive_sources_match_manifest(
                         archive,

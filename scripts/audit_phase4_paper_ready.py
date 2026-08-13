@@ -7,17 +7,18 @@ Runs ≥9 automated checks to validate experimental integrity:
 2. Correct toggle combinations: each condition has expected enable_contraction/disable_value_head_norm
 3. Seeds present: all 3 seeds (41, 42, 43) have checkpoints per condition
 4. No mislabeled conditions: checkpoint dirs match config names
-5. Summary.json exists and has correct structure
-6. All 12 runs present in summary
-7. CLAIMS.md exists and is non-empty
-8. PROVENANCE.md exists and references correct configs
-9. Metric bounds: Var(V) and Argmax@4× are within reasonable ranges
-10. No NaN/Inf in metrics
-11. Statistical validity: means have std computed from correct seed count
+5. Summary.json exists and is readable JSON
+6. Summary uses the strict publication schema version 2
+7. All 12 runs present in summary
+8. CLAIMS.md exists and is non-empty
+9. PROVENANCE.md exists and references correct configs
+10. Metric bounds: measured stability metrics are within valid ranges
+11. No non-finite values in measured metrics
+12. Statistical validity: means have std computed from correct seed count
 
 Usage:
     buck2 run //buiksat_trm:audit_phase4_paper_ready -- \
-        --results_dir results/paper_ready/phase4_2x2_norm_ablation
+        --results_dir results/paper_ready/phase4_2x2_norm_ablation/v2
 """
 
 import argparse
@@ -27,6 +28,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
+
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.phase4_result_schema import (  # noqa: E402
+    Phase4SummaryValidationError,
+    validate_phase4_summary,
+)
 
 
 # Expected conditions and their toggle values
@@ -196,7 +205,7 @@ def check_no_mislabeled(results_dir: Path) -> AuditResult:
 
 
 def check_summary_exists(results_dir: Path) -> Tuple[AuditResult, Dict[str, Any]]:
-    """Check 5: summary.json exists and has correct structure."""
+    """Check 5: summary.json exists and is readable JSON."""
     summary_path = results_dir / "summary.json"
 
     if not summary_path.exists():
@@ -214,23 +223,32 @@ def check_summary_exists(results_dir: Path) -> Tuple[AuditResult, Dict[str, Any]
             {},
         )
 
-    required_keys = ["experiment", "all_results", "aggregates"]
-    missing_keys = [k for k in required_keys if k not in summary]
-
-    if missing_keys:
-        return (
-            AuditResult("Summary Exists", False, f"Missing keys: {missing_keys}"),
-            {},
-        )
-
     return (
-        AuditResult("Summary Exists", True, "summary.json exists with correct structure"),
+        AuditResult("Summary Exists", True, "summary.json exists and is readable JSON"),
         summary,
     )
 
 
+def check_publication_schema(summary: Dict[str, Any]) -> AuditResult:
+    """Check 6: summary is a publishable Phase 4 schema-v2 artifact."""
+    try:
+        validate_phase4_summary(summary)
+    except Phase4SummaryValidationError as error:
+        return AuditResult(
+            "Publication Schema",
+            False,
+            "Historical/schema-less summaries are non-publishable and are not "
+            f"migrated: {error}",
+        )
+    return AuditResult(
+        "Publication Schema",
+        True,
+        "Strict schema version 2 is valid; unavailable metrics are explicit",
+    )
+
+
 def check_all_runs_present(summary: Dict[str, Any]) -> AuditResult:
-    """Check 6: All 12 runs present in summary."""
+    """Check 7: All 12 runs present in summary."""
     if not summary:
         return AuditResult("All Runs Present", False, "No summary to check")
 
@@ -270,7 +288,7 @@ def check_all_runs_present(summary: Dict[str, Any]) -> AuditResult:
 
 
 def check_claims_exists(results_dir: Path) -> AuditResult:
-    """Check 7: CLAIMS.md exists and is non-empty."""
+    """Check 8: CLAIMS.md exists and is non-empty."""
     claims_path = results_dir / "CLAIMS.md"
 
     if not claims_path.exists():
@@ -292,7 +310,7 @@ def check_claims_exists(results_dir: Path) -> AuditResult:
 
 
 def check_provenance_exists(results_dir: Path, config_dir: Path) -> AuditResult:
-    """Check 8: PROVENANCE.md exists and references configs."""
+    """Check 9: PROVENANCE.md exists and references configs."""
     prov_path = results_dir / "PROVENANCE.md"
 
     if not prov_path.exists():
@@ -317,7 +335,7 @@ def check_provenance_exists(results_dir: Path, config_dir: Path) -> AuditResult:
 
 
 def check_metric_bounds(summary: Dict[str, Any]) -> AuditResult:
-    """Check 9: Metrics are within reasonable bounds."""
+    """Check 10: Measured metrics are within their valid ranges."""
     if not summary:
         return AuditResult("Metric Bounds", False, "No summary to check")
 
@@ -328,19 +346,21 @@ def check_metric_bounds(summary: Dict[str, Any]) -> AuditResult:
         cond = agg.get("condition", "unknown")
 
         # Var(V) should be non-negative and not huge
-        var_v = agg.get("var_V_mean", -1)
+        var_v = agg["var_V_mean"]
         if var_v < 0 or var_v > 1000:
             issues.append(f"{cond}: var_V_mean={var_v} out of bounds [0, 1000]")
 
         # Argmax agreement should be in [0, 1]
-        argmax = agg.get("argmax_4x_mean", -1)
+        argmax = agg["argmax_4x_mean"]
         if argmax < 0 or argmax > 1:
             issues.append(f"{cond}: argmax_4x_mean={argmax} out of bounds [0, 1]")
 
-        # Success rate should be in [0, 1]
-        success = agg.get("success_trivial_mean", -1)
-        if success < 0 or success > 1:
-            issues.append(f"{cond}: success_trivial_mean={success} out of bounds [0, 1]")
+        projection_rate = agg["projection_active_rate_mean"]
+        if projection_rate < 0 or projection_rate > 1:
+            issues.append(
+                f"{cond}: projection_active_rate_mean={projection_rate} "
+                "out of bounds [0, 1]"
+            )
 
     if issues:
         return AuditResult(
@@ -357,9 +377,9 @@ def check_metric_bounds(summary: Dict[str, Any]) -> AuditResult:
 
 
 def check_no_nan_inf(summary: Dict[str, Any]) -> AuditResult:
-    """Check 10: No NaN or Inf in metrics."""
+    """Check 11: No non-finite values in measured metrics."""
     if not summary:
-        return AuditResult("No NaN/Inf", False, "No summary to check")
+        return AuditResult("Finite Metrics", False, "No summary to check")
 
     def check_value(v: Any, path: str) -> List[str]:
         issues = []
@@ -380,16 +400,16 @@ def check_no_nan_inf(summary: Dict[str, Any]) -> AuditResult:
 
     if issues:
         return AuditResult(
-            "No NaN/Inf",
+            "Finite Metrics",
             False,
             f"Found NaN/Inf: {issues[:3]}{'...' if len(issues) > 3 else ''}",
         )
 
-    return AuditResult("No NaN/Inf", True, "No NaN or Inf values found")
+    return AuditResult("Finite Metrics", True, "All measured values are finite")
 
 
 def check_statistical_validity(summary: Dict[str, Any]) -> AuditResult:
-    """Check 11: Aggregates computed from correct number of seeds."""
+    """Check 12: Aggregates computed from correct number of seeds."""
     if not summary:
         return AuditResult("Statistical Validity", False, "No summary to check")
 
@@ -435,8 +455,9 @@ def run_audit(results_dir: Path, config_dir: Path) -> Tuple[List[AuditResult], b
     results.append(check_config_integrity(config_dir))
     results.append(check_correct_toggles(config_dir))
 
-    # Check 5: Summary exists (get it early for other checks)
+    # Checks 5-6: Load the summary, then establish publication eligibility.
     summary_result, summary = check_summary_exists(results_dir)
+    publication_schema_result = check_publication_schema(summary)
 
     # Check 3-4: Seeds and directories (pass summary if available)
     results.append(check_seeds_present(results_dir, summary))
@@ -444,16 +465,27 @@ def run_audit(results_dir: Path, config_dir: Path) -> Tuple[List[AuditResult], b
 
     # Add summary check result
     results.append(summary_result)
+    results.append(publication_schema_result)
 
-    # Checks 6-8: Documentation and completeness
+    # Checks 7-9: Documentation and completeness
     results.append(check_all_runs_present(summary))
     results.append(check_claims_exists(results_dir))
     results.append(check_provenance_exists(results_dir, config_dir))
 
-    # Checks 9-11: Data quality
-    results.append(check_metric_bounds(summary))
-    results.append(check_no_nan_inf(summary))
-    results.append(check_statistical_validity(summary))
+    # Checks 10-12: Only a validated schema may enter data-quality consumers.
+    if publication_schema_result.passed:
+        results.append(check_metric_bounds(summary))
+        results.append(check_no_nan_inf(summary))
+        results.append(check_statistical_validity(summary))
+    else:
+        for name in ("Metric Bounds", "Finite Metrics", "Statistical Validity"):
+            results.append(
+                AuditResult(
+                    name,
+                    False,
+                    "Publication schema is invalid; measured fields were not consumed",
+                )
+            )
 
     all_passed = all(r.passed for r in results)
     return results, all_passed
@@ -461,6 +493,17 @@ def run_audit(results_dir: Path, config_dir: Path) -> Tuple[List[AuditResult], b
 
 def write_audit_md(results_dir: Path, results: List[AuditResult], all_passed: bool):
     """Write AUDIT.md with results."""
+    publication_schema = next(
+        (result for result in results if result.name == "Publication Schema"),
+        None,
+    )
+    if publication_schema is None or not publication_schema.passed:
+        print(
+            "Not writing AUDIT.md: the input is a historical or invalid "
+            "publication schema"
+        )
+        return
+
     content = """# Phase 4: 2×2 Norm Ablation - Audit Report
 
 ## Summary
@@ -491,7 +534,10 @@ def main():
         "--results_dir",
         type=str,
         required=True,
-        help="Path to results directory (e.g., results/paper_ready/phase4_2x2_norm_ablation)",
+        help=(
+            "Path to results directory "
+            "(e.g., results/paper_ready/phase4_2x2_norm_ablation/v2)"
+        ),
     )
     parser.add_argument(
         "--config_dir",

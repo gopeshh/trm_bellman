@@ -3,37 +3,44 @@
 Phase 4: 2x2 Norm Ablation Evaluation Script.
 
 Evaluates all 12 checkpoints (4 conditions × 3 seeds) and generates:
-- summary.json with per-condition/per-seed metrics
+- schema-v2 summary.json with measured per-condition/per-seed metrics
 - CLAIMS.md, PROVENANCE.md
 
 Metrics:
 - Stability: Var(V), L̂_z (pre-proj), projection_active_rate
-- Success: trivial suite, hard suite
+
+This script does not run an environment rollout or load training history. The
+schema records the corresponding success, final-loss, and training-history
+metrics as unavailable instead of emitting placeholder values.
 
 Usage:
     buck2 run //buiksat_trm:eval_phase4_2x2_norm_ablation -- \
-        --out_dir results/paper_ready/phase4_2x2_norm_ablation
+        --out_dir results/paper_ready/phase4_2x2_norm_ablation/v2
 """
 
 import argparse
-import hashlib
 import json
 import os
 import subprocess
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 import yaml
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.phase4_result_schema import (  # noqa: E402
+    PHASE4_SCHEMA_VERSION,
+    phase4_metric_availability,
+    write_phase4_summary,
+)
 
 
 # =============================================================================
@@ -49,7 +56,6 @@ CONDITION_LABELS = {
 }
 SEEDS = [41, 42, 43]
 N_TRAIN = 2
-EVAL_N_LIST = [4, 8]
 
 
 # =============================================================================
@@ -77,12 +83,6 @@ class ConditionResult:
     argmax_agreement_8x: float
     delta_V_4x: float
     delta_V_8x: float
-    # Success metrics
-    success_trivial: float
-    success_hard: float
-    # Training stability
-    final_loss: float
-    has_nan: bool
 
 
 @dataclass
@@ -108,13 +108,6 @@ class ConditionAggregate:
     argmax_8x_std: float
     delta_V_4x_mean: float
     delta_V_8x_mean: float
-    # Success
-    success_trivial_mean: float
-    success_trivial_std: float
-    success_hard_mean: float
-    success_hard_std: float
-    # Training
-    nan_count: int
 
 
 # =============================================================================
@@ -418,23 +411,6 @@ def compute_projection_rate(model, states: List[Dict], n_steps: int = 2, device:
     return active_count / total_count if total_count > 0 else 0.0
 
 
-def compute_success_rate(
-    model, puzzles: List[Dict], n_steps: int = 2, max_steps: int = 20, device: str = "cuda"
-) -> float:
-    """Compute success rate on puzzle suite.
-
-    NOTE: Full success rate computation requires setting up PlanEditEnv with
-    proper dataset and checker. For this 2×2 ablation, we focus on stability
-    metrics (Var(V), argmax agreement, Lipschitz) which are the primary claims.
-
-    This function returns 0.0 as a placeholder. Full success rate evaluation
-    should be done with the proper training infrastructure.
-    """
-    # TODO: Implement proper success rate with full environment setup
-    # For now, return placeholder as stability metrics are the primary focus
-    return 0.0
-
-
 # =============================================================================
 # Main Evaluation
 # =============================================================================
@@ -460,16 +436,14 @@ def evaluate_condition(
     # Load model and config
     model, config = load_checkpoint(str(ckpt_path), str(config_path), device)
 
-    # Load test puzzles from train/test directories
+    # Load the inputs used by the finite checkpoint diagnostics. This is not an
+    # environment rollout and therefore does not produce a success metric.
     trivial_puzzles = []
-    hard_puzzles = []
 
-    for dataset_name in ["sudoku-4x4-trivial", "sudoku-4x4-easy_6to8empties"]:
+    for dataset_name in ["sudoku-4x4-trivial"]:
         dataset_path = data_dir / dataset_name
         if not dataset_path.exists():
             continue
-
-        is_hard = "6to8" in dataset_name or "hard" in dataset_name
 
         for split in ["train", "test"]:
             split_dir = dataset_path / split
@@ -489,10 +463,7 @@ def evaluate_condition(
                     "puzzle_identifier": int(puzzle_ids[i]),
                     "plan": inputs[i].astype(np.int64).tolist(),
                 }
-                if is_hard:
-                    hard_puzzles.append(puzzle)
-                else:
-                    trivial_puzzles.append(puzzle)
+                trivial_puzzles.append(puzzle)
 
     if not trivial_puzzles:
         print(f"  [Skip] No puzzles found in {data_dir}")
@@ -502,10 +473,6 @@ def evaluate_condition(
     L_preproj, L_preproj_std = compute_lipschitz(model, trivial_puzzles, N_TRAIN, device)
     stability = compute_stability_metrics(model, trivial_puzzles, N_TRAIN, device)
     proj_rate = compute_projection_rate(model, trivial_puzzles, N_TRAIN, device)
-
-    # Success rates (smaller sample for speed)
-    success_trivial = compute_success_rate(model, trivial_puzzles[:50], N_TRAIN, 20, device)
-    success_hard = compute_success_rate(model, hard_puzzles[:50], N_TRAIN, 20, device) if len(hard_puzzles) > 0 else 0.0
 
     return ConditionResult(
         condition=condition,
@@ -523,10 +490,6 @@ def evaluate_condition(
         argmax_agreement_8x=stability["argmax_8x"],
         delta_V_4x=stability["delta_V_4x"],
         delta_V_8x=stability["delta_V_8x"],
-        success_trivial=success_trivial,
-        success_hard=success_hard,
-        final_loss=0.0,  # Would need to parse from log
-        has_nan=False,
     )
 
 
@@ -548,22 +511,31 @@ def aggregate_results(results: List[ConditionResult]) -> List[ConditionAggregate
             latent_projection_mode=cond_results[0].latent_projection_mode,
             latent_ball_radius=cond_results[0].latent_ball_radius,
             n_seeds=n,
-            L_preproj_mean=np.mean([r.L_preproj for r in cond_results]),
-            L_preproj_std=np.std([r.L_preproj for r in cond_results]),
-            var_V_mean=np.mean([r.var_V for r in cond_results]),
-            var_V_std=np.std([r.var_V for r in cond_results]),
-            projection_active_rate_mean=np.mean([r.projection_active_rate for r in cond_results]),
-            argmax_4x_mean=np.mean([r.argmax_agreement_4x for r in cond_results]),
-            argmax_4x_std=np.std([r.argmax_agreement_4x for r in cond_results]),
-            argmax_8x_mean=np.mean([r.argmax_agreement_8x for r in cond_results]),
-            argmax_8x_std=np.std([r.argmax_agreement_8x for r in cond_results]),
-            delta_V_4x_mean=np.mean([r.delta_V_4x for r in cond_results]),
-            delta_V_8x_mean=np.mean([r.delta_V_8x for r in cond_results]),
-            success_trivial_mean=np.mean([r.success_trivial for r in cond_results]),
-            success_trivial_std=np.std([r.success_trivial for r in cond_results]),
-            success_hard_mean=np.mean([r.success_hard for r in cond_results]),
-            success_hard_std=np.std([r.success_hard for r in cond_results]),
-            nan_count=sum(1 for r in cond_results if r.has_nan),
+            L_preproj_mean=float(np.mean([r.L_preproj for r in cond_results])),
+            L_preproj_std=float(np.std([r.L_preproj for r in cond_results])),
+            var_V_mean=float(np.mean([r.var_V for r in cond_results])),
+            var_V_std=float(np.std([r.var_V for r in cond_results])),
+            projection_active_rate_mean=float(
+                np.mean([r.projection_active_rate for r in cond_results])
+            ),
+            argmax_4x_mean=float(
+                np.mean([r.argmax_agreement_4x for r in cond_results])
+            ),
+            argmax_4x_std=float(
+                np.std([r.argmax_agreement_4x for r in cond_results])
+            ),
+            argmax_8x_mean=float(
+                np.mean([r.argmax_agreement_8x for r in cond_results])
+            ),
+            argmax_8x_std=float(
+                np.std([r.argmax_agreement_8x for r in cond_results])
+            ),
+            delta_V_4x_mean=float(
+                np.mean([r.delta_V_4x for r in cond_results])
+            ),
+            delta_V_8x_mean=float(
+                np.mean([r.delta_V_8x for r in cond_results])
+            ),
         ))
 
     return aggregates
@@ -595,23 +567,33 @@ by the values themselves.
 
 ## Evidence
 
-| Condition | z→z | V-head | Var(V) | Argmax@4× | Success |
-|-----------|-----|--------|--------|-----------|---------|
+| Condition | z→z | V-head | Var(V) | Argmax@4× |
+|-----------|-----|--------|--------|-----------|
 """
     for agg in aggregates:
         c_status = "ON" if agg.enable_contraction else "OFF"
         v_status = "OFF" if agg.disable_value_head_norm else "ON"
         content += f"| {agg.label} | {c_status} | {v_status} | "
         content += f"{agg.var_V_mean:.3f}±{agg.var_V_std:.3f} | "
-        content += f"{agg.argmax_4x_mean:.3f}±{agg.argmax_4x_std:.3f} | "
-        content += f"{agg.success_trivial_mean:.3f}±{agg.success_trivial_std:.3f} |\n"
+        content += f"{agg.argmax_4x_mean:.3f}±{agg.argmax_4x_std:.3f} |\n"
 
     content += """
-## Interpretation
+## Scope
 
-- V-head ON conditions (nc_yv, yc_yv) expected to show higher Var(V) or NaN
-- z→z contraction alone (yc_nv) should perform similarly to baseline (nc_nv)
+These are finite checkpoint diagnostics on loaded input arrays. They do not
+establish a causal effect, a uniform stability premise, or an environment-level
+performance result.
+
+## Unavailable metrics
+
+| Field | Status | Reason |
+|-------|--------|--------|
 """
+    for metric, metadata in phase4_metric_availability().items():
+        content += (
+            f"| `{metric}` | {metadata['status']} | "
+            f"`{metadata['reason']}` |\n"
+        )
 
     with open(out_path / "CLAIMS.md", "w") as f:
         f.write(content)
@@ -619,7 +601,6 @@ by the values themselves.
 
 
 def generate_provenance_md(
-    aggregates: List[ConditionAggregate],
     config_dir: Path,
     out_path: Path,
     git_sha: str,
@@ -629,6 +610,17 @@ def generate_provenance_md(
 
 ## Git SHA: {git_sha}
 ## Generated: {datetime.now().isoformat()}
+## Summary schema: {PHASE4_SCHEMA_VERSION}
+
+## Metric availability
+
+The evaluator did not run an environment rollout or load a training log or
+training history. New schema-v2 summaries omit the retired numeric fields and
+record their availability as follows:
+
+```json
+{json.dumps(phase4_metric_availability(), indent=2)}
+```
 
 ## Config Files
 
@@ -647,7 +639,11 @@ def generate_provenance_md(
 
 def main():
     parser = argparse.ArgumentParser(description="Phase 4 Evaluation")
-    parser.add_argument("--out_dir", type=str, default="results/paper_ready/phase4_2x2_norm_ablation")
+    parser.add_argument(
+        "--out_dir",
+        type=str,
+        default="results/paper_ready/phase4_2x2_norm_ablation/v2",
+    )
     parser.add_argument("--checkpoint_dir", type=str, default="results/phase4_2x2_norm_ablation")
     parser.add_argument("--config_dir", type=str, default="configs/phase4_2x2_norm_ablation")
     parser.add_argument("--data_dir", type=str, default="data")
@@ -694,6 +690,8 @@ def main():
     git_sha = get_git_sha()
 
     summary = {
+        "schema_version": PHASE4_SCHEMA_VERSION,
+        "metric_availability": phase4_metric_availability(),
         "experiment": "Phase4_2x2_norm_ablation",
         "description": "Multi-seed 2×2 norm ablation (z→z contraction × value-head norm)",
         "generated_at": datetime.now().isoformat(),
@@ -704,12 +702,11 @@ def main():
         "aggregates": [asdict(a) for a in aggregates],
     }
 
-    with open(out_path / "summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
+    write_phase4_summary(summary, out_path / "summary.json")
     print(f"\nSaved: {out_path / 'summary.json'}")
 
     generate_claims_md(aggregates, out_path)
-    generate_provenance_md(aggregates, config_dir, out_path, git_sha)
+    generate_provenance_md(config_dir, out_path, git_sha)
 
     print("\nDone!")
     return 0

@@ -8,25 +8,37 @@ Produces:
 
 Usage:
     buck2 run //buiksat_trm:make_paper_figures_phase4 -- \
-        --summary_json results/paper_ready/phase4_2x2_norm_ablation/summary.json
+        --summary_json results/paper_ready/phase4_2x2_norm_ablation/v2/summary.json
 """
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
 
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.phase4_result_schema import (  # noqa: E402
+    Phase4SummaryValidationError,
+    validate_phase4_summary,
+)
+
 
 def load_summary(summary_path: str) -> Dict[str, Any]:
-    """Load summary.json."""
+    """Load and validate a publication-eligible summary.json."""
     with open(summary_path, "r") as f:
-        return json.load(f)
+        summary = json.load(f)
+    validate_phase4_summary(summary)
+    return summary
 
 
 def generate_2x2_plot(summary: Dict[str, Any], out_path: Path) -> None:
     """Generate 2×2 grid plot showing condition effects."""
+    validate_phase4_summary(summary)
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -35,10 +47,7 @@ def generate_2x2_plot(summary: Dict[str, Any], out_path: Path) -> None:
         print("[Warning] matplotlib not available, skipping plot")
         return
 
-    aggregates = summary.get("aggregates", [])
-    if not aggregates:
-        print("[Warning] No aggregates to plot")
-        return
+    aggregates = summary["aggregates"]
 
     # Create 2×2 matrix of results
     # Rows: z→z contraction (OFF, ON)
@@ -57,7 +66,6 @@ def generate_2x2_plot(summary: Dict[str, Any], out_path: Path) -> None:
     metrics = [
         ("var_V_mean", "Var(V)", "steelblue"),
         ("argmax_4x_mean", "Argmax@4×", "darkgreen"),
-        ("success_trivial_mean", "Success (trivial)", "darkorange"),
     ]
 
     for i, contraction in enumerate(["OFF", "ON"]):
@@ -70,11 +78,11 @@ def generate_2x2_plot(summary: Dict[str, Any], out_path: Path) -> None:
 
                 # Bar chart of metrics
                 x = np.arange(len(metrics))
-                values = [data.get(m[0], 0) for m in metrics]
-                stds = [data.get(m[0].replace("_mean", "_std"), 0) for m in metrics]
+                values = [data[m[0]] for m in metrics]
+                stds = [data[m[0].replace("_mean", "_std")] for m in metrics]
                 colors = [m[2] for m in metrics]
 
-                bars = ax.bar(x, values, color=colors, alpha=0.7, edgecolor='black')
+                ax.bar(x, values, color=colors, alpha=0.7, edgecolor='black')
                 ax.errorbar(x, values, yerr=stds, fmt='none', color='black', capsize=3)
 
                 ax.set_xticks(x)
@@ -103,6 +111,7 @@ def generate_2x2_plot(summary: Dict[str, Any], out_path: Path) -> None:
 
 def generate_bar_comparison(summary: Dict[str, Any], out_path: Path) -> None:
     """Generate grouped bar chart comparing conditions."""
+    validate_phase4_summary(summary)
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -110,14 +119,12 @@ def generate_bar_comparison(summary: Dict[str, Any], out_path: Path) -> None:
     except ImportError:
         return
 
-    aggregates = summary.get("aggregates", [])
-    if not aggregates:
-        return
+    aggregates = summary["aggregates"]
 
     conditions = [a["condition"] for a in aggregates]
     labels = [a["label"] for a in aggregates]
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig, axes = plt.subplots(1, 2, figsize=(9, 4))
 
     # Plot 1: Var(V)
     ax = axes[0]
@@ -143,18 +150,6 @@ def generate_bar_comparison(summary: Dict[str, Any], out_path: Path) -> None:
     ax.set_ylim(0, 1.05)
     ax.grid(True, alpha=0.3)
 
-    # Plot 3: Success Rate
-    ax = axes[2]
-    vals = [a["success_trivial_mean"] for a in aggregates]
-    stds = [a["success_trivial_std"] for a in aggregates]
-    ax.bar(x, vals, yerr=stds, color='darkorange', alpha=0.7, capsize=3)
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=45, ha='right')
-    ax.set_ylabel("Success Rate")
-    ax.set_title("Trivial Suite")
-    ax.set_ylim(0, 1.05)
-    ax.grid(True, alpha=0.3)
-
     plt.suptitle("Phase 4: Norm Ablation Comparison", fontsize=12, fontweight='bold')
     plt.tight_layout()
 
@@ -167,15 +162,16 @@ def generate_bar_comparison(summary: Dict[str, Any], out_path: Path) -> None:
 
 def generate_latex_table(summary: Dict[str, Any], out_path: Path) -> None:
     """Generate LaTeX table."""
-    aggregates = summary.get("aggregates", [])
+    validate_phase4_summary(summary)
+    aggregates = summary["aggregates"]
 
     content = r"""\begin{table}[t]
 \centering
 \caption{Phase 4: 2×2 Norm Ablation across 3 seeds. C=z$\to$z contraction, V=value-head spectral norm.}
 \label{tab:phase4-2x2-ablation}
-\begin{tabular}{lcccccc}
+\begin{tabular}{lcccc}
 \toprule
-Condition & C & V & Var($V$) & Argmax@4$\times$ & Success (trivial) \\
+Condition & C & V & Var($V$) & Argmax@4$\times$ \\
 \midrule
 """
 
@@ -184,8 +180,7 @@ Condition & C & V & Var($V$) & Argmax@4$\times$ & Success (trivial) \\
         v_status = "OFF" if a["disable_value_head_norm"] else "ON"
         content += f"{a['label']} & {c_status} & {v_status} & "
         content += f"${a['var_V_mean']:.3f} \\pm {a['var_V_std']:.3f}$ & "
-        content += f"${a['argmax_4x_mean']:.3f} \\pm {a['argmax_4x_std']:.3f}$ & "
-        content += f"${a['success_trivial_mean']:.3f} \\pm {a['success_trivial_std']:.3f}$ \\\\\n"
+        content += f"${a['argmax_4x_mean']:.3f} \\pm {a['argmax_4x_std']:.3f}$ \\\\\n"
 
     content += r"""\bottomrule
 \end{tabular}
@@ -220,10 +215,14 @@ def main():
         print(f"ERROR: Summary file not found: {summary_path}")
         return 1
 
+    try:
+        summary = load_summary(str(summary_path))
+    except (OSError, json.JSONDecodeError, Phase4SummaryValidationError) as error:
+        print(f"ERROR: Summary is not publishable: {error}")
+        return 1
+
     out_path = Path(args.out_dir) if args.out_dir else summary_path.parent
     out_path.mkdir(parents=True, exist_ok=True)
-
-    summary = load_summary(str(summary_path))
 
     print(f"Generating figures from: {summary_path}")
     print(f"Output directory: {out_path}")

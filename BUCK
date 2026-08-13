@@ -188,6 +188,22 @@ python_binary(
 )
 
 python_binary(
+    name = "cleanrl_runner",
+    srcs = [],
+    base_module = "",
+    keep_gpu_sections = True,
+    main_module = "rl.cleanrl.cleanrl_runner",
+    deps = [
+        ":puzzle_dataset_lib",
+        ":rl",
+        "fbsource//third-party/pypi/gym:gym",
+        "fbsource//third-party/pypi/gymnasium:gymnasium",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
+    ],
+)
+
+python_binary(
     name = "imitation_train",
     srcs = ["imitation_train.py"],
     base_module = "",
@@ -772,6 +788,7 @@ python_unittest(
     srcs = [
         "tests/__init__.py",
         "tests/test_cleanrl_regressions_unittest.py",
+        "tests/test_cleanrl_runner_unittest.py",
     ],
     base_module = "",
     deps = [
@@ -1506,6 +1523,12 @@ python_binary(
 # Phase 4: 2×2 Norm Ablation (Multi-seed)
 # ============================================================================
 
+python_library(
+    name = "phase4_result_schema",
+    srcs = ["scripts/phase4_result_schema.py"],
+    base_module = "",
+)
+
 python_binary(
     name = "eval_phase4_2x2_norm_ablation",
     srcs = ["scripts/eval_phase4_2x2_norm_ablation.py"],
@@ -1513,6 +1536,7 @@ python_binary(
     main_module = "scripts.eval_phase4_2x2_norm_ablation",
     deps = [
         ":models",
+        ":phase4_result_schema",
         ":rl",
         ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
@@ -1528,6 +1552,7 @@ python_binary(
     base_module = "",
     main_module = "scripts.make_paper_figures_phase4",
     deps = [
+        ":phase4_result_schema",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
@@ -1539,6 +1564,25 @@ python_binary(
     base_module = "",
     main_module = "scripts.audit_phase4_paper_ready",
     deps = [
+        ":phase4_result_schema",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_unittest(
+    name = "test_phase4_reporting",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_phase4_reporting_unittest.py",
+        "scripts/audit_phase4_paper_ready.py",
+        "scripts/eval_phase4_2x2_norm_ablation.py",
+        "scripts/make_paper_figures_phase4.py",
+    ],
+    base_module = "",
+    deps = [
+        ":phase4_result_schema",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )

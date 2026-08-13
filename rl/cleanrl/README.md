@@ -137,6 +137,7 @@ Note: DQN uses the in-house `DQNTrainer` because the CleanRL DQN training
 loop has an unresolved observation-encoding divergence on Sudoku. The DQN
 row should be labeled "in-house DQN via benchmark harness," not CleanRL.
 
-DQN n=5 is dropped from the Sudoku benchmark: the in-house `DQNTrainer`
-in this checkout does not implement n-step returns. The CartPole DQN n=5
-smoke gate passed (CleanRL implementation).
+DQN n=5 is dropped from the Sudoku benchmark. The in-house `DQNTrainer`
+supports n-step targets, but the benchmark wrapper currently configures only
+one-step targets and rejects `n_step > 1`. The CartPole DQN n=5 smoke gate
+passed through the CleanRL implementation.
