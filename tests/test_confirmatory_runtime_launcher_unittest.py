@@ -50,6 +50,7 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
         sources = {
             "confirmatory_runtime_launcher.py": b"# launcher\n",
             "puzzle_dataset.py": b"# puzzle\n",
+            "runtime_archive_preflight.py": b"# preflight\n",
             "upi_trm_train.py": b"# trainer\n",
         }
         for directory in ("dataset", "evaluators", "models", "rl", "utils"):

@@ -16,6 +16,7 @@ SOURCE_MANIFEST_RELATIVE_PATH = (
 _ROOT_SOURCES = (
     "confirmatory_runtime_launcher.py",
     "puzzle_dataset.py",
+    "runtime_archive_preflight.py",
     "upi_trm_train.py",
 )
 _SOURCE_DIRECTORIES = ("dataset", "evaluators", "models", "rl", "utils")

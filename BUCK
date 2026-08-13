@@ -131,6 +131,12 @@ python_binary(
 )
 
 python_library(
+    name = "runtime_archive_preflight",
+    srcs = ["runtime_archive_preflight.py"],
+    base_module = "",
+)
+
+python_library(
     name = "upi_trm_train_lib",
     srcs = ["upi_trm_train.py"],
     base_module = "",
@@ -140,6 +146,7 @@ python_library(
     ]),
     deps = [
         ":confirmatory_runtime_launcher_lib",
+        ":runtime_archive_preflight",
         ":models",
         ":rl",
         ":utils",
@@ -170,6 +177,7 @@ python_binary(
     ]),
     deps = [
         ":confirmatory_runtime_launcher_lib",
+        ":runtime_archive_preflight",
         ":models",
         ":rl",
         ":utils",
@@ -1545,7 +1553,44 @@ python_library(
     srcs = ["scripts/phase4_source.py"],
     base_module = "",
     deps = [
+        ":phase4_runtime_profile",
         ":utils",
+    ],
+)
+
+python_library(
+    name = "phase4_runtime_profile",
+    srcs = ["phase4_runtime_profile.py"],
+    base_module = "",
+)
+
+python_library(
+    name = "phase4_runtime_entrypoint",
+    srcs = ["phase4_runtime_entrypoint.py"],
+    base_module = "",
+    deps = [
+        ":runtime_archive_preflight",
+    ],
+)
+
+python_library(
+    name = "phase4_runtime_launcher_lib",
+    srcs = ["phase4_runtime_launcher.py"],
+    base_module = "",
+    deps = [
+        ":confirmatory_runtime_launcher_lib",
+        ":phase4_runtime_profile",
+    ],
+)
+
+python_binary(
+    name = "phase4_runtime_launcher",
+    srcs = ["phase4_runtime_launcher.py"],
+    base_module = "",
+    main_module = "phase4_runtime_launcher",
+    deps = [
+        ":confirmatory_runtime_launcher_lib",
+        ":phase4_runtime_profile",
     ],
 )
 
@@ -1576,16 +1621,21 @@ python_binary(
 
 python_binary(
     name = "eval_phase4_2x2_norm_ablation",
-    srcs = ["scripts/eval_phase4_2x2_norm_ablation.py"],
+    srcs = [
+        "phase4_runtime_entrypoint.py",
+        "scripts/eval_phase4_2x2_norm_ablation.py",
+    ],
     base_module = "",
     compile = False,
-    main_module = "scripts.eval_phase4_2x2_norm_ablation",
+    main_module = "phase4_runtime_entrypoint",
     deps = [
         ":models",
         ":phase4_checkpoint",
         ":phase4_diagnostic_inputs",
         ":phase4_result_schema",
+        ":phase4_runtime_profile",
         ":phase4_source",
+        ":runtime_archive_preflight",
         ":rl",
         ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
@@ -1597,15 +1647,20 @@ python_binary(
 
 python_binary(
     name = "make_paper_figures_phase4",
-    srcs = ["scripts/make_paper_figures_phase4.py"],
+    srcs = [
+        "phase4_runtime_entrypoint.py",
+        "scripts/make_paper_figures_phase4.py",
+    ],
     base_module = "",
     compile = False,
-    main_module = "scripts.make_paper_figures_phase4",
+    main_module = "phase4_runtime_entrypoint",
     deps = [
         ":phase4_checkpoint",
         ":phase4_diagnostic_inputs",
         ":phase4_result_schema",
+        ":phase4_runtime_profile",
         ":phase4_source",
+        ":runtime_archive_preflight",
         ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
@@ -1614,15 +1669,20 @@ python_binary(
 
 python_binary(
     name = "audit_phase4_paper_ready",
-    srcs = ["scripts/audit_phase4_paper_ready.py"],
+    srcs = [
+        "phase4_runtime_entrypoint.py",
+        "scripts/audit_phase4_paper_ready.py",
+    ],
     base_module = "",
     compile = False,
-    main_module = "scripts.audit_phase4_paper_ready",
+    main_module = "phase4_runtime_entrypoint",
     deps = [
         ":phase4_checkpoint",
         ":phase4_diagnostic_inputs",
         ":phase4_result_schema",
+        ":phase4_runtime_profile",
         ":phase4_source",
+        ":runtime_archive_preflight",
         ":models",
         ":rl",
         ":utils",
@@ -1648,12 +1708,30 @@ python_unittest(
         ":phase4_checkpoint",
         ":phase4_diagnostic_inputs",
         ":phase4_result_schema",
+        ":phase4_runtime_launcher_lib",
+        ":phase4_runtime_profile",
         ":phase4_source",
+        ":runtime_archive_preflight",
         ":rl",
         ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_unittest(
+    name = "test_phase4_runtime_launcher",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_phase4_runtime_launcher_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":confirmatory_runtime_launcher_lib",
+        ":phase4_runtime_launcher_lib",
+        ":phase4_runtime_profile",
+        ":runtime_archive_preflight",
     ],
 )
 

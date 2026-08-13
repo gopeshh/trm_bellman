@@ -27,6 +27,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -50,7 +51,9 @@ from scripts.phase4_source import (  # noqa: E402
     PHASE4_AUDIT_SOURCE_PROFILE,
     Phase4SourceError,
     phase4_evaluator_source_manifest_sha256,
+    require_phase4_runtime_attestation,
     resolve_phase4_source_roots,
+    verify_phase4_producer_source,
     verify_phase4_runtime_sources,
 )
 from utils.run_identity import (  # noqa: E402
@@ -445,6 +448,7 @@ def check_checkpoint_identities(
     summary: Dict[str, Any],
     checkpoint_dir: Path,
     config_dir: Path,
+    expected_producer_source: Dict[str, Any],
 ) -> AuditResult:
     """Check 13: Rehash and strictly reload every recorded full checkpoint."""
 
@@ -453,6 +457,7 @@ def check_checkpoint_identities(
             summary,
             checkpoint_dir,
             config_dir,
+            expected_producer_source=expected_producer_source,
             device="cpu",
         )
     except (OSError, Phase4CheckpointError) as error:
@@ -484,6 +489,7 @@ def check_diagnostic_input_identity(
 def check_evaluator_source_identity(
     summary: Dict[str, Any],
     project_root: Path,
+    expected_runtime_sha256: str,
 ) -> AuditResult:
     """Check 15: Bind evaluator bytes and commit to the clean checkout."""
 
@@ -504,6 +510,12 @@ def check_evaluator_source_identity(
             False,
             "Summary evaluator source digest differs from the project checkout",
         )
+    if summary.get("evaluator_runtime_artifact_sha256") != expected_runtime_sha256:
+        return AuditResult(
+            "Evaluator Source Identity",
+            False,
+            "Summary evaluator runtime differs from the authorized PAR digest",
+        )
     return AuditResult(
         "Evaluator Source Identity",
         True,
@@ -517,6 +529,8 @@ def run_audit(
     checkpoint_dir: Path,
     data_dir: Path,
     project_root: Path,
+    expected_producer_source: Dict[str, Any],
+    expected_evaluator_runtime_sha256: str,
 ) -> Tuple[List[AuditResult], bool]:
     """Run all audit checks."""
     results = []
@@ -548,10 +562,21 @@ def run_audit(
         results.append(check_no_nan_inf(summary))
         results.append(check_statistical_validity(summary))
         results.append(
-            check_checkpoint_identities(summary, checkpoint_dir, config_dir)
+            check_checkpoint_identities(
+                summary,
+                checkpoint_dir,
+                config_dir,
+                expected_producer_source,
+            )
         )
         results.append(check_diagnostic_input_identity(summary, data_dir))
-        results.append(check_evaluator_source_identity(summary, project_root))
+        results.append(
+            check_evaluator_source_identity(
+                summary,
+                project_root,
+                expected_evaluator_runtime_sha256,
+            )
+        )
     else:
         for name in (
             "Metric Bounds",
@@ -610,7 +635,15 @@ def write_audit_md(results_dir: Path, results: List[AuditResult], all_passed: bo
     print(f"Saved: {audit_path}")
 
 
-def main():
+def main(*, runtime_attestation: Dict[str, Any] | None = None):
+    try:
+        attestation = require_phase4_runtime_attestation(
+            runtime_attestation,
+            PHASE4_AUDIT_SOURCE_PROFILE,
+        )
+    except Phase4SourceError as error:
+        print(f"ERROR: Audit runtime source is not authenticated: {error}")
+        return 1
     parser = argparse.ArgumentParser(description="Phase 4 Audit Script")
     parser.add_argument(
         "--project_root",
@@ -623,6 +656,23 @@ def main():
         type=str,
         required=True,
         help="fbcode root whose buiksat_trm cell resolves to project_root",
+    )
+    parser.add_argument(
+        "--producer_project_root",
+        type=str,
+        required=True,
+        help="Exact clean implementation checkout used for Phase 4 training",
+    )
+    parser.add_argument(
+        "--expected_producer_git_commit",
+        type=str,
+        required=True,
+        help="Authorized Phase 4 training commit",
+    )
+    parser.add_argument(
+        "--expected_evaluator_runtime_sha256",
+        required=True,
+        help="Externally authorized evaluator PAR SHA-256",
     )
     parser.add_argument(
         "--results_dir",
@@ -640,12 +690,6 @@ def main():
         help="Trusted root containing the 12 full Phase 4 checkpoints",
     )
     parser.add_argument(
-        "--config_dir",
-        type=str,
-        required=True,
-        help="Trusted root containing the four Phase 4 condition configs",
-    )
-    parser.add_argument(
         "--data_dir",
         type=str,
         required=True,
@@ -653,6 +697,12 @@ def main():
     )
 
     args = parser.parse_args()
+    if re.fullmatch(
+        r"[0-9a-f]{64}",
+        args.expected_evaluator_runtime_sha256,
+    ) is None:
+        print("ERROR: Expected evaluator runtime SHA-256 is invalid.")
+        return 1
 
     try:
         project_root, _ = resolve_phase4_source_roots(
@@ -663,6 +713,22 @@ def main():
             project_root,
             PHASE4_AUDIT_SOURCE_PROFILE,
         )
+        project_identity = discover_clean_git_source(project_root)
+        if (
+            runtime_source_digest != attestation["source_manifest_sha256"]
+            or project_identity["git_commit"]
+            != attestation["source_git_commit"]
+        ):
+            raise Phase4SourceError(
+                "Audit checkout differs from the pre-import runtime attestation."
+            )
+        producer_project_root = Path(
+            args.producer_project_root
+        ).expanduser().resolve(strict=True)
+        expected_producer_source = verify_phase4_producer_source(
+            producer_project_root,
+            args.expected_producer_git_commit,
+        )
     except (OSError, Phase4SourceError) as error:
         print(f"ERROR: Audit runtime source is not authenticated: {error}")
         return 1
@@ -670,7 +736,9 @@ def main():
     results_dir = Path(args.results_dir)
     checkpoint_dir = Path(args.checkpoint_dir)
     data_dir = Path(args.data_dir)
-    config_dir = Path(args.config_dir)
+    config_dir = (
+        producer_project_root / "configs" / "phase4_2x2_norm_ablation"
+    )
 
     print("=" * 60)
     print("Phase 4: 2×2 Norm Ablation - Audit")
@@ -685,6 +753,8 @@ def main():
         checkpoint_dir,
         data_dir,
         project_root,
+        expected_producer_source,
+        args.expected_evaluator_runtime_sha256,
     )
 
     try:
@@ -695,6 +765,13 @@ def main():
         if final_runtime_source_digest != runtime_source_digest:
             raise Phase4SourceError(
                 "Audit runtime source changed during validation."
+            )
+        if verify_phase4_producer_source(
+            producer_project_root,
+            args.expected_producer_git_commit,
+        ) != expected_producer_source:
+            raise Phase4SourceError(
+                "Producer source identity changed during audit."
             )
         final_identity = discover_clean_git_source(project_root)
         summary_result, final_summary = check_summary_exists(results_dir)

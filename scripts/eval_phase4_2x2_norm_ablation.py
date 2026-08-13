@@ -26,7 +26,7 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -52,7 +52,9 @@ from scripts.phase4_checkpoint import (  # noqa: E402
 )
 from scripts.phase4_source import (  # noqa: E402
     PHASE4_EVALUATOR_SOURCE_PROFILE,
+    require_phase4_runtime_attestation,
     resolve_phase4_source_roots,
+    verify_phase4_producer_source,
     verify_phase4_runtime_sources,
 )
 
@@ -92,6 +94,7 @@ class ConditionResult:
     dataset_provenance_sha256: str
     producer_git_commit: str
     producer_source_manifest_sha256: str
+    training_runtime_artifact_sha256: str
     initialization_kind: str
     checkpoint_schema_version: int
     training_invocation_schema_version: int
@@ -430,6 +433,7 @@ def evaluate_condition(
     seed: int,
     checkpoint_dir: Path,
     config_dir: Path,
+    expected_producer_source: Dict[str, object],
     diagnostic_states: List[Dict],
     device: str = "cuda",
 ) -> Optional[ConditionResult]:
@@ -449,6 +453,7 @@ def evaluate_condition(
         config_path,
         condition=condition,
         seed=seed,
+        expected_producer_source=expected_producer_source,
         device=device,
     )
     model = loaded.model
@@ -493,6 +498,9 @@ def evaluate_condition(
         producer_git_commit=identity.producer_git_commit,
         producer_source_manifest_sha256=(
             identity.producer_source_manifest_sha256
+        ),
+        training_runtime_artifact_sha256=(
+            identity.training_runtime_artifact_sha256
         ),
         initialization_kind=identity.initialization_kind,
         checkpoint_schema_version=identity.checkpoint_schema_version,
@@ -657,17 +665,26 @@ record their availability as follows:
     print(f"Saved: {out_path / 'PROVENANCE.md'}")
 
 
-def main():
+def main(*, runtime_attestation: Optional[Dict[str, Any]] = None):
+    attestation = require_phase4_runtime_attestation(
+        runtime_attestation,
+        PHASE4_EVALUATOR_SOURCE_PROFILE,
+    )
     parser = argparse.ArgumentParser(description="Phase 4 Evaluation")
     parser.add_argument("--project_root", type=str, required=True)
     parser.add_argument("--fbcode_root", type=str, required=True)
+    parser.add_argument("--producer_project_root", type=str, required=True)
+    parser.add_argument(
+        "--expected_producer_git_commit",
+        type=str,
+        required=True,
+    )
     parser.add_argument(
         "--out_dir",
         type=str,
         default="results/paper_ready/phase4_2x2_norm_ablation/v3",
     )
     parser.add_argument("--checkpoint_dir", type=str, default="results/phase4_2x2_norm_ablation")
-    parser.add_argument("--config_dir", type=str, default="configs/phase4_2x2_norm_ablation")
     parser.add_argument("--data_dir", type=str, default="data")
     parser.add_argument("--device", type=str, default="cuda")
 
@@ -682,9 +699,26 @@ def main():
         project_root,
         PHASE4_EVALUATOR_SOURCE_PROFILE,
     )
+    if (
+        evaluator_git_commit != attestation["source_git_commit"]
+        or evaluator_source_manifest_sha256
+        != attestation["source_manifest_sha256"]
+    ):
+        raise RuntimeError(
+            "Evaluator checkout differs from the pre-import runtime attestation."
+        )
+    producer_project_root = Path(args.producer_project_root).expanduser().resolve(
+        strict=True
+    )
+    expected_producer_source = verify_phase4_producer_source(
+        producer_project_root,
+        args.expected_producer_git_commit,
+    )
     out_path = project_root / args.out_dir
     checkpoint_dir = project_root / args.checkpoint_dir
-    config_dir = project_root / args.config_dir
+    config_dir = (
+        producer_project_root / "configs" / "phase4_2x2_norm_ablation"
+    )
     data_dir = project_root / args.data_dir
 
     out_path.mkdir(parents=True, exist_ok=True)
@@ -713,6 +747,7 @@ def main():
                 seed,
                 checkpoint_dir,
                 config_dir,
+                expected_producer_source,
                 diagnostic_states,
                 device,
             )
@@ -736,6 +771,11 @@ def main():
     )
     if final_source_manifest_sha256 != evaluator_source_manifest_sha256:
         raise RuntimeError("Evaluator runtime source changed during evaluation.")
+    if verify_phase4_producer_source(
+        producer_project_root,
+        args.expected_producer_git_commit,
+    ) != expected_producer_source:
+        raise RuntimeError("Producer source identity changed during evaluation.")
 
     summary = {
         "schema_version": PHASE4_SCHEMA_VERSION,
@@ -747,6 +787,7 @@ def main():
         "evaluator_source_manifest_sha256": (
             evaluator_source_manifest_sha256
         ),
+        "evaluator_runtime_artifact_sha256": attestation["runtime_sha256"],
         "diagnostic_dataset": diagnostic_dataset,
         "diagnostic_dataset_sha256": canonical_json_sha256(
             diagnostic_dataset

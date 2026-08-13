@@ -1,7 +1,6 @@
 
 import argparse
 import copy
-import fcntl
 import hashlib
 import importlib.metadata
 import json
@@ -11,7 +10,6 @@ import os
 import platform
 import random
 import re
-import stat
 import sys
 import tempfile
 import zipfile
@@ -19,46 +17,52 @@ from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, MutableMapping, Optional, Tuple
 
+from runtime_archive_preflight import RuntimePreflight, preflight_runtime
 
-_VERIFIED_RUNTIME_PATH_ENV = "UPI_TRM_VERIFIED_RUNTIME_PATH"
-_VERIFIED_RUNTIME_SHA256_ENV = "UPI_TRM_VERIFIED_RUNTIME_SHA256"
-_VERIFIED_RUNTIME_FD_ENV = "UPI_TRM_VERIFIED_RUNTIME_FD"
-_PRIVATE_UNPACK_BASE_ENV = "UPI_TRM_PRIVATE_UNPACK_BASE"
-_PRIVATE_UNPACK_FD_ENV = "UPI_TRM_PRIVATE_UNPACK_FD"
-_LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_MEMFD_SEALING_AVAILABLE = all(
-    hasattr(fcntl, name)
-    for name in (
-        "F_GET_SEALS",
-        "F_SEAL_GROW",
-        "F_SEAL_SEAL",
-        "F_SEAL_SHRINK",
-        "F_SEAL_WRITE",
+_PHASE4_RUN_ID_PREFIX = "phase4_2x2_norm_ablation."
+_PHASE4_TRAINING_ROLE = "training"
+
+
+def _phase4_run_requested(argv: List[str]) -> bool:
+    """Recognize a Phase 4 run before argparse or behavior imports execute."""
+
+    if "--phase4-publication" in argv:
+        return True
+    for index, argument in enumerate(argv):
+        if argument.startswith(f"--run-id={_PHASE4_RUN_ID_PREFIX}"):
+            return True
+        if (
+            argument == "--run-id"
+            and index + 1 < len(argv)
+            and argv[index + 1].startswith(_PHASE4_RUN_ID_PREFIX)
+        ):
+            return True
+    return False
+
+
+def _preflight_training_runtime(
+    *,
+    argv: List[str],
+    module_file: str,
+    environ: MutableMapping[str, str],
+) -> Optional[RuntimePreflight]:
+    """Authenticate confirmatory and Phase 4 runtimes before behavior imports."""
+
+    confirmatory = "--confirmatory" in argv
+    phase4_requested = _phase4_run_requested(argv)
+    if confirmatory and phase4_requested:
+        raise RuntimeError(
+            "Confirmatory and Phase 4 publication modes cannot be combined."
+        )
+    return preflight_runtime(
+        module_file=module_file,
+        expected_module_name="upi_trm_train.py",
+        environ=environ,
+        attestation_required=confirmatory or phase4_requested,
+        allowed_phase4_roles=(
+            frozenset({_PHASE4_TRAINING_ROLE}) if phase4_requested else None
+        ),
     )
-)
-_F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 0)
-_REQUIRED_MEMFD_SEALS = sum(
-    getattr(fcntl, name, 0)
-    for name in (
-        "F_SEAL_WRITE",
-        "F_SEAL_SHRINK",
-        "F_SEAL_GROW",
-        "F_SEAL_SEAL",
-    )
-)
-
-
-def _hash_preimport_runtime(path: Path) -> str:
-    """Hash the packaged runtime before any behavior module is imported."""
-
-    digest = hashlib.sha256()
-    try:
-        with path.open("rb") as handle:
-            for block in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(block)
-    except OSError as exc:
-        raise RuntimeError("Verified runtime artifact cannot be read.") from exc
-    return digest.hexdigest()
 
 
 def _preflight_confirmatory_runtime(
@@ -67,215 +71,41 @@ def _preflight_confirmatory_runtime(
     module_file: str,
     environ: MutableMapping[str, str],
 ) -> Tuple[Optional[str], Optional[int], Optional[int]]:
-    """Reject confirmatory execution before importing behavior-bearing code."""
+    """Compatibility wrapper exposing the historical descriptor tuple."""
 
-    confirmatory = "--confirmatory" in argv
-    attested_path_raw = environ.pop(_VERIFIED_RUNTIME_PATH_ENV, None)
-    attested_sha256 = environ.pop(_VERIFIED_RUNTIME_SHA256_ENV, None)
-    attested_fd_raw = environ.pop(_VERIFIED_RUNTIME_FD_ENV, None)
-    private_unpack_raw = environ.pop(_PRIVATE_UNPACK_BASE_ENV, None)
-    private_unpack_fd_raw = environ.pop(_PRIVATE_UNPACK_FD_ENV, None)
-    if not confirmatory:
-        if (
-            attested_path_raw is not None
-            or attested_sha256 is not None
-            or attested_fd_raw is not None
-            or private_unpack_raw is not None
-            or private_unpack_fd_raw is not None
-        ):
-            raise RuntimeError(
-                "Packaged-runtime attestation is valid only for --confirmatory."
-            )
+    preflight = _preflight_training_runtime(
+        argv=argv,
+        module_file=module_file,
+        environ=environ,
+    )
+    if preflight is None:
         return None, None, None
-    if (
-        attested_path_raw is None
-        or attested_sha256 is None
-        or attested_fd_raw is None
-        or private_unpack_raw is None
-        or private_unpack_fd_raw is None
-    ):
-        raise RuntimeError(
-            "Confirmatory execution requires the verified packaged-runtime launcher."
-        )
-    if not _LOWER_SHA256.fullmatch(attested_sha256):
-        raise RuntimeError(
-            "Verified runtime SHA-256 must be 64 lowercase hexadecimal characters."
-        )
-    if not _MEMFD_SEALING_AVAILABLE:
-        raise RuntimeError(
-            "This host cannot inspect a sealed confirmatory runtime."
-        )
-
-    if not re.fullmatch(r"[0-9]+", attested_fd_raw):
-        raise RuntimeError("Verified runtime descriptor must be a decimal integer.")
-    attested_fd = int(attested_fd_raw)
-    if attested_fd < 3:
-        raise RuntimeError("Verified runtime descriptor is reserved or invalid.")
-    if not re.fullmatch(r"[0-9]+", private_unpack_fd_raw):
-        raise RuntimeError("Private unpack descriptor must be a decimal integer.")
-    private_unpack_fd = int(private_unpack_fd_raw)
-    if private_unpack_fd < 3 or private_unpack_fd == attested_fd:
-        raise RuntimeError("Private unpack descriptor is reserved or invalid.")
-
-    descriptor_path = Path(f"/proc/self/fd/{attested_fd}")
-    par_filename_raw = environ.get("FB_PAR_FILENAME")
-    if (
-        attested_path_raw != str(descriptor_path)
-        or par_filename_raw != str(descriptor_path)
-    ):
-        raise RuntimeError("Confirmatory runtime attestation has an invalid path.")
-
-    module_path = Path(module_file)
-    module_descriptor_match = re.fullmatch(
-        r"/proc/self/fd/([0-9]+)/upi_trm_train\.py",
-        module_path.as_posix(),
-    )
-    if module_descriptor_match is None:
-        raise RuntimeError(
-            "Confirmatory entrypoint was not imported from the attested PAR."
-        )
-    module_fd = int(module_descriptor_match.group(1))
-    if module_fd < 3:
-        raise RuntimeError("Confirmatory module descriptor is reserved or invalid.")
-
-    try:
-        before = os.fstat(attested_fd)
-        module_before = os.fstat(module_fd)
-        attested_seals = fcntl.fcntl(attested_fd, _F_GET_SEALS)
-        module_seals = fcntl.fcntl(module_fd, _F_GET_SEALS)
-    except OSError as exc:
-        raise RuntimeError(
-            "Confirmatory runtime descriptor cannot be inspected."
-        ) from exc
-    if (
-        not stat.S_ISREG(before.st_mode)
-        or not stat.S_ISREG(module_before.st_mode)
-        or not os.get_inheritable(attested_fd)
-        or attested_seals & _REQUIRED_MEMFD_SEALS != _REQUIRED_MEMFD_SEALS
-        or module_seals & _REQUIRED_MEMFD_SEALS != _REQUIRED_MEMFD_SEALS
-        or (before.st_dev, before.st_ino, before.st_size)
-        != (module_before.st_dev, module_before.st_ino, module_before.st_size)
-        or not zipfile.is_zipfile(descriptor_path)
-    ):
-        raise RuntimeError(
-            "Confirmatory execution requires the immutable attested PAR artifact."
-        )
-
-    private_unpack_path = Path(f"/proc/self/fd/{private_unpack_fd}")
-    par_unpack_raw = environ.pop("FB_PAR_UNPACK_BASEDIR", None)
-    if (
-        private_unpack_raw != str(private_unpack_path)
-        or par_unpack_raw != str(private_unpack_path)
-    ):
-        raise RuntimeError(
-            "Confirmatory private unpack attestation has an invalid path."
-        )
-    try:
-        unpack_before = os.fstat(private_unpack_fd)
-    except OSError as exc:
-        raise RuntimeError(
-            "Confirmatory private unpack descriptor cannot be inspected."
-        ) from exc
-    actual_sha256 = _hash_preimport_runtime(descriptor_path)
-    try:
-        after = os.fstat(attested_fd)
-        module_after = os.fstat(module_fd)
-        unpack_after = os.fstat(private_unpack_fd)
-    except OSError as exc:
-        raise RuntimeError(
-            "Confirmatory runtime or private unpack directory changed during preflight."
-        ) from exc
-    before_identity = (
-        before.st_dev,
-        before.st_ino,
-        stat.S_IFMT(before.st_mode),
-        before.st_size,
-        before.st_mtime_ns,
-        before.st_ctime_ns,
-    )
-    after_identity = (
-        after.st_dev,
-        after.st_ino,
-        stat.S_IFMT(after.st_mode),
-        after.st_size,
-        after.st_mtime_ns,
-        after.st_ctime_ns,
-    )
-    module_before_identity = (
-        module_before.st_dev,
-        module_before.st_ino,
-        stat.S_IFMT(module_before.st_mode),
-        module_before.st_size,
-        module_before.st_mtime_ns,
-        module_before.st_ctime_ns,
-    )
-    module_after_identity = (
-        module_after.st_dev,
-        module_after.st_ino,
-        stat.S_IFMT(module_after.st_mode),
-        module_after.st_size,
-        module_after.st_mtime_ns,
-        module_after.st_ctime_ns,
-    )
-    if (
-        len(
-            {
-                before_identity,
-                after_identity,
-                module_before_identity,
-                module_after_identity,
-            }
-        )
-        != 1
-        or actual_sha256 != attested_sha256
-    ):
-        raise RuntimeError(
-            "Confirmatory runtime artifact differs from its launcher attestation."
-        )
-    unpack_before_identity = (
-        unpack_before.st_dev,
-        unpack_before.st_ino,
-        stat.S_IFMT(unpack_before.st_mode),
-    )
-    unpack_after_identity = (
-        unpack_after.st_dev,
-        unpack_after.st_ino,
-        stat.S_IFMT(unpack_after.st_mode),
-    )
-    if (
-        unpack_before_identity != unpack_after_identity
-        or not stat.S_ISDIR(unpack_after.st_mode)
-        or unpack_after.st_uid != os.geteuid()
-        or stat.S_IMODE(unpack_after.st_mode) != 0o700
-        or not os.get_inheritable(private_unpack_fd)
-    ):
-        raise RuntimeError(
-            "Confirmatory private unpack directory has an invalid identity or mode."
-        )
-    try:
-        os.set_inheritable(attested_fd, False)
-        if module_fd != attested_fd:
-            os.set_inheritable(module_fd, False)
-        os.set_inheritable(private_unpack_fd, False)
-    except OSError as exc:
-        raise RuntimeError(
-            "Confirmatory runtime descriptor cannot be isolated from child processes."
-        ) from exc
     return (
-        actual_sha256,
-        private_unpack_fd,
-        attested_fd,
+        preflight.runtime_sha256,
+        preflight.private_unpack_descriptor,
+        preflight.runtime_descriptor,
     )
 
 
-(
-    _PREVERIFIED_RUNTIME_SHA256,
-    _PREVERIFIED_PRIVATE_UNPACK_FD,
-    _PREVERIFIED_RUNTIME_FD,
-) = _preflight_confirmatory_runtime(
+_PREVERIFIED_RUNTIME = _preflight_training_runtime(
     argv=list(sys.argv[1:]),
     module_file=__file__,
     environ=os.environ,
+)
+_PREVERIFIED_RUNTIME_SHA256 = (
+    _PREVERIFIED_RUNTIME.runtime_sha256
+    if _PREVERIFIED_RUNTIME is not None
+    else None
+)
+_PREVERIFIED_PRIVATE_UNPACK_FD = (
+    _PREVERIFIED_RUNTIME.private_unpack_descriptor
+    if _PREVERIFIED_RUNTIME is not None
+    else None
+)
+_PREVERIFIED_RUNTIME_FD = (
+    _PREVERIFIED_RUNTIME.runtime_descriptor
+    if _PREVERIFIED_RUNTIME is not None
+    else None
 )
 
 # Force subsequent imports to compile from the manifest-covered source files.
@@ -1741,7 +1571,7 @@ def _phase4_condition_from_run_id(
 ) -> Optional[str]:
     """Recognize and validate one Phase 4 publication run identifier."""
 
-    prefix = "phase4_2x2_norm_ablation."
+    prefix = _PHASE4_RUN_ID_PREFIX
     if run_id is None or not run_id.startswith(prefix):
         return None
     if training_seed is None:
@@ -1767,7 +1597,31 @@ def _prepare_phase4_publication_source(
 
     condition = _phase4_condition_from_run_id(args.run_id, args.seed)
     if condition is None:
+        if args.phase4_publication:
+            raise RuntimeError(
+                "Phase 4 launcher mode requires a registered Phase 4 run ID."
+            )
         return None
+    if not args.phase4_publication:
+        raise RuntimeError(
+            "Phase 4 publication runs require the authenticated Phase 4 launcher."
+        )
+    runtime_preflight = _PREVERIFIED_RUNTIME
+    if (
+        runtime_preflight is None
+        or runtime_preflight.phase4_role != _PHASE4_TRAINING_ROLE
+        or runtime_preflight.source_git_commit is None
+        or runtime_preflight.source_manifest_sha256 is None
+    ):
+        raise RuntimeError(
+            "Phase 4 publication requires phase4-training preflight identity."
+        )
+    runtime_artifact_sha256 = _validate_expected_sha256(
+        runtime_preflight.runtime_sha256,
+        field="Phase 4 runtime artifact SHA-256",
+    )
+    if runtime_artifact_sha256 != _PREVERIFIED_RUNTIME_SHA256:
+        raise RuntimeError("Phase 4 runtime preflight identity is inconsistent.")
     disallowed = {
         "baseline": selected_baseline,
         "dataset_paths": args.dataset_paths,
@@ -1848,8 +1702,18 @@ def _prepare_phase4_publication_source(
         raise RuntimeError(
             "Phase 4 publication source identity cannot be established."
         ) from exc
+    if (
+        producer_identity["git_commit"]
+        != runtime_preflight.source_git_commit
+        or source_manifest_sha256
+        != runtime_preflight.source_manifest_sha256
+    ):
+        raise RuntimeError(
+            "Phase 4 producer source differs from the launcher authorization."
+        )
     return {
         "condition": condition,
+        "runtime_artifact_sha256": runtime_artifact_sha256,
         "config_source_paths": [str(expected_config_path)],
         "config_sources": [
             {"name": expected_config_path.name, "sha256": config_sha256}
@@ -1874,10 +1738,15 @@ def _phase4_training_invocation(
 ) -> Dict[str, Any]:
     """Build the complete checkpoint-bound Phase 4 training identity."""
 
+    runtime_artifact_sha256 = _validate_expected_sha256(
+        source_context.get("runtime_artifact_sha256"),
+        field="Phase 4 runtime artifact SHA-256",
+    )
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "training_seed": training_seed,
         "run_id": run_id,
+        "runtime_artifact_sha256": runtime_artifact_sha256,
         "config_sources": list(source_context["config_sources"]),
         "rl_config_sha256": canonical_json_sha256(rl_config),
         "model_config_sha256": canonical_json_sha256(model_config),
@@ -2345,7 +2214,15 @@ def save_checkpoint(
         raise RuntimeError("Checkpoint requires the active model configuration.")
     model_config = _config_dict(model_config_object)
     rl_config = _config_dict(effective_rl_cfg)
+    phase4_condition = _phase4_condition_from_run_id(
+        training_run_id,
+        training_seed,
+    )
     if checkpoint_training_invocation is None:
+        if phase4_condition is not None:
+            raise RuntimeError(
+                "Phase 4 checkpoints require a preverified publication identity."
+            )
         training_invocation = _checkpoint_training_invocation(
             training_seed=training_seed,
             training_run_id=training_run_id,
@@ -2354,11 +2231,16 @@ def save_checkpoint(
             model_config=model_config,
         )
     else:
+        if phase4_condition is None:
+            raise RuntimeError(
+                "Checkpoint publication identity is reserved for Phase 4 runs."
+            )
         training_invocation = dict(checkpoint_training_invocation)
         expected_fields = {
             "schema_version",
             "training_seed",
             "run_id",
+            "runtime_artifact_sha256",
             "config_sources",
             "rl_config_sha256",
             "model_config_sha256",
@@ -2370,9 +2252,9 @@ def save_checkpoint(
             raise RuntimeError(
                 "Checkpoint publication training identity has an invalid inventory."
             )
-        if training_invocation["schema_version"] != 2:
+        if training_invocation["schema_version"] != 3:
             raise RuntimeError(
-                "Checkpoint publication training identity must use schema 2."
+                "Checkpoint publication training identity must use schema 3."
             )
         if training_invocation["training_seed"] != training_seed:
             raise RuntimeError(
@@ -2395,6 +2277,17 @@ def save_checkpoint(
         ] != canonical_json_sha256(canonical_dataset_provenance):
             raise RuntimeError(
                 "Checkpoint publication training identity has stale dataset provenance."
+            )
+        invocation_runtime_sha256 = _validate_expected_sha256(
+            training_invocation["runtime_artifact_sha256"],
+            field="Checkpoint publication runtime artifact SHA-256",
+        )
+        if (
+            _PREVERIFIED_RUNTIME_SHA256 is None
+            or invocation_runtime_sha256 != _PREVERIFIED_RUNTIME_SHA256
+        ):
+            raise RuntimeError(
+                "Checkpoint publication training identity has the wrong runtime artifact."
             )
     runtime_fingerprint = _runtime_fingerprint()
     canonical_run_identity: Optional[Dict[str, Any]] = None
@@ -3591,7 +3484,10 @@ def resume_from_checkpoint(
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train TinyRecursiveReasoningModel with plan-space RL.")
+    parser = argparse.ArgumentParser(
+        description="Train TinyRecursiveReasoningModel with plan-space RL.",
+        allow_abbrev=False,
+    )
     parser.add_argument("--dataset-paths", nargs="+", default=None, help="Optional list of supervised dataset directories.")
     parser.add_argument("--train-split", default="train", help="Dataset split used for training.")
     parser.add_argument("--eval-split", default="test", help="Disjoint dataset split used for evaluation.")
@@ -3653,6 +3549,11 @@ def parse_args():
         "--confirmatory",
         action="store_true",
         help="Enable fail-closed confirmatory provenance and evaluation artifacts.",
+    )
+    parser.add_argument(
+        "--phase4-publication",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--confirmatory-cell",

@@ -16,7 +16,11 @@ Seeds: {41, 42, 43}
 Usage:
     buck2 run //buiksat_trm:run_phase4_training -- \
         --project-root /absolute/path/to/trm_bellman \
-        --fbcode-root /absolute/path/to/fbsource/fbcode
+        --fbcode-root /absolute/path/to/fbsource/fbcode \
+        --phase4-launcher /absolute/path/to/phase4_runtime_launcher \
+        --training-runtime /absolute/path/to/upi_trm_train.par \
+        --expected-runtime-sha256 <sha256> \
+        --expected-producer-git-commit <commit>
 """
 
 import argparse
@@ -35,14 +39,28 @@ CONDITIONS = ["nc_nv", "nc_yv", "yc_nv", "yc_yv"]
 SEEDS = [41, 42, 43]
 NUM_GPUS = 4
 
-# Buck2 command template
-BUCK2_CMD = [
-    "buck2", "run", "//buiksat_trm:upi_trm_train",
-    "-c", "fbcode.nvcc_arch=a100",
-    "-c", "fbcode.enable_gpu_sections=true",
-    "--local-only",
-    "--",
-]
+
+def _require_absolute_file(path_value: str, label: str) -> Path:
+    requested = Path(path_value).expanduser()
+    if not requested.is_absolute():
+        raise ValueError(f"{label} must be an explicit absolute path.")
+    try:
+        resolved = requested.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} does not exist.") from exc
+    if not resolved.is_file():
+        raise ValueError(f"{label} must be a regular file.")
+    return resolved
+
+
+def _require_lower_hex(value: str, length: int, label: str) -> str:
+    if len(value) != length or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ValueError(
+            f"{label} must be {length} lowercase hexadecimal characters."
+        )
+    return value
 
 
 def run_job(
@@ -52,6 +70,10 @@ def run_job(
     *,
     project_root: Path,
     fbcode_root: Path,
+    phase4_launcher: Path,
+    training_runtime: Path,
+    expected_runtime_sha256: str,
+    expected_producer_git_commit: str,
 ) -> subprocess.Popen:
     """Launch a single training job on a specific GPU."""
     config_path = (
@@ -69,12 +91,23 @@ def run_job(
     # producer-worktree preflight.
     log_path = ckpt_dir / "training.log"
 
-    cmd = BUCK2_CMD + [
+    cmd = [
+        str(phase4_launcher),
+        "--purpose",
+        "phase4-training",
+        "--runtime-archive",
+        str(training_runtime),
+        "--expected-runtime-sha256",
+        expected_runtime_sha256,
+        "--source-project-root",
+        str(project_root),
+        "--expected-source-git-commit",
+        expected_producer_git_commit,
+        "--",
         "--config", str(config_path),
         "--seed", str(seed),
         "--run-id", phase4_run_id(condition, seed),
         "--checkpoint-dir", str(ckpt_dir),
-        "--producer-repo-root", str(project_root),
         "--save-interval", "1000",
     ]
 
@@ -112,7 +145,48 @@ def main():
         required=True,
         help="fbcode cell whose buiksat_trm entry resolves to --project-root",
     )
+    parser.add_argument(
+        "--phase4-launcher",
+        required=True,
+        help="Absolute path to the Phase 4 runtime launcher",
+    )
+    parser.add_argument(
+        "--training-runtime",
+        required=True,
+        help="Absolute path to the frozen Phase 4 training PAR",
+    )
+    parser.add_argument(
+        "--expected-runtime-sha256",
+        required=True,
+        help="Externally supplied SHA-256 for the training PAR",
+    )
+    parser.add_argument(
+        "--expected-producer-git-commit",
+        required=True,
+        help="Externally authorized producer source commit",
+    )
     args = parser.parse_args()
+    try:
+        phase4_launcher = _require_absolute_file(
+            args.phase4_launcher,
+            "Phase 4 launcher",
+        )
+        training_runtime = _require_absolute_file(
+            args.training_runtime,
+            "Phase 4 training runtime",
+        )
+        expected_runtime_sha256 = _require_lower_hex(
+            args.expected_runtime_sha256,
+            64,
+            "Expected training runtime SHA-256",
+        )
+        expected_producer_git_commit = _require_lower_hex(
+            args.expected_producer_git_commit,
+            40,
+            "Expected producer Git commit",
+        )
+    except ValueError as error:
+        parser.error(str(error))
     project_root, fbcode_root = resolve_phase4_source_roots(
         args.project_root,
         args.fbcode_root,
@@ -162,6 +236,12 @@ def main():
                 gpu_id,
                 project_root=project_root,
                 fbcode_root=fbcode_root,
+                phase4_launcher=phase4_launcher,
+                training_runtime=training_runtime,
+                expected_runtime_sha256=expected_runtime_sha256,
+                expected_producer_git_commit=(
+                    expected_producer_git_commit
+                ),
             )
             running.append((proc, condition, seed, gpu_id))
             job_idx += 1

@@ -51,6 +51,7 @@ class Phase4CheckpointIdentity:
     dataset_provenance_sha256: str
     producer_git_commit: str
     producer_source_manifest_sha256: str
+    training_runtime_artifact_sha256: str
     initialization_kind: str
     checkpoint_schema_version: int
     training_invocation_schema_version: int
@@ -79,6 +80,28 @@ def _require_mapping(value: Any, label: str) -> Dict[str, Any]:
     ):
         raise Phase4CheckpointError(f"{label} must be a string-keyed mapping.")
     return dict(value)
+
+
+def _validate_producer_source(value: Any, label: str) -> Dict[str, Any]:
+    producer_source = _require_mapping(value, label)
+    if set(producer_source) != {
+        "git_commit",
+        "git_clean",
+        "source_manifest_sha256",
+    }:
+        raise Phase4CheckpointError(f"{label} has an invalid field inventory.")
+    git_commit = producer_source["git_commit"]
+    if not isinstance(git_commit, str) or len(git_commit) != 40 or any(
+        character not in "0123456789abcdef" for character in git_commit
+    ):
+        raise Phase4CheckpointError(f"{label} Git commit is invalid.")
+    if producer_source["git_clean"] is not True:
+        raise Phase4CheckpointError(f"{label} worktree was not clean.")
+    _require_sha256(
+        producer_source["source_manifest_sha256"],
+        f"{label} manifest digest",
+    )
+    return producer_source
 
 
 def _strict_config(raw: Any, config_type: Any, label: str) -> Any:
@@ -651,6 +674,7 @@ def load_phase4_checkpoint(
     *,
     condition: str,
     seed: int,
+    expected_producer_source: Mapping[str, Any],
     device: str | torch.device = "cpu",
     expected_identity: Optional[Mapping[str, Any]] = None,
 ) -> LoadedPhase4Checkpoint:
@@ -660,6 +684,10 @@ def load_phase4_checkpoint(
         raise Phase4CheckpointError(f"Unknown Phase 4 condition {condition!r}.")
     if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
         raise Phase4CheckpointError("Phase 4 seed must be a nonnegative integer.")
+    authorized_producer_source = _validate_producer_source(
+        expected_producer_source,
+        "Authorized training producer source",
+    )
 
     checkpoint_payload, checkpoint_sha256 = _stable_read(
         Path(checkpoint_path),
@@ -793,6 +821,7 @@ def load_phase4_checkpoint(
         "schema_version",
         "training_seed",
         "run_id",
+        "runtime_artifact_sha256",
         "config_sources",
         "rl_config_sha256",
         "model_config_sha256",
@@ -815,6 +844,10 @@ def load_phase4_checkpoint(
     expected_run_id = phase4_run_id(condition, seed)
     if invocation["run_id"] != expected_run_id:
         raise Phase4CheckpointError("Checkpoint-bound Phase 4 run ID is incorrect.")
+    training_runtime_artifact_sha256 = _require_sha256(
+        invocation["runtime_artifact_sha256"],
+        "Training runtime artifact digest",
+    )
     expected_sources = [{"name": Path(config_path).name, "sha256": config_sha256}]
     if invocation["config_sources"] != expected_sources:
         raise Phase4CheckpointError("Checkpoint-bound config source is incorrect.")
@@ -836,27 +869,15 @@ def load_phase4_checkpoint(
         raise Phase4CheckpointError(
             "Phase 4 publication requires random initialization with no warm start."
         )
-    producer_source = _require_mapping(
+    producer_source = _validate_producer_source(
         invocation["producer_source"],
-        "training producer source",
+        "Training producer source",
     )
-    if set(producer_source) != {
-        "git_commit",
-        "git_clean",
-        "source_manifest_sha256",
-    }:
-        raise Phase4CheckpointError("Training producer source has an invalid inventory.")
+    if producer_source != authorized_producer_source:
+        raise Phase4CheckpointError(
+            "Training producer source does not match the authorized checkout."
+        )
     git_commit = producer_source["git_commit"]
-    if not isinstance(git_commit, str) or len(git_commit) != 40 or any(
-        character not in "0123456789abcdef" for character in git_commit
-    ):
-        raise Phase4CheckpointError("Training producer Git commit is invalid.")
-    if producer_source["git_clean"] is not True:
-        raise Phase4CheckpointError("Training producer worktree was not clean.")
-    _require_sha256(
-        producer_source["source_manifest_sha256"],
-        "training producer manifest digest",
-    )
 
     state_dict = _require_mapping(checkpoint["model_state_dict"], "model state")
     _validate_auxiliary_model_states(checkpoint, state_dict)
@@ -886,6 +907,9 @@ def load_phase4_checkpoint(
         producer_source_manifest_sha256=producer_source[
             "source_manifest_sha256"
         ],
+        training_runtime_artifact_sha256=(
+            training_runtime_artifact_sha256
+        ),
         initialization_kind="random",
         checkpoint_schema_version=PHASE4_CHECKPOINT_SCHEMA_VERSION,
         training_invocation_schema_version=(
@@ -918,10 +942,15 @@ def verify_phase4_summary_checkpoints(
     checkpoint_root: str | Path,
     config_root: str | Path,
     *,
+    expected_producer_source: Mapping[str, Any],
     device: str | torch.device = "cpu",
 ) -> int:
     """Revalidate every checkpoint named by an already validated summary."""
 
+    authorized_producer_source = _validate_producer_source(
+        expected_producer_source,
+        "Authorized training producer source",
+    )
     try:
         resolved_checkpoint_root = Path(checkpoint_root).expanduser().resolve(
             strict=True
@@ -950,6 +979,7 @@ def verify_phase4_summary_checkpoints(
         "dataset_provenance_sha256",
         "producer_git_commit",
         "producer_source_manifest_sha256",
+        "training_runtime_artifact_sha256",
         "initialization_kind",
         "checkpoint_schema_version",
         "training_invocation_schema_version",
@@ -991,11 +1021,21 @@ def verify_phase4_summary_checkpoints(
             raise Phase4CheckpointError(
                 f"Phase 4 run {index} has incomplete checkpoint identity."
             )
+        if (
+            run["producer_git_commit"]
+            != authorized_producer_source["git_commit"]
+            or run["producer_source_manifest_sha256"]
+            != authorized_producer_source["source_manifest_sha256"]
+        ):
+            raise Phase4CheckpointError(
+                f"Phase 4 run {index} does not match the authorized producer source."
+            )
         load_phase4_checkpoint(
             resolved_checkpoint_path,
             resolved_config_path,
             condition=condition,
             seed=seed,
+            expected_producer_source=authorized_producer_source,
             device=device,
             expected_identity=expected_identity,
         )

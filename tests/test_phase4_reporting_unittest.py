@@ -47,9 +47,11 @@ from scripts.phase4_result_schema import (
 )
 from scripts.phase4_source import (
     PHASE4_EVALUATOR_SOURCE_PROFILE,
+    PHASE4_FIGURE_SOURCE_PROFILE,
     Phase4SourceError,
     phase4_evaluator_source_manifest_sha256,
     resolve_phase4_source_roots,
+    verify_phase4_producer_source,
     verify_phase4_runtime_sources,
 )
 from scripts.run_phase4_training import run_job
@@ -60,6 +62,10 @@ from models.recursive_reasoning.trm import (
 from rl.replay import Transition
 from utils.run_identity import RunIdentityError, canonical_json_sha256
 from utils.dataset_provenance import build_dataset_provenance
+from utils.source_identity import (
+    SOURCE_MANIFEST_RELATIVE_PATH,
+    build_producer_source_manifest,
+)
 
 
 RETIRED_RUN_FIELDS = {
@@ -89,6 +95,14 @@ def _fake_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _fake_producer_source() -> dict[str, object]:
+    return {
+        "git_commit": "a" * 40,
+        "git_clean": True,
+        "source_manifest_sha256": _fake_sha256("producer manifest"),
+    }
+
+
 def _condition_result(
     condition: str = "nc_nv", seed: int = 41
 ) -> eval_phase4_2x2_norm_ablation.ConditionResult:
@@ -107,11 +121,16 @@ def _condition_result(
         rl_config_sha256=_fake_sha256(f"rl:{condition}"),
         model_config_sha256=_fake_sha256(f"model:{condition}"),
         dataset_provenance_sha256=_fake_sha256(f"dataset:{seed}"),
-        producer_git_commit="a" * 40,
-        producer_source_manifest_sha256=_fake_sha256("producer manifest"),
+        producer_git_commit=str(_fake_producer_source()["git_commit"]),
+        producer_source_manifest_sha256=str(
+            _fake_producer_source()["source_manifest_sha256"]
+        ),
+        training_runtime_artifact_sha256=_fake_sha256(
+            f"training-runtime:{condition}:{seed}"
+        ),
         initialization_kind="random",
         checkpoint_schema_version=4,
-        training_invocation_schema_version=2,
+        training_invocation_schema_version=3,
         enable_contraction=enable_contraction,
         disable_value_head_norm=disable_value_head_norm,
         latent_projection_mode="enabled",
@@ -146,6 +165,7 @@ def _valid_summary():
         "generated_at": "2026-08-12T00:00:00",
         "evaluator_git_commit": "b" * 40,
         "evaluator_source_manifest_sha256": "c" * 64,
+        "evaluator_runtime_artifact_sha256": "d" * 64,
         "diagnostic_dataset": diagnostic_dataset,
         "diagnostic_dataset_sha256": canonical_json_sha256(
             diagnostic_dataset
@@ -434,9 +454,12 @@ def _write_synthetic_phase4_checkpoint(
         "rl_config": rl_config,
         "dataset_provenance": dataset_provenance,
         "training_invocation": {
-            "schema_version": 2,
+            "schema_version": 3,
             "training_seed": seed,
             "run_id": phase4_run_id(condition, seed),
+            "runtime_artifact_sha256": _fake_sha256(
+                f"training-runtime:{condition}:{seed}"
+            ),
             "config_sources": [
                 {"name": config_path.name, "sha256": config_sha256}
             ],
@@ -449,11 +472,7 @@ def _write_synthetic_phase4_checkpoint(
                 "kind": "random",
                 "artifact_sha256": None,
             },
-            "producer_source": {
-                "git_commit": "a" * 40,
-                "git_clean": True,
-                "source_manifest_sha256": _fake_sha256("producer manifest"),
-            },
+            "producer_source": _fake_producer_source(),
         },
     }
     if mutate is not None:
@@ -597,12 +616,16 @@ class Phase4ReportingTest(unittest.TestCase):
                     str(temp_path),
                     "--fbcode_root",
                     str(temp_path),
+                    "--producer_project_root",
+                    str(temp_path),
+                    "--expected_producer_git_commit",
+                    "a" * 40,
+                    "--expected_evaluator_runtime_sha256",
+                    "d" * 64,
                     "--summary_json",
                     str(summary_path),
                     "--checkpoint_dir",
                     str(temp_path / "checkpoints"),
-                    "--config_dir",
-                    str(temp_path / "configs"),
                     "--data_dir",
                     str(temp_path / "data"),
                     "--out_dir",
@@ -616,8 +639,26 @@ class Phase4ReportingTest(unittest.TestCase):
                 make_paper_figures_phase4,
                 "verify_phase4_runtime_sources",
                 return_value="d" * 64,
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "verify_phase4_producer_source",
+                return_value=_fake_producer_source(),
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "discover_clean_git_source",
+                return_value={"git_commit": "a" * 40, "git_clean": True},
             ):
-                self.assertEqual(make_paper_figures_phase4.main(), 1)
+                self.assertEqual(
+                    make_paper_figures_phase4.main(
+                        runtime_attestation={
+                            "runtime_sha256": "f" * 64,
+                            "role": PHASE4_FIGURE_SOURCE_PROFILE,
+                            "source_git_commit": "a" * 40,
+                            "source_manifest_sha256": "d" * 64,
+                        }
+                    ),
+                    1,
+                )
 
             self.assertFalse(output_path.exists())
 
@@ -833,6 +874,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                 config_path,
                 condition="nc_nv",
                 seed=41,
+                expected_producer_source=_fake_producer_source(),
                 device="cpu",
             )
             run = {
@@ -847,10 +889,39 @@ class Phase4CheckpointTest(unittest.TestCase):
                     {"all_results": [run]},
                     checkpoint_root,
                     config_dir,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 ),
                 1,
             )
+
+    def test_fabricated_producer_identity_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, _, checkpoint_path, config_path = (
+                _write_synthetic_phase4_checkpoint(Path(temp_dir))
+            )
+            for field, fabricated_value in (
+                ("git_commit", "b" * 40),
+                (
+                    "source_manifest_sha256",
+                    _fake_sha256("fabricated producer manifest"),
+                ),
+            ):
+                with self.subTest(field=field):
+                    fabricated_source = _fake_producer_source()
+                    fabricated_source[field] = fabricated_value
+                    with self.assertRaisesRegex(
+                        Phase4CheckpointError,
+                        "authorized checkout",
+                    ):
+                        load_phase4_checkpoint(
+                            checkpoint_path,
+                            config_path,
+                            condition="nc_nv",
+                            seed=41,
+                            expected_producer_source=fabricated_source,
+                            device="cpu",
+                        )
 
     def test_model_only_checkpoint_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -866,6 +937,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -884,6 +956,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -906,6 +979,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -924,6 +998,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -951,6 +1026,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -978,6 +1054,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -1002,6 +1079,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -1026,6 +1104,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -1047,6 +1126,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -1067,6 +1147,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -1085,6 +1166,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -1103,6 +1185,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="nc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -1116,6 +1199,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     config_path,
                     condition="yc_nv",
                     seed=41,
+                    expected_producer_source=_fake_producer_source(),
                     device="cpu",
                 )
 
@@ -1183,12 +1267,18 @@ class Phase4TrainingOrchestratorTest(unittest.TestCase):
             with self.assertRaisesRegex(Phase4SourceError, "project root"):
                 resolve_phase4_source_roots(str(wrong_project), str(fbcode))
 
-    def test_job_log_stays_under_ignored_checkpoint_root(self) -> None:
+    def test_job_uses_explicit_runtime_and_keeps_log_under_output_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project = Path(temp_dir) / "project"
             fbcode = Path(temp_dir) / "fbcode"
+            phase4_launcher = Path(temp_dir) / "phase4_runtime_launcher"
+            training_runtime = Path(temp_dir) / "upi_trm_train.par"
             project.mkdir()
             fbcode.mkdir()
+            phase4_launcher.write_text("#!/bin/sh\n")
+            training_runtime.write_bytes(b"PAR")
+            expected_runtime_sha256 = "b" * 64
+            expected_producer_git_commit = "c" * 40
             with mock.patch(
                 "scripts.run_phase4_training.subprocess.Popen"
             ) as popen:
@@ -1198,6 +1288,12 @@ class Phase4TrainingOrchestratorTest(unittest.TestCase):
                     0,
                     project_root=project,
                     fbcode_root=fbcode,
+                    phase4_launcher=phase4_launcher,
+                    training_runtime=training_runtime,
+                    expected_runtime_sha256=expected_runtime_sha256,
+                    expected_producer_git_commit=(
+                        expected_producer_git_commit
+                    ),
                 )
 
             self.assertIs(process, popen.return_value)
@@ -1213,14 +1309,36 @@ class Phase4TrainingOrchestratorTest(unittest.TestCase):
             )
             self.assertEqual(popen.call_args.kwargs["cwd"], str(fbcode))
             command = popen.call_args.args[0]
-            self.assertIn(str(project), command)
-            self.assertIn(phase4_run_id("nc_nv", 41), command)
+            self.assertEqual(command[0], str(phase4_launcher))
+            self.assertEqual(
+                command[1:12],
+                [
+                    "--purpose",
+                    "phase4-training",
+                    "--runtime-archive",
+                    str(training_runtime),
+                    "--expected-runtime-sha256",
+                    expected_runtime_sha256,
+                    "--source-project-root",
+                    str(project),
+                    "--expected-source-git-commit",
+                    expected_producer_git_commit,
+                    "--",
+                ],
+            )
+            child_arguments = command[12:]
+            self.assertIn(phase4_run_id("nc_nv", 41), child_arguments)
+            self.assertNotIn("--producer-repo-root", child_arguments)
+            self.assertNotIn("buck2", command)
 
 
 class Phase4RuntimeSourceIdentityTest(unittest.TestCase):
     @staticmethod
     def _write_source_tree(root: Path) -> None:
         relative_paths = (
+            "phase4_runtime_entrypoint.py",
+            "phase4_runtime_profile.py",
+            "runtime_archive_preflight.py",
             "models/model.py",
             "rl/trainer.py",
             "utils/identity.py",
@@ -1241,6 +1359,71 @@ class Phase4RuntimeSourceIdentityTest(unittest.TestCase):
             str(path.relative_to(root))
             for path in root.rglob("*.py")
         )
+
+    @staticmethod
+    def _write_producer_source_tree(root: Path) -> None:
+        for relative_path in (
+            "confirmatory_runtime_launcher.py",
+            "puzzle_dataset.py",
+            "runtime_archive_preflight.py",
+            "upi_trm_train.py",
+        ):
+            destination = root / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(f"# {relative_path}\n")
+        for directory in ("dataset", "evaluators", "models", "rl", "utils"):
+            destination = root / directory / "module.py"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(f"# {directory}\n")
+        confirmatory_config = root / "configs" / "iclr_confirmatory" / "cell.yaml"
+        confirmatory_config.parent.mkdir(parents=True, exist_ok=True)
+        confirmatory_config.write_text("gamma: 0.9\n")
+        phase4_config = root / "configs" / "phase4_2x2_norm_ablation"
+        phase4_config.mkdir(parents=True, exist_ok=True)
+        for condition in ("nc_nv", "nc_yv", "yc_nv", "yc_yv"):
+            (phase4_config / f"{condition}.yaml").write_text(
+                f"condition: {condition}\n"
+            )
+        manifest_path = root / SOURCE_MANIFEST_RELATIVE_PATH
+        manifest_path.write_text(
+            json.dumps(build_producer_source_manifest(root), sort_keys=True)
+            + "\n"
+        )
+
+    def test_producer_source_binds_manifest_to_authorized_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            producer_root = Path(temp_dir) / "producer"
+            self._write_producer_source_tree(producer_root)
+            git_identity = {"git_commit": "a" * 40, "git_clean": True}
+
+            with mock.patch(
+                "scripts.phase4_source.discover_clean_git_source",
+                return_value=git_identity,
+            ), mock.patch(
+                "scripts.phase4_source.assert_git_files_match_head"
+            ):
+                producer_source = verify_phase4_producer_source(
+                    producer_root,
+                    "a" * 40,
+                )
+
+            self.assertEqual(producer_source["git_commit"], "a" * 40)
+            self.assertTrue(producer_source["git_clean"])
+            self.assertEqual(
+                producer_source["source_manifest_sha256"],
+                hashlib.sha256(
+                    (producer_root / SOURCE_MANIFEST_RELATIVE_PATH).read_bytes()
+                ).hexdigest(),
+            )
+
+            with mock.patch(
+                "scripts.phase4_source.discover_clean_git_source",
+                return_value=git_identity,
+            ), self.assertRaisesRegex(
+                Phase4SourceError,
+                "authorized commit",
+            ):
+                verify_phase4_producer_source(producer_root, "b" * 40)
 
     def test_runtime_source_bytes_bind_to_project_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

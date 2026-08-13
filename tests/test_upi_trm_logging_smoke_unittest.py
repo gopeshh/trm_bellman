@@ -41,7 +41,10 @@ from upi_trm_train import (
     _config_dict,
     _fixed_base_effective_config,
     _phase4_condition_from_run_id,
+    _phase4_run_requested,
+    _phase4_training_invocation,
     _preflight_confirmatory_runtime,
+    _preflight_training_runtime,
     _remember_latest_optimization_metrics,
     _reject_confirmatory_resume,
     _resolve_train_pool_size,
@@ -158,6 +161,47 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             canonical_json_sha256(model_config),
         )
 
+    def test_phase4_invocation_binds_preverified_runtime_artifact(self):
+        runtime_sha256 = "d" * 64
+        invocation = _phase4_training_invocation(
+            source_context={
+                "runtime_artifact_sha256": runtime_sha256,
+                "config_sources": [
+                    {"name": "nc_nv.yaml", "sha256": "c" * 64}
+                ],
+                "producer_source": {
+                    "git_commit": "a" * 40,
+                    "git_clean": True,
+                    "source_manifest_sha256": "b" * 64,
+                },
+            },
+            training_seed=41,
+            run_id="phase4_2x2_norm_ablation.nc_nv.seed41",
+            rl_config={"training_protocol": "legacy"},
+            model_config={"hidden_size": 64},
+            dataset_provenance={"schema_version": 1},
+            initialization_kind="random",
+            initialization_artifact_sha256=None,
+        )
+
+        self.assertEqual(invocation["schema_version"], 3)
+        self.assertEqual(invocation["runtime_artifact_sha256"], runtime_sha256)
+        with self.assertRaisesRegex(RuntimeError, "64 lowercase"):
+            _phase4_training_invocation(
+                source_context={
+                    "runtime_artifact_sha256": "not-a-digest",
+                    "config_sources": [],
+                    "producer_source": {},
+                },
+                training_seed=41,
+                run_id="phase4_2x2_norm_ablation.nc_nv.seed41",
+                rl_config={},
+                model_config={},
+                dataset_provenance={},
+                initialization_kind="random",
+                initialization_artifact_sha256=None,
+            )
+
     def test_phase4_run_id_requires_registered_seed_and_cell(self):
         self.assertEqual(
             _phase4_condition_from_run_id(
@@ -175,6 +219,75 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             _phase4_condition_from_run_id(
                 "phase4_2x2_norm_ablation.nc_nv.seed42",
                 41,
+            )
+
+    def test_phase4_preimport_detection_covers_launcher_and_run_id_forms(self):
+        self.assertTrue(_phase4_run_requested(["--phase4-publication"]))
+        self.assertTrue(
+            _phase4_run_requested(
+                [
+                    "--run-id",
+                    "phase4_2x2_norm_ablation.nc_nv.seed41",
+                ]
+            )
+        )
+        self.assertTrue(
+            _phase4_run_requested(
+                [
+                    "--run-id=phase4_2x2_norm_ablation.yc_yv.seed43",
+                ]
+            )
+        )
+        self.assertFalse(_phase4_run_requested(["--run-id", "ordinary.seed41"]))
+
+    def test_phase4_preflight_requires_training_attestation(self):
+        with self.assertRaisesRegex(RuntimeError, "packaged-runtime launcher"):
+            _preflight_training_runtime(
+                argv=[
+                    "--run-id",
+                    "phase4_2x2_norm_ablation.nc_nv.seed41",
+                ],
+                module_file=__file__,
+                environ={},
+            )
+
+        sentinel = upi_trm_train.RuntimePreflight(
+            runtime_sha256="d" * 64,
+            private_unpack_descriptor=11,
+            runtime_descriptor=12,
+            phase4_role="training",
+            source_git_commit="a" * 40,
+            source_manifest_sha256="b" * 64,
+        )
+        with patch.object(
+            upi_trm_train,
+            "preflight_runtime",
+            return_value=sentinel,
+        ) as preflight:
+            result = _preflight_training_runtime(
+                argv=[
+                    "--phase4-publication",
+                    "--run-id=phase4_2x2_norm_ablation.nc_nv.seed41",
+                ],
+                module_file="/proc/self/fd/12/upi_trm_train.py",
+                environ={},
+            )
+        self.assertIs(result, sentinel)
+        self.assertEqual(
+            preflight.call_args.kwargs["allowed_phase4_roles"],
+            frozenset({"training"}),
+        )
+        self.assertTrue(preflight.call_args.kwargs["attestation_required"])
+
+    def test_phase4_and_confirmatory_modes_are_mutually_exclusive_preimport(self):
+        with self.assertRaisesRegex(RuntimeError, "cannot be combined"):
+            _preflight_training_runtime(
+                argv=[
+                    "--confirmatory",
+                    "--run-id=phase4_2x2_norm_ablation.nc_nv.seed41",
+                ],
+                module_file=__file__,
+                environ={},
             )
 
     def test_confirmatory_preflight_requires_packaged_launcher(self):
@@ -322,7 +435,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 os.close(private_descriptor)
 
     def test_preflight_rejects_attestation_without_confirmatory_mode(self):
-        with self.assertRaisesRegex(RuntimeError, "only for --confirmatory"):
+        with self.assertRaisesRegex(RuntimeError, "authenticated evidence mode"):
             _preflight_confirmatory_runtime(
                 argv=[],
                 module_file=__file__,
@@ -390,6 +503,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             for relative_path in (
                 "confirmatory_runtime_launcher.py",
                 "puzzle_dataset.py",
+                "runtime_archive_preflight.py",
                 "upi_trm_train.py",
             ):
                 destination = producer_root / relative_path
@@ -446,6 +560,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             for relative_path in (
                 "confirmatory_runtime_launcher.py",
                 "puzzle_dataset.py",
+                "runtime_archive_preflight.py",
                 "upi_trm_train.py",
             ):
                 destination = producer_root / relative_path
@@ -903,6 +1018,64 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 "masked_token_ids": [0, 1],
             },
         )
+
+    def test_phase4_checkpoint_rejects_runtime_identity_mismatch(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer("legacy")
+        provenance = self._checkpoint_provenance(trainer)
+        invocation = _phase4_training_invocation(
+            source_context={
+                "runtime_artifact_sha256": "d" * 64,
+                "config_sources": [],
+                "producer_source": {
+                    "git_commit": "a" * 40,
+                    "git_clean": True,
+                    "source_manifest_sha256": "b" * 64,
+                },
+            },
+            training_seed=41,
+            run_id="phase4_2x2_norm_ablation.nc_nv.seed41",
+            rl_config=_config_dict(cfg),
+            model_config=_config_dict(model.config),
+            dataset_provenance=provenance,
+            initialization_kind="random",
+            initialization_artifact_sha256=None,
+        )
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            upi_trm_train,
+            "_PREVERIFIED_RUNTIME_SHA256",
+            "e" * 64,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "preverified publication identity",
+            ):
+                save_checkpoint(
+                    model,
+                    trainer,
+                    step=0,
+                    checkpoint_dir=directory,
+                    rl_cfg=cfg,
+                    dataset_provenance=provenance,
+                    training_seed=41,
+                    training_run_id=(
+                        "phase4_2x2_norm_ablation.nc_nv.seed41"
+                    ),
+                )
+            with self.assertRaisesRegex(RuntimeError, "wrong runtime artifact"):
+                save_checkpoint(
+                    model,
+                    trainer,
+                    step=0,
+                    checkpoint_dir=directory,
+                    rl_cfg=cfg,
+                    dataset_provenance=provenance,
+                    training_seed=41,
+                    training_run_id=(
+                        "phase4_2x2_norm_ablation.nc_nv.seed41"
+                    ),
+                    checkpoint_training_invocation=invocation,
+                )
+            self.assertEqual(list(Path(directory).iterdir()), [])
 
     def _run_identity(
         self,

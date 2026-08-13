@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict
 
@@ -35,7 +36,9 @@ from scripts.phase4_source import (  # noqa: E402
     PHASE4_FIGURE_SOURCE_PROFILE,
     Phase4SourceError,
     phase4_evaluator_source_manifest_sha256,
+    require_phase4_runtime_attestation,
     resolve_phase4_source_roots,
+    verify_phase4_producer_source,
     verify_phase4_runtime_sources,
 )
 from utils.run_identity import (  # noqa: E402
@@ -47,9 +50,11 @@ from utils.run_identity import (  # noqa: E402
 def load_summary(
     summary_path: str,
     checkpoint_dir: str,
-    config_dir: str,
     data_dir: str,
     project_root: str | Path,
+    producer_project_root: str | Path,
+    expected_producer_source: Dict[str, Any],
+    expected_evaluator_runtime_sha256: str,
 ) -> Dict[str, Any]:
     """Load a summary and revalidate every checkpoint before publication."""
     with open(summary_path, "r") as f:
@@ -67,10 +72,22 @@ def load_summary(
         raise Phase4SourceError(
             "Summary evaluator source digest differs from the project checkout."
         )
+    if (
+        summary["evaluator_runtime_artifact_sha256"]
+        != expected_evaluator_runtime_sha256
+    ):
+        raise Phase4SourceError(
+            "Summary evaluator runtime differs from the authorized PAR digest."
+        )
     verify_phase4_summary_checkpoints(
         summary,
         checkpoint_dir,
-        config_dir,
+        (
+            Path(producer_project_root)
+            / "configs"
+            / "phase4_2x2_norm_ablation"
+        ),
+        expected_producer_source=expected_producer_source,
         device="cpu",
     )
     verify_phase4_diagnostic_inputs(summary, data_dir)
@@ -234,7 +251,15 @@ Condition & C & V & Var($V$) & Argmax at $n=4$ \\
     print(f"Saved: {tex_path}")
 
 
-def main():
+def main(*, runtime_attestation: Dict[str, Any] | None = None):
+    try:
+        attestation = require_phase4_runtime_attestation(
+            runtime_attestation,
+            PHASE4_FIGURE_SOURCE_PROFILE,
+        )
+    except Phase4SourceError as error:
+        print(f"ERROR: Figure runtime source is not authenticated: {error}")
+        return 1
     parser = argparse.ArgumentParser(description="Generate Phase 4 figures")
     parser.add_argument(
         "--project_root",
@@ -247,6 +272,23 @@ def main():
         type=str,
         required=True,
         help="fbcode root whose buiksat_trm cell resolves to project_root",
+    )
+    parser.add_argument(
+        "--producer_project_root",
+        type=str,
+        required=True,
+        help="Exact clean implementation checkout used for Phase 4 training",
+    )
+    parser.add_argument(
+        "--expected_producer_git_commit",
+        type=str,
+        required=True,
+        help="Authorized Phase 4 training commit",
+    )
+    parser.add_argument(
+        "--expected_evaluator_runtime_sha256",
+        required=True,
+        help="Externally authorized evaluator PAR SHA-256",
     )
     parser.add_argument(
         "--summary_json",
@@ -267,12 +309,6 @@ def main():
         help="Trusted root containing the 12 full Phase 4 checkpoints",
     )
     parser.add_argument(
-        "--config_dir",
-        type=str,
-        required=True,
-        help="Trusted root containing the four Phase 4 condition configs",
-    )
-    parser.add_argument(
         "--data_dir",
         type=str,
         required=True,
@@ -280,6 +316,12 @@ def main():
     )
 
     args = parser.parse_args()
+    if re.fullmatch(
+        r"[0-9a-f]{64}",
+        args.expected_evaluator_runtime_sha256,
+    ) is None:
+        print("ERROR: Expected evaluator runtime SHA-256 is invalid.")
+        return 1
 
     summary_path = Path(args.summary_json)
     if not summary_path.exists():
@@ -295,12 +337,30 @@ def main():
             project_root,
             PHASE4_FIGURE_SOURCE_PROFILE,
         )
+        project_identity = discover_clean_git_source(project_root)
+        if (
+            runtime_source_digest != attestation["source_manifest_sha256"]
+            or project_identity["git_commit"]
+            != attestation["source_git_commit"]
+        ):
+            raise Phase4SourceError(
+                "Figure checkout differs from the pre-import runtime attestation."
+            )
+        producer_project_root = Path(
+            args.producer_project_root
+        ).expanduser().resolve(strict=True)
+        expected_producer_source = verify_phase4_producer_source(
+            producer_project_root,
+            args.expected_producer_git_commit,
+        )
         summary = load_summary(
             str(summary_path),
             args.checkpoint_dir,
-            args.config_dir,
             args.data_dir,
             project_root,
+            producer_project_root,
+            expected_producer_source,
+            args.expected_evaluator_runtime_sha256,
         )
     except (
         OSError,
@@ -332,6 +392,13 @@ def main():
         ) != runtime_source_digest:
             raise Phase4SourceError(
                 "Figure-generator runtime source changed during generation."
+            )
+        if verify_phase4_producer_source(
+            producer_project_root,
+            args.expected_producer_git_commit,
+        ) != expected_producer_source:
+            raise Phase4SourceError(
+                "Producer source identity changed during figure generation."
             )
         final_identity = discover_clean_git_source(project_root)
         if final_identity["git_commit"] != summary["evaluator_git_commit"]:

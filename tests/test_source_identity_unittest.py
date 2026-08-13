@@ -37,6 +37,7 @@ class TestSourceIdentity(unittest.TestCase):
         for relative_path in (
             "confirmatory_runtime_launcher.py",
             "puzzle_dataset.py",
+            "runtime_archive_preflight.py",
             "upi_trm_train.py",
         ):
             destination = root / relative_path

@@ -22,7 +22,7 @@ import zlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 from zipfile import BadZipFile, ZipFile
 
 
@@ -40,6 +40,7 @@ PAR_FILENAME_ENV = "FB_PAR_FILENAME"
 _ROOT_SOURCES = (
     "confirmatory_runtime_launcher.py",
     "puzzle_dataset.py",
+    "runtime_archive_preflight.py",
     "upi_trm_train.py",
 )
 _SOURCE_DIRECTORIES = ("dataset", "evaluators", "models", "rl", "utils")
@@ -357,7 +358,9 @@ def _sealed_runtime_copy(source_descriptor: int, expected_sha256: str) -> int:
     return sealed_descriptor
 
 
-def _validate_archive_sources(archive: ZipFile) -> None:
+def _validate_archive_layout(archive: ZipFile) -> None:
+    """Reject unsafe or ambiguous members before profile-specific checks."""
+
     infos = archive.infolist()
     if any(info.orig_filename != info.filename for info in infos):
         raise ConfirmatoryRuntimeError(
@@ -388,6 +391,11 @@ def _validate_archive_sources(archive: ZipFile) -> None:
                 raise ConfirmatoryRuntimeError(
                     "Runtime archive contains a file/directory path collision."
                 )
+
+
+def _validate_archive_sources(archive: ZipFile) -> None:
+    _validate_archive_layout(archive)
+    infos = archive.infolist()
 
     sources = _load_embedded_manifest(archive)
     expected = dict(sources)
@@ -429,9 +437,23 @@ def _validate_archive_sources(archive: ZipFile) -> None:
             )
 
 
+def validate_archive_layout(archive: ZipFile) -> None:
+    """Public standard-library archive-layout gate for trusted launchers."""
+
+    _validate_archive_layout(archive)
+
+
+def validate_confirmatory_archive_sources(archive: ZipFile) -> None:
+    """Public source-profile gate used by confirmatory and Phase 4 training."""
+
+    _validate_archive_sources(archive)
+
+
 def validate_runtime_archive(
     runtime_archive: str | os.PathLike[str],
     expected_sha256: str,
+    *,
+    archive_validator: Callable[[ZipFile], None] | None = None,
 ) -> VerifiedRuntime:
     """Authenticate one frozen standalone PAR without importing project code."""
 
@@ -471,7 +493,7 @@ def validate_runtime_archive(
                 )
             try:
                 with ZipFile(handle, "r") as archive:
-                    _validate_archive_sources(archive)
+                    (archive_validator or _validate_archive_sources)(archive)
             except BadZipFile as exc:
                 raise ConfirmatoryRuntimeError(
                     "Runtime artifact is not a valid ZIP-based PAR."
@@ -587,17 +609,19 @@ def launch_verified_runtime(
     runtime_args: Sequence[str],
     *,
     environ: Mapping[str, str] | None = None,
+    required_argument: str | None = "--confirmatory",
+    attestation_environment: Mapping[str, str] | None = None,
 ) -> int:
     """Run the exact verified PAR as a supervised child, without a shell."""
 
     arguments = list(runtime_args)
-    if "--confirmatory" not in arguments:
+    if required_argument is not None and required_argument not in arguments:
         try:
             os.close(runtime.descriptor)
         except OSError:
             pass
         raise ConfirmatoryRuntimeError(
-            "Verified runtime must be launched with --confirmatory."
+            f"Verified runtime must be launched with {required_argument}."
         )
     if not _MEMFD_SEALING_AVAILABLE:
         try:
@@ -689,6 +713,27 @@ def launch_verified_runtime(
     child_environment["FB_PAR_UNPACK_BASEDIR"] = private_unpack_path
     child_environment[PRIVATE_UNPACK_BASE_ENV] = private_unpack_path
     child_environment[PRIVATE_UNPACK_FD_ENV] = str(private_unpack_descriptor)
+    if attestation_environment is not None:
+        reserved_names = {
+            VERIFIED_RUNTIME_PATH_ENV,
+            VERIFIED_RUNTIME_SHA256_ENV,
+            VERIFIED_RUNTIME_FD_ENV,
+            PRIVATE_UNPACK_BASE_ENV,
+            PRIVATE_UNPACK_FD_ENV,
+            PAR_FILENAME_ENV,
+            "FB_PAR_UNPACK_BASEDIR",
+        }
+        if any(name in reserved_names for name in attestation_environment):
+            os.close(runtime.descriptor)
+            _remove_private_unpack_directory(
+                private_unpack_base,
+                private_unpack_descriptor,
+            )
+            os.close(private_unpack_descriptor)
+            raise ConfirmatoryRuntimeError(
+                "Additional runtime attestation attempts to replace a reserved field."
+            )
+        child_environment.update(attestation_environment)
     argv = [exec_path, *arguments]
     process: subprocess.Popen[bytes] | None = None
     try:

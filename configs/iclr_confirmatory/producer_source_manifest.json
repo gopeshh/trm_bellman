@@ -14,7 +14,7 @@
     "configs/iclr_confirmatory/debug_smoke.yaml": "56a48ad52e6a8c74c3e57d52d282bcc9b8676a2c9a24a321692f5985f25ba081",
     "configs/iclr_confirmatory/persistent_diagnostics.json": "d9b2f39bb3843eaf7e5d4633db5ecaa27dd2e5062caef8acb2c4e830116c3b7e",
     "configs/iclr_confirmatory/run_matrix.json": "13a9145e4af4011a1691ba35d8f0344078c787b83e472b6f7456480552f6c721",
-    "confirmatory_runtime_launcher.py": "12d249a38a218388f691a92a9958fe331be8776c968fee9cf0cf0e2078b47aa8",
+    "confirmatory_runtime_launcher.py": "8843eff1c7cb7cee3506b5e595fbc0a27c9e9c49612217791c28ade3e432276d",
     "dataset/__init__.py": "b5e0e8c6c99d4cf503ff5c82f352003c9ae7ef4c2263aeb7b97928591cd7a73e",
     "dataset/build_4x4_sudoku.py": "2809903efec8fda4efef8d62be675dda2f613134afc5041d474b6459b053eeb5",
     "dataset/build_4x4_trivial.py": "69c691a1af07d1ad08654a3a89665d5496a6989cd8cadf08ae38640a38c031b6",
@@ -70,7 +70,8 @@
     "rl/training_setup.py": "4665a2c49bbf53fb44febbd131b8c01cef2c4801bf2e1986f9480a8f728a04de",
     "rl/upi_trm_trainer.py": "3b21283e53850a1941f6f7e66d752659ee51ba99baaa39e08eea3596969922af",
     "rl/value_targets.py": "8b935cb7c7dadf95ebb62887167217a66ed3f7d9d70f46c63d1e170cbad4baf9",
-    "upi_trm_train.py": "f8cfd1348ad298a0b469aacc1799328499ea898074587866c9deea0434448dbc",
+    "runtime_archive_preflight.py": "eb4790b228946393cd68072de343b0e931385c7f3d75a85e0bc42281ced5be12",
+    "upi_trm_train.py": "f56505778e7ba75959f64b165130d2752bc7e1f43a0aea8efff2d9f13b67e053",
     "utils/__init__.py": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
     "utils/compute_accounting.py": "b1367ee405611914bc6e3d2c4c319992eb4c2b657ead4f4de994d5a2f98efe9d",
     "utils/dataset_provenance.py": "5e74124dbc672d9184d84dd2ddac7a46e1ba348e8a32a3a3d52f74edb340133e",
@@ -79,6 +80,6 @@
     "utils/lipschitz.py": "361254016d0bab61a07e8e8ae7a9a84403784755eae50e243cc310c590268fbc",
     "utils/run_identity.py": "af64163b7eb74b2ceb28e86b2cd45edf2f94f7799e15b4225a7a7e44e4420807",
     "utils/seeding.py": "1ed299ba22625bbe0e0056d4a3daca463c82c06436663a53817e1f6a83141265",
-    "utils/source_identity.py": "3e1556fc922ef99b854437d0e4bef70692c17ab17b0a9a207bc50c1e605b430d"
+    "utils/source_identity.py": "0bd955d479ddf2fc94677867516ff17fbfe97f15debeeb6b6b2a8fcf8b68dd0f"
   }
 }

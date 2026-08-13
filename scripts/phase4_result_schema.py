@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any, Dict, FrozenSet, List
 
 
-PHASE4_SCHEMA_VERSION = 3
+PHASE4_SCHEMA_VERSION = 4
 PHASE4_CHECKPOINT_STEP = 5000
 PHASE4_CHECKPOINT_SCHEMA_VERSION = 4
-PHASE4_TRAINING_INVOCATION_SCHEMA_VERSION = 2
+PHASE4_TRAINING_INVOCATION_SCHEMA_VERSION = 3
 PHASE4_DIAGNOSTIC_DATASET_NAME = "sudoku-4x4-trivial"
 PHASE4_DIAGNOSTIC_SPLITS = ("train", "test")
 PHASE4_DIAGNOSTIC_RECORDS_PER_SPLIT = 50
@@ -91,6 +91,7 @@ _TOP_LEVEL_FIELDS: FrozenSet[str] = frozenset(
         "generated_at",
         "evaluator_git_commit",
         "evaluator_source_manifest_sha256",
+        "evaluator_runtime_artifact_sha256",
         "diagnostic_dataset",
         "diagnostic_dataset_sha256",
         "lipschitz_perturbation_seed",
@@ -117,6 +118,7 @@ _RUN_FIELDS: FrozenSet[str] = frozenset(
         "dataset_provenance_sha256",
         "producer_git_commit",
         "producer_source_manifest_sha256",
+        "training_runtime_artifact_sha256",
         "initialization_kind",
         "checkpoint_schema_version",
         "training_invocation_schema_version",
@@ -176,7 +178,7 @@ _RETIRED_AGGREGATE_FIELDS: FrozenSet[str] = frozenset(
 
 
 class Phase4SummaryValidationError(ValueError):
-    """Raised when a Phase 4 summary is not publishable schema version 3."""
+    """Raised when a Phase 4 summary is not publishable schema version 4."""
 
 
 def phase4_metric_availability() -> Dict[str, Dict[str, str]]:
@@ -444,6 +446,7 @@ def _validate_run(
         "model_config_sha256",
         "dataset_provenance_sha256",
         "producer_source_manifest_sha256",
+        "training_runtime_artifact_sha256",
     ):
         _require_sha256(run[field], f"{path}.{field}")
     _require_git_commit(run["producer_git_commit"], f"{path}.producer_git_commit")
@@ -678,6 +681,10 @@ def validate_phase4_summary(summary: Any) -> None:
     _require_sha256(
         summary["evaluator_source_manifest_sha256"],
         "evaluator_source_manifest_sha256",
+    )
+    _require_sha256(
+        summary["evaluator_runtime_artifact_sha256"],
+        "evaluator_runtime_artifact_sha256",
     )
     diagnostic_dataset = _validate_diagnostic_dataset(summary["diagnostic_dataset"])
     diagnostic_dataset_sha256 = _require_sha256(
