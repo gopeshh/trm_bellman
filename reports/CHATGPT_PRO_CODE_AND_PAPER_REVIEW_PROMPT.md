@@ -24,10 +24,10 @@ Prefer these local repositories:
 The intended frozen source anchors for this review are:
 
 - implementation behavior-source commit
-  `980f6ede14717e87ad68ceb32acc111bdd7fca1b`, parent
-  `86ec7363103b3d6a6a36fb25094ec1991cefd48e`, with previous behavior anchor
-  `f86bddb607adcd24eba65fd5869af58f91742a52`;
-- paper branch head `a76eb29f2712042742fea738cdb859d354fafce2`;
+  `de013fd3fcaae8bc80d124c0c868c7c8611aeede`, parent
+  `12fa350951c31e8635ee51747f6de25295c07333`, with previous behavior anchor
+  `980f6ede14717e87ad68ceb32acc111bdd7fca1b`;
+- paper branch head `5ad61a16281f3b509d0fc2e1756911ae86ae0c1c`;
 - canonical mathematical paper source commit
   `5253692fea5e77cfde3a130c50351183dc0268e3`.
 
@@ -84,7 +84,7 @@ not as authority.
 
 This review follows repairs for `UPITRM-UPD-001` through `UPITRM-UPD-006`,
 `UPITRM-GPT-001` through `UPITRM-GPT-007`, and `UPITRM-POST-001` through
-`UPITRM-POST-003`.
+`UPITRM-POST-005`.
 Do not assume those repairs are correct merely because tests or prior reviewers
 accepted them. Reconstruct and challenge each contract from current source:
 
@@ -100,7 +100,7 @@ accepted them. Reconstruct and challenge each contract from current source:
    extraction cache.
 4. The packaged entry point must independently verify descriptor identity,
    seals, whole-artifact SHA-256, module origin, and the inherited private
-   unpack descriptor before project imports.
+   unpack descriptor before behavior-bearing project imports.
 5. The verified runtime SHA-256 must bind current effective configuration,
    evidence identity, confirmatory lock, checkpoint save, and resume. Historical
    schemas must remain readable only under their exact historical contracts,
@@ -111,7 +111,7 @@ accepted them. Reconstruct and challenge each contract from current source:
 8. Archive validation must reject root aliases, noncanonical member names,
    canonical path aliases, and file/directory prefix collisions before the PAR
    bootstrap sees them.
-9. Current validation documents must identify the complete 24-target affected
+9. Current validation documents must identify the complete 30-target affected
    type gate and must not retain stale test, manifest, artifact, or source
    profile counts.
 10. Treat the launcher executable, operating system, host namespace, other
@@ -132,7 +132,7 @@ accepted them. Reconstruct and challenge each contract from current source:
     for new writes. Historical schemas 1 through 3 may remain readable only
     under their exact historical contracts and must not mint new schema-v5
     evidence.
-14. Phase 4 schema-v3 output must omit the retired numeric success, final-loss,
+14. Phase 4 schema-v4 output must omit the retired numeric success, final-loss,
     and training-history fields while retaining exact unavailability reasons.
     Publication requires the exact four-condition by three-seed design, fixed
     toggles and projection settings, complete finite metric samples, and
@@ -164,9 +164,36 @@ accepted them. Reconstruct and challenge each contract from current source:
     duplicate or raw/effective archive names, worktree bytes that differ from
     HEAD, ignored additions, hidden deletions, and `skip-worktree` or
     `assume-unchanged` index flags.
+22. Phase 4 training, evaluator, audit, and figure execution must pass through
+    the standard-library external launcher. It must authenticate the complete
+    role-specific PAR before behavior-bearing imports, copy it to a sealed memfd, and
+    execute that descriptor with a descriptor-bound private unpack directory.
+    A source verifier called from ordinary `main()` after NumPy, Torch, or
+    behavior-bearing project imports is not sufficient.
+23. Audit and figure consumers must independently resolve the authorized
+    training-source commit from Git, verify the exact producer manifest from
+    that clean tree, and compare both with every checkpoint. Format-valid
+    producer strings embedded in a checkpoint are not evidence.
+24. All 12 Phase 4 records must bind one externally authorized training-PAR
+    SHA-256. Mixed training runtimes, summary-only runtime strings, and a
+    checkpoint that omits or contradicts the runtime identity must fail.
+25. Strict Phase 4 checkpoint validation must cover the complete schema-4
+    resume state, not only model weights. Replay entries must be executed
+    through the registered `PlanEditEnv`, including mask, successor state,
+    reward, terminal flag, terminal reason, clock, and sequence validation.
+26. Evaluator, audit, and figure source profiles must include the full imported
+    closure, including every selected `dataset/*.py` file. Imported behavior
+    may not sit outside the authenticated profile.
+27. Figure output must be staged privately and published only after final
+    source, checkpoint, runtime, and diagnostic-input identity checks. The
+    evaluator and audit must finish their required identity checks before their
+    direct output writes.
+28. Launcher-owned child options must reject both split and `--name=value`
+    overrides. Registered dummy Phase 4 data must be deterministic, supported
+    by the exact action mask, and reproducible from the bound seed and config.
 
-Review the complete implementation change from `e4edcb2` through `980f6ede`,
-with special attention to `86ec7363..980f6ede`, but do not limit the audit to
+Review the complete implementation change from `e4edcb2` through `de013fd`,
+with special attention to `980f6ede..de013fd`, but do not limit the audit to
 those diffs. The resulting source tree and all reachable callers remain the
 source of truth.
 
@@ -652,6 +679,32 @@ missing or extra selected source, a duplicate member, and a raw/effective ZIP
 name mismatch. All tests must use temporary repositories or archives. Do not
 alter either reviewed worktree's Git index flags.
 
+Trace the pre-import boundary for all four Phase 4 roles. Start at the external
+`phase4_runtime_launcher`, through complete archive validation and sealed-memfd
+copy, then follow training into `upi_trm_train` and consumer roles into
+`phase4_runtime_entrypoint`. Prove that role, whole-artifact digest, seals,
+module origin, and private unpack directory are checked before NumPy, Torch,
+`dataset`, `models`, `rl`, `utils`, or any Phase 4 behavior module is imported.
+Direct execution, role mismatch, wrong digest, stale bytes, protected argument
+overrides, and startup failure must fail closed and clean up the exact private
+directory object.
+
+Independently authorize the training producer. Resolve the claimed commit in a
+clean explicit source checkout, reconstruct or verify its tracked producer
+manifest, and compare the resulting commit and manifest digest with every
+checkpoint. Confirm that all 12 records bind the same externally authorized
+training-PAR SHA-256. A checkpoint hash only binds embedded strings; it does
+not establish that the producer claims are true.
+
+For checkpoint replay, reconstruct the exact registered environment and run
+every retained transition through `PlanEditEnv`. Challenge action support,
+serialized state, reward, clock, terminal flag and reason, post-terminal
+records, collector state, replay capacity/order, and the nested resume-state
+inventory. Use fresh fixtures for each negative case so one mutation cannot
+mask another. Confirm that the figure writer stages output and repeats all
+external identity checks immediately before atomic publication. Confirm that
+the evaluator and audit complete their required checks before direct writes.
+
 ## Boundary cases
 
 Check at least:
@@ -683,6 +736,12 @@ Check at least:
 - equal and unequal joint latent perturbation component norms;
 - zero, partial, nonfinite, and complete Phase 4 metric samples;
 - stale Phase 4 PAR source bytes and hidden Git index/worktree state;
+- direct Phase 4 PAR execution, wrong digest, and runtime-role mismatch;
+- fabricated or unavailable producer commits and manifests;
+- mixed training-runtime digests across the 12 records;
+- impossible replay actions, rewards, successors, terminal causes, or clocks;
+- imported `dataset/*.py` omitted from a runtime source profile;
+- publication failure before the final identity check;
 - `delta_dep=0` and `delta_dep=1`.
 
 For each, cite the proof, code path, existing test, or temporary reproducer and
@@ -728,10 +787,11 @@ buck2 test --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_upi_trm_logging_smoke \
   fbcode//buiksat_trm:test_cleanrl_regressions \
   fbcode//buiksat_trm:test_unroll_sensitivity \
-  fbcode//buiksat_trm:test_phase4_reporting
+  fbcode//buiksat_trm:test_phase4_reporting \
+  fbcode//buiksat_trm:test_phase4_runtime_launcher
 ```
 
-Run the complete 24-target affected type gate from the same workdir:
+Run the complete 30-target affected type gate from the same workdir:
 
 ```bash
 buck2 build --local-only @fbcode//mode/opt \
@@ -743,6 +803,12 @@ buck2 build --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_augmented_replay_diagnostics-library-type-checking \
   fbcode//buiksat_trm:confirmatory_runtime_launcher_lib-type-checking \
   fbcode//buiksat_trm:confirmatory_runtime_launcher-library-type-checking \
+  fbcode//buiksat_trm:runtime_archive_preflight-type-checking \
+  fbcode//buiksat_trm:phase4_runtime_profile-type-checking \
+  fbcode//buiksat_trm:phase4_runtime_launcher_lib-type-checking \
+  fbcode//buiksat_trm:phase4_runtime_launcher-library-type-checking \
+  fbcode//buiksat_trm:phase4_runtime_entrypoint-type-checking \
+  fbcode//buiksat_trm:test_phase4_runtime_launcher-library-type-checking \
   fbcode//buiksat_trm:audit_phase4_paper_ready-library-type-checking \
   fbcode//buiksat_trm:cleanrl_runner-library-type-checking \
   fbcode//buiksat_trm:eval_phase4_2x2_norm_ablation-library-type-checking \
@@ -784,25 +850,25 @@ sha256sum /absolute/path/to/upi_trm_train.par
 /absolute/path/to/cleanrl_runner.par --help
 ```
 
-Build the three Phase 4 publication tools without running an evaluator or
+Build the Phase 4 launcher and three publication tools without running an evaluator or
 loading a checkpoint:
 
 ```bash
 buck2 build --local-only @fbcode//mode/opt --show-output \
+  fbcode//buiksat_trm:phase4_runtime_launcher \
   fbcode//buiksat_trm:eval_phase4_2x2_norm_ablation \
   fbcode//buiksat_trm:audit_phase4_paper_ready \
   fbcode//buiksat_trm:make_paper_figures_phase4
 ```
 
-Hash each artifact. Independently call
-`verify_phase4_runtime_sources(..., runtime_location=<artifact>)` with the
-matching evaluator, audit, or figure profile against the frozen clean checkout.
-Record the artifact SHA-256, canonical profile digest, selected member count,
-and exact result. A Buck success is not source-identity evidence by itself. If
-an artifact is stale, preserve the rejection, obtain a genuinely current
-rebuild without disturbing another user's active Buck session, and verify the
-new bytes. Do not execute the evaluator, load a checkpoint, or create a Phase 4
-summary as part of this audit.
+Hash each artifact. Exercise training, evaluator, audit, and figure `--help`
+only through `phase4_runtime_launcher`, using the correct role, artifact digest,
+clean checkout, and source commit. Record each artifact SHA-256, canonical
+profile digest, selected member count, exact exit, and private-directory cleanup.
+A Buck success is not source-identity evidence by itself. Run wrong-digest,
+role-mismatch, direct-PAR, and protected-child-argument negative cases. Do not
+execute an evaluator, load a checkpoint, create a Phase 4 summary, or run
+training as part of this audit.
 
 Record the training, launcher, and CleanRL artifact paths, their SHA-256 values,
 exit codes, stderr, and the count of `upi_trm_confirmatory_unpack.*`
@@ -845,31 +911,31 @@ Also:
 The current handoffs record the following maintainer results at the frozen
 source anchors. Treat them only as claims to reproduce or refute:
 
-- parity runtime gate: 338 passed, with zero failures, timeouts, fatal errors,
+- parity runtime gate: 366 passed, with zero failures, timeouts, fatal errors,
   infrastructure failures, or build failures;
-- affected type gate: 24 of 24 targets passed;
-- producer manifest: 79 entries;
+- affected type gate: 30 of 30 targets built successfully;
+- producer manifest: 80 entries;
 - training, launcher, and CleanRL artifact SHA-256 values:
-  `1a01d06695200a48b160b10d81fa7160750c3499a133b6cfcdda9b110a5ba577`,
-  `46cb7201226f39718ea83135e397ec6618b9ab344d7ed963a8c26ddf2d4d83ae`,
-  and `54cb744038a121ef5715c0d52cc87e6e9c7c19616a3a836bb3b96e3f3b8cc9ad`;
+  `cafabc3314730f09f6251144a2d2d06c329d7f93f5431a59f252f71f8b6e708e`,
+  `faf969e3353b0e78b89042472f37eb900913cd0e09f3196715c793cc7d8c4c54`,
+  and `c2a088a72d3e65a4b0b977ae73e58188ee3b80940802fd2804497d470b978f0b`;
+- Phase 4 launcher SHA-256:
+  `a83574644a024b337f0d384814b56cdb4600628a0819635136e7c91828002de9`;
 - Phase 4 evaluator, audit, and figure artifact SHA-256 values:
-  `e03022090542be8773069b7ba5ccf3e630b220b3f1ac943881394c3a81fc7dc0`,
-  `50ccb5891320e9a1cd4455795a9da0896d54386850653278e233016ec492875f`,
-  and `6bbedeebe4ce9b5d77581f5f3c5144868baf2b4e68ebe3410a530c3b6df33744`;
+  `82b65fc5a9f8714140ddc8769882b07921eb4a17b71319036232c713768def19`,
+  `e0943bf4a0db909c8f7b783d7dc3d92fe4db2e3eb96f4dfe79f5aee218cc2495`,
+  and `625d1dccff6dd611cfc7341d7134c7f57fd9825292f02bcb86e0285845ad4057`;
 - corresponding Phase 4 source-profile digests:
-  `99cdbf794b79e70e21cab59eeb4e0143042875a8a233f919075e3d3a24d38500`,
-  `43211cb68189983870d8877424e840ce20364adec2dbda8dfbd5b1102c28c335`,
-  and `246f9396498572487056f843d9699f2779adaea1440248bde7f8b4f899b61b08`;
-- static gates: 46 shell, 625 JSON, 96 YAML, and 246 Python files;
+  `a2ddc393a9d1849a41ab194b9e3bab75b4945dcdbbc1c3db94c91b4225dbb06a`,
+  `24ad45bf18566dc48b6df15e9bc31ea4cca42f3c6056156a0cba57491d9c15c0`,
+  and `7024d357f9653ca8ab39b8d186b7b045474703c73f2faf073bedd6177efcb4e0`;
+- static gates: 46 shell, 625 JSON, 96 YAML, and 251 Python files;
 - canonical paper: 38 pages, 544,004 bytes, SHA-256
-  `2b5a930136b7c81d2f3e8cc59ea7aa27ab837c913cf7cd2d07200b26a940a534`.
+  `de4fde697f7c835ef2827884569a5a44a12cca473758f91b4fd7dea6d298961d`.
 
-The maintainer also records that the first post-repair Phase 4 build returned
-stale `phase4_source.py` and `run_identity.py` members, that the new verifier
-rejected it, and that a cold-daemon rebuild produced the three accepted
-artifacts above. Reproduce the byte comparison. Do not erase this negative
-evidence by reporting only the final build exit code.
+The maintainer also records successful authenticated `--help` paths for all
+four Phase 4 roles, with wrong-digest, role-mismatch, and direct-PAR cases
+failing closed. Reproduce those checks and the exact source-profile comparison.
 
 Do not copy historical pass counts as current evidence. The repository-wide
 package diagnostic is optional because it includes known unrelated type debt.

@@ -4,7 +4,7 @@ This repository contains the plan-edit MDP, recurrent evaluator, training loops,
 baselines, diagnostics, and retained experiment outputs for the UPI-TRM paper.
 The implementation parity anchor is the manuscript source at paper commit
 `5253692fea5e77cfde3a130c50351183dc0268e3` and implementation source commit
-`980f6ede14717e87ad68ceb32acc111bdd7fca1b` on `full-implementation`. See
+`de013fd3fcaae8bc80d124c0c868c7c8611aeede` on `full-implementation`. See
 `reports/PAPER_PARITY_REPORT.md` for the executable Algorithm 1/2 mapping and
 the theorem premises that remain conditional.
 
@@ -41,10 +41,16 @@ The July 2026 correctness audit repaired the following implementation paths:
   map and the measured joint latent perturbation norm;
 - Phase 4 policy stability uses the production `policy_dist` path, `z_H`, and
   the task action mask at absolute depths 2, 4, and 8; and
-- Phase 4 schema-v3 publication records bind all 12 strict full checkpoints,
-  configs, diagnostic input bytes, evaluator source bytes, and clean Git
-  identity. Audit and figure consumers revalidate those identities before
-  consuming a metric.
+- Phase 4 schema-v4 publication records bind all 12 strict full checkpoints,
+  configs, diagnostic input bytes, producer and evaluator source bytes, and
+  clean Git identity. Audit and figure consumers reopen the checkpoints,
+  replay retained transitions through the registered environment, and
+  revalidate those identities before consuming a metric;
+- a standard-library Phase 4 launcher authenticates and seals the training,
+  evaluator, audit, or figure PAR before behavior-bearing imports. Every one of the 12
+  records must bind the same independently authorized training PAR digest; and
+- Phase 4 figure output is staged privately and published only after the final
+  source, checkpoint, runtime, and diagnostic-input identity checks pass.
 
 The retained 57.4% UPI-TRM result was evaluated on the first 32 training
 instances. It is in-sample and must not be compared with the 50-instance SB3
@@ -128,6 +134,13 @@ PAR. Its inherited descriptors and attestation variables are capabilities for
 the verified runtime and unpack directory, not a claim that environment
 variables are cryptographically unforgeable.
 
+Phase 4 publication tools use the separate `phase4_runtime_launcher`. The
+launcher accepts one explicit role, runtime PAR, runtime SHA-256, clean source
+checkout, and expected source commit. It authenticates the complete artifact
+before importing NumPy, Torch, dataset/model/RL code, or a Phase 4 consumer.
+Direct entry into a Phase 4 role without the launcher fails before those
+behavior imports.
+
 ## Tests
 
 From an fbcode checkout where this repository is available as `buiksat_trm`:
@@ -146,8 +159,8 @@ buck2 test --local-only @fbcode//mode/opt 'fbcode//buiksat_trm:'
 
 That package pattern also runs Buck's generated Python type-check targets.
 The final paper-parity runtime selection, including the Phase 4 reporting
-regressions, passed 338/338. The complete changed-surface type gate passed all
-24 targets, including synchronization, launcher, Phase 4, source-identity,
+regressions, passed 366/366. The complete changed-surface type gate built all
+30 targets, including synchronization, launcher, Phase 4, source-identity,
 checkpoint, trainer, and CleanRL targets. Exact commands, the historical
 repository-wide diagnostic result, and
 the scope of the executable parity claim are recorded in

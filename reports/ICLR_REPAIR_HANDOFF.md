@@ -4,16 +4,16 @@ Date: 2026-08-13
 
 Implementation branch: `full-implementation`
 
-Implementation source anchor: `980f6ede14717e87ad68ceb32acc111bdd7fca1b`
+Implementation source anchor: `de013fd3fcaae8bc80d124c0c868c7c8611aeede`
 
-Implementation parent: `86ec7363103b3d6a6a36fb25094ec1991cefd48e`
+Implementation parent: `12fa350951c31e8635ee51747f6de25295c07333`
 
-Previous behavior anchor: `f86bddb607adcd24eba65fd5869af58f91742a52`
+Previous behavior anchor: `980f6ede14717e87ad68ceb32acc111bdd7fca1b`
 
 Paper source anchor: UPI-TRM commit
 `5253692fea5e77cfde3a130c50351183dc0268e3`
 
-Paper handoff head: `a76eb29f2712042742fea738cdb859d354fafce2`
+Paper handoff head: `5ad61a16281f3b509d0fc2e1756911ae86ae0c1c`
 
 This branch contains the repaired implementation baseline. It is not a
 completed confirmatory experiment and must not be cited as one. The detailed
@@ -64,11 +64,18 @@ conditional theorem premises are in `reports/PAPER_PARITY_REPORT.md`.
   is present and finite.
 - Phase 4 policy stability calls the production `policy_dist` path with `z_H`
   and the exact action mask at depths 2, 4, and 8.
-- Phase 4 schema-v3 summaries require the exact four-condition by three-seed
+- Phase 4 schema-v4 summaries require the exact four-condition by three-seed
   design, strict complete checkpoint loads, checkpoint/model/config/run/source/
-  data identities, and recomputed aggregates. Evaluator, audit, and figure
-  PARs bind their behavior-source bytes to a clean explicit Git checkout and
-  reject stale or hidden source state before consuming publication evidence.
+  data identities, one independently authorized producer source, one training
+  runtime across all 12 records, and recomputed aggregates.
+- The standard-library Phase 4 launcher authenticates and seals the training,
+  evaluator, audit, or figure PAR before behavior-bearing imports. Direct role
+  execution, a role mismatch, a stale artifact, or hidden source state fails
+  closed.
+- Checkpoint audit executes every retained replay transition through the exact
+  registered `PlanEditEnv` and compares the action mask, successor state,
+  reward, terminal flag, and terminal reason. Figure output is staged and
+  published only after the final identity checks pass.
 - CleanRL scripts route through one owned dispatcher target, and dispatcher
   tests cover every supported backend and fail-closed branch.
 - Current-source parity runtime and affected type-check gates are green; exact
@@ -110,41 +117,42 @@ earlier revisions and are not validation of the current validated source state.
 
 ## Current validation status
 
-The final 14-target parity runtime command recorded in
-`reports/PAPER_PARITY_REPORT.md` passed 338/338. The final affected type gate
-passed all 24 synchronization, launcher, Phase 4, source-identity, training,
-and reporting targets. The producer manifest matches a fresh 79-source
+The final 15-target parity runtime command recorded in
+`reports/PAPER_PARITY_REPORT.md` passed 366/366. The final affected type gate
+built all 30 synchronization, launcher, Phase 4, source-identity, training,
+and reporting targets. The producer manifest matches a fresh 80-source
 regeneration, and `git diff --check` passes.
 
 The final training PAR SHA-256 is
-`1a01d06695200a48b160b10d81fa7160750c3499a133b6cfcdda9b110a5ba577`.
+`cafabc3314730f09f6251144a2d2d06c329d7f93f5431a59f252f71f8b6e708e`.
 The launcher and CleanRL dispatcher SHA-256 values are
-`46cb7201226f39718ea83135e397ec6618b9ab344d7ed963a8c26ddf2d4d83ae` and
-`54cb744038a121ef5715c0d52cc87e6e9c7c19616a3a836bb3b96e3f3b8cc9ad`.
+`faf969e3353b0e78b89042472f37eb900913cd0e09f3196715c793cc7d8c4c54` and
+`c2a088a72d3e65a4b0b977ae73e58188ee3b80940802fd2804497d470b978f0b`.
 The real launcher help path exited 0 with no private unpack directory left
 behind. Wrong-digest, uppercase-digest, malformed-digest, and direct-PAR
 confirmatory invocations failed closed with exit codes 2, 2, 2, and 1.
 
-Cold rebuilt Phase 4 evaluator, audit, and figure PARs passed exact
-committed-source profile verification. Their artifact SHA-256 values are
-`e03022090542be8773069b7ba5ccf3e630b220b3f1ac943881394c3a81fc7dc0`,
-`50ccb5891320e9a1cd4455795a9da0896d54386850653278e233016ec492875f`, and
-`6bbedeebe4ce9b5d77581f5f3c5144868baf2b4e68ebe3410a530c3b6df33744`.
+The Phase 4 launcher SHA-256 is
+`a83574644a024b337f0d384814b56cdb4600628a0819635136e7c91828002de9`.
+The evaluator, audit, and figure PARs passed exact committed-source profile
+verification. Their artifact SHA-256 values are
+`82b65fc5a9f8714140ddc8769882b07921eb4a17b71319036232c713768def19`,
+`e0943bf4a0db909c8f7b783d7dc3d92fe4db2e3eb96f4dfe79f5aee218cc2495`, and
+`625d1dccff6dd611cfc7341d7134c7f57fd9825292f02bcb86e0285845ad4057`.
 The corresponding source-profile digests are
-`99cdbf794b79e70e21cab59eeb4e0143042875a8a233f919075e3d3a24d38500`,
-`43211cb68189983870d8877424e840ce20364adec2dbda8dfbd5b1102c28c335`, and
-`246f9396498572487056f843d9699f2779adaea1440248bde7f8b4f899b61b08`.
-The first post-repair inspection detected stale cached runtime bytes; the
-verifier rejected them, and all three artifacts were rebuilt from a cold Buck
-daemon before the successful checks above.
+`a2ddc393a9d1849a41ab194b9e3bab75b4945dcdbbc1c3db94c91b4225dbb06a`,
+`24ad45bf18566dc48b6df15e9bc31ea4cca42f3c6056156a0cba57491d9c15c0`, and
+`7024d357f9653ca8ab39b8d186b7b045474703c73f2faf073bedd6177efcb4e0`.
+Authenticated help paths passed for all four Phase 4 roles. Wrong-digest,
+role-mismatch, and direct-PAR cases failed closed.
 
 All 46 tracked shell scripts passed `bash -n`; 625 tracked JSON files and 96
-tracked YAML files parsed successfully, and all 246 tracked Python sources
+tracked YAML files parsed successfully, and all 251 tracked Python sources
 compiled. The retired launcher exited 2 without changing the worktree.
 
 The canonical paper rebuilt successfully at the frozen mathematical source:
 38 pages, 544,004 bytes, SHA-256
-`2b5a930136b7c81d2f3e8cc59ea7aa27ab837c913cf7cd2d07200b26a940a534`.
+`de4fde697f7c835ef2827884569a5a44a12cca473758f91b4fd7dea6d298961d`.
 All 38 rendered pages were inspected and the final log contained no matched
 warning, missing-reference, missing-citation, or fatal-error condition.
 

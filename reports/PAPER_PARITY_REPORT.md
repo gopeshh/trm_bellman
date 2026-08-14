@@ -4,12 +4,12 @@ Date: 2026-08-13
 
 - Paper source anchor: `/home/buiksat/UPI_TRM`, commit
   `5253692fea5e77cfde3a130c50351183dc0268e3`
-- Paper handoff head: `a76eb29f2712042742fea738cdb859d354fafce2`
+- Paper handoff head: `5ad61a16281f3b509d0fc2e1756911ae86ae0c1c`
 - Paper branch at inspection: `iclr-evidence-aligned-revision`
 - Implementation source anchor: branch `full-implementation`, commit
-  `980f6ede14717e87ad68ceb32acc111bdd7fca1b`
-- Implementation parent: `86ec7363103b3d6a6a36fb25094ec1991cefd48e`
-- Previous behavior anchor: `f86bddb607adcd24eba65fd5869af58f91742a52`
+  `de013fd3fcaae8bc80d124c0c868c7c8611aeede`
+- Implementation parent: `12fa350951c31e8635ee51747f6de25295c07333`
+- Previous behavior anchor: `980f6ede14717e87ad68ceb32acc111bdd7fca1b`
 
 ## Result
 
@@ -150,7 +150,7 @@ optimization convergence. Schema-v5 checkpoints bind this protocol and its
 object roles so historical mutable checkpoints cannot be reinterpreted as
 theorem-facing runs.
 
-Phase 4 paper-facing summaries use strict schema version 3. They mark success,
+Phase 4 paper-facing summaries use strict schema version 4. They mark success,
 final loss, and training-history NaN status unavailable instead of serializing
 placeholder measurements. `L_preproj` uses the exact plan-conditioned
 pre-projection map and actual joint perturbation norm. Policy stability calls
@@ -160,14 +160,20 @@ registered sample counts, fixed toggles and projection settings, and aggregates
 recomputed from all 12 measured records.
 
 Each record binds a strict full checkpoint, complete model/config/run identity,
-checkpoint and model-state SHA-256 values, and the exact ordered diagnostic
-input population. The summary also records a canonical evaluator-source
-manifest digest. Evaluator, audit, and figure PARs compare their runtime source
-members with the explicit checkout, its complete Git `HEAD` inventory, safe
-index flags, and HEAD-identical worktree bytes. Audit and figure consumers
-reopen all 12 checkpoints and revalidate source, config, and input identities
-before consuming metrics. This reporting contract does not turn the finite
-diagnostics into a uniform theorem certificate.
+checkpoint and model-state SHA-256 values, the exact ordered diagnostic input
+population, one independently authorized producer commit and manifest, and one
+training-PAR SHA-256 shared by all 12 records. The standard-library Phase 4
+launcher authenticates and seals the training, evaluator, audit, or figure PAR
+before behavior-bearing imports. The training entrypoint and the three
+consumer-role entrypoints independently check descriptor seals,
+digest, role, module origin, and the descriptor-bound unpack directory.
+Evaluator, audit, and figure profiles include every imported `dataset`, model,
+RL, utility, root, and Phase 4 Python source. Audit and figure consumers reopen
+all 12 checkpoints, execute each retained replay transition through the exact
+registered environment, and revalidate source, config, runtime, and input
+identities before consuming metrics. Figure files are staged privately and
+published only after the final identity check. This reporting contract does
+not turn the finite diagnostics into a uniform theorem certificate.
 
 ## Validation status
 
@@ -191,13 +197,14 @@ buck2 test --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_upi_trm_logging_smoke \
   fbcode//buiksat_trm:test_cleanrl_regressions \
   fbcode//buiksat_trm:test_unroll_sensitivity \
-  fbcode//buiksat_trm:test_phase4_reporting
+  fbcode//buiksat_trm:test_phase4_reporting \
+  fbcode//buiksat_trm:test_phase4_runtime_launcher
 ```
 
-Result: 338 passed, 0 failed, 0 timed out, 0 fatal, 0 infra failures, and 0
+Result: 366 passed, 0 failed, 0 timed out, 0 fatal, 0 infra failures, and 0
 build failures.
 
-The complete changed-surface type gate passed 24/24 targets:
+The complete changed-surface type gate built 30/30 targets:
 
 ```text
 buck2 build --local-only @fbcode//mode/opt \
@@ -209,6 +216,12 @@ buck2 build --local-only @fbcode//mode/opt \
   fbcode//buiksat_trm:test_augmented_replay_diagnostics-library-type-checking \
   fbcode//buiksat_trm:confirmatory_runtime_launcher_lib-type-checking \
   fbcode//buiksat_trm:confirmatory_runtime_launcher-library-type-checking \
+  fbcode//buiksat_trm:runtime_archive_preflight-type-checking \
+  fbcode//buiksat_trm:phase4_runtime_profile-type-checking \
+  fbcode//buiksat_trm:phase4_runtime_launcher_lib-type-checking \
+  fbcode//buiksat_trm:phase4_runtime_launcher-library-type-checking \
+  fbcode//buiksat_trm:phase4_runtime_entrypoint-type-checking \
+  fbcode//buiksat_trm:test_phase4_runtime_launcher-library-type-checking \
   fbcode//buiksat_trm:audit_phase4_paper_ready-library-type-checking \
   fbcode//buiksat_trm:cleanrl_runner-library-type-checking \
   fbcode//buiksat_trm:eval_phase4_2x2_norm_ablation-library-type-checking \
@@ -238,34 +251,38 @@ experiment scripts outside the cleared targets, so the all-target package
 command is not claimed green.
 
 The checked producer manifest equals a fresh mechanical regeneration and
-contains 79 source entries. The final training PAR SHA-256 is
-`1a01d06695200a48b160b10d81fa7160750c3499a133b6cfcdda9b110a5ba577`.
+contains 80 source entries. The final training PAR SHA-256 is
+`cafabc3314730f09f6251144a2d2d06c329d7f93f5431a59f252f71f8b6e708e`.
 The launcher and CleanRL dispatcher SHA-256 values are
-`46cb7201226f39718ea83135e397ec6618b9ab344d7ed963a8c26ddf2d4d83ae` and
-`54cb744038a121ef5715c0d52cc87e6e9c7c19616a3a836bb3b96e3f3b8cc9ad`.
+`faf969e3353b0e78b89042472f37eb900913cd0e09f3196715c793cc7d8c4c54` and
+`c2a088a72d3e65a4b0b977ae73e58188ee3b80940802fd2804497d470b978f0b`.
 The real launcher help path exited 0 with zero private unpack directories before
 and after. Wrong-digest, uppercase-digest, malformed-digest, and direct-PAR
 confirmatory invocations exited 2, 2, 2, and 1, respectively. The packaged
 CleanRL dispatcher also built and its help path exited 0 without training.
 
-The first post-repair Phase 4 PAR inspection rejected stale cached
-`phase4_source.py` and `run_identity.py` members. After a clean-daemon rebuild,
-the evaluator, audit, and figure PARs matched their exact committed source
+The Phase 4 launcher SHA-256 is
+`a83574644a024b337f0d384814b56cdb4600628a0819635136e7c91828002de9`.
+The evaluator, audit, and figure PARs matched their exact committed source
 profiles. Their artifact SHA-256 values are, respectively,
-`e03022090542be8773069b7ba5ccf3e630b220b3f1ac943881394c3a81fc7dc0`,
-`50ccb5891320e9a1cd4455795a9da0896d54386850653278e233016ec492875f`, and
-`6bbedeebe4ce9b5d77581f5f3c5144868baf2b4e68ebe3410a530c3b6df33744`.
+`82b65fc5a9f8714140ddc8769882b07921eb4a17b71319036232c713768def19`,
+`e0943bf4a0db909c8f7b783d7dc3d92fe4db2e3eb96f4dfe79f5aee218cc2495`, and
+`625d1dccff6dd611cfc7341d7134c7f57fd9825292f02bcb86e0285845ad4057`.
 Their canonical runtime source-profile digests are
-`99cdbf794b79e70e21cab59eeb4e0143042875a8a233f919075e3d3a24d38500`,
-`43211cb68189983870d8877424e840ce20364adec2dbda8dfbd5b1102c28c335`, and
-`246f9396498572487056f843d9699f2779adaea1440248bde7f8b4f899b61b08`.
+`a2ddc393a9d1849a41ab194b9e3bab75b4945dcdbbc1c3db94c91b4225dbb06a`,
+`24ad45bf18566dc48b6df15e9bc31ea4cca42f3c6056156a0cba57491d9c15c0`, and
+`7024d357f9653ca8ab39b8d186b7b045474703c73f2faf073bedd6177efcb4e0`.
+All three profiles contain 69 source members. The authenticated Phase 4 help
+paths for training, evaluator, audit, and figure exited 0. A wrong digest, a
+role-mismatched PAR, and direct evaluator-PAR execution failed closed; no
+private launcher unpack directory remained.
 
 All 46 tracked shell scripts passed `bash -n`; 625 tracked JSON files and 96
-tracked YAML files parsed successfully; and 246 tracked Python files passed
+tracked YAML files parsed successfully; and 251 tracked Python files passed
 source compilation. The retired launcher exited 2 without changing the
 worktree. The canonical paper built 38 pages, all pages were inspected, and
 the PDF SHA-256 was
-`2b5a930136b7c81d2f3e8cc59ea7aa27ab837c913cf7cd2d07200b26a940a534`.
+`de4fde697f7c835ef2827884569a5a44a12cca473758f91b4fd7dea6d298961d`.
 `git diff --check` passes. The complete source diff was inspected before
 commit.
 
