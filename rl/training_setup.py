@@ -28,7 +28,18 @@ class DummyPuzzleDataset:
     Tiny in-memory dataset suitable for smoke tests of the RL loop.
     """
 
-    def __init__(self, num_instances: int = 32, seq_len: int = 16, vocab_size: int = 32):
+    def __init__(
+        self,
+        num_instances: int = 32,
+        seq_len: int = 16,
+        vocab_size: int = 32,
+        *,
+        ensure_sudoku_action_support: bool = False,
+    ):
+        if ensure_sudoku_action_support and (seq_len < 2 or vocab_size < 3):
+            raise ValueError(
+                "Sudoku action support requires at least two cells and three tokens."
+            )
         self.seq_len = seq_len
         self.vocab_size = vocab_size
         self.num_identifiers = num_instances
@@ -36,6 +47,12 @@ class DummyPuzzleDataset:
         self.samples: List[dict] = []
         for idx in range(num_instances):
             inputs = torch.randint(low=0, high=vocab_size, size=(seq_len,), dtype=torch.long)
+            if ensure_sudoku_action_support:
+                # Phase 4 disables STOP. Keep one editable cell and one clue in
+                # every synthetic record so its masked policy has nonempty
+                # support while the zero initial plan cannot terminate solved.
+                inputs[idx % seq_len] = 1
+                inputs[(idx + 1) % seq_len] = 2
             puzzle_identifier = torch.tensor(idx, dtype=torch.long)
             sample = {
                 "inputs": inputs,

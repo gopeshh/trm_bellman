@@ -3,7 +3,7 @@
 Phase 4: 2x2 Norm Ablation Evaluation Script.
 
 Evaluates all 12 checkpoints (4 conditions × 3 seeds) and generates:
-- schema-v3 summary.json with measured per-condition/per-seed metrics
+- schema-v4 summary.json with measured per-condition/per-seed metrics
 - CLAIMS.md, PROVENANCE.md
 
 Metrics:
@@ -13,15 +13,14 @@ This script does not run an environment rollout or load training history. The
 schema records the corresponding success, final-loss, and training-history
 metrics as unavailable instead of emitting placeholder values.
 
-Usage:
-    buck2 run //buiksat_trm:eval_phase4_2x2_norm_ablation -- \
-        --project_root /absolute/path/to/trm_bellman \
-        --fbcode_root /absolute/path/to/fbsource/fbcode \
-        --out_dir results/paper_ready/phase4_2x2_norm_ablation/v3
+Build the evaluator PAR, freeze its SHA-256 externally, and invoke it only
+through ``phase4_runtime_launcher --purpose phase4-evaluator``. Direct PAR or
+``buck2 run`` execution fails the required pre-import runtime attestation.
 """
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -53,6 +52,7 @@ from scripts.phase4_checkpoint import (  # noqa: E402
 from scripts.phase4_source import (  # noqa: E402
     PHASE4_EVALUATOR_SOURCE_PROFILE,
     require_phase4_runtime_attestation,
+    resolve_phase4_path,
     resolve_phase4_source_roots,
     verify_phase4_producer_source,
     verify_phase4_runtime_sources,
@@ -434,6 +434,7 @@ def evaluate_condition(
     checkpoint_dir: Path,
     config_dir: Path,
     expected_producer_source: Dict[str, object],
+    expected_training_runtime_sha256: str,
     diagnostic_states: List[Dict],
     device: str = "cuda",
 ) -> Optional[ConditionResult]:
@@ -454,6 +455,7 @@ def evaluate_condition(
         condition=condition,
         seed=seed,
         expected_producer_source=expected_producer_source,
+        expected_training_runtime_sha256=expected_training_runtime_sha256,
         device=device,
     )
     model = loaded.model
@@ -643,7 +645,7 @@ def generate_provenance_md(
 ## Metric availability
 
 The evaluator did not run an environment rollout or load a training log or
-training history. New schema-v3 summaries omit the retired numeric fields and
+training history. New schema-v4 summaries omit the retired numeric fields and
 record their availability as follows:
 
 ```json
@@ -680,15 +682,25 @@ def main(*, runtime_attestation: Optional[Dict[str, Any]] = None):
         required=True,
     )
     parser.add_argument(
+        "--expected_training_runtime_sha256",
+        type=str,
+        required=True,
+        help="Externally authorized Phase 4 training PAR SHA-256",
+    )
+    parser.add_argument(
         "--out_dir",
         type=str,
-        default="results/paper_ready/phase4_2x2_norm_ablation/v3",
+        default="results/paper_ready/phase4_2x2_norm_ablation/v4",
     )
     parser.add_argument("--checkpoint_dir", type=str, default="results/phase4_2x2_norm_ablation")
     parser.add_argument("--data_dir", type=str, default="data")
     parser.add_argument("--device", type=str, default="cuda")
 
     args = parser.parse_args()
+    if re.fullmatch(
+        r"[0-9a-f]{64}", args.expected_training_runtime_sha256
+    ) is None:
+        parser.error("--expected_training_runtime_sha256 must be lowercase SHA-256")
 
     project_root, _ = resolve_phase4_source_roots(
         args.project_root,
@@ -714,12 +726,15 @@ def main(*, runtime_attestation: Optional[Dict[str, Any]] = None):
         producer_project_root,
         args.expected_producer_git_commit,
     )
-    out_path = project_root / args.out_dir
-    checkpoint_dir = project_root / args.checkpoint_dir
+    out_path = resolve_phase4_path(args.out_dir, project_root)
+    checkpoint_dir = resolve_phase4_path(
+        args.checkpoint_dir,
+        producer_project_root,
+    )
     config_dir = (
         producer_project_root / "configs" / "phase4_2x2_norm_ablation"
     )
-    data_dir = project_root / args.data_dir
+    data_dir = resolve_phase4_path(args.data_dir, project_root)
 
     out_path.mkdir(parents=True, exist_ok=True)
 
@@ -748,6 +763,7 @@ def main(*, runtime_attestation: Optional[Dict[str, Any]] = None):
                 checkpoint_dir,
                 config_dir,
                 expected_producer_source,
+                args.expected_training_runtime_sha256,
                 diagnostic_states,
                 device,
             )

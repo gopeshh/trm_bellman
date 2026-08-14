@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Callable, cast
 
 from runtime_archive_preflight import preflight_runtime
 
@@ -29,14 +31,16 @@ _RUNTIME_BYTECODE_CACHE = tempfile.TemporaryDirectory(
 )
 sys.pycache_prefix = str(Path(_RUNTIME_BYTECODE_CACHE.name).resolve())
 
-if _PREFLIGHT.phase4_role == "evaluator":
-    from scripts.eval_phase4_2x2_norm_ablation import main
-elif _PREFLIGHT.phase4_role == "audit":
-    from scripts.audit_phase4_paper_ready import main
-elif _PREFLIGHT.phase4_role == "figure":
-    from scripts.make_paper_figures_phase4 import main
-else:  # pragma: no cover - preflight rejects every other role.
+_ROLE_MODULES = {
+    "evaluator": "scripts.eval_phase4_2x2_norm_ablation",
+    "audit": "scripts.audit_phase4_paper_ready",
+    "figure": "scripts.make_paper_figures_phase4",
+}
+_module_name = _ROLE_MODULES.get(_PREFLIGHT.phase4_role)
+if _module_name is None:  # pragma: no cover - preflight rejects other roles.
     raise RuntimeError("Unsupported authenticated Phase 4 role.")
+_module = importlib.import_module(_module_name)
+main = cast(Callable[..., int], getattr(_module, "main"))
 
 
 if __name__ == "__main__":

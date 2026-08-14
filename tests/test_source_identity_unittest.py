@@ -104,7 +104,7 @@ class TestSourceIdentity(unittest.TestCase):
             validate_producer_source_manifest(invalid)
 
     def test_manifest_schema_requires_exact_non_bool_integer(self) -> None:
-        base = {
+        base: dict[str, object] = {
             "source_manifest_schema_version": 1,
             "sources": {"rl/module.py": "a" * 64},
         }

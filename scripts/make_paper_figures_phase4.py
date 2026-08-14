@@ -6,15 +6,15 @@ Produces:
 - fig_phase4_2x2_norm_ablation.pdf: 2×2 grid showing condition effects
 - table_phase4_2x2_norm_ablation.tex: LaTeX table
 
-Usage:
-    buck2 run //buiksat_trm:make_paper_figures_phase4 -- \
-        --summary_json results/paper_ready/phase4_2x2_norm_ablation/v3/summary.json
-        --checkpoint_dir results/phase4_2x2_norm_ablation
+Build the figure PAR, freeze its SHA-256 externally, and invoke it only through
+``phase4_runtime_launcher --purpose phase4-figure``. Direct PAR or ``buck2 run``
+execution fails the required pre-import runtime attestation.
 """
 
 import argparse
 import json
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, Dict
 
@@ -37,6 +37,7 @@ from scripts.phase4_source import (  # noqa: E402
     Phase4SourceError,
     phase4_evaluator_source_manifest_sha256,
     require_phase4_runtime_attestation,
+    resolve_phase4_path,
     resolve_phase4_source_roots,
     verify_phase4_producer_source,
     verify_phase4_runtime_sources,
@@ -47,6 +48,34 @@ from utils.run_identity import (  # noqa: E402
 )
 
 
+_PHASE4_FIGURE_OUTPUTS = frozenset(
+    {
+        "fig_phase4_2x2_norm_ablation.pdf",
+        "fig_phase4_2x2_norm_ablation.png",
+        "fig_phase4_bar_comparison.pdf",
+        "table_phase4_2x2_norm_ablation.tex",
+    }
+)
+
+
+def _publish_staged_outputs(staging_path: Path, out_path: Path) -> None:
+    """Publish one complete validated figure set from a private directory."""
+
+    staged_outputs = {
+        path.name for path in staging_path.iterdir() if path.is_file()
+    }
+    if staged_outputs != _PHASE4_FIGURE_OUTPUTS:
+        missing = sorted(_PHASE4_FIGURE_OUTPUTS - staged_outputs)
+        unexpected = sorted(staged_outputs - _PHASE4_FIGURE_OUTPUTS)
+        raise RuntimeError(
+            "Phase 4 figure generation produced an incomplete artifact set: "
+            f"missing={missing}, unexpected={unexpected}."
+        )
+    out_path.mkdir(parents=True, exist_ok=True)
+    for name in sorted(_PHASE4_FIGURE_OUTPUTS):
+        (staging_path / name).replace(out_path / name)
+
+
 def load_summary(
     summary_path: str,
     checkpoint_dir: str,
@@ -55,6 +84,7 @@ def load_summary(
     producer_project_root: str | Path,
     expected_producer_source: Dict[str, Any],
     expected_evaluator_runtime_sha256: str,
+    expected_training_runtime_sha256: str,
 ) -> Dict[str, Any]:
     """Load a summary and revalidate every checkpoint before publication."""
     with open(summary_path, "r") as f:
@@ -88,6 +118,7 @@ def load_summary(
             / "phase4_2x2_norm_ablation"
         ),
         expected_producer_source=expected_producer_source,
+        expected_training_runtime_sha256=expected_training_runtime_sha256,
         device="cpu",
     )
     verify_phase4_diagnostic_inputs(summary, data_dir)
@@ -291,6 +322,11 @@ def main(*, runtime_attestation: Dict[str, Any] | None = None):
         help="Externally authorized evaluator PAR SHA-256",
     )
     parser.add_argument(
+        "--expected_training_runtime_sha256",
+        required=True,
+        help="Externally authorized Phase 4 training PAR SHA-256",
+    )
+    parser.add_argument(
         "--summary_json",
         type=str,
         required=True,
@@ -316,23 +352,24 @@ def main(*, runtime_attestation: Dict[str, Any] | None = None):
     )
 
     args = parser.parse_args()
-    if re.fullmatch(
-        r"[0-9a-f]{64}",
-        args.expected_evaluator_runtime_sha256,
-    ) is None:
-        print("ERROR: Expected evaluator runtime SHA-256 is invalid.")
-        return 1
-
-    summary_path = Path(args.summary_json)
-    if not summary_path.exists():
-        print(f"ERROR: Summary file not found: {summary_path}")
-        return 1
+    for label, digest in (
+        ("evaluator", args.expected_evaluator_runtime_sha256),
+        ("training", args.expected_training_runtime_sha256),
+    ):
+        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            print(f"ERROR: Expected {label} runtime SHA-256 is invalid.")
+            return 1
 
     try:
         project_root, _ = resolve_phase4_source_roots(
             args.project_root,
             args.fbcode_root,
         )
+        summary_path = resolve_phase4_path(args.summary_json, project_root)
+        if not summary_path.exists():
+            raise Phase4SourceError(
+                f"Summary file not found: {summary_path}"
+            )
         runtime_source_digest = verify_phase4_runtime_sources(
             project_root,
             PHASE4_FIGURE_SOURCE_PROFILE,
@@ -353,14 +390,20 @@ def main(*, runtime_attestation: Dict[str, Any] | None = None):
             producer_project_root,
             args.expected_producer_git_commit,
         )
+        checkpoint_dir = resolve_phase4_path(
+            args.checkpoint_dir,
+            producer_project_root,
+        )
+        data_dir = resolve_phase4_path(args.data_dir, project_root)
         summary = load_summary(
             str(summary_path),
-            args.checkpoint_dir,
-            args.data_dir,
+            str(checkpoint_dir),
+            str(data_dir),
             project_root,
             producer_project_root,
             expected_producer_source,
             args.expected_evaluator_runtime_sha256,
+            args.expected_training_runtime_sha256,
         )
     except (
         OSError,
@@ -374,40 +417,73 @@ def main(*, runtime_attestation: Dict[str, Any] | None = None):
         print(f"ERROR: Summary is not publishable: {error}")
         return 1
 
-    out_path = Path(args.out_dir) if args.out_dir else summary_path.parent
-    out_path.mkdir(parents=True, exist_ok=True)
+    out_path = (
+        resolve_phase4_path(args.out_dir, project_root)
+        if args.out_dir
+        else summary_path.parent
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Generating figures from: {summary_path}")
     print(f"Output directory: {out_path}")
     print()
 
-    generate_2x2_plot(summary, out_path)
-    generate_bar_comparison(summary, out_path)
-    generate_latex_table(summary, out_path)
+    with tempfile.TemporaryDirectory(
+        prefix=".upi_trm_phase4_figures.",
+        dir=out_path.parent,
+    ) as staging_directory:
+        staging_path = Path(staging_directory)
+        generate_2x2_plot(summary, staging_path)
+        generate_bar_comparison(summary, staging_path)
+        generate_latex_table(summary, staging_path)
 
-    try:
-        if verify_phase4_runtime_sources(
-            project_root,
-            PHASE4_FIGURE_SOURCE_PROFILE,
-        ) != runtime_source_digest:
-            raise Phase4SourceError(
-                "Figure-generator runtime source changed during generation."
+        try:
+            if verify_phase4_runtime_sources(
+                project_root,
+                PHASE4_FIGURE_SOURCE_PROFILE,
+            ) != runtime_source_digest:
+                raise Phase4SourceError(
+                    "Figure-generator runtime source changed during generation."
+                )
+            if verify_phase4_producer_source(
+                producer_project_root,
+                args.expected_producer_git_commit,
+            ) != expected_producer_source:
+                raise Phase4SourceError(
+                    "Producer source identity changed during figure generation."
+                )
+            final_summary = load_summary(
+                str(summary_path),
+                str(checkpoint_dir),
+                str(data_dir),
+                project_root,
+                producer_project_root,
+                expected_producer_source,
+                args.expected_evaluator_runtime_sha256,
+                args.expected_training_runtime_sha256,
             )
-        if verify_phase4_producer_source(
-            producer_project_root,
-            args.expected_producer_git_commit,
-        ) != expected_producer_source:
-            raise Phase4SourceError(
-                "Producer source identity changed during figure generation."
-            )
-        final_identity = discover_clean_git_source(project_root)
-        if final_identity["git_commit"] != summary["evaluator_git_commit"]:
-            raise Phase4SourceError(
-                "Project source identity changed during figure generation."
-            )
-    except (OSError, Phase4SourceError, RunIdentityError) as error:
-        print(f"ERROR: Figure generation source changed: {error}")
-        return 1
+            if final_summary != summary:
+                raise Phase4SourceError(
+                    "Summary or bound evidence changed during figure generation."
+                )
+            final_identity = discover_clean_git_source(project_root)
+            if final_identity["git_commit"] != summary["evaluator_git_commit"]:
+                raise Phase4SourceError(
+                    "Project source identity changed during figure generation."
+                )
+            _publish_staged_outputs(staging_path, out_path)
+        except (
+            OSError,
+            json.JSONDecodeError,
+            Phase4CheckpointError,
+            Phase4DiagnosticInputError,
+            Phase4SourceError,
+            Phase4SummaryValidationError,
+            RunIdentityError,
+            RuntimeError,
+        ) as error:
+            print(f"ERROR: Figure generation was not published: {error}")
+            return 1
 
     print("\nDone!")
     return 0

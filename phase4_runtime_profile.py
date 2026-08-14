@@ -21,10 +21,11 @@ PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH = (
     "configs/iclr_confirmatory/producer_source_manifest.json"
 )
 
-PHASE4_SOURCE_DIRECTORIES = ("models", "rl", "utils")
+PHASE4_SOURCE_DIRECTORIES = ("dataset", "models", "rl", "utils")
 PHASE4_ROOT_SOURCES = (
     "phase4_runtime_entrypoint.py",
     "phase4_runtime_profile.py",
+    "puzzle_dataset.py",
     "runtime_archive_preflight.py",
 )
 PHASE4_SHARED_SOURCES = (

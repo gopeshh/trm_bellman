@@ -104,17 +104,26 @@ def _normalize_child_args(
     arguments = list(runtime_args)
     if arguments[:1] == ["--"]:
         arguments = arguments[1:]
-    if "--confirmatory" in arguments:
+
+    def contains_option(name: str) -> bool:
+        return any(
+            argument == name or argument.startswith(f"{name}=")
+            for argument in arguments
+        )
+
+    if contains_option("--confirmatory"):
         raise ConfirmatoryRuntimeError(
             "Phase 4 publication runtimes cannot use confirmatory mode."
         )
     if purpose != "phase4-training":
-        if "--phase4-publication" in arguments:
+        if contains_option("--phase4-publication"):
             raise ConfirmatoryRuntimeError(
                 "Phase 4 consumer arguments contain a training-only flag."
             )
         return arguments
-    if "--phase4-publication" in arguments or "--producer-repo-root" in arguments:
+    if contains_option("--phase4-publication") or contains_option(
+        "--producer-repo-root"
+    ):
         raise ConfirmatoryRuntimeError(
             "Phase 4 training launcher owns its publication and producer flags."
         )

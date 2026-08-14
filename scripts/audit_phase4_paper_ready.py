@@ -8,7 +8,7 @@ Runs ≥9 automated checks to validate experimental integrity:
 3. Seeds present: all 3 seeds (41, 42, 43) have full checkpoints per condition
 4. No mislabeled conditions: checkpoint dirs match config names
 5. Summary.json exists and is readable JSON
-6. Summary uses the strict publication schema version 3
+6. Summary uses the strict publication schema version 4
 7. All 12 runs present in summary
 8. CLAIMS.md exists and is non-empty
 9. PROVENANCE.md exists and references correct configs
@@ -19,10 +19,9 @@ Runs ≥9 automated checks to validate experimental integrity:
 14. Diagnostic input identity: the exact ordered input bytes are revalidated
 15. Evaluator source identity: runtime bytes match the claimed clean checkout
 
-Usage:
-    buck2 run //buiksat_trm:audit_phase4_paper_ready -- \
-        --results_dir results/paper_ready/phase4_2x2_norm_ablation/v3 \
-        --checkpoint_dir results/phase4_2x2_norm_ablation
+Build the audit PAR, freeze its SHA-256 externally, and invoke it only through
+``phase4_runtime_launcher --purpose phase4-audit``. Direct PAR or ``buck2 run``
+execution fails the required pre-import runtime attestation.
 """
 
 import argparse
@@ -52,6 +51,7 @@ from scripts.phase4_source import (  # noqa: E402
     Phase4SourceError,
     phase4_evaluator_source_manifest_sha256,
     require_phase4_runtime_attestation,
+    resolve_phase4_path,
     resolve_phase4_source_roots,
     verify_phase4_producer_source,
     verify_phase4_runtime_sources,
@@ -227,7 +227,7 @@ def check_summary_exists(results_dir: Path) -> Tuple[AuditResult, Dict[str, Any]
 
 
 def check_publication_schema(summary: Dict[str, Any]) -> AuditResult:
-    """Check 6: summary is a publishable Phase 4 schema-v3 artifact."""
+    """Check 6: summary is a publishable Phase 4 schema-v4 artifact."""
     try:
         validate_phase4_summary(summary)
     except Phase4SummaryValidationError as error:
@@ -240,7 +240,7 @@ def check_publication_schema(summary: Dict[str, Any]) -> AuditResult:
     return AuditResult(
         "Publication Schema",
         True,
-        "Strict schema version 3 is valid; checkpoint identity is explicit",
+        "Strict schema version 4 is valid; checkpoint identity is explicit",
     )
 
 
@@ -449,6 +449,7 @@ def check_checkpoint_identities(
     checkpoint_dir: Path,
     config_dir: Path,
     expected_producer_source: Dict[str, Any],
+    expected_training_runtime_sha256: str,
 ) -> AuditResult:
     """Check 13: Rehash and strictly reload every recorded full checkpoint."""
 
@@ -458,6 +459,9 @@ def check_checkpoint_identities(
             checkpoint_dir,
             config_dir,
             expected_producer_source=expected_producer_source,
+            expected_training_runtime_sha256=(
+                expected_training_runtime_sha256
+            ),
             device="cpu",
         )
     except (OSError, Phase4CheckpointError) as error:
@@ -531,6 +535,7 @@ def run_audit(
     project_root: Path,
     expected_producer_source: Dict[str, Any],
     expected_evaluator_runtime_sha256: str,
+    expected_training_runtime_sha256: str,
 ) -> Tuple[List[AuditResult], bool]:
     """Run all audit checks."""
     results = []
@@ -567,6 +572,7 @@ def run_audit(
                 checkpoint_dir,
                 config_dir,
                 expected_producer_source,
+                expected_training_runtime_sha256,
             )
         )
         results.append(check_diagnostic_input_identity(summary, data_dir))
@@ -675,12 +681,17 @@ def main(*, runtime_attestation: Dict[str, Any] | None = None):
         help="Externally authorized evaluator PAR SHA-256",
     )
     parser.add_argument(
+        "--expected_training_runtime_sha256",
+        required=True,
+        help="Externally authorized Phase 4 training PAR SHA-256",
+    )
+    parser.add_argument(
         "--results_dir",
         type=str,
         required=True,
         help=(
             "Path to results directory "
-            "(e.g., results/paper_ready/phase4_2x2_norm_ablation/v3)"
+            "(e.g., results/paper_ready/phase4_2x2_norm_ablation/v4)"
         ),
     )
     parser.add_argument(
@@ -697,12 +708,13 @@ def main(*, runtime_attestation: Dict[str, Any] | None = None):
     )
 
     args = parser.parse_args()
-    if re.fullmatch(
-        r"[0-9a-f]{64}",
-        args.expected_evaluator_runtime_sha256,
-    ) is None:
-        print("ERROR: Expected evaluator runtime SHA-256 is invalid.")
-        return 1
+    for label, digest in (
+        ("evaluator", args.expected_evaluator_runtime_sha256),
+        ("training", args.expected_training_runtime_sha256),
+    ):
+        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            print(f"ERROR: Expected {label} runtime SHA-256 is invalid.")
+            return 1
 
     try:
         project_root, _ = resolve_phase4_source_roots(
@@ -733,9 +745,12 @@ def main(*, runtime_attestation: Dict[str, Any] | None = None):
         print(f"ERROR: Audit runtime source is not authenticated: {error}")
         return 1
 
-    results_dir = Path(args.results_dir)
-    checkpoint_dir = Path(args.checkpoint_dir)
-    data_dir = Path(args.data_dir)
+    results_dir = resolve_phase4_path(args.results_dir, project_root)
+    checkpoint_dir = resolve_phase4_path(
+        args.checkpoint_dir,
+        producer_project_root,
+    )
+    data_dir = resolve_phase4_path(args.data_dir, project_root)
     config_dir = (
         producer_project_root / "configs" / "phase4_2x2_norm_ablation"
     )
@@ -755,6 +770,7 @@ def main(*, runtime_attestation: Dict[str, Any] | None = None):
         project_root,
         expected_producer_source,
         args.expected_evaluator_runtime_sha256,
+        args.expected_training_runtime_sha256,
     )
 
     try:

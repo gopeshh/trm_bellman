@@ -15,6 +15,7 @@ from phase4_runtime_profile import (
     PHASE4_EVALUATOR_SOURCE_PROFILE,
     PHASE4_FIGURE_SOURCE_PROFILE,
     PHASE4_PROFILE_ENTRYPOINTS,
+    PHASE4_ROOT_SOURCES,
     PHASE4_SHARED_SOURCES,
     PHASE4_SOURCE_DIRECTORIES,
     PHASE4_SOURCE_MANIFEST_SCHEMA_VERSION,
@@ -217,6 +218,18 @@ def verify_phase4_producer_source(
     }
 
 
+def resolve_phase4_path(
+    path_value: str | Path,
+    relative_to: str | Path,
+) -> Path:
+    """Resolve a Phase 4 CLI path against its declared ownership root."""
+
+    requested = Path(path_value).expanduser()
+    if requested.is_absolute():
+        return requested.resolve()
+    return (Path(relative_to).expanduser() / requested).resolve()
+
+
 def phase4_source_relative_paths(
     project_root: Path,
     profile: str,
@@ -235,10 +248,8 @@ def _assert_project_inventory_matches_head(
     entrypoints = PHASE4_PROFILE_ENTRYPOINTS[profile]
     pathspecs = [
         *PHASE4_SOURCE_DIRECTORIES,
+        *PHASE4_ROOT_SOURCES,
         *PHASE4_SHARED_SOURCES,
-        "phase4_runtime_entrypoint.py",
-        "phase4_runtime_profile.py",
-        "runtime_archive_preflight.py",
         *entrypoints,
     ]
     try:
@@ -247,12 +258,7 @@ def _assert_project_inventory_matches_head(
             relative_path
             for relative_path in tracked_paths
             if relative_path in PHASE4_SHARED_SOURCES
-            or relative_path
-            in {
-                "phase4_runtime_entrypoint.py",
-                "phase4_runtime_profile.py",
-                "runtime_archive_preflight.py",
-            }
+            or relative_path in PHASE4_ROOT_SOURCES
             or relative_path in entrypoints
             or _is_selected_python_source(relative_path)
         }
@@ -333,7 +339,7 @@ def phase4_source_manifest_sha256(
 def phase4_evaluator_source_manifest_sha256(
     project_root: str | Path,
 ) -> str:
-    """Return the source digest a schema-v3 evaluator must record."""
+    """Return the source digest a schema-v4 evaluator must record."""
 
     return phase4_source_manifest_sha256(
         project_root,

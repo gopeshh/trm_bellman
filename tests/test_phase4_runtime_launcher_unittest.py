@@ -9,14 +9,20 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 from zipfile import ZipFile
 
+import phase4_runtime_launcher
 from confirmatory_runtime_launcher import (
     ConfirmatoryRuntimeError,
     validate_archive_layout,
     validate_runtime_archive,
 )
-from phase4_runtime_launcher import _normalize_child_args
+from phase4_runtime_launcher import (
+    _normalize_child_args,
+    _training_archive_validator,
+)
 from phase4_runtime_profile import (
     PHASE4_EVALUATOR_SOURCE_PROFILE,
     PHASE4_PROFILE_ENTRYPOINTS,
@@ -56,6 +62,8 @@ def _profile_sources() -> dict[str, bytes]:
         *PHASE4_ROOT_SOURCES,
         *PHASE4_SHARED_SOURCES,
         *PHASE4_PROFILE_ENTRYPOINTS[PHASE4_EVALUATOR_SOURCE_PROFILE],
+        "dataset/__init__.py",
+        "dataset/common.py",
         "models/model.py",
         "rl/trainer.py",
         "utils/identity.py",
@@ -100,6 +108,15 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
             )
         with self.assertRaisesRegex(
             ConfirmatoryRuntimeError,
+            "owns its publication and producer flags",
+        ):
+            _normalize_child_args(
+                "phase4-training",
+                "/repo",
+                ["--producer-repo-root=/other"],
+            )
+        with self.assertRaisesRegex(
+            ConfirmatoryRuntimeError,
             "cannot use confirmatory mode",
         ):
             _normalize_child_args(
@@ -107,6 +124,105 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 "/repo",
                 ["--confirmatory"],
             )
+
+    def test_training_archive_requires_the_authorized_manifest_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "training.par"
+            with ZipFile(archive_path, "w") as archive:
+                archive.writestr(
+                    "configs/iclr_confirmatory/producer_source_manifest.json",
+                    b"different",
+                )
+            validator = _training_archive_validator(b"authorized")
+            with ZipFile(archive_path) as archive, mock.patch.object(
+                phase4_runtime_launcher,
+                "validate_confirmatory_archive_sources",
+            ), self.assertRaisesRegex(
+                ConfirmatoryRuntimeError,
+                "differs from the authorized checkout",
+            ):
+                validator(archive)
+
+    def test_main_dispatches_every_role_with_bound_attestation(self) -> None:
+        runtime = object()
+        consumer_authorized = SimpleNamespace(
+            git_commit="a" * 40,
+            source_manifest_sha256="b" * 64,
+        )
+        training_authorized = SimpleNamespace(
+            git_commit="a" * 40,
+            source_manifest_sha256="c" * 64,
+            manifest_bytes=b"manifest",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            for purpose, expected_role in (
+                ("phase4-training", "training"),
+                ("phase4-evaluator", "evaluator"),
+                ("phase4-audit", "audit"),
+                ("phase4-figure", "figure"),
+            ):
+                with self.subTest(purpose=purpose), mock.patch.object(
+                    phase4_runtime_launcher,
+                    "authorize_phase4_training_source",
+                    return_value=training_authorized,
+                ), mock.patch.object(
+                    phase4_runtime_launcher,
+                    "authorize_phase4_source_profile",
+                    return_value=consumer_authorized,
+                ), mock.patch.object(
+                    phase4_runtime_launcher,
+                    "validate_runtime_archive",
+                    return_value=runtime,
+                ), mock.patch.object(
+                    phase4_runtime_launcher,
+                    "launch_verified_runtime",
+                    return_value=0,
+                ) as launch:
+                    self.assertEqual(
+                        phase4_runtime_launcher.main(
+                            [
+                                "--purpose",
+                                purpose,
+                                "--runtime-archive",
+                                "/runtime.par",
+                                "--expected-runtime-sha256",
+                                "d" * 64,
+                                "--source-project-root",
+                                str(root),
+                                "--expected-source-git-commit",
+                                "a" * 40,
+                                "--",
+                                "--help",
+                            ]
+                        ),
+                        0,
+                    )
+                    attestation = launch.call_args.kwargs[
+                        "attestation_environment"
+                    ]
+                    self.assertEqual(
+                        attestation[
+                            phase4_runtime_launcher.PHASE4_RUNTIME_ROLE_ENV
+                        ],
+                        expected_role,
+                    )
+                    self.assertEqual(
+                        attestation[
+                            phase4_runtime_launcher.PHASE4_SOURCE_COMMIT_ENV
+                        ],
+                        "a" * 40,
+                    )
+                    if purpose == "phase4-training":
+                        child_args = launch.call_args.args[1]
+                        self.assertEqual(
+                            child_args[:3],
+                            [
+                                "--phase4-publication",
+                                "--producer-repo-root",
+                                str(root),
+                            ],
+                        )
 
     def test_direct_phase4_entrypoint_has_no_attestation(self) -> None:
         with self.assertRaisesRegex(
@@ -136,46 +252,60 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 validate_archive_layout(archive)
                 assert_phase4_archive_matches_profile(archive, authorized)
 
-            tampered_archive = root / "tampered.par"
-            with ZipFile(tampered_archive, "w") as archive:
-                for relative_path, payload in sources.items():
-                    archive.writestr(
-                        relative_path,
-                        b"# different\n"
-                        if relative_path == "models/model.py"
-                        else payload,
+            for tampered_source in ("models/model.py", "dataset/common.py"):
+                with self.subTest(tampered_source=tampered_source):
+                    tampered_archive = root / (
+                        tampered_source.replace("/", "_") + ".par"
                     )
-            tampered_digest = hashlib.sha256(
-                tampered_archive.read_bytes()
-            ).hexdigest()
+                    with ZipFile(tampered_archive, "w") as archive:
+                        for relative_path, payload in sources.items():
+                            archive.writestr(
+                                relative_path,
+                                b"# different\n"
+                                if relative_path == tampered_source
+                                else payload,
+                            )
+                    tampered_digest = hashlib.sha256(
+                        tampered_archive.read_bytes()
+                    ).hexdigest()
 
-            def validate_tampered(archive: ZipFile) -> None:
-                validate_archive_layout(archive)
-                try:
-                    assert_phase4_archive_matches_profile(archive, authorized)
-                except Phase4RuntimeProfileError as exc:
-                    raise ConfirmatoryRuntimeError(str(exc)) from exc
+                    def validate_tampered(archive: ZipFile) -> None:
+                        validate_archive_layout(archive)
+                        try:
+                            assert_phase4_archive_matches_profile(
+                                archive, authorized
+                            )
+                        except Phase4RuntimeProfileError as exc:
+                            raise ConfirmatoryRuntimeError(str(exc)) from exc
 
-            with self.assertRaisesRegex(
-                ConfirmatoryRuntimeError,
-                "differs from the authorized checkout",
-            ):
-                validate_runtime_archive(
-                    tampered_archive,
-                    tampered_digest,
-                    archive_validator=validate_tampered,
-                )
+                    with self.assertRaisesRegex(
+                        ConfirmatoryRuntimeError,
+                        "differs from the authorized checkout",
+                    ):
+                        validate_runtime_archive(
+                            tampered_archive,
+                            tampered_digest,
+                            archive_validator=validate_tampered,
+                        )
 
-            bytecode_archive = root / "bytecode.par"
-            with ZipFile(bytecode_archive, "w") as archive:
-                for relative_path, payload in sources.items():
-                    archive.writestr(relative_path, payload)
-                archive.writestr("models/model.pyc", b"bytecode")
-            with ZipFile(bytecode_archive, "r") as archive, self.assertRaisesRegex(
-                Phase4RuntimeProfileError,
-                "bytecode",
-            ):
-                assert_phase4_archive_matches_profile(archive, authorized)
+            for bytecode_path in ("models/model.pyc", "dataset/common.pyc"):
+                with self.subTest(bytecode_path=bytecode_path):
+                    bytecode_archive = root / (
+                        bytecode_path.replace("/", "_") + ".par"
+                    )
+                    with ZipFile(bytecode_archive, "w") as archive:
+                        for relative_path, payload in sources.items():
+                            archive.writestr(relative_path, payload)
+                        archive.writestr(bytecode_path, b"bytecode")
+                    with ZipFile(
+                        bytecode_archive, "r"
+                    ) as archive, self.assertRaisesRegex(
+                        Phase4RuntimeProfileError,
+                        "bytecode",
+                    ):
+                        assert_phase4_archive_matches_profile(
+                            archive, authorized
+                        )
 
     def test_source_profile_requires_exact_clean_commit_and_safe_index(
         self,

@@ -10,6 +10,7 @@ import unittest
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest import mock
 
 import torch
@@ -19,7 +20,12 @@ from torch.distributions import Categorical
 from scripts import audit_phase4_paper_ready
 from scripts import eval_phase4_2x2_norm_ablation
 from scripts import make_paper_figures_phase4
+from scripts import phase4_checkpoint as phase4_checkpoint_module
 from scripts.phase4_checkpoint import (
+    PHASE4_EPISODE_LENGTH,
+    PHASE4_FINAL_ENV_STEPS,
+    PHASE4_FINAL_EPISODES,
+    PHASE4_FINAL_REPLAY_SIZE,
     Phase4CheckpointError,
     load_phase4_checkpoint,
     phase4_checkpoint_relpath,
@@ -27,6 +33,7 @@ from scripts.phase4_checkpoint import (
     verify_phase4_summary_checkpoints,
     _expected_model_config,
     _expected_rl_config,
+    _phase4_environment,
     _registered_phase4_config_layer,
 )
 from scripts.phase4_diagnostic_inputs import (
@@ -49,6 +56,7 @@ from scripts.phase4_source import (
     PHASE4_EVALUATOR_SOURCE_PROFILE,
     PHASE4_FIGURE_SOURCE_PROFILE,
     Phase4SourceError,
+    resolve_phase4_path,
     phase4_evaluator_source_manifest_sha256,
     resolve_phase4_source_roots,
     verify_phase4_producer_source,
@@ -60,8 +68,17 @@ from models.recursive_reasoning.trm import (
     TinyRecursiveReasoningModel_ACTV1InnerCarry,
 )
 from rl.replay import Transition
+from rl.config import RLConfig
+from rl.training_setup import DummyPuzzleDataset
+from rl.upi_trm_trainer import UPITrmTrainer
 from utils.run_identity import RunIdentityError, canonical_json_sha256
-from utils.dataset_provenance import build_dataset_provenance
+from utils.dataset_provenance import (
+    build_dataset_provenance,
+    dataset_pool_sha256,
+    dataset_puzzle_identifier_sha256s,
+    dataset_sample_sha256s,
+    ordered_record_sha256,
+)
 from utils.source_identity import (
     SOURCE_MANIFEST_RELATIVE_PATH,
     build_producer_source_manifest,
@@ -95,6 +112,74 @@ def _fake_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+_FAKE_TRAINING_RUNTIME_SHA256 = _fake_sha256("training runtime artifact")
+
+
+def _final_phase4_replay(
+    *,
+    seed: int,
+    rl_config: RLConfig,
+) -> list[Transition]:
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        dataset = DummyPuzzleDataset(
+            ensure_sudoku_action_support=True,
+        )
+    environment = _phase4_environment(rl_config, dataset=dataset)
+    environment.reset(idx=0)
+    template = []
+    for timestep in range(PHASE4_EPISODE_LENGTH):
+        action_mask = environment.get_action_mask()
+        if action_mask is None:
+            raise AssertionError("Registered Phase 4 fixture has no action mask.")
+        action = torch.tensor(
+            2 + timestep % 4,
+            dtype=torch.long,
+        )
+        if not bool(action_mask[int(action.item())].item()):
+            raise AssertionError(
+                "Registered Phase 4 fixture has no valid edit action."
+            )
+        x = copy.deepcopy(environment.x)
+        y = copy.deepcopy(environment.y)
+        (x_next, y_next), reward, done, info = environment.step(
+            int(action.item())
+        )
+        terminal = timestep == PHASE4_EPISODE_LENGTH - 1
+        if bool(done) != terminal or info.get("done_reason") != (
+            "budget" if terminal else None
+        ):
+            raise AssertionError(
+                "Registered Phase 4 fixture did not reach the exact edit budget."
+            )
+        template.append(
+            Transition(
+                x=x,
+                y=copy.deepcopy(y),
+                action=action.clone(),
+                reward=torch.as_tensor(reward, dtype=torch.float32).view(1),
+                x_next=copy.deepcopy(x_next),
+                y_next=copy.deepcopy(y_next),
+                done=torch.tensor([done], dtype=torch.bool),
+                episode_id=0,
+                timestep=timestep,
+                behavior_log_prob=torch.tensor(0.0, dtype=torch.float32),
+                terminal_reason="budget" if terminal else None,
+            )
+        )
+    first_episode = PHASE4_FINAL_EPISODES - (
+        PHASE4_FINAL_REPLAY_SIZE // PHASE4_EPISODE_LENGTH
+    )
+    transitions = []
+    for episode_id in range(first_episode, PHASE4_FINAL_EPISODES):
+        for template_transition in template:
+            transition = copy.deepcopy(template_transition)
+            transition.episode_id = episode_id
+            transitions.append(transition)
+    assert len(transitions) == PHASE4_FINAL_REPLAY_SIZE
+    return transitions
+
+
 def _fake_producer_source() -> dict[str, object]:
     return {
         "git_commit": "a" * 40,
@@ -125,9 +210,7 @@ def _condition_result(
         producer_source_manifest_sha256=str(
             _fake_producer_source()["source_manifest_sha256"]
         ),
-        training_runtime_artifact_sha256=_fake_sha256(
-            f"training-runtime:{condition}:{seed}"
-        ),
+        training_runtime_artifact_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
         initialization_kind="random",
         checkpoint_schema_version=4,
         training_invocation_schema_version=3,
@@ -333,35 +416,86 @@ def _write_synthetic_phase4_checkpoint(
     rl_config = _expected_rl_config(yaml_config, condition)
     model_config = _expected_model_config(rl_config)
     model = TinyRecursiveReasoningModel_ACTV1(model_config)
-    model_config = model.config.model_dump()
-    model_state = model.state_dict()
-    replay_transition = Transition(
-        x={
-            "inputs": torch.zeros(16, dtype=torch.long),
-            "puzzle_identifiers": torch.tensor(0, dtype=torch.long),
-            "remaining_edits": torch.tensor(1, dtype=torch.long),
-        },
-        y=torch.zeros(16, dtype=torch.long),
-        action=torch.tensor(0, dtype=torch.long),
-        reward=torch.tensor(0.0),
-        x_next={
-            "inputs": torch.zeros(16, dtype=torch.long),
-            "puzzle_identifiers": torch.tensor(0, dtype=torch.long),
-            "remaining_edits": torch.tensor(0, dtype=torch.long),
-        },
-        y_next=torch.zeros(16, dtype=torch.long),
-        done=torch.tensor(True),
-        episode_id=0,
-        timestep=0,
-        behavior_log_prob=torch.tensor(0.0),
-        terminal_reason="budget",
+    rl_config_object = RLConfig(**rl_config)
+    trainer = UPITrmTrainer(
+        model=model,
+        env=_phase4_environment(rl_config_object),
+        rl_cfg=rl_config_object,
+        device=torch.device("cpu"),
     )
-    records = [_fake_sha256(f"record:{seed}:{index}") for index in range(32)]
-    pool_sha256 = _fake_sha256(f"pool:{seed}")
-    identifier_sha256 = _fake_sha256("identifiers:0-31")
+    model_config = model.config.model_dump()
+    replay_transitions = _final_phase4_replay(
+        seed=seed,
+        rl_config=rl_config_object,
+    )
+    replay_tail = replay_transitions[-1]
+    trainer.replay.add(replay_tail)
+    trainer._next_episode_id = PHASE4_FINAL_EPISODES
+    trainer._train_step_count = 5000
+    trainer._env_step_count = PHASE4_FINAL_ENV_STEPS
+    trainer._value_optimizer_step_count = 5000
+    trainer._policy_optimizer_step_count = 5000
+    trainer._distill_optimizer_step_count = 0
+    trainer.env.x = copy.deepcopy(replay_tail.x_next)
+    trainer.env.y = cast(torch.Tensor, replay_tail.y_next).clone()
+    trainer.env.step_count = PHASE4_EPISODE_LENGTH
+    trainer.env.done = True
+    trainer.env._cached_phi = 0.0
+    trainer.env._action_mask = None
+    trainer.env._original_inputs = replay_tail.x_next["inputs"].clone()
+    trainer.env._stop_penalty = 0.0
+    trainer.env._edit_history = []
+    value_unused_parameters = {
+        parameter
+        for name, parameter in trainer.model.named_parameters()
+        if name
+        in {
+            "inner.lm_head.weight",
+            "inner.q_head.weight",
+            "inner.q_head.bias",
+        }
+    }
+    for optimizer in (
+        trainer.value_opt,
+        trainer.policy_opt,
+    ):
+        assert optimizer is not None
+        for group in optimizer.param_groups:
+            for parameter in group["params"]:
+                parameter.grad = (
+                    None
+                    if optimizer is trainer.value_opt
+                    and parameter in value_unused_parameters
+                    else torch.zeros_like(parameter)
+                )
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+        for state in optimizer.state.values():
+            state["step"] = torch.tensor(5000.0)
+    for scheduler in (trainer.value_scheduler, trainer.policy_scheduler):
+        assert scheduler is not None
+        for _ in range(5000):
+            scheduler.step()
+    model_state = model.state_dict()
+    compute_accounting_state = trainer.compute_accounting_checkpoint_state()
+    compute_accounting_state["peak_cuda_allocated_bytes"] = 0
+    compute_accounting_state["peak_cuda_reserved_bytes"] = 0
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        registered_dataset = DummyPuzzleDataset(
+            ensure_sudoku_action_support=True,
+        )
+    records = dataset_sample_sha256s(registered_dataset)
+    pool_sha256 = dataset_pool_sha256(
+        registered_dataset,
+        len(registered_dataset),
+    )
+    identifier_sha256 = ordered_record_sha256(
+        dataset_puzzle_identifier_sha256s(registered_dataset)
+    )
     dataset_provenance = build_dataset_provenance(
         builder_name="rl.training_setup.DummyPuzzleDataset",
-        builder_version=1,
+        builder_version=2,
         generation_seed=seed,
         train_record_sha256s=records,
         eval_record_sha256s=records,
@@ -415,41 +549,70 @@ def _write_synthetic_phase4_checkpoint(
         "training_protocol": "legacy",
         "trainer_kind": "UPITrmTrainer",
         "step": 5000,
-        "execution_device": "cpu",
+        "execution_device": "cuda:0",
         "progress": {
-            "env_steps": 12345,
+            "env_steps": PHASE4_FINAL_ENV_STEPS,
             "optimizer_updates": 5000,
-            "optimizer_steps": 4999,
+            "optimizer_steps": 5000,
         },
         "model_state_dict": dict(model_state),
-        "policy_model_old_state_dict": dict(model_state),
-        "policy_model_candidate_state_dict": dict(model_state),
-        "target_model_state_dict": dict(model_state),
-        "value_optimizer_state_dict": {
-            "state": {0: {"step": torch.tensor(1.0)}},
-            "param_groups": [{"params": [0]}],
-        },
-        "policy_optimizer_state_dict": {
-            "state": {0: {"step": torch.tensor(1.0)}},
-            "param_groups": [{"params": [0]}],
-        },
+        "policy_model_old_state_dict": dict(
+            trainer.policy_model_old.state_dict()
+        ),
+        "policy_model_candidate_state_dict": dict(
+            trainer.policy_model_candidate.state_dict()
+        ),
+        "target_model_state_dict": dict(trainer.target_model.state_dict()),
+        "value_optimizer_state_dict": trainer.value_opt.state_dict(),
+        "policy_optimizer_state_dict": trainer.policy_opt.state_dict(),
+        "old_policy_distill_optimizer_state_dict": (
+            cast(
+                torch.optim.Optimizer,
+                trainer.old_policy_distill_opt,
+            ).state_dict()
+        ),
+        "value_scheduler_state_dict": cast(
+            torch.optim.lr_scheduler.LambdaLR,
+            trainer.value_scheduler,
+        ).state_dict(),
+        "policy_scheduler_state_dict": cast(
+            torch.optim.lr_scheduler.LambdaLR,
+            trainer.policy_scheduler,
+        ).state_dict(),
         "rng_state": {
             "python": random.getstate(),
             "numpy": np.random.get_state(),
             "torch_cpu": torch.random.get_rng_state(),
-            "torch_cuda": None,
+            "torch_cuda": [torch.zeros(16, dtype=torch.uint8)],
         },
         "trainer_state": {
+            "next_episode_id": PHASE4_FINAL_EPISODES,
             "train_step_count": 5000,
-            "env_step_count": 12345,
-            "optimizer_step_count": 4999,
-            "collection_state": {},
-            "environment_state": {},
+            "env_step_count": PHASE4_FINAL_ENV_STEPS,
+            "optimizer_step_count": 5000,
+            "value_optimizer_step_count": 5000,
+            "policy_optimizer_step_count": 5000,
+            "distill_optimizer_step_count": 0,
+            "puzzle_optimizer_step_count": 0,
+            "kl_coef": trainer._kl_coef,
+            "term_stats": dict(trainer.term_stats),
+            "debug_episode_lengths": [],
+            "debug_episode_returns": [],
+            "debug_stop_probs": [],
+            "debug_score_changes": [],
+            "drift_values": [],
+            "plan_changes": [],
+            "value_of_memory": [],
+            "opnorm_clamp_warned": False,
+            "collection_state": trainer.collection_checkpoint_state(),
+            "environment_state": trainer.env.checkpoint_state(),
+            "exact_centering_state": trainer.exact_centering_checkpoint_state(),
+            "compute_accounting_state": compute_accounting_state,
             "terminal_reason_replay_version": 1,
         },
-        "replay_transitions": [replay_transition],
-        "replay_buffer_size": 1,
-        "replay_capacity": 100000,
+        "replay_transitions": replay_transitions,
+        "replay_buffer_size": PHASE4_FINAL_REPLAY_SIZE,
+        "replay_capacity": PHASE4_FINAL_REPLAY_SIZE,
         "model_config": model_config,
         "rl_config": rl_config,
         "dataset_provenance": dataset_provenance,
@@ -457,9 +620,7 @@ def _write_synthetic_phase4_checkpoint(
             "schema_version": 3,
             "training_seed": seed,
             "run_id": phase4_run_id(condition, seed),
-            "runtime_artifact_sha256": _fake_sha256(
-                f"training-runtime:{condition}:{seed}"
-            ),
+            "runtime_artifact_sha256": _FAKE_TRAINING_RUNTIME_SHA256,
             "config_sources": [
                 {"name": config_path.name, "sha256": config_sha256}
             ],
@@ -482,7 +643,13 @@ def _write_synthetic_phase4_checkpoint(
 
 
 class Phase4ReportingTest(unittest.TestCase):
-    def test_schema_v3_has_exact_availability_and_no_retired_fields(self) -> None:
+    def test_registered_final_training_design_is_frozen(self) -> None:
+        self.assertEqual(PHASE4_FINAL_ENV_STEPS, 320_000)
+        self.assertEqual(PHASE4_FINAL_EPISODES, 20_000)
+        self.assertEqual(PHASE4_FINAL_REPLAY_SIZE, 100_000)
+        self.assertEqual(PHASE4_EPISODE_LENGTH, 16)
+
+    def test_schema_v4_has_exact_availability_and_no_retired_fields(self) -> None:
         summary = _valid_summary()
 
         validate_phase4_summary(summary)
@@ -538,6 +705,18 @@ class Phase4ReportingTest(unittest.TestCase):
 
         with self.assertRaisesRegex(
             Phase4SummaryValidationError, "complete four-condition"
+        ):
+            validate_phase4_summary(summary)
+
+    def test_mixed_training_runtime_artifacts_are_rejected(self) -> None:
+        summary = _valid_summary()
+        summary["all_results"][-1]["training_runtime_artifact_sha256"] = (
+            _fake_sha256("different training runtime artifact")
+        )
+
+        with self.assertRaisesRegex(
+            Phase4SummaryValidationError,
+            "share one training runtime artifact SHA-256",
         ):
             validate_phase4_summary(summary)
 
@@ -622,6 +801,8 @@ class Phase4ReportingTest(unittest.TestCase):
                     "a" * 40,
                     "--expected_evaluator_runtime_sha256",
                     "d" * 64,
+                    "--expected_training_runtime_sha256",
+                    _FAKE_TRAINING_RUNTIME_SHA256,
                     "--summary_json",
                     str(summary_path),
                     "--checkpoint_dir",
@@ -647,6 +828,103 @@ class Phase4ReportingTest(unittest.TestCase):
                 make_paper_figures_phase4,
                 "discover_clean_git_source",
                 return_value={"git_commit": "a" * 40, "git_clean": True},
+            ):
+                self.assertEqual(
+                    make_paper_figures_phase4.main(
+                        runtime_attestation={
+                            "runtime_sha256": "f" * 64,
+                            "role": PHASE4_FIGURE_SOURCE_PROFILE,
+                            "source_git_commit": "a" * 40,
+                            "source_manifest_sha256": "d" * 64,
+                        }
+                    ),
+                    1,
+                )
+
+            self.assertFalse(output_path.exists())
+
+    def test_source_change_discards_staged_figure_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            summary_path = temp_path / "summary.json"
+            summary_path.write_text(json.dumps(_valid_summary()))
+            output_path = temp_path / "figures"
+
+            def write_plot_outputs(_summary, staging_path: Path) -> None:
+                for name in (
+                    "fig_phase4_2x2_norm_ablation.pdf",
+                    "fig_phase4_2x2_norm_ablation.png",
+                ):
+                    (staging_path / name).write_bytes(b"plot")
+
+            def write_bar_output(_summary, staging_path: Path) -> None:
+                (staging_path / "fig_phase4_bar_comparison.pdf").write_bytes(
+                    b"bar"
+                )
+
+            def write_table_output(_summary, staging_path: Path) -> None:
+                (
+                    staging_path / "table_phase4_2x2_norm_ablation.tex"
+                ).write_text("table")
+
+            with mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "make_paper_figures_phase4",
+                    "--project_root",
+                    str(temp_path),
+                    "--fbcode_root",
+                    str(temp_path),
+                    "--producer_project_root",
+                    str(temp_path),
+                    "--expected_producer_git_commit",
+                    "a" * 40,
+                    "--expected_evaluator_runtime_sha256",
+                    "d" * 64,
+                    "--expected_training_runtime_sha256",
+                    _FAKE_TRAINING_RUNTIME_SHA256,
+                    "--summary_json",
+                    str(summary_path),
+                    "--checkpoint_dir",
+                    str(temp_path / "checkpoints"),
+                    "--data_dir",
+                    str(temp_path / "data"),
+                    "--out_dir",
+                    str(output_path),
+                ],
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "resolve_phase4_source_roots",
+                return_value=(temp_path, temp_path),
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "verify_phase4_runtime_sources",
+                side_effect=["d" * 64, "e" * 64],
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "verify_phase4_producer_source",
+                return_value=_fake_producer_source(),
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "discover_clean_git_source",
+                return_value={"git_commit": "a" * 40, "git_clean": True},
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "load_summary",
+                return_value=_valid_summary(),
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "generate_2x2_plot",
+                side_effect=write_plot_outputs,
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "generate_bar_comparison",
+                side_effect=write_bar_output,
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "generate_latex_table",
+                side_effect=write_table_output,
             ):
                 self.assertEqual(
                     make_paper_figures_phase4.main(
@@ -864,6 +1142,81 @@ class Phase4DiagnosticInputTest(unittest.TestCase):
 
 
 class Phase4CheckpointTest(unittest.TestCase):
+    def setUp(self) -> None:
+        # The public loader enforces the 20k-episode/100k-replay constants
+        # asserted above. Scale only loop bounds in per-mutation unit fixtures.
+        global PHASE4_FINAL_ENV_STEPS
+        global PHASE4_FINAL_EPISODES
+        global PHASE4_FINAL_REPLAY_SIZE
+        self._production_design = (
+            PHASE4_FINAL_ENV_STEPS,
+            PHASE4_FINAL_EPISODES,
+            PHASE4_FINAL_REPLAY_SIZE,
+        )
+        self._production_expected_rl_config = _expected_rl_config
+
+        def compact_expected_rl_config(yaml_config, condition):
+            resolved = self._production_expected_rl_config(
+                yaml_config,
+                condition,
+            )
+            return {**resolved, "replay_capacity": PHASE4_EPISODE_LENGTH}
+
+        globals()["_expected_rl_config"] = compact_expected_rl_config
+        phase4_checkpoint_module._expected_rl_config = (
+            compact_expected_rl_config
+        )
+        PHASE4_FINAL_ENV_STEPS = PHASE4_EPISODE_LENGTH
+        PHASE4_FINAL_EPISODES = 1
+        PHASE4_FINAL_REPLAY_SIZE = PHASE4_EPISODE_LENGTH
+        phase4_checkpoint_module.PHASE4_FINAL_ENV_STEPS = PHASE4_EPISODE_LENGTH
+        phase4_checkpoint_module.PHASE4_FINAL_EPISODES = 1
+        phase4_checkpoint_module.PHASE4_FINAL_REPLAY_SIZE = PHASE4_EPISODE_LENGTH
+        self.addCleanup(self._restore_production_design)
+
+    def _restore_production_design(self) -> None:
+        global PHASE4_FINAL_ENV_STEPS
+        global PHASE4_FINAL_EPISODES
+        global PHASE4_FINAL_REPLAY_SIZE
+        (
+            PHASE4_FINAL_ENV_STEPS,
+            PHASE4_FINAL_EPISODES,
+            PHASE4_FINAL_REPLAY_SIZE,
+        ) = self._production_design
+        phase4_checkpoint_module.PHASE4_FINAL_ENV_STEPS = (
+            PHASE4_FINAL_ENV_STEPS
+        )
+        phase4_checkpoint_module.PHASE4_FINAL_EPISODES = PHASE4_FINAL_EPISODES
+        phase4_checkpoint_module.PHASE4_FINAL_REPLAY_SIZE = (
+            PHASE4_FINAL_REPLAY_SIZE
+        )
+        globals()["_expected_rl_config"] = self._production_expected_rl_config
+        phase4_checkpoint_module._expected_rl_config = (
+            self._production_expected_rl_config
+        )
+
+    def test_registered_dummy_data_always_has_policy_support(self) -> None:
+        for seed in (41, 42, 43):
+            with self.subTest(seed=seed), torch.random.fork_rng():
+                torch.manual_seed(seed)
+                dataset = DummyPuzzleDataset(
+                    ensure_sudoku_action_support=True,
+                )
+                rl_config = RLConfig(
+                    **_expected_rl_config(
+                        _registered_phase4_config_layer("nc_nv"),
+                        "nc_nv",
+                    )
+                )
+                environment = _phase4_environment(rl_config)
+                environment.dataset = dataset
+                for index in range(len(dataset)):
+                    environment.reset(index)
+                    action_mask = environment.get_action_mask()
+                    self.assertIsNotNone(action_mask)
+                    assert action_mask is not None
+                    self.assertTrue(bool(action_mask.any().item()))
+
     def test_full_checkpoint_is_strictly_bound_and_reverified(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             checkpoint_root, config_dir, checkpoint_path, config_path = (
@@ -875,6 +1228,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                 condition="nc_nv",
                 seed=41,
                 expected_producer_source=_fake_producer_source(),
+                expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                 device="cpu",
             )
             run = {
@@ -890,6 +1244,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     checkpoint_root,
                     config_dir,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 ),
                 1,
@@ -920,8 +1275,30 @@ class Phase4CheckpointTest(unittest.TestCase):
                             condition="nc_nv",
                             seed=41,
                             expected_producer_source=fabricated_source,
+                            expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                             device="cpu",
                         )
+
+    def test_self_asserted_training_runtime_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, _, checkpoint_path, config_path = (
+                _write_synthetic_phase4_checkpoint(Path(temp_dir))
+            )
+            with self.assertRaisesRegex(
+                Phase4CheckpointError,
+                "externally authorized digest",
+            ):
+                load_phase4_checkpoint(
+                    checkpoint_path,
+                    config_path,
+                    condition="nc_nv",
+                    seed=41,
+                    expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_fake_sha256(
+                        "unauthorized training runtime"
+                    ),
+                    device="cpu",
+                )
 
     def test_model_only_checkpoint_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -938,6 +1315,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -957,6 +1335,292 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
+                    device="cpu",
+                )
+
+    def test_truncated_resume_state_is_rejected(self) -> None:
+        mutations = {
+            "empty collector": lambda checkpoint: checkpoint["trainer_state"].__setitem__(
+                "collection_state", {}
+            ),
+            "empty environment": lambda checkpoint: checkpoint["trainer_state"].__setitem__(
+                "environment_state", {}
+            ),
+            "missing next episode": lambda checkpoint: checkpoint["trainer_state"].pop(
+                "next_episode_id"
+            ),
+            "missing value scheduler": lambda checkpoint: checkpoint.pop(
+                "value_scheduler_state_dict"
+            ),
+            "missing policy scheduler": lambda checkpoint: checkpoint.pop(
+                "policy_scheduler_state_dict"
+            ),
+            "empty compute accounting": lambda checkpoint: checkpoint[
+                "trainer_state"
+            ].__setitem__("compute_accounting_state", {}),
+            "malformed CUDA RNG": lambda checkpoint: checkpoint[
+                "rng_state"
+            ].__setitem__(
+                "torch_cuda", [torch.tensor([1], dtype=torch.uint8)]
+            ),
+            "misaligned CUDA RNG offset": lambda checkpoint: checkpoint[
+                "rng_state"
+            ].__setitem__(
+                "torch_cuda",
+                [
+                    torch.tensor(
+                        [0] * 8 + [1] + [0] * 7,
+                        dtype=torch.uint8,
+                    )
+                ],
+            ),
+            "noncanonical execution device": lambda checkpoint: checkpoint.__setitem__(
+                "execution_device", "definitely-not-a-device"
+            ),
+        }
+        for label, mutation in mutations.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temp_dir:
+                _, _, checkpoint_path, config_path = (
+                    _write_synthetic_phase4_checkpoint(
+                        Path(temp_dir),
+                        mutate=mutation,
+                    )
+                )
+                with self.assertRaises(Phase4CheckpointError):
+                    load_phase4_checkpoint(
+                        checkpoint_path,
+                        config_path,
+                        condition="nc_nv",
+                        seed=41,
+                        expected_producer_source=_fake_producer_source(),
+                        expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
+                        device="cpu",
+                    )
+
+    def test_optimizer_must_cover_the_registered_parameter_groups(self) -> None:
+        def truncate_optimizer(checkpoint):
+            checkpoint["value_optimizer_state_dict"] = {
+                "state": {0: {"step": torch.tensor(1.0)}},
+                "param_groups": [{"params": [0]}],
+            }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, _, checkpoint_path, config_path = _write_synthetic_phase4_checkpoint(
+                Path(temp_dir),
+                mutate=truncate_optimizer,
+            )
+            with self.assertRaises(Phase4CheckpointError):
+                load_phase4_checkpoint(
+                    checkpoint_path,
+                    config_path,
+                    condition="nc_nv",
+                    seed=41,
+                    expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
+                    device="cpu",
+                )
+
+    def test_optimizer_parameter_order_is_bound(self) -> None:
+        def swap_optimizer_parameters(checkpoint):
+            parameters = checkpoint["policy_optimizer_state_dict"][
+                "param_groups"
+            ][0]["params"]
+            parameters[0], parameters[1] = parameters[1], parameters[0]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, _, checkpoint_path, config_path = _write_synthetic_phase4_checkpoint(
+                Path(temp_dir),
+                mutate=swap_optimizer_parameters,
+            )
+            with self.assertRaisesRegex(
+                Phase4CheckpointError,
+                "parameter order",
+            ):
+                load_phase4_checkpoint(
+                    checkpoint_path,
+                    config_path,
+                    condition="nc_nv",
+                    seed=41,
+                    expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
+                    device="cpu",
+                )
+
+    def test_replay_payload_supports_registered_policy_update(self) -> None:
+        def use_masked_clue_action(checkpoint):
+            transition = checkpoint["replay_transitions"][0]
+            clue_positions = torch.nonzero(
+                transition.x["inputs"] > 1,
+                as_tuple=False,
+            ).reshape(-1)
+            transition.action = torch.tensor(
+                int(clue_positions[0].item()) * 32 + 2,
+                dtype=torch.long,
+            )
+
+        def change_successor(checkpoint):
+            transitions = checkpoint["replay_transitions"]
+            transition = transitions[0]
+            successor = cast(torch.Tensor, transition.y_next).clone()
+            successor[0] = (int(successor[0].item()) + 1) % 32
+            transition.y_next = successor
+            transitions[1].y = successor.clone()
+
+        def change_successor_clock(checkpoint):
+            transitions = checkpoint["replay_transitions"]
+            successor = copy.deepcopy(transitions[0].x_next)
+            successor["remaining_edits"] = (
+                successor["remaining_edits"] + 1
+            )
+            transitions[0].x_next = successor
+            transitions[1].x = copy.deepcopy(successor)
+
+        def change_reward(checkpoint):
+            transition = checkpoint["replay_transitions"][0]
+            transition.reward = transition.reward + 1.0
+
+        def change_terminal_flag(checkpoint):
+            transition = checkpoint["replay_transitions"][-1]
+            transition.done = torch.tensor([False], dtype=torch.bool)
+            transition.terminal_reason = None
+
+        def change_terminal_reason(checkpoint):
+            checkpoint["replay_transitions"][-1].terminal_reason = "stop"
+
+        mutations = {
+            "missing behavior log-probability": (
+                lambda checkpoint: setattr(
+                    checkpoint["replay_transitions"][0],
+                    "behavior_log_prob",
+                    None,
+                ),
+                "behavior log-probability",
+            ),
+            "disabled STOP action": (
+                lambda checkpoint: setattr(
+                    checkpoint["replay_transitions"][0],
+                    "action",
+                    torch.tensor(512, dtype=torch.long),
+                ),
+                "registered scalar action",
+            ),
+            "masked clue action": (
+                use_masked_clue_action,
+                "action is masked",
+            ),
+            "mismatched successor": (
+                change_successor,
+                "successor disagrees",
+            ),
+            "mismatched successor clock": (
+                change_successor_clock,
+                "successor disagrees",
+            ),
+            "mismatched reward": (
+                change_reward,
+                "reward disagrees",
+            ),
+            "mismatched terminal flag": (
+                change_terminal_flag,
+                "terminal flag disagrees",
+            ),
+            "mismatched terminal reason": (
+                change_terminal_reason,
+                "terminal reason disagrees",
+            ),
+        }
+        for label, (mutation, expected_error) in mutations.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temp_dir:
+                _, _, checkpoint_path, config_path = (
+                    _write_synthetic_phase4_checkpoint(
+                        Path(temp_dir),
+                        mutate=mutation,
+                    )
+                )
+                with self.assertRaisesRegex(
+                    Phase4CheckpointError, expected_error
+                ):
+                    load_phase4_checkpoint(
+                        checkpoint_path,
+                        config_path,
+                        condition="nc_nv",
+                        seed=41,
+                        expected_producer_source=_fake_producer_source(),
+                        expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
+                        device="cpu",
+                    )
+
+    def test_optimizer_slot_inventory_cannot_be_truncated(self) -> None:
+        def remove_optimizer_slot(checkpoint):
+            state = checkpoint["value_optimizer_state_dict"]["state"]
+            del state[next(iter(state))]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, _, checkpoint_path, config_path = _write_synthetic_phase4_checkpoint(
+                Path(temp_dir),
+                mutate=remove_optimizer_slot,
+            )
+            with self.assertRaises(Phase4CheckpointError):
+                load_phase4_checkpoint(
+                    checkpoint_path,
+                    config_path,
+                    condition="nc_nv",
+                    seed=41,
+                    expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
+                    device="cpu",
+                )
+
+    def test_optimizer_hyperparameters_must_match_registered_adam(self) -> None:
+        for field, value in (
+            ("betas", (0.0, 0.0)),
+            ("eps", 1.0),
+        ):
+            def change_hyperparameter(checkpoint, field=field, value=value):
+                checkpoint["value_optimizer_state_dict"]["param_groups"][0][
+                    field
+                ] = value
+
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temp_dir:
+                _, _, checkpoint_path, config_path = (
+                    _write_synthetic_phase4_checkpoint(
+                        Path(temp_dir),
+                        mutate=change_hyperparameter,
+                    )
+                )
+                with self.assertRaises(Phase4CheckpointError):
+                    load_phase4_checkpoint(
+                        checkpoint_path,
+                        config_path,
+                        condition="nc_nv",
+                        seed=41,
+                        expected_producer_source=_fake_producer_source(),
+                        expected_training_runtime_sha256=(
+                            _FAKE_TRAINING_RUNTIME_SHA256
+                        ),
+                        device="cpu",
+                    )
+
+    def test_scheduler_state_must_match_optimizer_progress(self) -> None:
+        def rewind_scheduler(checkpoint):
+            scheduler = checkpoint["value_scheduler_state_dict"]
+            scheduler["last_epoch"] = 0
+            scheduler["_step_count"] = 1
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, _, checkpoint_path, config_path = _write_synthetic_phase4_checkpoint(
+                Path(temp_dir),
+                mutate=rewind_scheduler,
+            )
+            with self.assertRaises(Phase4CheckpointError):
+                load_phase4_checkpoint(
+                    checkpoint_path,
+                    config_path,
+                    condition="nc_nv",
+                    seed=41,
+                    expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -980,6 +1644,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -999,6 +1664,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -1027,6 +1693,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -1055,6 +1722,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -1080,6 +1748,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -1105,6 +1774,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -1127,6 +1797,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -1148,6 +1819,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -1167,6 +1839,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -1186,6 +1859,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="nc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -1200,6 +1874,7 @@ class Phase4CheckpointTest(unittest.TestCase):
                     condition="yc_nv",
                     seed=41,
                     expected_producer_source=_fake_producer_source(),
+                    expected_training_runtime_sha256=_FAKE_TRAINING_RUNTIME_SHA256,
                     device="cpu",
                 )
 
@@ -1242,6 +1917,19 @@ class Phase4CheckpointTest(unittest.TestCase):
 
 
 class Phase4TrainingOrchestratorTest(unittest.TestCase):
+    def test_relative_paths_resolve_against_their_ownership_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            external = root / "external.json"
+            self.assertEqual(
+                resolve_phase4_path("results/checkpoints", root),
+                root / "results" / "checkpoints",
+            )
+            self.assertEqual(
+                resolve_phase4_path(external, root / "other"),
+                external,
+            )
+
     def test_roots_require_matching_fbcode_cell(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1338,7 +2026,10 @@ class Phase4RuntimeSourceIdentityTest(unittest.TestCase):
         relative_paths = (
             "phase4_runtime_entrypoint.py",
             "phase4_runtime_profile.py",
+            "puzzle_dataset.py",
             "runtime_archive_preflight.py",
+            "dataset/__init__.py",
+            "dataset/common.py",
             "models/model.py",
             "rl/trainer.py",
             "utils/identity.py",

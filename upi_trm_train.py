@@ -15,7 +15,7 @@ import tempfile
 import zipfile
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
-from typing import Any, Dict, List, MutableMapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, MutableMapping, Optional, Tuple, Union, cast
 
 from runtime_archive_preflight import RuntimePreflight, preflight_runtime
 
@@ -134,8 +134,9 @@ try:
 except ImportError:  # pragma: no cover
     trange = None
 
+wandb: Any = None
 try:
-    import wandb
+    wandb = importlib.import_module("wandb")
     WANDB_AVAILABLE = True
 except ImportError:  # pragma: no cover
     wandb = None
@@ -256,7 +257,7 @@ class BaselineSelection:
         self,
         selected_baseline: Optional[str],
         yaml_algorithm: Optional[str],
-        get_yaml_key: callable,
+        get_yaml_key: Callable[..., Any],
     ):
         self.selected_baseline = selected_baseline  # Effective baseline: CLI > YAML > None
         self.yaml_algorithm = yaml_algorithm  # Algorithm from YAML (for logging)
@@ -368,7 +369,12 @@ def build_trainer(
     
     if selected_baseline is None:
         # Default: UPI-TRM (theory-aligned algorithm)
-        trainer = UPITrmTrainer(model=model, env=env, rl_cfg=rl_cfg, device=device)
+        trainer = UPITrmTrainer(
+            model=cast(TinyRecursiveReasoningModel_ACTV1, model),
+            env=env,
+            rl_cfg=rl_cfg,
+            device=device,
+        )
         if verbose:
             print(f"[TRAINER] UPI-TRM (K={rl_cfg.K}, inner_n={rl_cfg.inner_unroll_n})")
             print(f"[TRAINER] CLI --baseline: {cli_baseline}, YAML algorithm: {yaml_algorithm}")
@@ -510,7 +516,7 @@ def build_trainer(
 def load_checkpoint(
     model: nn.Module,
     checkpoint_path: str,
-    device: str = None,
+    device: Optional[str] = None,
     strict: bool = False,
     expected_sha256: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -558,8 +564,11 @@ def load_checkpoint(
     puzzle_emb_key = "inner.puzzle_emb.weights"
     if puzzle_emb_key in cleaned_state_dict:
         loaded_emb = cleaned_state_dict[puzzle_emb_key]
-        if hasattr(model, "inner") and hasattr(model.inner, "puzzle_emb"):
-            expected_shape = model.inner.puzzle_emb.weights.shape
+        inner = getattr(model, "inner", None)
+        puzzle_emb = getattr(inner, "puzzle_emb", None)
+        puzzle_emb_weights = getattr(puzzle_emb, "weights", None)
+        if isinstance(puzzle_emb_weights, torch.Tensor):
+            expected_shape = puzzle_emb_weights.shape
             if loaded_emb.shape != expected_shape:
                 print(f"[Checkpoint] Resizing puzzle embeddings: {loaded_emb.shape} -> {expected_shape}")
                 # Resize by averaging existing embeddings
@@ -1026,7 +1035,7 @@ def _runtime_fingerprint() -> Dict[str, Any]:
             )
     cuda_matmul = getattr(torch.backends.cuda, "matmul", None)
     cudnn = getattr(torch.backends, "cudnn", None)
-    package_versions = {}
+    package_versions: Dict[str, Optional[str]] = {}
     for package_name in ("einops", "omegaconf", "pydantic", "PyYAML"):
         try:
             package_versions[package_name] = importlib.metadata.version(package_name)
@@ -1418,7 +1427,7 @@ def _validate_schema_v5_replay(
         behavior_log_prob = transition.behavior_log_prob
         if require_behavior_log_prob:
             if (
-                not torch.is_tensor(behavior_log_prob)
+                not isinstance(behavior_log_prob, torch.Tensor)
                 or behavior_log_prob.numel() != 1
                 or not bool(torch.isfinite(behavior_log_prob).all().item())
                 or float(behavior_log_prob.detach().cpu().reshape(()).item()) > 0
@@ -2447,7 +2456,7 @@ def save_checkpoint(
                 raise RuntimeError(
                     "Schema-v5 next episode ID disagrees with replay before save."
                 )
-    checkpoint = {
+    checkpoint: Dict[str, Any] = {
         "checkpoint_schema_version": checkpoint_schema_version,
         "training_protocol": training_protocol,
         "execution_device": execution_device,
@@ -2512,9 +2521,12 @@ def save_checkpoint(
         # UPITrmTrainer has separate value and policy optimizers
         checkpoint["value_optimizer_state_dict"] = trainer.value_opt.state_dict()
         checkpoint["policy_optimizer_state_dict"] = trainer.policy_opt.state_dict()
-        if getattr(trainer, "old_policy_distill_opt", None) is not None:
+        old_policy_distill_opt = getattr(
+            trainer, "old_policy_distill_opt", None
+        )
+        if old_policy_distill_opt is not None:
             checkpoint["old_policy_distill_optimizer_state_dict"] = (
-                trainer.old_policy_distill_opt.state_dict()
+                old_policy_distill_opt.state_dict()
             )
     elif hasattr(trainer, 'optimizer'):
         # PPO/A2C have a single combined optimizer
@@ -2523,12 +2535,14 @@ def save_checkpoint(
     if puzzle_emb_optimizer is not None:
         checkpoint["puzzle_emb_optimizer_state_dict"] = puzzle_emb_optimizer.state_dict()
 
-    if getattr(trainer, "value_scheduler", None) is not None:
-        checkpoint["value_scheduler_state_dict"] = trainer.value_scheduler.state_dict()
-    if getattr(trainer, "policy_scheduler", None) is not None:
-        checkpoint["policy_scheduler_state_dict"] = trainer.policy_scheduler.state_dict()
+    value_scheduler = getattr(trainer, "value_scheduler", None)
+    if value_scheduler is not None:
+        checkpoint["value_scheduler_state_dict"] = value_scheduler.state_dict()
+    policy_scheduler = getattr(trainer, "policy_scheduler", None)
+    if policy_scheduler is not None:
+        checkpoint["policy_scheduler_state_dict"] = policy_scheduler.state_dict()
 
-    checkpoint["trainer_state"] = {
+    trainer_state_payload: Dict[str, Any] = {
         "next_episode_id": int(getattr(trainer, "_next_episode_id", 0)),
         "train_step_count": int(getattr(trainer, "_train_step_count", 0)),
         "env_step_count": int(getattr(trainer, "_env_step_count", 0)),
@@ -2570,12 +2584,13 @@ def save_checkpoint(
             getattr(trainer, "_opnorm_clamp_warned", False)
         ),
     }
+    checkpoint["trainer_state"] = trainer_state_payload
     compute_checkpoint_state_fn = getattr(
         trainer, "compute_accounting_checkpoint_state", None
     )
     if callable(compute_checkpoint_state_fn):
         try:
-            checkpoint["trainer_state"]["compute_accounting_state"] = (
+            trainer_state_payload["compute_accounting_state"] = (
                 compute_checkpoint_state_fn()
             )
         except RuntimeError:
@@ -2589,7 +2604,7 @@ def save_checkpoint(
                 "omitting compute state from this non-confirmatory checkpoint."
             )
     if is_upi_checkpoint:
-        checkpoint["trainer_state"].update(
+        trainer_state_payload.update(
             {
                 "collection_state": collection_checkpoint_state,
                 "environment_state": environment_checkpoint_state,
@@ -2604,10 +2619,10 @@ def save_checkpoint(
                     "Schema-v5 checkpoints require exact-centering state."
                 )
         else:
-            checkpoint["trainer_state"]["exact_centering_state"] = (
+            trainer_state_payload["exact_centering_state"] = (
                 centering_state_fn()
             )
-        checkpoint["trainer_state"]["terminal_reason_replay_version"] = 1
+        trainer_state_payload["terminal_reason_replay_version"] = 1
     else:
         print(
             "[Checkpoint] Baseline trainer checkpoint is weights-only for future "
@@ -3066,7 +3081,12 @@ def resume_from_checkpoint(
         saved_puzzle_optimizer_steps = int(
             trainer_state.get("puzzle_optimizer_step_count", 0)
         )
-    if int(checkpoint["replay_capacity"]) != int(trainer.replay.storage.maxlen):
+    replay_capacity = trainer.replay.storage.maxlen
+    if replay_capacity is None:
+        raise RuntimeError(
+            "Trainer replay buffer must have a finite capacity for resume."
+        )
+    if int(checkpoint["replay_capacity"]) != replay_capacity:
         raise RuntimeError(
             "Checkpoint replay capacity mismatch; exact continuation is impossible."
         )
@@ -3400,23 +3420,26 @@ def resume_from_checkpoint(
         )
     trainer.value_opt.load_state_dict(checkpoint["value_optimizer_state_dict"])
     trainer.policy_opt.load_state_dict(checkpoint["policy_optimizer_state_dict"])
+    old_policy_distill_opt = getattr(trainer, "old_policy_distill_opt", None)
     if (
         "old_policy_distill_optimizer_state_dict" in checkpoint
-        and getattr(trainer, "old_policy_distill_opt", None) is not None
+        and old_policy_distill_opt is not None
     ):
-        trainer.old_policy_distill_opt.load_state_dict(
+        old_policy_distill_opt.load_state_dict(
             checkpoint["old_policy_distill_optimizer_state_dict"]
         )
+    value_scheduler = getattr(trainer, "value_scheduler", None)
     if (
         "value_scheduler_state_dict" in checkpoint
-        and getattr(trainer, "value_scheduler", None) is not None
+        and value_scheduler is not None
     ):
-        trainer.value_scheduler.load_state_dict(checkpoint["value_scheduler_state_dict"])
+        value_scheduler.load_state_dict(checkpoint["value_scheduler_state_dict"])
+    policy_scheduler = getattr(trainer, "policy_scheduler", None)
     if (
         "policy_scheduler_state_dict" in checkpoint
-        and getattr(trainer, "policy_scheduler", None) is not None
+        and policy_scheduler is not None
     ):
-        trainer.policy_scheduler.load_state_dict(checkpoint["policy_scheduler_state_dict"])
+        policy_scheduler.load_state_dict(checkpoint["policy_scheduler_state_dict"])
     
     if puzzle_emb_optimizer is not None:
         puzzle_emb_optimizer.load_state_dict(checkpoint["puzzle_emb_optimizer_state_dict"])
@@ -3899,7 +3922,10 @@ def _log_training_metrics(
         ]:
             if key in metrics:
                 wandb_metrics[f"debug/{key}"] = metrics[key]
-        wandb.log(wandb_metrics, step=progress_step)
+        wandb_module = wandb
+        if wandb_module is None:
+            raise RuntimeError("WandB logging was enabled without the module.")
+        wandb_module.log(wandb_metrics, step=progress_step)
 
 
 def _run_eval_and_log(
@@ -4050,7 +4076,12 @@ def _run_eval_and_log(
                 wandb_eval["eval/filled_mean"] = filled_mean
                 wandb_eval["eval/violations_mean"] = violations_mean
                 wandb_eval["eval/zero_cand_mean"] = zero_cand_mean
-            wandb.log(wandb_eval, step=progress_step)
+            wandb_module = wandb
+            if wandb_module is None:
+                raise RuntimeError(
+                    "WandB logging was enabled without the module."
+                )
+            wandb_module.log(wandb_eval, step=progress_step)
     else:
         print(f"{prefix} (eval not available for baseline trainer)")
 
@@ -4070,7 +4101,12 @@ def _run_eval_and_log(
             wandb_debug = {}
             for key, value in debug_stats.items():
                 wandb_debug[f"debug/{key}"] = value
-            wandb.log(wandb_debug, step=progress_step)
+            wandb_module = wandb
+            if wandb_module is None:
+                raise RuntimeError(
+                    "WandB logging was enabled without the module."
+                )
+            wandb_module.log(wandb_debug, step=progress_step)
 
     if hasattr(trainer, "clear_debug_stats"):
         trainer.clear_debug_stats()
@@ -4495,11 +4531,17 @@ def main():
         batch_size=rl_cfg.batch_size,
         require_explicit=strict_evidence_run,
     )
-    dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
-        dataset_paths=args.dataset_paths,
-        pool_size=train_pool_size,
-        split=args.train_split,
-    )
+    if phase4_publication_source is not None and args.dataset_paths is None:
+        dataset = DummyPuzzleDataset(ensure_sudoku_action_support=True)
+        seq_len = dataset.seq_len
+        vocab_size = dataset.vocab_size
+        num_identifiers = dataset.num_identifiers
+    else:
+        dataset, seq_len, vocab_size, num_identifiers = build_dataset_from_paths(
+            dataset_paths=args.dataset_paths,
+            pool_size=train_pool_size,
+            split=args.train_split,
+        )
     if args.train_pool_size is not None and len(dataset) != train_pool_size:
         raise RuntimeError(
             "Training split is smaller than --train-pool-size; refusing to "
@@ -4637,7 +4679,9 @@ def main():
         print(f"[DATASET] resolved_dataset_name=dummy")
         print(f"[DATASET] num_samples={len(dataset)}")
         provenance_builder_name = "rl.training_setup.DummyPuzzleDataset"
-        provenance_builder_version = 1
+        provenance_builder_version = (
+            2 if phase4_publication_source is not None else 1
+        )
         provenance_generation_seed = args.seed
         provenance_train_split = "dummy"
         provenance_eval_split = "dummy"
@@ -4718,6 +4762,18 @@ def main():
     num_edit_actions = seq_len * vocab_size
     rl_num_actions = num_edit_actions + 1  # STOP action appended at the end
     env.set_stop_action_id(stop_id=rl_num_actions - 1)
+    if phase4_publication_source is not None:
+        unsupported_records: List[int] = []
+        for index in range(len(dataset)):
+            env.reset(index)
+            action_mask = env.get_action_mask()
+            if action_mask is None or not bool(action_mask.any().item()):
+                unsupported_records.append(index)
+        if unsupported_records:
+            raise RuntimeError(
+                "Registered Phase 4 dataset has no valid policy action for "
+                f"records {unsupported_records}."
+            )
 
     dataset_provenance = build_dataset_provenance(
         builder_name=provenance_builder_name,

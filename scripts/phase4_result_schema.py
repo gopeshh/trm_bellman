@@ -654,8 +654,9 @@ def _validate_aggregate_consistency(
 def validate_phase4_summary(summary: Any) -> None:
     """Validate a newly generated, publication-eligible Phase 4 summary.
 
-    Schema-less, schema-v1, and schema-v2 files remain historical artifacts. They are not
-    migrated because a legacy zero cannot be distinguished from a measurement.
+    Schema-less and all earlier-schema files remain historical artifacts. They
+    are not migrated because a legacy zero cannot be distinguished from a
+    measurement.
     """
     if not isinstance(summary, dict):
         raise Phase4SummaryValidationError("summary must be an object")
@@ -793,6 +794,13 @@ def validate_phase4_summary(summary: Any) -> None:
     if len(producer_commits) != 1 or len(producer_manifests) != 1:
         raise Phase4SummaryValidationError(
             "all_results must share one clean producer commit and source manifest"
+        )
+    training_runtime_digests = {
+        run["training_runtime_artifact_sha256"] for run in all_results
+    }
+    if len(training_runtime_digests) != 1:
+        raise Phase4SummaryValidationError(
+            "all_results must share one training runtime artifact SHA-256"
         )
     for seed in seeds:
         dataset_digests = {

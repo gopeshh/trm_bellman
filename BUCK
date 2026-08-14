@@ -1601,8 +1601,10 @@ python_library(
     deps = [
         ":models",
         ":phase4_result_schema",
+        ":puzzle_dataset_lib",
         ":rl",
         ":utils",
+        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
