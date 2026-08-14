@@ -1528,6 +1528,43 @@ python_binary(
 )
 
 # ============================================================================
+# Exact finite-MDP numerical sanity suite (no learned checkpoints)
+# ============================================================================
+
+python_library(
+    name = "exact_finite_mdp_sanity_lib",
+    srcs = ["scripts/exact_finite_mdp_sanity.py"],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+python_binary(
+    name = "exact_finite_mdp_sanity",
+    srcs = [],
+    base_module = "",
+    main_module = "scripts.exact_finite_mdp_sanity",
+    deps = [
+        ":exact_finite_mdp_sanity_lib",
+    ],
+)
+
+python_unittest(
+    name = "test_exact_finite_mdp_sanity",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_exact_finite_mdp_sanity_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":exact_finite_mdp_sanity_lib",
+        "fbsource//third-party/pypi/numpy:numpy",
+    ],
+)
+
+# ============================================================================
 # Phase 4: 2×2 Norm Ablation (Multi-seed)
 # ============================================================================
 
