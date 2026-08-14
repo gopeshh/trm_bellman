@@ -803,6 +803,10 @@ class Phase4ReportingTest(unittest.TestCase):
                     "d" * 64,
                     "--expected_training_runtime_sha256",
                     _FAKE_TRAINING_RUNTIME_SHA256,
+                    "--evaluator_runtime_archive",
+                    str(temp_path / "evaluator.par"),
+                    "--training_runtime_archive",
+                    str(temp_path / "training.par"),
                     "--summary_json",
                     str(summary_path),
                     "--checkpoint_dir",
@@ -820,6 +824,10 @@ class Phase4ReportingTest(unittest.TestCase):
                 make_paper_figures_phase4,
                 "verify_phase4_runtime_sources",
                 return_value="d" * 64,
+            ), mock.patch.object(
+                make_paper_figures_phase4,
+                "verify_runtime_archive_sha256",
+                side_effect=lambda _path, digest, _label: digest,
             ), mock.patch.object(
                 make_paper_figures_phase4,
                 "verify_phase4_producer_source",
@@ -884,6 +892,10 @@ class Phase4ReportingTest(unittest.TestCase):
                     "d" * 64,
                     "--expected_training_runtime_sha256",
                     _FAKE_TRAINING_RUNTIME_SHA256,
+                    "--evaluator_runtime_archive",
+                    str(temp_path / "evaluator.par"),
+                    "--training_runtime_archive",
+                    str(temp_path / "training.par"),
                     "--summary_json",
                     str(summary_path),
                     "--checkpoint_dir",
@@ -903,16 +915,23 @@ class Phase4ReportingTest(unittest.TestCase):
                 side_effect=["d" * 64, "e" * 64],
             ), mock.patch.object(
                 make_paper_figures_phase4,
+                "verify_runtime_archive_sha256",
+                side_effect=lambda _path, digest, _label: digest,
+            ), mock.patch.object(
+                make_paper_figures_phase4,
                 "verify_phase4_producer_source",
                 return_value=_fake_producer_source(),
             ), mock.patch.object(
                 make_paper_figures_phase4,
                 "discover_clean_git_source",
-                return_value={"git_commit": "a" * 40, "git_clean": True},
+                return_value={"git_commit": "b" * 40, "git_clean": True},
             ), mock.patch.object(
                 make_paper_figures_phase4,
                 "load_summary",
-                return_value=_valid_summary(),
+                return_value=(
+                    _valid_summary(),
+                    _fake_sha256("summary bytes"),
+                ),
             ), mock.patch.object(
                 make_paper_figures_phase4,
                 "generate_2x2_plot",
@@ -931,14 +950,19 @@ class Phase4ReportingTest(unittest.TestCase):
                         runtime_attestation={
                             "runtime_sha256": "f" * 64,
                             "role": PHASE4_FIGURE_SOURCE_PROFILE,
-                            "source_git_commit": "a" * 40,
+                            "source_git_commit": "b" * 40,
                             "source_manifest_sha256": "d" * 64,
                         }
                     ),
                     1,
                 )
 
-            self.assertFalse(output_path.exists())
+            self.assertTrue(output_path.is_dir())
+            self.assertFalse((output_path / "CURRENT.json").exists())
+            self.assertEqual(
+                list((output_path / "generations").iterdir()),
+                [],
+            )
 
     def test_nonfinite_measurement_is_rejected_before_serialization(self) -> None:
         summary = _valid_summary()

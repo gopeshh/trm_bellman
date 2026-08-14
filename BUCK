@@ -1549,6 +1549,15 @@ python_library(
 )
 
 python_library(
+    name = "phase4_figure_publication",
+    srcs = ["scripts/phase4_figure_publication.py"],
+    base_module = "",
+    deps = [
+        ":utils",
+    ],
+)
+
+python_library(
     name = "phase4_source",
     srcs = ["scripts/phase4_source.py"],
     base_module = "",
@@ -1659,6 +1668,7 @@ python_binary(
     deps = [
         ":phase4_checkpoint",
         ":phase4_diagnostic_inputs",
+        ":phase4_figure_publication",
         ":phase4_result_schema",
         ":phase4_runtime_profile",
         ":phase4_source",
@@ -1709,6 +1719,7 @@ python_unittest(
         ":models",
         ":phase4_checkpoint",
         ":phase4_diagnostic_inputs",
+        ":phase4_figure_publication",
         ":phase4_result_schema",
         ":phase4_runtime_launcher_lib",
         ":phase4_runtime_profile",
@@ -1719,6 +1730,19 @@ python_unittest(
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
+    ],
+)
+
+python_unittest(
+    name = "test_phase4_figure_publication",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_phase4_figure_publication_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":phase4_figure_publication",
+        ":utils",
     ],
 )
 

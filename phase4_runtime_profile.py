@@ -42,6 +42,7 @@ PHASE4_PROFILE_ENTRYPOINTS = {
         "scripts/audit_phase4_paper_ready.py",
     ),
     PHASE4_FIGURE_SOURCE_PROFILE: (
+        "scripts/phase4_figure_publication.py",
         "scripts/make_paper_figures_phase4.py",
     ),
 }
