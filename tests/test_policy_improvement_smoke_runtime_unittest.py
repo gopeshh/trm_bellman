@@ -42,6 +42,17 @@ class PolicyImprovementSmokeRuntimeTest(unittest.TestCase):
             {"num_steps": 16, "num_epochs": 1},
         )
 
+    def test_registered_checker_is_bound_for_exact_upi_updates(self) -> None:
+        trainer = object.__new__(smoke.UPITrmTrainer)
+        trainer._checker_fn = None
+        checker = object()
+        smoke._bind_registered_checker(trainer, checker)
+        self.assertIs(trainer._checker_fn, checker)
+
+        baseline = SimpleNamespace()
+        smoke._bind_registered_checker(baseline, checker)
+        self.assertFalse(hasattr(baseline, "_checker_fn"))
+
     def _context_and_session(
         self,
         root: Path,

@@ -172,6 +172,18 @@ def _optional_trainer_config_dict(trainer: Any, module: Any) -> dict[str, Any] |
     return module._config_dict(config) if config is not None else None
 
 
+def _bind_registered_checker(trainer: Any, checker: Any) -> None:
+    """Install the exact-baseline checker on UPI trainers as production does."""
+
+    if not isinstance(trainer, UPITrmTrainer):
+        return
+    trainer.set_checker_fn(checker)
+    if trainer._checker_fn is not checker:
+        raise PolicyImprovementSmokeError(
+            "UPI trainer did not retain the registered checker."
+        )
+
+
 def _sha256(value: object, *, name: str) -> str:
     if (
         not isinstance(value, str)
@@ -872,6 +884,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
             raise PolicyImprovementSmokeError("Registered PPO smoke trainer differs.")
     elif not isinstance(trainer, UPITrmTrainer):
         raise PolicyImprovementSmokeError("Registered UPI smoke trainer differs.")
+    _bind_registered_checker(trainer, checker)
     effective_config = {
         "schema_name": "policy_improvement_smoke_effective_config_v1",
         "protocol_sha256": context.protocol_sha256,
