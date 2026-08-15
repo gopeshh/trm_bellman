@@ -14,6 +14,7 @@ from scripts.policy_improvement_registry import (
     validate_registry_document,
 )
 from scripts.policy_improvement_audit import (
+    _load_historical_runtime_authorizations,
     audit_result_set,
     derive_registered_selection,
 )
@@ -78,6 +79,12 @@ def main(
     parser.add_argument("--producer-source-manifest-sha256", required=True)
     parser.add_argument("--runtime-authorization-json", required=True)
     parser.add_argument("--runtime-authorization-sha256", required=True)
+    parser.add_argument(
+        "--historical-runtime-authorization",
+        action="append",
+        default=[],
+        metavar="PATH=SHA256",
+    )
     arguments = parser.parse_args(argv)
     if checkpoint_validator is None:
         raise PolicyImprovementSchemaError(
@@ -109,6 +116,10 @@ def main(
         raise PolicyImprovementSchemaError(
             "Runtime authorization names another protocol."
         )
+    historical_authorizations = _load_historical_runtime_authorizations(
+        arguments.historical_runtime_authorization,
+        protocol_sha256=protocol_sha256,
+    )
     audit_role = next(
         (
             _mapping(role, path="runtime_authorization.audit_role")
@@ -195,6 +206,7 @@ def main(
         dataset_root=arguments.dataset_root,
         evidence_root=arguments.evidence_root,
         runtime_authorization=authorization,
+        historical_runtime_authorizations=historical_authorizations,
         audit_execution_identity={
             **expected_execution,
             "launcher_sha256": arguments.launcher_sha256,

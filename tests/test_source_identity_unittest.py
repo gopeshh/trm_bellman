@@ -13,6 +13,7 @@ from utils.source_identity import (
     SourceIdentityError,
     assert_runtime_archive_sources_match_manifest,
     behavior_source_relative_paths,
+    behavior_source_relative_paths_from_inventory,
     build_producer_source_manifest,
     validate_producer_source_manifest,
 )
@@ -24,13 +25,16 @@ class TestSourceIdentity(unittest.TestCase):
         encoded_raw_name = raw_name.encode("ascii")
         encoded_effective_name = effective_name.encode("utf-8")
         info = ZipInfo(raw_name)
-        info.extra = struct.pack(
-            "<HHBL",
-            0x7075,
-            5 + len(encoded_effective_name),
-            1,
-            zlib.crc32(encoded_raw_name),
-        ) + encoded_effective_name
+        info.extra = (
+            struct.pack(
+                "<HHBL",
+                0x7075,
+                5 + len(encoded_effective_name),
+                1,
+                zlib.crc32(encoded_raw_name),
+            )
+            + encoded_effective_name
+        )
         return info
 
     def _source_tree(self, root: Path) -> None:
@@ -59,9 +63,7 @@ class TestSourceIdentity(unittest.TestCase):
         policy_config_dir = root / "configs" / "policy_improvement_v1"
         policy_config_dir.mkdir(parents=True)
         (policy_config_dir / "protocol.json").write_text("{}\n", encoding="ascii")
-        (policy_config_dir / "method.yaml").write_text(
-            "gamma: 0.9\n", encoding="ascii"
-        )
+        (policy_config_dir / "method.yaml").write_text("gamma: 0.9\n", encoding="ascii")
 
     def _runtime_archive(
         self,
@@ -96,6 +98,15 @@ class TestSourceIdentity(unittest.TestCase):
             self.assertEqual(
                 list(manifest["sources"]),
                 behavior_source_relative_paths(root),
+            )
+            repository_files = [
+                path.relative_to(root).as_posix()
+                for path in root.rglob("*")
+                if path.is_file()
+            ]
+            self.assertEqual(
+                list(manifest["sources"]),
+                behavior_source_relative_paths_from_inventory(repository_files),
             )
             self.assertNotIn(SOURCE_MANIFEST_RELATIVE_PATH, manifest["sources"])
 

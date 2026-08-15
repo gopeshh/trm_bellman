@@ -80,12 +80,14 @@ HEX64 = "a" * 64
 def audit_result_set(*args: object, **kwargs: object) -> dict[str, Any]:
     kwargs.setdefault("project_root", REPOSITORY_ROOT)
     kwargs.setdefault("checkpoint_validator", _fixture_checkpoint_validator)
+    kwargs.setdefault("_producer_source_authenticator", lambda _: None)
     return _audit_result_set(*args, **kwargs)
 
 
 def analyze_stage2_confirmatory(*args: object, **kwargs: object) -> dict[str, Any]:
     kwargs.setdefault("project_root", REPOSITORY_ROOT)
     kwargs.setdefault("checkpoint_validator", _fixture_checkpoint_validator)
+    kwargs.setdefault("_producer_source_authenticator", lambda _: None)
     return _analyze_stage2_confirmatory(*args, **kwargs)
 
 

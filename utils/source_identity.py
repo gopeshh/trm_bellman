@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 from zipfile import BadZipFile, ZipFile
 
 
@@ -36,6 +36,59 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 class SourceIdentityError(RuntimeError):
     """Raised when producer source bytes cannot be bound to the runtime."""
+
+
+def behavior_source_relative_paths_from_inventory(
+    relative_paths: Iterable[str],
+) -> list[str]:
+    """Select the complete producer inventory from canonical repository paths."""
+
+    inventory: set[str] = set()
+    for relative_path in relative_paths:
+        candidate = PurePosixPath(relative_path)
+        if (
+            not relative_path
+            or "\\" in relative_path
+            or candidate.is_absolute()
+            or candidate.as_posix() != relative_path
+            or any(part in {"", ".", ".."} for part in candidate.parts)
+        ):
+            raise SourceIdentityError("Repository source inventory is not canonical.")
+        inventory.add(relative_path)
+    required = {*_ROOT_SOURCES, *_ADDITIONAL_SOURCES}
+    missing = required - inventory
+    if missing:
+        raise SourceIdentityError(
+            f"Producer repository is missing sources {sorted(missing)!r}."
+        )
+    selected = set(required)
+    for relative_directory in _SOURCE_DIRECTORIES:
+        prefix = f"{relative_directory}/"
+        members = {
+            path
+            for path in inventory
+            if path.startswith(prefix) and path.endswith(".py")
+        }
+        if not any(path.startswith(prefix) for path in inventory):
+            raise SourceIdentityError(
+                f"Producer repository is missing directory {relative_directory!r}."
+            )
+        selected.update(members)
+    for relative_directory in _CONFIG_DIRECTORIES:
+        parent = PurePosixPath(relative_directory)
+        members = {
+            path
+            for path in inventory
+            if PurePosixPath(path).parent == parent
+            and PurePosixPath(path).suffix in {".json", ".yaml"}
+            and path != SOURCE_MANIFEST_RELATIVE_PATH
+        }
+        if not any(PurePosixPath(path).parent == parent for path in inventory):
+            raise SourceIdentityError(
+                "Producer repository is missing registered configuration sources."
+            )
+        selected.update(members)
+    return sorted(selected)
 
 
 def behavior_source_relative_paths(root: str | Path) -> list[str]:
@@ -153,10 +206,15 @@ def _is_behavior_python_archive_member(relative_path: str) -> bool:
 
 def _is_behavior_bytecode_archive_member(relative_path: str) -> bool:
     path = PurePosixPath(relative_path)
-    if path.is_absolute() or ".." in path.parts or path.suffix not in {
-        ".pyc",
-        ".pyo",
-    }:
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or path.suffix
+        not in {
+            ".pyc",
+            ".pyo",
+        }
+    ):
         return False
     if path.parts[0] in _SOURCE_DIRECTORIES:
         return True
@@ -165,17 +223,15 @@ def _is_behavior_bytecode_archive_member(relative_path: str) -> bool:
         return path.stem in root_stems
     if path.parent.as_posix() == "scripts":
         return any(
-            path.stem == PurePosixPath(source).stem
-            for source in _ADDITIONAL_SOURCES
+            path.stem == PurePosixPath(source).stem for source in _ADDITIONAL_SOURCES
         )
     if path.parts[:2] == ("scripts", "__pycache__"):
         return any(
             path.name.startswith(f"{PurePosixPath(source).stem}.")
             for source in _ADDITIONAL_SOURCES
         )
-    return (
-        path.parts[0] == "__pycache__"
-        and any(path.name.startswith(f"{stem}.") for stem in root_stems)
+    return path.parts[0] == "__pycache__" and any(
+        path.name.startswith(f"{stem}.") for stem in root_stems
     )
 
 

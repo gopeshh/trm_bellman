@@ -205,6 +205,7 @@ python_library(
         ":policy_improvement_registry",
         ":policy_improvement_schema",
         ":policy_improvement_test_open",
+        ":utils",
     ],
 )
 
@@ -251,6 +252,7 @@ python_binary(
         ":policy_improvement_test_open",
         ":policy_improvement_test_open_cli",
         ":runtime_archive_preflight",
+        ":utils",
     ],
 )
 
@@ -713,6 +715,19 @@ python_unittest(
         ":policy_improvement_test_open",
         ":policy_improvement_test_open_cli",
         ":rl",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_audit",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_audit_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":policy_improvement_audit_lib",
+        ":policy_improvement_schema",
     ],
 )
 

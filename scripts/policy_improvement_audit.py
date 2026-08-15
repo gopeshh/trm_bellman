@@ -17,6 +17,7 @@ import math
 import os
 import stat
 import struct
+import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from fractions import Fraction
 from functools import lru_cache
@@ -49,9 +50,15 @@ from scripts.policy_improvement_schema import (
     validate_runtime_authorization,
 )
 from scripts.policy_improvement_test_open import authenticate_test_open
+from utils.source_identity import (
+    SOURCE_MANIFEST_RELATIVE_PATH,
+    SourceIdentityError,
+    behavior_source_relative_paths_from_inventory,
+    validate_producer_source_manifest,
+)
 
 
-AUDIT_SCHEMA_VERSION = 4
+AUDIT_SCHEMA_VERSION = 5
 PER_INSTANCE_SCHEMA_VERSION = 2
 _DATASET_TOP_LEVEL_NAMES = {
     "MANIFEST.json",
@@ -145,6 +152,279 @@ def _number(value: object, *, path: str) -> float:
     if not math.isfinite(result):
         raise PolicyImprovementSchemaError(f"{path} must be finite.")
     return result
+
+
+def _git_object_bytes(
+    project_root: Path,
+    arguments: Sequence[str],
+    *,
+    label: str,
+) -> bytes:
+    """Read one exact Git object without a shell or working-tree filters."""
+
+    try:
+        git_environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        }
+        git_environment.update(
+            {
+                "GIT_NO_REPLACE_OBJECTS": "1",
+                "GIT_OPTIONAL_LOCKS": "0",
+            }
+        )
+        completed = subprocess.run(
+            ["git", "--no-replace-objects", *arguments],
+            cwd=project_root,
+            check=False,
+            env=git_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise PolicyImprovementSchemaError(
+            f"Historical producer {label} could not be resolved."
+        ) from exc
+    if completed.returncode != 0:
+        raise PolicyImprovementSchemaError(
+            f"Historical producer {label} could not be resolved."
+        )
+    return completed.stdout
+
+
+def _authenticate_authorization_producer_source(
+    authorization: Mapping[str, object],
+    *,
+    project_root: str | Path,
+) -> None:
+    """Resolve one authorized producer commit and rehash its complete manifest."""
+
+    root = Path(project_root)
+    try:
+        root_status = root.lstat()
+        resolved_root = root.resolve(strict=True)
+    except OSError as exc:
+        raise PolicyImprovementSchemaError(
+            "Historical producer project root is unavailable."
+        ) from exc
+    if (
+        root != resolved_root
+        or stat.S_ISLNK(root_status.st_mode)
+        or not stat.S_ISDIR(root_status.st_mode)
+        or root_status.st_uid != os.geteuid()
+    ):
+        raise PolicyImprovementSchemaError(
+            "Historical producer project root is aliased or unowned."
+        )
+    commit = str(authorization["producer_git_commit"])
+    resolved_commit = _git_object_bytes(
+        root,
+        ["rev-parse", "--verify", f"{commit}^{{commit}}"],
+        label="commit",
+    ).strip()
+    if resolved_commit != commit.encode("ascii"):
+        raise PolicyImprovementSchemaError(
+            "Historical producer commit does not resolve exactly."
+        )
+    manifest_bytes = _git_object_bytes(
+        root,
+        ["cat-file", "blob", f"{commit}:{SOURCE_MANIFEST_RELATIVE_PATH}"],
+        label="manifest",
+    )
+    if (
+        hashlib.sha256(manifest_bytes).hexdigest()
+        != authorization["producer_source_manifest_sha256"]
+    ):
+        raise PolicyImprovementSchemaError(
+            "Historical producer manifest digest differs from its commit."
+        )
+    try:
+        manifest = validate_producer_source_manifest(
+            load_strict_json_bytes(manifest_bytes)
+        )
+    except (PolicyImprovementSchemaError, SourceIdentityError) as exc:
+        raise PolicyImprovementSchemaError(
+            "Historical producer manifest is invalid."
+        ) from exc
+    tree_output = _git_object_bytes(
+        root,
+        ["ls-tree", "-r", "--name-only", "-z", commit],
+        label="tree inventory",
+    )
+    try:
+        tree_paths = [item.decode("utf-8") for item in tree_output.split(b"\0") if item]
+        expected_sources = behavior_source_relative_paths_from_inventory(tree_paths)
+    except (UnicodeDecodeError, SourceIdentityError) as exc:
+        raise PolicyImprovementSchemaError(
+            "Historical producer tree inventory is invalid."
+        ) from exc
+    sources = manifest["sources"]
+    if list(sources) != expected_sources:
+        raise PolicyImprovementSchemaError(
+            "Historical producer manifest inventory differs from its commit."
+        )
+    for relative_path, expected_sha256 in sources.items():
+        source_bytes = _git_object_bytes(
+            root,
+            ["cat-file", "blob", f"{commit}:{relative_path}"],
+            label=f"source {relative_path}",
+        )
+        if hashlib.sha256(source_bytes).hexdigest() != expected_sha256:
+            raise PolicyImprovementSchemaError(
+                "Historical producer source digest differs from its manifest."
+            )
+
+
+def _validated_runtime_authorization_map(
+    *,
+    current_authorization: Mapping[str, object],
+    historical_runtime_authorizations: Mapping[str, Mapping[str, object]] | None,
+    protocol_sha256: str,
+    producer_source_authenticator: Callable[[Mapping[str, object]], None],
+) -> dict[str, Mapping[str, object]]:
+    """Validate every authorization used by a retained failed attempt."""
+
+    current = validate_runtime_authorization(current_authorization)
+    producer_source_authenticator(current)
+    current_digest = runtime_authorization_sha256(current)
+    checked: dict[str, Mapping[str, object]] = {current_digest: current}
+    for supplied_digest, supplied_document in (
+        historical_runtime_authorizations or {}
+    ).items():
+        digest = _hex(
+            supplied_digest,
+            path="historical_runtime_authorizations.key",
+            length=64,
+        )
+        document = validate_runtime_authorization(supplied_document)
+        producer_source_authenticator(document)
+        if runtime_authorization_sha256(document) != digest:
+            raise PolicyImprovementSchemaError(
+                "Historical runtime authorization digest differs from its document."
+            )
+        if document["protocol_sha256"] != protocol_sha256:
+            raise PolicyImprovementSchemaError(
+                "Historical runtime authorization names a different protocol."
+            )
+        prior = checked.get(digest)
+        if prior is not None and canonical_json_bytes(prior) != canonical_json_bytes(
+            document
+        ):
+            raise PolicyImprovementSchemaError(
+                "One runtime authorization digest names different documents."
+            )
+        checked[digest] = document
+    return checked
+
+
+def _load_historical_runtime_authorizations(
+    specifications: Sequence[str],
+    *,
+    protocol_sha256: str,
+) -> dict[str, Mapping[str, object]]:
+    """Load repeatable PATH=SHA256 authorization arguments without aliases."""
+
+    loaded: dict[str, Mapping[str, object]] = {}
+    for specification in specifications:
+        if specification.count("=") != 1:
+            raise PolicyImprovementSchemaError(
+                "--historical-runtime-authorization must use PATH=SHA256."
+            )
+        path_text, expected_digest = specification.rsplit("=", 1)
+        digest = _hex(
+            expected_digest,
+            path="historical_runtime_authorization.sha256",
+            length=64,
+        )
+        path = Path(path_text)
+        if not path.is_absolute():
+            raise PolicyImprovementSchemaError(
+                "Historical runtime authorization path must be absolute."
+            )
+        payload, _ = _stable_regular_file(path)
+        try:
+            payload.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise PolicyImprovementSchemaError(
+                "Historical runtime authorization is not ASCII JSON."
+            ) from exc
+        document = validate_runtime_authorization(load_strict_json_bytes(payload))
+        if runtime_authorization_sha256(document) != digest:
+            raise PolicyImprovementSchemaError(
+                "Historical runtime authorization digest differs."
+            )
+        if document["protocol_sha256"] != protocol_sha256:
+            raise PolicyImprovementSchemaError(
+                "Historical runtime authorization names a different protocol."
+            )
+        if digest in loaded:
+            raise PolicyImprovementSchemaError(
+                "Duplicate historical runtime authorization digest."
+            )
+        loaded[digest] = document
+    return loaded
+
+
+def _historical_failed_attempt_manifest_sha256s(
+    generation_identity: Mapping[str, object],
+) -> list[str]:
+    """Extract the exact retained-failure manifest inventory from one run."""
+
+    raw_attempts = generation_identity.get("historical_failed_attempts")
+    if not isinstance(raw_attempts, list):
+        raise PolicyImprovementSchemaError(
+            "Complete evidence lacks its historical failed-attempt inventory."
+        )
+    manifests: list[str] = []
+    for index, raw_attempt in enumerate(raw_attempts):
+        attempt = _fields(
+            raw_attempt,
+            {
+                "attempt_id",
+                "segment",
+                "failure_phase",
+                "runtime_authorization_sha256",
+                "generation_manifest_sha256",
+                "result_sha256",
+            },
+            path=f"historical_failed_attempts[{index}]",
+        )
+        _hex(
+            attempt["attempt_id"],
+            path=f"historical_failed_attempts[{index}].attempt_id",
+            length=32,
+        )
+        _ascii(
+            attempt["segment"],
+            path=f"historical_failed_attempts[{index}].segment",
+        )
+        _ascii(
+            attempt["failure_phase"],
+            path=f"historical_failed_attempts[{index}].failure_phase",
+        )
+        _hex(
+            attempt["runtime_authorization_sha256"],
+            path=f"historical_failed_attempts[{index}].runtime_authorization_sha256",
+            length=64,
+        )
+        manifest = _hex(
+            attempt["generation_manifest_sha256"],
+            path=f"historical_failed_attempts[{index}].generation_manifest_sha256",
+            length=64,
+        )
+        _hex(
+            attempt["result_sha256"],
+            path=f"historical_failed_attempts[{index}].result_sha256",
+            length=64,
+        )
+        manifests.append(manifest)
+    if len(manifests) != len(set(manifests)):
+        raise PolicyImprovementSchemaError(
+            "Historical failed-attempt manifest digests must be unique."
+        )
+    return manifests
 
 
 def validate_per_instance_document(value: object) -> dict[str, Any]:
@@ -1401,6 +1681,7 @@ def audit_result_set(
     dataset_root: str | Path,
     evidence_root: str | Path,
     runtime_authorization: object,
+    historical_runtime_authorizations: Mapping[str, Mapping[str, object]] | None = None,
     audit_execution_identity: object,
     checkpoint_validator: Callable[[Mapping[str, object]], Mapping[str, object]],
     execution_role_name: str = "policy-improvement-audit",
@@ -1410,6 +1691,9 @@ def audit_result_set(
     test_open_sha256: str | None = None,
     _verify_amendment_evidence: bool = True,
     _dataset_bindings: Mapping[str, Mapping[str, Any]] | None = None,
+    _producer_source_authenticator: (
+        Callable[[Mapping[str, object]], None] | None
+    ) = None,
 ) -> dict[str, Any]:
     """Audit an exact phase inventory, including failures and paired records."""
 
@@ -1422,6 +1706,20 @@ def audit_result_set(
             "Runtime authorization names a different protocol."
         )
     authorization_digest = runtime_authorization_sha256(authorization)
+    producer_source_authenticator = (
+        _producer_source_authenticator
+        if _producer_source_authenticator is not None
+        else lambda item: _authenticate_authorization_producer_source(
+            item,
+            project_root=project_root,
+        )
+    )
+    runtime_authorizations = _validated_runtime_authorization_map(
+        current_authorization=authorization,
+        historical_runtime_authorizations=historical_runtime_authorizations,
+        protocol_sha256=protocol_digest,
+        producer_source_authenticator=producer_source_authenticator,
+    )
     if history and history[0]["runtime_authorization_sha256"] != authorization_digest:
         raise PolicyImprovementSchemaError(
             "Compute freeze binds a different runtime/source authorization."
@@ -1514,6 +1812,7 @@ def audit_result_set(
                 dataset_root=dataset_root,
                 evidence_root=evidence_root,
                 runtime_authorization=authorization,
+                historical_runtime_authorizations=runtime_authorizations,
                 audit_execution_identity=checked_execution_identity,
                 checkpoint_validator=checkpoint_validator,
                 execution_role_name=execution_role_name,
@@ -1522,6 +1821,7 @@ def audit_result_set(
                 test_open_sha256=None,
                 _verify_amendment_evidence=False,
                 _dataset_bindings=dataset_bindings,
+                _producer_source_authenticator=producer_source_authenticator,
             )
             evidence_report = dict(prior_report)
             if execution_role_name != "policy-improvement-audit":
@@ -1622,6 +1922,7 @@ def audit_result_set(
     complete_count = 0
     failed_count = 0
     generation_manifest_sha256s: list[str] = []
+    historical_failed_attempt_manifest_sha256s: list[str] = []
     semantic_validation_sha256s: list[str] = []
     for run_id, result in by_run_id.items():
         row = rows_by_id[run_id]
@@ -1673,14 +1974,26 @@ def audit_result_set(
             raise PolicyImprovementSchemaError(
                 "Result method config digest differs from the protocol tuple."
             )
-        training_role = _authorized_role(authorization, "policy-improvement-training")
+        result_authorization_digest = _hex(
+            result["identities"]["runtime_authorization_sha256"],
+            path=f"result[{run_id}].identities.runtime_authorization_sha256",
+            length=64,
+        )
+        result_authorization = runtime_authorizations.get(result_authorization_digest)
+        if result_authorization is None:
+            raise PolicyImprovementSchemaError(
+                f"Result {run_id} lacks its frozen runtime authorization."
+            )
+        training_role = _authorized_role(
+            result_authorization, "policy-improvement-training"
+        )
         expected_runtime_bindings = {
-            "runtime_authorization_sha256": authorization_digest,
-            "producer_git_commit": authorization["producer_git_commit"],
-            "producer_manifest_sha256": authorization[
+            "runtime_authorization_sha256": result_authorization_digest,
+            "producer_git_commit": result_authorization["producer_git_commit"],
+            "producer_manifest_sha256": result_authorization[
                 "producer_source_manifest_sha256"
             ],
-            "launcher_sha256": authorization["launcher_sha256"],
+            "launcher_sha256": result_authorization["launcher_sha256"],
             "training_source_git_commit": training_role["source_git_commit"],
             "training_runtime_sha256": training_role["runtime_sha256"],
             "training_runtime_profile_sha256": training_role["runtime_profile_sha256"],
@@ -1729,7 +2042,7 @@ def audit_result_set(
                 result=result,
                 protocol_sha256=protocol_digest,
                 registry_row_sha256=row_digest,
-                runtime_authorization_sha256=authorization_digest,
+                runtime_authorization_sha256=result_authorization_digest,
                 expected_environment_interactions=expected_interactions,
             )
             generation_manifest_sha256s.append(
@@ -1758,7 +2071,8 @@ def audit_result_set(
             registry_row=row,
             project_root=project_root,
             dataset_root=dataset_root,
-            runtime_authorization=authorization,
+            runtime_authorization=result_authorization,
+            historical_runtime_authorizations=runtime_authorizations,
         )
         generation_manifest_sha256s.append(
             str(generation_identity["generation_manifest_sha256"])
@@ -1777,9 +2091,14 @@ def audit_result_set(
         )
         if parent_generation_manifest_sha256 is not None:
             generation_manifest_sha256s.append(str(parent_generation_manifest_sha256))
+        historical_manifests = _historical_failed_attempt_manifest_sha256s(
+            generation_identity
+        )
+        generation_manifest_sha256s.extend(historical_manifests)
+        historical_failed_attempt_manifest_sha256s.extend(historical_manifests)
         complete_count += 1
         evaluation_role = _authorized_role(
-            authorization, "policy-improvement-evaluation"
+            result_authorization, "policy-improvement-evaluation"
         )
         for field, expected in (
             ("evaluation_runtime_sha256", evaluation_role["runtime_sha256"]),
@@ -2004,7 +2323,7 @@ def audit_result_set(
                             "Paired methods use different puzzle identities or order."
                         )
     report = {
-        "schema_name": "policy_improvement_audit_v4",
+        "schema_name": "policy_improvement_audit_v5",
         "schema_version": AUDIT_SCHEMA_VERSION,
         "protocol_sha256": protocol_digest,
         "registry_sha256": registry_digest,
@@ -2029,6 +2348,12 @@ def audit_result_set(
         ),
         "generation_manifest_set_sha256": hashlib.sha256(
             canonical_json_bytes(sorted(generation_manifest_sha256s))
+        ).hexdigest(),
+        "historical_failed_attempt_count": len(
+            historical_failed_attempt_manifest_sha256s
+        ),
+        "historical_failed_attempt_manifest_set_sha256": hashlib.sha256(
+            canonical_json_bytes(sorted(historical_failed_attempt_manifest_sha256s))
         ).hexdigest(),
         "semantic_checkpoint_validation_count": len(semantic_validation_sha256s),
         "semantic_checkpoint_validation_set_sha256": hashlib.sha256(
@@ -2056,6 +2381,12 @@ def main(
     parser.add_argument("--evidence-root", required=True)
     parser.add_argument("--runtime-authorization-json", required=True)
     parser.add_argument("--runtime-authorization-sha256", required=True)
+    parser.add_argument(
+        "--historical-runtime-authorization",
+        action="append",
+        default=[],
+        metavar="PATH=SHA256",
+    )
     parser.add_argument("--audit-runtime-sha256", required=True)
     parser.add_argument("--audit-runtime-profile-sha256", required=True)
     parser.add_argument("--audit-source-git-commit", required=True)
@@ -2112,6 +2443,11 @@ def main(
         raise PolicyImprovementSchemaError(
             "Protected runtime authorization digest differs."
         )
+    protocol_digest = hashlib.sha256(canonical_json_bytes(protocol)).hexdigest()
+    historical_authorizations = _load_historical_runtime_authorizations(
+        arguments.historical_runtime_authorization,
+        protocol_sha256=protocol_digest,
+    )
     report = audit_result_set(
         protocol,
         load_strict_json(arguments.registry),
@@ -2124,6 +2460,7 @@ def main(
         dataset_root=arguments.dataset_root,
         evidence_root=arguments.evidence_root,
         runtime_authorization=authorization,
+        historical_runtime_authorizations=historical_authorizations,
         audit_execution_identity={
             "runtime_sha256": arguments.audit_runtime_sha256,
             "runtime_profile_sha256": arguments.audit_runtime_profile_sha256,

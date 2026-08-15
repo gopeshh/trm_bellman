@@ -15,6 +15,8 @@ from scripts.policy_improvement_evidence import authenticate_complete_generation
 from scripts.policy_improvement_schema import (
     PolicyImprovementSchemaError,
     canonical_json_bytes,
+    runtime_authorization_sha256,
+    validate_result,
 )
 from scripts.policy_improvement_test_open import (
     _authenticate_record,
@@ -27,6 +29,10 @@ HEX64 = "a" * 64
 
 def _available(value: object) -> dict[str, object]:
     return {"status": "available", "value": value}
+
+
+def _unavailable(reason: str) -> dict[str, object]:
+    return {"status": "unavailable", "reason": reason}
 
 
 def _write_json(path: Path, value: object) -> str:
@@ -70,13 +76,41 @@ class CompleteGenerationTest(unittest.TestCase):
             "seed": 1,
             "expected_effective_config_sha256": "5" * 64,
         }
+        self.runtime_authorization = {
+            "schema_name": "policy_improvement_runtime_authorization_v1",
+            "schema_version": 1,
+            "authorization_id": "complete-generation-fixture-v1",
+            "created_at_utc": "2026-08-14T12:00:00Z",
+            "protocol_sha256": self.protocol_sha,
+            "producer_git_commit": "b" * 40,
+            "producer_source_manifest_sha256": "e" * 64,
+            "launcher_sha256": "0" * 64,
+            "roles": [
+                {
+                    "role": role,
+                    "source_git_commit": "b" * 40,
+                    "runtime_sha256": "c" * 64,
+                    "runtime_profile_sha256": "d" * 64,
+                    "selected_source_manifest_sha256": "d" * 64,
+                }
+                for role in (
+                    "policy-improvement-training",
+                    "policy-improvement-evaluation",
+                    "policy-improvement-audit",
+                    "policy-improvement-analysis",
+                )
+            ],
+        }
+        self.runtime_authorization_digest = runtime_authorization_sha256(
+            self.runtime_authorization
+        )
         self.training_execution_identity = {
             "role": "policy-improvement-training",
             "source_git_commit": "b" * 40,
             "runtime_sha256": "c" * 64,
             "runtime_profile_sha256": "d" * 64,
-            "selected_source_manifest_sha256": "e" * 64,
-            "runtime_authorization_sha256": "f" * 64,
+            "selected_source_manifest_sha256": "d" * 64,
+            "runtime_authorization_sha256": self.runtime_authorization_digest,
             "launcher_sha256": "0" * 64,
         }
         self.generation = (
@@ -241,10 +275,23 @@ class CompleteGenerationTest(unittest.TestCase):
             self.generation / "RUN_MANIFEST.json", run_manifest
         )
         self.result = {
+            "protocol_id": "policy-improvement-v1-20260814",
+            "protocol_sha256": self.protocol_sha,
             "run_id": self.run_id,
+            "registry_row_sha256": self.row_sha,
+            "phase": "stage0_smoke",
             "method_id": "matched_ppo",
+            "base_method_id": "matched_ppo",
             "tier": "smoke",
             "seed": 1,
+            "evaluation_split": "validation",
+            "n": 2,
+            "K": 1,
+            "alpha": 0.1,
+            "ablation_variant": None,
+            "primary_policy_variant": "realized_policy",
+            "applied_config_override": {"method": "matched_ppo"},
+            "amendment_history_sha256": hashlib.sha256(b"[]").hexdigest(),
             "artifacts": {
                 "checkpoint": _available(checkpoint_sha),
                 "checkpoint_validation": _available(checkpoint_validation_digest),
@@ -252,6 +299,12 @@ class CompleteGenerationTest(unittest.TestCase):
                 "run_manifest": _available(run_manifest_digest),
             },
             "identities": {
+                "producer_git_commit": self.runtime_authorization[
+                    "producer_git_commit"
+                ],
+                "producer_manifest_sha256": self.runtime_authorization[
+                    "producer_source_manifest_sha256"
+                ],
                 "checkpoint_sha256": _available(checkpoint_sha),
                 "model_state_sha256": _available(model_sha),
                 "initialization_sha256": initialization_sha,
@@ -271,9 +324,14 @@ class CompleteGenerationTest(unittest.TestCase):
                     "runtime_authorization_sha256"
                 ],
                 "launcher_sha256": self.training_execution_identity["launcher_sha256"],
+                "git_clean": True,
                 "method_config_sha256": "4" * 64,
                 "effective_config_sha256": "5" * 64,
                 "dataset_manifest_sha256": "8" * 64,
+                "train_ordered_records_sha256": "1" * 64,
+                "evaluation_ordered_records_sha256": "2" * 64,
+                "test_open_sha256": _unavailable("test_data_not_opened"),
+                "device": "cpu",
             },
             "evaluation_snapshots": [
                 {
@@ -327,7 +385,11 @@ class CompleteGenerationTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def _authenticate(self) -> dict[str, object]:
+    def _authenticate(
+        self,
+        *,
+        historical_runtime_authorizations: dict[str, dict[str, object]] | None = None,
+    ) -> dict[str, object]:
         return authenticate_complete_generation(
             evidence_root=self.root,
             result_path=self.generation / "result.json",
@@ -342,8 +404,237 @@ class CompleteGenerationTest(unittest.TestCase):
             registry_row=self.row,
             project_root=self.project_root,
             dataset_root=self.dataset_root,
-            runtime_authorization={},
+            runtime_authorization=self.runtime_authorization,
+            historical_runtime_authorizations=historical_runtime_authorizations,
         )
+
+    def _historical_runtime_authorization(self) -> tuple[dict[str, object], str]:
+        authorization = {
+            "schema_name": "policy_improvement_runtime_authorization_v1",
+            "schema_version": 1,
+            "authorization_id": "historical-failed-attempt-v1",
+            "created_at_utc": "2026-08-14T11:00:00Z",
+            "protocol_sha256": self.protocol_sha,
+            "producer_git_commit": "c" * 40,
+            "producer_source_manifest_sha256": "7" * 64,
+            "launcher_sha256": "8" * 64,
+            "roles": [
+                {
+                    "role": role,
+                    "source_git_commit": "c" * 40,
+                    "runtime_sha256": "9" * 64,
+                    "runtime_profile_sha256": "a" * 64,
+                    "selected_source_manifest_sha256": "a" * 64,
+                }
+                for role in (
+                    "policy-improvement-training",
+                    "policy-improvement-evaluation",
+                    "policy-improvement-audit",
+                    "policy-improvement-analysis",
+                )
+            ],
+        }
+        return authorization, runtime_authorization_sha256(authorization)
+
+    def _materialize_historical_failed_attempt(
+        self,
+        *,
+        bind_to_complete_generation: bool = True,
+    ) -> tuple[Path, dict[str, object], str]:
+        authorization, authorization_digest = self._historical_runtime_authorization()
+        reason = "run_failed_before_checkpoint"
+        measurement_reason = "run_failed_before_measurement"
+        snapshots = []
+        for kind, unit in (
+            ("interaction_matched", "environment_interactions"),
+            ("compute_matched", "recurrent_map_applications"),
+        ):
+            snapshots.append(
+                {
+                    "snapshot_kind": kind,
+                    "status": "unavailable",
+                    "unavailable_reason": reason,
+                    "target": {
+                        "unit": unit,
+                        "registered_quantity": _unavailable(reason),
+                    },
+                    "observed_environment_interactions": _unavailable(reason),
+                    "observed_recurrent_map_applications": _unavailable(reason),
+                    "accelerator_seconds_observed": _unavailable(reason),
+                    "checkpoint_sha256": _unavailable(reason),
+                    "model_state_sha256": _unavailable(reason),
+                    "checkpoint_lineage_sha256": _unavailable(reason),
+                    "policy_evaluations": [],
+                }
+            )
+        training_fields = (
+            "interactions_to_first_solve",
+            "value_loss",
+            "policy_loss",
+            "wall_time_seconds",
+            "gpu_hours",
+            "gpu_utilization_fraction",
+            "gpu_utilization_sample_count",
+            "gpu_utilization_sampling_interval_seconds",
+            "peak_allocated_memory_bytes",
+            "peak_reserved_memory_bytes",
+            "optimizer_steps",
+            "cells_processed",
+            "actions_processed",
+            "tokens_processed",
+            "policy_head_calls",
+            "recurrent_map_applications",
+            "value_head_calls",
+        )
+        diagnostic_fields = (
+            "L_preproj",
+            "projection_active_rate",
+            "absolute_depth_policy_agreement",
+            "finite_depth_discrepancy",
+            "fixed_target_residual",
+            "propagated_target_lag",
+            "exact_centering_defect",
+            "candidate_current_tv",
+            "mixture_realized_tv",
+            "mixture_realized_kl",
+            "fresh_initialization_discrepancy",
+            "value_of_memory",
+        )
+        failed_result = validate_result(
+            {
+                "schema_name": "policy_improvement_v1",
+                "schema_version": 3,
+                "protocol_id": self.result["protocol_id"],
+                "protocol_sha256": self.protocol_sha,
+                "amendment_history_sha256": hashlib.sha256(b"[]").hexdigest(),
+                "run_id": self.run_id,
+                "registry_row_sha256": self.row_sha,
+                "phase": "stage0_smoke",
+                "tier": "smoke",
+                "seed": 1,
+                "evaluation_split": "validation",
+                "method_id": "matched_ppo",
+                "base_method_id": "matched_ppo",
+                "n": 2,
+                "K": 1,
+                "alpha": 0.1,
+                "ablation_variant": None,
+                "applied_config_override": {"method": "matched_ppo"},
+                "primary_policy_variant": "realized_policy",
+                "evaluation_snapshots": snapshots,
+                "status": "failed",
+                "failure": {
+                    "phase": "training",
+                    "error_class": "runtime_error",
+                    "message_sha256": "6" * 64,
+                },
+                "identities": {
+                    "producer_git_commit": authorization["producer_git_commit"],
+                    "git_clean": True,
+                    "runtime_authorization_sha256": authorization_digest,
+                    "training_source_git_commit": authorization["roles"][0][
+                        "source_git_commit"
+                    ],
+                    "training_runtime_sha256": authorization["roles"][0][
+                        "runtime_sha256"
+                    ],
+                    "training_runtime_profile_sha256": authorization["roles"][0][
+                        "runtime_profile_sha256"
+                    ],
+                    "training_selected_source_manifest_sha256": authorization["roles"][
+                        0
+                    ]["selected_source_manifest_sha256"],
+                    "launcher_sha256": authorization["launcher_sha256"],
+                    "producer_manifest_sha256": authorization[
+                        "producer_source_manifest_sha256"
+                    ],
+                    "method_config_sha256": "4" * 64,
+                    "effective_config_sha256": "5" * 64,
+                    "dataset_manifest_sha256": "8" * 64,
+                    "train_ordered_records_sha256": "1" * 64,
+                    "evaluation_ordered_records_sha256": "2" * 64,
+                    "initialization_sha256": self.result["identities"][
+                        "initialization_sha256"
+                    ],
+                    "checkpoint_sha256": _unavailable(reason),
+                    "model_state_sha256": _unavailable(reason),
+                    "evaluation_runtime_sha256": _unavailable(
+                        "run_failed_before_evaluation"
+                    ),
+                    "evaluation_source_git_commit": _unavailable(
+                        "run_failed_before_evaluation"
+                    ),
+                    "evaluation_runtime_profile_sha256": _unavailable(
+                        "run_failed_before_evaluation"
+                    ),
+                    "evaluation_selected_source_manifest_sha256": _unavailable(
+                        "run_failed_before_evaluation"
+                    ),
+                    "evaluation_pool_sha256": _unavailable(
+                        "run_failed_before_evaluation"
+                    ),
+                    "test_open_sha256": _unavailable("test_data_not_opened"),
+                    "device": "cpu",
+                },
+                "metrics": {
+                    "training": {
+                        name: _unavailable(measurement_reason)
+                        for name in training_fields
+                    },
+                    "diagnostics": {
+                        name: _unavailable(measurement_reason)
+                        for name in diagnostic_fields
+                    },
+                },
+                "artifacts": {
+                    "checkpoint": _unavailable(reason),
+                    "checkpoint_validation": _unavailable(reason),
+                    "model_state_inventory": _unavailable(reason),
+                    "run_manifest": _unavailable(reason),
+                },
+            }
+        )
+        attempt_id = "0" * 32
+        attempt = self.root / "runs" / self.run_id / "attempts" / "prepare" / attempt_id
+        result_digest = _write_json(attempt / "result.json", failed_result)
+        result_path = attempt / "result.json"
+        _write_json(
+            attempt / "MANIFEST.json",
+            {
+                "schema_name": "policy_improvement_smoke_failed_attempt_v1",
+                "schema_version": 1,
+                "attempt_id": attempt_id,
+                "protocol_sha256": self.protocol_sha,
+                "registry_row_sha256": self.row_sha,
+                "runtime_authorization_sha256": authorization_digest,
+                "run_id": self.run_id,
+                "segment": "prepare",
+                "failure_phase": "training",
+                "result": {
+                    "path": "result.json",
+                    "bytes": result_path.stat().st_size,
+                    "sha256": result_digest,
+                },
+            },
+        )
+        if bind_to_complete_generation:
+            complete_manifest_path = self.generation / "MANIFEST.json"
+            complete_manifest = json.loads(
+                complete_manifest_path.read_text(encoding="ascii")
+            )
+            complete_manifest["schema_version"] = 2
+            complete_manifest["prior_failed_attempts"] = [
+                {
+                    "segment": "prepare",
+                    "attempt_id": attempt_id,
+                    "generation_manifest_sha256": _identity(attempt / "MANIFEST.json")[
+                        "sha256"
+                    ],
+                    "result_sha256": result_digest,
+                }
+            ]
+            _write_json(complete_manifest_path, complete_manifest)
+        return attempt, authorization, authorization_digest
 
     def _checkpoint_validator(self, request: dict[str, object]) -> dict[str, object]:
         checkpoint = Path(str(request["checkpoint_path"]))
@@ -385,6 +676,125 @@ class CompleteGenerationTest(unittest.TestCase):
             observed["checkpoint_sha256"],
             self.result["artifacts"]["checkpoint"]["value"],
         )
+        self.assertEqual(observed["historical_failed_attempts"], [])
+
+    def test_complete_generation_authenticates_retained_failed_attempt(self) -> None:
+        attempt, authorization, authorization_digest = (
+            self._materialize_historical_failed_attempt()
+        )
+        observed = self._authenticate(
+            historical_runtime_authorizations={
+                authorization_digest: authorization,
+            }
+        )
+        self.assertEqual(
+            observed["historical_failed_attempts"],
+            [
+                {
+                    "attempt_id": "0" * 32,
+                    "segment": "prepare",
+                    "failure_phase": "training",
+                    "runtime_authorization_sha256": authorization_digest,
+                    "generation_manifest_sha256": _identity(attempt / "MANIFEST.json")[
+                        "sha256"
+                    ],
+                    "result_sha256": _identity(attempt / "result.json")["sha256"],
+                }
+            ],
+        )
+
+    def test_retained_failed_attempt_requires_matching_authorization(self) -> None:
+        _, authorization, authorization_digest = (
+            self._materialize_historical_failed_attempt()
+        )
+        with self.assertRaises(PolicyImprovementSchemaError):
+            self._authenticate()
+        wrong_authorization = json.loads(json.dumps(authorization))
+        wrong_authorization["authorization_id"] = "wrong-historical-authorization-v1"
+        with self.assertRaises(PolicyImprovementSchemaError):
+            self._authenticate(
+                historical_runtime_authorizations={
+                    authorization_digest: wrong_authorization,
+                }
+            )
+
+    def test_posthoc_uncommitted_attempt_is_rejected(self) -> None:
+        _, authorization, authorization_digest = (
+            self._materialize_historical_failed_attempt(
+                bind_to_complete_generation=False
+            )
+        )
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "does not bind its exact prior failed-attempt set",
+        ):
+            self._authenticate(
+                historical_runtime_authorizations={
+                    authorization_digest: authorization,
+                }
+            )
+
+    def test_tampered_historical_result_is_rejected(self) -> None:
+        attempt, authorization, authorization_digest = (
+            self._materialize_historical_failed_attempt()
+        )
+        result = json.loads((attempt / "result.json").read_text(encoding="ascii"))
+        result["failure"]["message_sha256"] = "7" * 64
+        _write_json(attempt / "result.json", result)
+        with self.assertRaises(PolicyImprovementSchemaError):
+            self._authenticate(
+                historical_runtime_authorizations={
+                    authorization_digest: authorization,
+                }
+            )
+
+    def test_historical_registered_identity_drift_is_rejected(self) -> None:
+        attempt, authorization, authorization_digest = (
+            self._materialize_historical_failed_attempt()
+        )
+        result = json.loads((attempt / "result.json").read_text(encoding="ascii"))
+        result["identities"]["dataset_manifest_sha256"] = "f" * 64
+        result_digest = _write_json(attempt / "result.json", result)
+        manifest_path = attempt / "MANIFEST.json"
+        manifest = json.loads(manifest_path.read_text(encoding="ascii"))
+        manifest["result"]["sha256"] = result_digest
+        manifest["result"]["bytes"] = (attempt / "result.json").stat().st_size
+        _write_json(manifest_path, manifest)
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "dataset_manifest_sha256 differs",
+        ):
+            self._authenticate(
+                historical_runtime_authorizations={
+                    authorization_digest: authorization,
+                }
+            )
+
+    def test_tampered_historical_manifest_is_rejected(self) -> None:
+        attempt, authorization, authorization_digest = (
+            self._materialize_historical_failed_attempt()
+        )
+        manifest = json.loads((attempt / "MANIFEST.json").read_text(encoding="ascii"))
+        manifest["failure_phase"] = "publication"
+        _write_json(attempt / "MANIFEST.json", manifest)
+        with self.assertRaises(PolicyImprovementSchemaError):
+            self._authenticate(
+                historical_runtime_authorizations={
+                    authorization_digest: authorization,
+                }
+            )
+
+    def test_extra_historical_attempt_file_is_rejected(self) -> None:
+        attempt, authorization, authorization_digest = (
+            self._materialize_historical_failed_attempt()
+        )
+        (attempt / "unexpected.txt").write_bytes(b"unexpected")
+        with self.assertRaises(PolicyImprovementSchemaError):
+            self._authenticate(
+                historical_runtime_authorizations={
+                    authorization_digest: authorization,
+                }
+            )
 
     def test_detached_result_is_rejected(self) -> None:
         detached = self.root / "detached.json"
@@ -404,7 +814,7 @@ class CompleteGenerationTest(unittest.TestCase):
                 registry_row=self.row,
                 project_root=self.project_root,
                 dataset_root=self.dataset_root,
-                runtime_authorization={},
+                runtime_authorization=self.runtime_authorization,
             )
 
     def test_tampered_checkpoint_is_rejected(self) -> None:

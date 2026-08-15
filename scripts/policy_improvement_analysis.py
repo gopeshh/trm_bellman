@@ -14,7 +14,10 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from scripts.policy_improvement_audit import audit_result_set
+from scripts.policy_improvement_audit import (
+    _load_historical_runtime_authorizations,
+    audit_result_set,
+)
 from scripts.policy_improvement_registry import load_registered_base_configs
 from scripts.policy_improvement_schema import (
     PolicyImprovementSchemaError,
@@ -304,12 +307,16 @@ def analyze_stage2_confirmatory(
     dataset_root: str | Path,
     evidence_root: str | Path,
     runtime_authorization: object,
+    historical_runtime_authorizations: Mapping[str, Mapping[str, object]] | None = None,
     analysis_execution_identity: object,
     amendment_evidence: Mapping[str, Mapping[str, object]],
     test_open_record: object,
     test_open_owner_root: str | Path,
     test_open_sha256: str,
     checkpoint_validator: Callable[[Mapping[str, object]], Mapping[str, object]],
+    _producer_source_authenticator: (
+        Callable[[Mapping[str, object]], None] | None
+    ) = None,
 ) -> dict[str, Any]:
     """Reaudit and analyze the one registered interaction-matched primary set."""
 
@@ -333,6 +340,7 @@ def analyze_stage2_confirmatory(
         dataset_root=dataset_root,
         evidence_root=evidence_root,
         runtime_authorization=authorization,
+        historical_runtime_authorizations=historical_runtime_authorizations,
         audit_execution_identity=execution,
         checkpoint_validator=checkpoint_validator,
         execution_role_name="policy-improvement-analysis",
@@ -340,6 +348,7 @@ def analyze_stage2_confirmatory(
         test_open_record=test_open_record,
         test_open_owner_root=test_open_owner_root,
         test_open_sha256=test_open_sha256,
+        _producer_source_authenticator=_producer_source_authenticator,
     )
     audit_execution = _authorized_audit_execution(authorization)
     expected_external_audit = {
@@ -537,6 +546,12 @@ def main(
     parser.add_argument("--evidence-root", required=True)
     parser.add_argument("--runtime-authorization-json", required=True)
     parser.add_argument("--runtime-authorization-sha256", required=True)
+    parser.add_argument(
+        "--historical-runtime-authorization",
+        action="append",
+        default=[],
+        metavar="PATH=SHA256",
+    )
     parser.add_argument("--analysis-runtime-sha256", required=True)
     parser.add_argument("--analysis-runtime-profile-sha256", required=True)
     parser.add_argument("--analysis-source-git-commit", required=True)
@@ -583,6 +598,11 @@ def main(
         raise PolicyImprovementSchemaError(
             "Protected runtime authorization digest differs."
         )
+    protocol_digest = hashlib.sha256(canonical_json_bytes(protocol)).hexdigest()
+    historical_authorizations = _load_historical_runtime_authorizations(
+        arguments.historical_runtime_authorization,
+        protocol_sha256=protocol_digest,
+    )
     analysis = analyze_stage2_confirmatory(
         protocol,
         load_strict_json(arguments.registry),
@@ -595,6 +615,7 @@ def main(
         dataset_root=arguments.dataset_root,
         evidence_root=arguments.evidence_root,
         runtime_authorization=authorization,
+        historical_runtime_authorizations=historical_authorizations,
         analysis_execution_identity={
             "runtime_sha256": arguments.analysis_runtime_sha256,
             "runtime_profile_sha256": arguments.analysis_runtime_profile_sha256,

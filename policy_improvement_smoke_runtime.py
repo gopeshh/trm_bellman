@@ -88,7 +88,7 @@ from utils.run_identity import (
 )
 
 
-SMOKE_SEGMENT_SCHEMA_VERSION = 1
+SMOKE_SEGMENT_SCHEMA_VERSION = 2
 _POLICY_SMOKE_ROLE = "policy-improvement-smoke"
 _LAUNCHER_SHA256_ENV = "UPI_TRM_POLICY_SMOKE_LAUNCHER_SHA256"
 _LOWER_SHA256 = frozenset("0123456789abcdef")
@@ -1125,6 +1125,7 @@ def _validate_segment_generation(
         "environment_interactions",
         "parent_checkpoint_sha256",
         "result_status",
+        "prior_failed_attempts",
         "outputs",
         "storage_bytes",
     }
@@ -1154,6 +1155,19 @@ def _validate_segment_generation(
         _sha256(manifest["parent_checkpoint_sha256"], name="segment parent checkpoint")
         if manifest["result_status"] != "complete":
             raise PolicyImprovementSmokeError("Resume segment result is incomplete.")
+    prior_failed_attempts = manifest["prior_failed_attempts"]
+    current_failed_attempts = _prior_failed_attempt_inventory(context)
+    exact_current_segment = expected_budget == context.segment_budget
+    if not isinstance(prior_failed_attempts, list) or (
+        prior_failed_attempts != current_failed_attempts
+        if exact_current_segment
+        else any(
+            attempt not in current_failed_attempts for attempt in prior_failed_attempts
+        )
+    ):
+        raise PolicyImprovementSmokeError(
+            "Stage 0 segment does not bind the prior failed-attempt inventory."
+        )
     outputs = manifest["outputs"]
     if not isinstance(outputs, dict) or set(outputs) != {"checkpoint", "files"}:
         raise PolicyImprovementSmokeError("Stage 0 output inventory is invalid.")
@@ -2896,6 +2910,76 @@ def _inventory(staging: Path) -> dict[str, dict[str, object]]:
     return result
 
 
+def _prior_failed_attempt_inventory(
+    context: SmokeContext,
+) -> list[dict[str, object]]:
+    """Snapshot every failed attempt that exists before segment publication."""
+
+    attempts_root = context.run_root / "attempts"
+    try:
+        root_status = attempts_root.lstat()
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise PolicyImprovementSmokeError(
+            "Prior failed-attempt inventory is unavailable."
+        ) from exc
+    if (
+        attempts_root.resolve(strict=True) != attempts_root
+        or stat.S_ISLNK(root_status.st_mode)
+        or not stat.S_ISDIR(root_status.st_mode)
+        or root_status.st_uid != os.geteuid()
+    ):
+        raise PolicyImprovementSmokeError(
+            "Prior failed-attempt inventory is aliased or unowned."
+        )
+    inventory: list[dict[str, object]] = []
+    segment_entries = sorted(attempts_root.iterdir(), key=lambda item: item.name)
+    if not segment_entries:
+        raise PolicyImprovementSmokeError("Prior failed-attempt root is empty.")
+    for segment in segment_entries:
+        segment_status = segment.lstat()
+        attempt_entries = sorted(segment.iterdir(), key=lambda item: item.name)
+        if (
+            segment.name not in {"prepare", "resume"}
+            or segment.resolve(strict=True) != segment
+            or stat.S_ISLNK(segment_status.st_mode)
+            or not stat.S_ISDIR(segment_status.st_mode)
+            or segment_status.st_uid != os.geteuid()
+            or not attempt_entries
+        ):
+            raise PolicyImprovementSmokeError(
+                "Prior failed-attempt segment is invalid or empty."
+            )
+        for attempt in attempt_entries:
+            attempt_status = attempt.lstat()
+            if (
+                len(attempt.name) != 32
+                or any(character not in _LOWER_SHA256 for character in attempt.name)
+                or attempt.resolve(strict=True) != attempt
+                or stat.S_ISLNK(attempt_status.st_mode)
+                or not stat.S_ISDIR(attempt_status.st_mode)
+                or attempt_status.st_uid != os.geteuid()
+            ):
+                raise PolicyImprovementSmokeError(
+                    "Prior failed-attempt generation is invalid."
+                )
+            files, directories = _segment_inventory(attempt)
+            if set(files) != {"MANIFEST.json", "result.json"} or directories:
+                raise PolicyImprovementSmokeError(
+                    "Prior failed-attempt generation inventory differs."
+                )
+            inventory.append(
+                {
+                    "segment": segment.name,
+                    "attempt_id": attempt.name,
+                    "generation_manifest_sha256": files["MANIFEST.json"]["sha256"],
+                    "result_sha256": files["result.json"]["sha256"],
+                }
+            )
+    return inventory
+
+
 def _publish_segment(
     context: SmokeContext,
     session: SmokeSession,
@@ -2950,6 +3034,7 @@ def _publish_segment(
                 raise _SmokeExecutionError("evaluation", exc) from exc
         outputs = _inventory(staging)
         checkpoint_relative = checkpoint_path.relative_to(staging).as_posix()
+        prior_failed_attempts = _prior_failed_attempt_inventory(context)
         manifest = {
             "schema_name": "policy_improvement_smoke_segment_v1",
             "schema_version": SMOKE_SEGMENT_SCHEMA_VERSION,
@@ -2962,6 +3047,7 @@ def _publish_segment(
             "environment_interactions": context.segment_budget,
             "parent_checkpoint_sha256": parent_sha256,
             "result_status": None if result is None else result["status"],
+            "prior_failed_attempts": prior_failed_attempts,
             "outputs": {
                 "checkpoint": {
                     "path": checkpoint_relative,
@@ -2989,6 +3075,10 @@ def _publish_segment(
             staging,
             expected_budget=context.segment_budget,
         )
+        if _prior_failed_attempt_inventory(context) != prior_failed_attempts:
+            raise PolicyImprovementSmokeError(
+                "Prior failed-attempt inventory changed before publication."
+            )
         _revalidate_external_inputs(context, runtime_preflight=runtime_preflight)
         try:
             final.lstat()

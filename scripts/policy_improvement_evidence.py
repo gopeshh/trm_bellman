@@ -20,6 +20,9 @@ from scripts.policy_improvement_schema import (
     PolicyImprovementSchemaError,
     canonical_json_bytes,
     load_strict_json_bytes,
+    runtime_authorization_sha256,
+    validate_runtime_authorization,
+    validate_result,
 )
 
 
@@ -421,6 +424,321 @@ def _load_ascii_json(path: Path) -> object:
     return load_strict_json_bytes(payload)
 
 
+def _prior_failed_attempt_commitments(
+    value: object,
+    *,
+    path: str,
+) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise PolicyImprovementSchemaError(f"{path} must be a list.")
+    commitments: list[dict[str, object]] = []
+    for index, raw in enumerate(value):
+        item = _fields(
+            raw,
+            {
+                "segment",
+                "attempt_id",
+                "generation_manifest_sha256",
+                "result_sha256",
+            },
+            path=f"{path}[{index}]",
+        )
+        segment = item["segment"]
+        attempt_id = item["attempt_id"]
+        if (
+            segment not in {"prepare", "resume"}
+            or not isinstance(attempt_id, str)
+            or len(attempt_id) != 32
+            or any(character not in "0123456789abcdef" for character in attempt_id)
+        ):
+            raise PolicyImprovementSchemaError(
+                f"{path}[{index}] names an invalid attempt."
+            )
+        commitments.append(
+            {
+                "segment": segment,
+                "attempt_id": attempt_id,
+                "generation_manifest_sha256": _sha256(
+                    item["generation_manifest_sha256"],
+                    path=f"{path}[{index}].generation_manifest_sha256",
+                ),
+                "result_sha256": _sha256(
+                    item["result_sha256"],
+                    path=f"{path}[{index}].result_sha256",
+                ),
+            }
+        )
+    if commitments != sorted(
+        commitments,
+        key=lambda item: (str(item["segment"]), str(item["attempt_id"])),
+    ) or len({(item["segment"], item["attempt_id"]) for item in commitments}) != len(
+        commitments
+    ):
+        raise PolicyImprovementSchemaError(
+            f"{path} must be unique and canonically ordered."
+        )
+    return commitments
+
+
+def _historical_attempt_commitments(
+    identities: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "segment": identity["segment"],
+            "attempt_id": identity["attempt_id"],
+            "generation_manifest_sha256": identity["generation_manifest_sha256"],
+            "result_sha256": identity["result_sha256"],
+        }
+        for identity in identities
+    ]
+
+
+def _authenticate_historical_failed_attempts(
+    *,
+    root: Path,
+    run_root: Path,
+    complete_result: Mapping[str, object],
+    protocol_sha256: str,
+    registry_row_sha256: str,
+    expected_environment_interactions: int,
+    runtime_authorizations: Mapping[str, Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Authenticate every immutable failure retained before a successful retry."""
+
+    attempts = run_root / "attempts"
+    try:
+        attempts.relative_to(root)
+        status = attempts.lstat()
+        resolved = attempts.resolve(strict=True)
+        segment_entries = sorted(attempts.iterdir(), key=lambda item: item.name)
+    except (OSError, ValueError) as exc:
+        raise PolicyImprovementSchemaError(
+            "Historical failed-attempt root is unavailable."
+        ) from exc
+    if (
+        attempts != resolved
+        or stat.S_ISLNK(status.st_mode)
+        or not stat.S_ISDIR(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or not segment_entries
+    ):
+        raise PolicyImprovementSchemaError(
+            "Historical failed-attempt root is invalid or empty."
+        )
+    is_smoke = complete_result.get("tier") == "smoke"
+    allowed_segments = {"prepare", "resume"} if is_smoke else {"complete"}
+    identities: list[dict[str, object]] = []
+    for segment in segment_entries:
+        try:
+            segment_status = segment.lstat()
+            resolved_segment = segment.resolve(strict=True)
+            attempt_entries = sorted(segment.iterdir(), key=lambda item: item.name)
+        except OSError as exc:
+            raise PolicyImprovementSchemaError(
+                "Historical failed-attempt segment is unavailable."
+            ) from exc
+        if (
+            segment.name not in allowed_segments
+            or segment != resolved_segment
+            or stat.S_ISLNK(segment_status.st_mode)
+            or not stat.S_ISDIR(segment_status.st_mode)
+            or segment_status.st_uid != os.geteuid()
+            or not attempt_entries
+        ):
+            raise PolicyImprovementSchemaError(
+                "Historical failed-attempt segment is invalid or empty."
+            )
+        for attempt in attempt_entries:
+            attempt_id = attempt.name
+            try:
+                attempt_status = attempt.lstat()
+                resolved_attempt = attempt.resolve(strict=True)
+            except OSError as exc:
+                raise PolicyImprovementSchemaError(
+                    "Historical failed-attempt generation is unavailable."
+                ) from exc
+            if (
+                len(attempt_id) != 32
+                or any(character not in "0123456789abcdef" for character in attempt_id)
+                or attempt != resolved_attempt
+                or stat.S_ISLNK(attempt_status.st_mode)
+                or not stat.S_ISDIR(attempt_status.st_mode)
+                or attempt_status.st_uid != os.geteuid()
+            ):
+                raise PolicyImprovementSchemaError(
+                    "Historical failed-attempt generation is invalid."
+                )
+            raw_result = validate_result(_load_ascii_json(attempt / "result.json"))
+            for field in (
+                "protocol_id",
+                "run_id",
+                "registry_row_sha256",
+                "phase",
+                "tier",
+                "seed",
+                "method_id",
+                "base_method_id",
+                "evaluation_split",
+                "n",
+                "K",
+                "alpha",
+                "ablation_variant",
+                "primary_policy_variant",
+                "applied_config_override",
+                "amendment_history_sha256",
+            ):
+                if raw_result[field] != complete_result[field]:
+                    raise PolicyImprovementSchemaError(
+                        f"Historical failed attempt {field} differs from its retry."
+                    )
+            if (
+                raw_result["status"] != "failed"
+                or raw_result["protocol_sha256"] != protocol_sha256
+                or raw_result["registry_row_sha256"] != registry_row_sha256
+            ):
+                raise PolicyImprovementSchemaError(
+                    "Historical failed-attempt result identity differs."
+                )
+            raw_identities = _object(
+                raw_result["identities"],
+                path="historical_failed_attempt.identities",
+            )
+            complete_identities = _object(
+                complete_result["identities"],
+                path="complete_result.identities",
+            )
+            for field in (
+                "git_clean",
+                "method_config_sha256",
+                "effective_config_sha256",
+                "dataset_manifest_sha256",
+                "train_ordered_records_sha256",
+                "evaluation_ordered_records_sha256",
+                "initialization_sha256",
+                "test_open_sha256",
+                "device",
+            ):
+                if raw_identities[field] != complete_identities[field]:
+                    raise PolicyImprovementSchemaError(
+                        "Historical failed-attempt registered identity "
+                        f"{field} differs from its retry."
+                    )
+            manifest_fields = {
+                "schema_name",
+                "schema_version",
+                "attempt_id",
+                "protocol_sha256",
+                "registry_row_sha256",
+                "runtime_authorization_sha256",
+                "run_id",
+                "segment",
+                "failure_phase",
+                "result",
+            }
+            if not is_smoke:
+                manifest_fields.update({"phase", "tier", "environment_interactions"})
+            manifest = _fields(
+                _load_ascii_json(attempt / "MANIFEST.json"),
+                manifest_fields,
+                path="historical_failed_attempt.manifest",
+            )
+            _, result_identity = _stable_regular_file(attempt / "result.json")
+            authorization_digest = _sha256(
+                raw_identities["runtime_authorization_sha256"],
+                path="historical_failed_attempt.runtime_authorization_sha256",
+            )
+            if authorization_digest not in runtime_authorizations:
+                raise PolicyImprovementSchemaError(
+                    "Historical failed attempt lacks its frozen runtime authorization."
+                )
+            authorization = validate_runtime_authorization(
+                runtime_authorizations[authorization_digest]
+            )
+            if (
+                runtime_authorization_sha256(authorization) != authorization_digest
+                or authorization["protocol_sha256"] != protocol_sha256
+            ):
+                raise PolicyImprovementSchemaError(
+                    "Historical failed-attempt runtime authorization differs."
+                )
+            training_role = authorization["roles"][0]
+            expected_runtime_bindings = {
+                "producer_git_commit": authorization["producer_git_commit"],
+                "producer_manifest_sha256": authorization[
+                    "producer_source_manifest_sha256"
+                ],
+                "launcher_sha256": authorization["launcher_sha256"],
+                "training_source_git_commit": training_role["source_git_commit"],
+                "training_runtime_sha256": training_role["runtime_sha256"],
+                "training_runtime_profile_sha256": training_role[
+                    "runtime_profile_sha256"
+                ],
+                "training_selected_source_manifest_sha256": training_role[
+                    "selected_source_manifest_sha256"
+                ],
+            }
+            for field, expected in expected_runtime_bindings.items():
+                if raw_identities[field] != expected:
+                    raise PolicyImprovementSchemaError(
+                        f"Historical failed-attempt identity {field} is not authorized."
+                    )
+            expected_schema = (
+                "policy_improvement_smoke_failed_attempt_v1"
+                if is_smoke
+                else "policy_improvement_run_failed_attempt_v1"
+            )
+            if (
+                manifest["schema_name"] != expected_schema
+                or manifest["schema_version"] != 1
+                or manifest["attempt_id"] != attempt_id
+                or manifest["protocol_sha256"] != protocol_sha256
+                or manifest["registry_row_sha256"] != registry_row_sha256
+                or manifest["runtime_authorization_sha256"] != authorization_digest
+                or manifest["run_id"] != raw_result["run_id"]
+                or manifest["segment"] != segment.name
+                or manifest["failure_phase"] != raw_result["failure"]["phase"]
+                or manifest["result"]
+                != {
+                    "path": "result.json",
+                    "bytes": result_identity["bytes"],
+                    "sha256": result_identity["sha256"],
+                }
+            ):
+                raise PolicyImprovementSchemaError(
+                    "Historical failed-attempt manifest identity differs."
+                )
+            if not is_smoke and (
+                manifest["phase"] != raw_result["phase"]
+                or manifest["tier"] != raw_result["tier"]
+                or manifest["environment_interactions"]
+                != expected_environment_interactions
+            ):
+                raise PolicyImprovementSchemaError(
+                    "Historical failed attempt has the wrong phase or budget."
+                )
+            actual_files, actual_directories = _inventory(attempt)
+            if (
+                set(actual_files) != {"MANIFEST.json", "result.json"}
+                or actual_directories
+            ):
+                raise PolicyImprovementSchemaError(
+                    "Historical failed-attempt inventory differs."
+                )
+            _, manifest_identity = _stable_regular_file(attempt / "MANIFEST.json")
+            identities.append(
+                {
+                    "attempt_id": attempt_id,
+                    "segment": segment.name,
+                    "failure_phase": raw_result["failure"]["phase"],
+                    "runtime_authorization_sha256": authorization_digest,
+                    "generation_manifest_sha256": manifest_identity["sha256"],
+                    "result_sha256": result_identity["sha256"],
+                }
+            )
+    return identities
+
+
 def _authenticate_smoke_parent_segment(
     *,
     root: Path,
@@ -455,28 +773,36 @@ def _authenticate_smoke_parent_segment(
         raise PolicyImprovementSchemaError(
             "Smoke prepare segment escaped the evidence root."
         ) from exc
-    manifest = _fields(
+    raw_manifest = _object(
         _load_ascii_json(parent / "MANIFEST.json"),
-        {
-            "schema_name",
-            "schema_version",
-            "protocol_sha256",
-            "registry_sha256",
-            "registry_row_sha256",
-            "run_id",
-            "method_id",
-            "segment",
-            "environment_interactions",
-            "parent_checkpoint_sha256",
-            "result_status",
-            "outputs",
-            "storage_bytes",
-        },
+        path=f"generation[{run_id}].parent_manifest",
+    )
+    parent_schema_version = raw_manifest.get("schema_version")
+    parent_manifest_fields = {
+        "schema_name",
+        "schema_version",
+        "protocol_sha256",
+        "registry_sha256",
+        "registry_row_sha256",
+        "run_id",
+        "method_id",
+        "segment",
+        "environment_interactions",
+        "parent_checkpoint_sha256",
+        "result_status",
+        "outputs",
+        "storage_bytes",
+    }
+    if parent_schema_version == 2:
+        parent_manifest_fields.add("prior_failed_attempts")
+    manifest = _fields(
+        raw_manifest,
+        parent_manifest_fields,
         path=f"generation[{run_id}].parent_manifest",
     )
     if (
         manifest["schema_name"] != "policy_improvement_smoke_segment_v1"
-        or manifest["schema_version"] != 1
+        or parent_schema_version not in {1, 2}
         or manifest["protocol_sha256"] != protocol_sha256
         or manifest["registry_sha256"] != registry_sha256
         or manifest["registry_row_sha256"] != registry_row_sha256
@@ -488,6 +814,14 @@ def _authenticate_smoke_parent_segment(
         or manifest["result_status"] is not None
     ):
         raise PolicyImprovementSchemaError("Smoke prepare segment identity differs.")
+    parent_prior_failed_attempts = (
+        _prior_failed_attempt_commitments(
+            manifest["prior_failed_attempts"],
+            path="parent.prior_failed_attempts",
+        )
+        if parent_schema_version == 2
+        else []
+    )
     outputs = _fields(
         manifest["outputs"], {"checkpoint", "files"}, path="parent.outputs"
     )
@@ -592,6 +926,7 @@ def _authenticate_smoke_parent_segment(
         "checkpoint_sha256": expected_checkpoint_sha256,
         "checkpoint_path": str(parent / checkpoint_name),
         "checkpoint_validation": dict(parent_validation),
+        "prior_failed_attempts": parent_prior_failed_attempts,
     }
 
 
@@ -611,10 +946,59 @@ def authenticate_complete_generation(
     project_root: str | Path,
     dataset_root: str | Path,
     runtime_authorization: Mapping[str, object],
+    historical_runtime_authorizations: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Reopen one complete immutable generation and bind every reported artifact."""
 
     root = _private_owner_root(evidence_root)
+    current_authorization = validate_runtime_authorization(runtime_authorization)
+    current_authorization_digest = runtime_authorization_sha256(current_authorization)
+    result_identities = _object(result["identities"], path="result.identities")
+    training_role = current_authorization["roles"][0]
+    current_runtime_bindings = {
+        "runtime_authorization_sha256": current_authorization_digest,
+        "producer_git_commit": current_authorization["producer_git_commit"],
+        "producer_manifest_sha256": current_authorization[
+            "producer_source_manifest_sha256"
+        ],
+        "launcher_sha256": current_authorization["launcher_sha256"],
+        "training_source_git_commit": training_role["source_git_commit"],
+        "training_runtime_sha256": training_role["runtime_sha256"],
+        "training_runtime_profile_sha256": training_role["runtime_profile_sha256"],
+        "training_selected_source_manifest_sha256": training_role[
+            "selected_source_manifest_sha256"
+        ],
+    }
+    if current_authorization["protocol_sha256"] != protocol_sha256 or any(
+        result_identities[field] != expected
+        for field, expected in current_runtime_bindings.items()
+    ):
+        raise PolicyImprovementSchemaError(
+            "Complete result is not bound to its supplied runtime authorization."
+        )
+    runtime_authorizations: dict[str, Mapping[str, object]] = {
+        current_authorization_digest: current_authorization,
+    }
+    for supplied_digest, supplied_authorization in (
+        historical_runtime_authorizations or {}
+    ).items():
+        digest = _sha256(
+            supplied_digest,
+            path="historical_runtime_authorizations.key",
+        )
+        authorization = validate_runtime_authorization(supplied_authorization)
+        if runtime_authorization_sha256(authorization) != digest:
+            raise PolicyImprovementSchemaError(
+                "Historical runtime-authorization key differs from its document."
+            )
+        existing = runtime_authorizations.get(digest)
+        if existing is not None and canonical_json_bytes(
+            existing
+        ) != canonical_json_bytes(authorization):
+            raise PolicyImprovementSchemaError(
+                "Runtime-authorization digest resolves to different documents."
+            )
+        runtime_authorizations[digest] = authorization
     run_id = str(result["run_id"])
     generation = (
         root
@@ -652,28 +1036,37 @@ def authenticate_complete_generation(
             "Result generation escaped the evidence root."
         ) from exc
 
-    manifest = _fields(
+    is_smoke = result.get("tier") == "smoke"
+    raw_manifest = _object(
         _load_ascii_json(generation / "MANIFEST.json"),
-        {
-            "schema_name",
-            "schema_version",
-            "protocol_sha256",
-            "registry_sha256",
-            "registry_row_sha256",
-            "run_id",
-            "method_id",
-            "segment",
-            "environment_interactions",
-            "parent_checkpoint_sha256",
-            "result_status",
-            "outputs",
-            "storage_bytes",
-        },
+        path=f"generation[{run_id}].manifest",
+    )
+    segment_schema_version = raw_manifest.get("schema_version")
+    manifest_fields = {
+        "schema_name",
+        "schema_version",
+        "protocol_sha256",
+        "registry_sha256",
+        "registry_row_sha256",
+        "run_id",
+        "method_id",
+        "segment",
+        "environment_interactions",
+        "parent_checkpoint_sha256",
+        "result_status",
+        "outputs",
+        "storage_bytes",
+    }
+    if is_smoke and segment_schema_version == 2:
+        manifest_fields.add("prior_failed_attempts")
+    manifest = _fields(
+        raw_manifest,
+        manifest_fields,
         path=f"generation[{run_id}].manifest",
     )
     if (
         manifest["schema_name"] not in _COMPLETE_SEGMENT_SCHEMAS
-        or manifest["schema_version"] != 1
+        or segment_schema_version not in ({1, 2} if is_smoke else {1})
         or manifest["protocol_sha256"] != protocol_sha256
         or manifest["registry_sha256"] != registry_sha256
         or manifest["registry_row_sha256"] != registry_row_sha256
@@ -685,29 +1078,52 @@ def authenticate_complete_generation(
         raise PolicyImprovementSchemaError(
             f"Result generation manifest for {run_id} has the wrong identity."
         )
-    is_smoke = result.get("tier") == "smoke"
     if is_smoke != (manifest["schema_name"] == "policy_improvement_smoke_segment_v1"):
         raise PolicyImprovementSchemaError(
             "Result tier and immutable segment schema differ."
         )
     run_root = root / "runs" / run_id
-    _require_exact_directory_entries(
-        run_root,
-        {"segments"},
-        label="Complete run root",
-    )
     attempts_path = run_root / "attempts"
     try:
         attempts_path.lstat()
     except FileNotFoundError:
-        pass
+        has_historical_attempts = False
     except OSError as exc:
         raise PolicyImprovementSchemaError(
             "Run attempt inventory cannot be authenticated."
         ) from exc
     else:
+        has_historical_attempts = True
+    _require_exact_directory_entries(
+        run_root,
+        {"segments", "attempts"} if has_historical_attempts else {"segments"},
+        label="Complete run root",
+    )
+    historical_attempts = (
+        _authenticate_historical_failed_attempts(
+            root=root,
+            run_root=run_root,
+            complete_result=result,
+            protocol_sha256=protocol_sha256,
+            registry_row_sha256=registry_row_sha256,
+            expected_environment_interactions=expected_environment_interactions,
+            runtime_authorizations=runtime_authorizations,
+        )
+        if has_historical_attempts
+        else []
+    )
+    committed_attempts = (
+        _prior_failed_attempt_commitments(
+            manifest["prior_failed_attempts"],
+            path="generation.prior_failed_attempts",
+        )
+        if is_smoke and segment_schema_version == 2
+        else []
+    )
+    observed_attempts = _historical_attempt_commitments(historical_attempts)
+    if committed_attempts != observed_attempts:
         raise PolicyImprovementSchemaError(
-            "A complete result cannot hide an earlier failed attempt."
+            "Complete generation does not bind its exact prior failed-attempt set."
         )
     segments_path = run_root / "segments"
     expected_segments = (
@@ -739,6 +1155,13 @@ def authenticate_complete_generation(
             registry_row_sha256=registry_row_sha256,
             expected_checkpoint_sha256=parent_checkpoint_sha256,
         )
+        parent_attempts = parent_identity["prior_failed_attempts"]
+        if not isinstance(parent_attempts, list) or any(
+            attempt not in committed_attempts for attempt in parent_attempts
+        ):
+            raise PolicyImprovementSchemaError(
+                "Final smoke generation omits a failure bound by its parent."
+            )
     elif (
         manifest["segment"] != "complete"
         or manifest["parent_checkpoint_sha256"] is not None
@@ -1233,10 +1656,36 @@ def authenticate_complete_generation(
             or parent_after["checkpoint_path"] != parent_identity["checkpoint_path"]
             or canonical_json_bytes(parent_after["checkpoint_validation"])
             != canonical_json_bytes(parent_identity["checkpoint_validation"])
+            or canonical_json_bytes(parent_after["prior_failed_attempts"])
+            != canonical_json_bytes(parent_identity["prior_failed_attempts"])
         ):
             raise PolicyImprovementSchemaError(
                 "Smoke prepare segment changed during semantic validation."
             )
+    _require_exact_directory_entries(
+        run_root,
+        {"segments", "attempts"} if has_historical_attempts else {"segments"},
+        label="Complete run root",
+    )
+    historical_attempts_after = (
+        _authenticate_historical_failed_attempts(
+            root=root,
+            run_root=run_root,
+            complete_result=result,
+            protocol_sha256=protocol_sha256,
+            registry_row_sha256=registry_row_sha256,
+            expected_environment_interactions=expected_environment_interactions,
+            runtime_authorizations=runtime_authorizations,
+        )
+        if has_historical_attempts
+        else []
+    )
+    if canonical_json_bytes(historical_attempts_after) != canonical_json_bytes(
+        historical_attempts
+    ):
+        raise PolicyImprovementSchemaError(
+            "Historical failed-attempt inventory changed during validation."
+        )
     return {
         "generation_path": str(generation),
         "generation_manifest_sha256": manifest_file_identity["sha256"],
@@ -1249,6 +1698,7 @@ def authenticate_complete_generation(
             if parent_identity is None
             else parent_identity["generation_manifest_sha256"]
         ),
+        "historical_failed_attempts": historical_attempts,
     }
 
 
