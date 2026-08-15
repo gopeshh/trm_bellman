@@ -165,6 +165,13 @@ class GpuUtilizationSummary:
     samples: tuple[float, ...]
 
 
+def _optional_trainer_config_dict(trainer: Any, module: Any) -> dict[str, Any] | None:
+    """Match production evidence semantics for baseline-only trainer config."""
+
+    config = getattr(trainer, "config", None)
+    return module._config_dict(config) if config is not None else None
+
+
 def _sha256(value: object, *, name: str) -> str:
     if (
         not isinstance(value, str)
@@ -865,7 +872,6 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
             raise PolicyImprovementSmokeError("Registered PPO smoke trainer differs.")
     elif not isinstance(trainer, UPITrmTrainer):
         raise PolicyImprovementSmokeError("Registered UPI smoke trainer differs.")
-
     effective_config = {
         "schema_name": "policy_improvement_smoke_effective_config_v1",
         "protocol_sha256": context.protocol_sha256,
@@ -877,7 +883,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
         "launcher_sha256": context.launcher_sha256,
         "producer_manifest_sha256": context.producer_manifest_sha256,
         "rl_config": module._config_dict(rl_config),
-        "trainer_config": module._config_dict(trainer.config),
+        "trainer_config": _optional_trainer_config_dict(trainer, module),
         "model_config": module._config_dict(model.config),
         "dataset_provenance_sha256": canonical_json_sha256(dataset_provenance),
         "config_source_sha256": file_sha256(config_path),

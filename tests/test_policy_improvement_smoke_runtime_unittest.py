@@ -28,6 +28,20 @@ PROTOCOL_PATH = REPOSITORY_ROOT / "configs/policy_improvement_v1/protocol.json"
 
 
 class PolicyImprovementSmokeRuntimeTest(unittest.TestCase):
+    def test_trainer_config_is_baseline_only_like_production_evidence(self) -> None:
+        rl_config = SimpleNamespace(training_protocol="fixed_base_exact")
+        trainer = object.__new__(smoke.UPITrmTrainer)
+        trainer.rl_cfg = rl_config
+        module = SimpleNamespace(_config_dict=lambda value: dict(vars(value)))
+        self.assertIsNone(smoke._optional_trainer_config_dict(trainer, module))
+
+        baseline_config = SimpleNamespace(num_steps=16, num_epochs=1)
+        baseline_trainer = SimpleNamespace(config=baseline_config)
+        self.assertEqual(
+            smoke._optional_trainer_config_dict(baseline_trainer, module),
+            {"num_steps": 16, "num_epochs": 1},
+        )
+
     def _context_and_session(
         self,
         root: Path,
