@@ -39,11 +39,22 @@ PAR_FILENAME_ENV = "FB_PAR_FILENAME"
 
 _ROOT_SOURCES = (
     "confirmatory_runtime_launcher.py",
+    "phase4_runtime_profile.py",
+    "policy_improvement_smoke_checkpoint.py",
+    "policy_improvement_smoke_runtime.py",
     "puzzle_dataset.py",
     "runtime_archive_preflight.py",
     "upi_trm_train.py",
 )
+_ADDITIONAL_SOURCES = (
+    "scripts/policy_improvement_registry.py",
+    "scripts/policy_improvement_schema.py",
+)
 _SOURCE_DIRECTORIES = ("dataset", "evaluators", "models", "rl", "utils")
+_CONFIG_DIRECTORIES = (
+    PurePosixPath("configs/iclr_confirmatory"),
+    PurePosixPath("configs/policy_improvement_v1"),
+)
 _LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _READ_SIZE = 1024 * 1024
 _MEMFD_SEALING_AVAILABLE = all(
@@ -142,6 +153,8 @@ def _is_behavior_python_source(relative_path: str) -> bool:
         return False
     if len(path.parts) == 1:
         return relative_path in _ROOT_SOURCES
+    if relative_path in _ADDITIONAL_SOURCES:
+        return True
     return path.parts[0] in _SOURCE_DIRECTORIES
 
 
@@ -156,6 +169,16 @@ def _is_behavior_bytecode(relative_path: str) -> bool:
     root_stems = tuple(PurePosixPath(source).stem for source in _ROOT_SOURCES)
     if len(path.parts) == 1:
         return path.stem in root_stems
+    if path.parent == PurePosixPath("scripts"):
+        return any(
+            path.stem == PurePosixPath(source).stem
+            for source in _ADDITIONAL_SOURCES
+        )
+    if path.parts[:2] == ("scripts", "__pycache__"):
+        return any(
+            path.name.startswith(f"{PurePosixPath(source).stem}.")
+            for source in _ADDITIONAL_SOURCES
+        )
     return path.parts[0] == "__pycache__" and any(
         path.name.startswith(f"{stem}.") for stem in root_stems
     )
@@ -166,7 +189,7 @@ def _is_confirmatory_config_source(relative_path: str) -> bool:
         return False
     path = PurePosixPath(relative_path)
     return (
-        path.parent == PurePosixPath("configs/iclr_confirmatory")
+        path.parent in _CONFIG_DIRECTORIES
         and path.suffix in {".json", ".yaml"}
         and relative_path != SOURCE_MANIFEST_RELATIVE_PATH
     )
@@ -209,7 +232,7 @@ def _validate_manifest(value: object) -> dict[str, str]:
             )
         sources[relative_path] = digest
 
-    missing_roots = set(_ROOT_SOURCES).difference(sources)
+    missing_roots = set((*_ROOT_SOURCES, *_ADDITIONAL_SOURCES)).difference(sources)
     missing_directories = {
         directory
         for directory in _SOURCE_DIRECTORIES
@@ -223,9 +246,18 @@ def _validate_manifest(value: object) -> dict[str, str]:
         raise ConfirmatoryRuntimeError(
             "Runtime source manifest omits a required behavior-source root."
         )
-    if not any(_is_confirmatory_config_source(path) for path in sources):
+    missing_config_directories = {
+        directory
+        for directory in _CONFIG_DIRECTORIES
+        if not any(
+            PurePosixPath(path).parent == directory
+            and _is_confirmatory_config_source(path)
+            for path in sources
+        )
+    }
+    if missing_config_directories:
         raise ConfirmatoryRuntimeError(
-            "Runtime source manifest omits confirmatory configuration sources."
+            "Runtime source manifest omits registered configuration sources."
         )
     return {name: sources[name] for name in sorted(sources)}
 

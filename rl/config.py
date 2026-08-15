@@ -176,7 +176,12 @@ class RLConfig(BaseModel):
     # Historical runs used the mutable ``legacy`` training path. The corrected
     # fixed-base protocol must be selected explicitly so old checkpoints and
     # configurations cannot be reinterpreted as theorem-facing runs.
-    training_protocol: Literal["legacy", "fixed_base_exact"] = "legacy"
+    training_protocol: Literal[
+        "legacy",
+        "fixed_base_exact",
+        "fixed_base_ablation_batch_only_centering",
+        "fixed_base_ablation_distilled_realization",
+    ] = "legacy"
     
     # === Theory-exact mixture mode (Issue 4 - CPI guarantee) ===
     # 
@@ -392,32 +397,68 @@ class RLConfig(BaseModel):
         if not 0.0 <= self.mixture_alpha <= 1.0:
             issues.append("mixture_alpha must lie in [0, 1] for a convex policy mixture.")
 
-        if self.training_protocol == "fixed_base_exact":
+        fixed_base_protocol = self.training_protocol in {
+            "fixed_base_exact",
+            "fixed_base_ablation_batch_only_centering",
+            "fixed_base_ablation_distilled_realization",
+        }
+        if fixed_base_protocol:
             if self.stop_action_mode != "terminal":
                 issues.append(
-                    "fixed_base_exact requires stop_action_mode='terminal' so "
+                    f"{self.training_protocol} requires stop_action_mode='terminal' so "
                     "STOP is the terminal action in the declared edit MDP."
                 )
             if self.value_target_clip is not None:
                 issues.append(
-                    "fixed_base_exact requires value_target_clip=None so the "
+                    f"{self.training_protocol} requires value_target_clip=None so the "
                     "declared K-step population target is not clipped."
                 )
+            if self.enable_contraction and self.opnorm_clamp_interval > 0:
+                issues.append(
+                    f"{self.training_protocol} requires opnorm_clamp_interval=0 because "
+                    "scheduled clamping would mutate the frozen recurrent map."
+                )
+            if self.enable_contraction and not self.disable_value_head_norm:
+                issues.append(
+                    f"{self.training_protocol} with contraction enabled requires "
+                    "disable_value_head_norm=True so value-head spectral-norm "
+                    "buffers cannot mutate during exact action enumeration."
+                )
+        if self.training_protocol == "fixed_base_exact":
             if not self.theory_exact_mixture:
                 issues.append(
                     "fixed_base_exact requires theory_exact_mixture=True for "
                     "probability-space proposal deployment."
                 )
-            if self.enable_contraction and self.opnorm_clamp_interval > 0:
+        elif self.training_protocol == "fixed_base_ablation_batch_only_centering":
+            issues.append(
+                "fixed_base_ablation_batch_only_centering is an explicitly "
+                "non-theorem Stage 3 intervention."
+            )
+            if self.exact_baseline_summation or not self.batch_centered_advantage:
                 issues.append(
-                    "fixed_base_exact requires opnorm_clamp_interval=0 because "
-                    "scheduled clamping would mutate the frozen recurrent map."
+                    "fixed_base_ablation_batch_only_centering requires only the "
+                    "registered batch-centering heuristic."
                 )
-            if self.enable_contraction and not self.disable_value_head_norm:
+            if not self.theory_exact_mixture or self.distill_mixture_policy:
                 issues.append(
-                    "fixed_base_exact with contraction enabled requires "
-                    "disable_value_head_norm=True so value-head spectral-norm "
-                    "buffers cannot mutate during exact action enumeration."
+                    "fixed_base_ablation_batch_only_centering requires exact "
+                    "probability-mixture deployment without distillation."
+                )
+        elif self.training_protocol == "fixed_base_ablation_distilled_realization":
+            issues.append(
+                "fixed_base_ablation_distilled_realization is an explicitly "
+                "non-theorem Stage 3 intervention."
+            )
+            if not self.exact_baseline_summation or self.batch_centered_advantage:
+                issues.append(
+                    "fixed_base_ablation_distilled_realization must retain the "
+                    "registered exact statewise centering configuration."
+                )
+            if self.theory_exact_mixture or not self.distill_mixture_policy:
+                issues.append(
+                    "fixed_base_ablation_distilled_realization requires the "
+                    "distilled realized policy rather than exact-mixture deployment."
                 )
         elif self.theory_exact_mixture:
             issues.append(
@@ -495,6 +536,47 @@ class RLConfig(BaseModel):
                 )
             )
         )
+
+    def is_registered_fixed_base_ablation(self) -> bool:
+        """Return whether this is one of the two registered Stage 3 interventions.
+
+        These protocols preserve fixed recurrent-map ownership while changing one
+        policy-improvement mechanism. They are intentionally excluded from
+        :meth:`is_fixed_base_proposal_exact` and from theorem-facing replay.
+        """
+
+        shared = (
+            0.0 <= self.gamma < 1.0
+            and self.stop_action_mode == "terminal"
+            and self.value_target_clip is None
+            and self.exact_k_step_targets
+            and self.policy_epsilon == 0.0
+            and 0.0 <= self.mixture_alpha <= 1.0
+            and (
+                not self.enable_contraction
+                or (
+                    self.opnorm_clamp_interval == 0
+                    and self.disable_value_head_norm
+                )
+            )
+        )
+        if not shared:
+            return False
+        if self.training_protocol == "fixed_base_ablation_batch_only_centering":
+            return (
+                not self.exact_baseline_summation
+                and self.batch_centered_advantage
+                and self.theory_exact_mixture
+                and not self.distill_mixture_policy
+            )
+        if self.training_protocol == "fixed_base_ablation_distilled_realization":
+            return (
+                self.exact_baseline_summation
+                and not self.batch_centered_advantage
+                and not self.theory_exact_mixture
+                and self.distill_mixture_policy
+            )
+        return False
 
     def is_theory_exact(self) -> bool:
         """Compatibility alias for the exact fixed-base proposal check.

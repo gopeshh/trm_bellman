@@ -21,6 +21,8 @@ from runtime_archive_preflight import RuntimePreflight, preflight_runtime
 
 _PHASE4_RUN_ID_PREFIX = "phase4_2x2_norm_ablation."
 _PHASE4_TRAINING_ROLE = "training"
+_POLICY_SMOKE_ENTRYPOINT = "--policy-improvement-smoke-entrypoint"
+_POLICY_SMOKE_ROLE = "policy-improvement-smoke"
 
 
 def _phase4_run_requested(argv: List[str]) -> bool:
@@ -40,6 +42,12 @@ def _phase4_run_requested(argv: List[str]) -> bool:
     return False
 
 
+def _policy_smoke_requested(argv: List[str]) -> bool:
+    """Recognize the launcher-owned Stage 0 entrypoint before imports."""
+
+    return _POLICY_SMOKE_ENTRYPOINT in argv
+
+
 def _preflight_training_runtime(
     *,
     argv: List[str],
@@ -50,17 +58,27 @@ def _preflight_training_runtime(
 
     confirmatory = "--confirmatory" in argv
     phase4_requested = _phase4_run_requested(argv)
-    if confirmatory and phase4_requested:
+    policy_smoke_requested = _policy_smoke_requested(argv)
+    if sum((confirmatory, phase4_requested, policy_smoke_requested)) > 1:
         raise RuntimeError(
-            "Confirmatory and Phase 4 publication modes cannot be combined."
+            "Confirmatory, Phase 4 publication, and policy-improvement smoke "
+            "modes cannot be combined."
         )
     return preflight_runtime(
         module_file=module_file,
         expected_module_name="upi_trm_train.py",
         environ=environ,
-        attestation_required=confirmatory or phase4_requested,
+        attestation_required=confirmatory or phase4_requested or policy_smoke_requested,
         allowed_phase4_roles=(
-            frozenset({_PHASE4_TRAINING_ROLE}) if phase4_requested else None
+            frozenset(
+                {
+                    _POLICY_SMOKE_ROLE
+                    if policy_smoke_requested
+                    else _PHASE4_TRAINING_ROLE
+                }
+            )
+            if phase4_requested or policy_smoke_requested
+            else None
         ),
     )
 
@@ -2652,7 +2670,7 @@ def save_checkpoint(
     return path
 
 
-def resume_from_checkpoint(
+def _resume_from_checkpoint_impl(
     checkpoint_path: str,
     model: nn.Module,
     trainer: "UPITrmTrainer",
@@ -2662,6 +2680,7 @@ def resume_from_checkpoint(
     expected_run_identity: Optional[Dict[str, Any]] = None,
     expected_checkpoint_sha256: Optional[str] = None,
     allow_legacy_warm_start: bool = False,
+    originating_runtime_artifact_sha256: Optional[str] = None,
 ) -> int:
     """
     Resume RL training from a saved checkpoint.
@@ -2855,7 +2874,7 @@ def resume_from_checkpoint(
             dataset_provenance=checkpoint_provenance,
             execution_device=_canonical_device(device),
             runtime_fingerprint=active_runtime_fingerprint,
-            runtime_artifact_sha256=_PREVERIFIED_RUNTIME_SHA256,
+            runtime_artifact_sha256=originating_runtime_artifact_sha256,
         )
         if checkpoint.get("checkpoint_phase") != "idle_between_training_calls":
             raise RuntimeError("Schema-v5 checkpoint has an invalid training phase.")
@@ -3504,6 +3523,64 @@ def resume_from_checkpoint(
     )
 
     return start_step
+
+
+def resume_from_checkpoint(
+    checkpoint_path: str,
+    model: nn.Module,
+    trainer: "UPITrmTrainer",
+    device: str,
+    puzzle_emb_optimizer: Optional[torch.optim.Optimizer] = None,
+    expected_dataset_provenance: Optional[Dict[str, Any]] = None,
+    expected_run_identity: Optional[Dict[str, Any]] = None,
+    expected_checkpoint_sha256: Optional[str] = None,
+    allow_legacy_warm_start: bool = False,
+) -> int:
+    """Resume training only against the runtime authenticated for this process."""
+
+    return _resume_from_checkpoint_impl(
+        checkpoint_path,
+        model,
+        trainer,
+        device,
+        puzzle_emb_optimizer,
+        expected_dataset_provenance,
+        expected_run_identity,
+        expected_checkpoint_sha256,
+        allow_legacy_warm_start,
+        originating_runtime_artifact_sha256=_PREVERIFIED_RUNTIME_SHA256,
+    )
+
+
+def validate_checkpoint_state_for_audit(
+    checkpoint_path: str,
+    model: nn.Module,
+    trainer: "UPITrmTrainer",
+    device: str,
+    *,
+    expected_dataset_provenance: Dict[str, Any],
+    expected_run_identity: Optional[Dict[str, Any]],
+    expected_checkpoint_sha256: str,
+    authorized_originating_runtime_sha256: str,
+) -> int:
+    """Strictly restore a disposable audit session for an authorized producer."""
+
+    originating_runtime = _validate_expected_sha256(
+        authorized_originating_runtime_sha256,
+        field="Authorized originating runtime SHA-256",
+    )
+    return _resume_from_checkpoint_impl(
+        checkpoint_path,
+        model,
+        trainer,
+        device,
+        None,
+        expected_dataset_provenance,
+        expected_run_identity,
+        expected_checkpoint_sha256,
+        False,
+        originating_runtime_artifact_sha256=originating_runtime,
+    )
 
 
 def parse_args():
@@ -4275,6 +4352,18 @@ def _resolve_train_pool_size(
 
 
 def main():
+    if _policy_smoke_requested(list(sys.argv[1:])):
+        if _PREVERIFIED_RUNTIME is None:
+            raise RuntimeError(
+                "Policy-improvement smoke execution has no runtime preflight."
+            )
+        from policy_improvement_smoke_runtime import main as smoke_main
+
+        return smoke_main(
+            list(sys.argv[1:]),
+            runtime_preflight=_PREVERIFIED_RUNTIME,
+            training_module=sys.modules[__name__],
+        )
     args = parse_args()
 
     if args.seed is not None:
@@ -5787,4 +5876,6 @@ if __name__ == "__main__":
     # Only set up if no handlers already configured
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(message)s")
-    main()
+    _exit_status = main()
+    if _exit_status is not None:
+        raise SystemExit(_exit_status)

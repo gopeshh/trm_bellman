@@ -1,16 +1,18 @@
 load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
 load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+load("@fbcode_macros//build_defs:python_unittest.bzl", "python_unittest")
 
 python_library(
     name = "dataset",
     srcs = glob(["dataset/*.py"]),
     base_module = "",
     deps = [
-        ":utils",
         "fbsource//third-party/pypi/huggingface-hub:huggingface-hub",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/tqdm:tqdm",
+        ":phase4_runtime_profile",
+        ":utils",
     ],
 )
 
@@ -19,10 +21,10 @@ python_library(
     srcs = glob(["models/*.py", "models/**/*.py"]),
     base_module = "",
     deps = [
-        ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/einops:einops",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/torch:torch",
+        ":utils",
     ],
 )
 
@@ -31,7 +33,8 @@ python_library(
     srcs = glob(
         ["utils/*.py"],
         exclude = ["utils/evaluation_artifacts.py"],
-    ) + ["utils/evaluation_artifacts.py"],
+    )
+    + ["utils/evaluation_artifacts.py"],
     base_module = "",
     deps = [
         "fbsource//third-party/pypi/torch:torch",
@@ -43,11 +46,11 @@ python_library(
     srcs = glob(["rl/*.py", "rl/**/*.py"]),
     base_module = "",
     deps = [
-        ":models",
-        ":utils",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":utils",
     ],
 )
 
@@ -68,13 +71,13 @@ python_library(
     srcs = glob(["evaluators/*.py"]),
     base_module = "",
     deps = [
-        ":dataset",
-        ":models",
-        ":utils",
-        ":rl",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/numba:numba",
         "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        ":dataset",
+        ":models",
+        ":rl",
+        ":utils",
     ],
 )
 
@@ -83,14 +86,14 @@ python_library(
     srcs = ["scripts/eval/unroll_sensitivity.py"],
     base_module = "",
     deps = [
-        ":models",
-        ":utils",
-        ":rl",
-        ":puzzle_dataset_lib",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":utils",
     ],
 )
 
@@ -99,8 +102,8 @@ python_library(
     srcs = glob(["entrypoints/*.py"]),
     base_module = "",
     deps = [
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
     ],
 )
 
@@ -109,11 +112,11 @@ python_library(
     srcs = ["puzzle_dataset.py"],
     base_module = "",
     deps = [
-        ":dataset",
-        ":models",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/torch:torch",
+        ":dataset",
+        ":models",
     ],
 )
 
@@ -137,30 +140,289 @@ python_library(
 )
 
 python_library(
+    name = "policy_improvement_schema",
+    srcs = ["scripts/policy_improvement_schema.py"],
+    base_module = "",
+)
+
+python_library(
+    name = "policy_improvement_registry",
+    srcs = ["scripts/policy_improvement_registry.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_evidence",
+    srcs = ["scripts/policy_improvement_evidence.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_full_runtime",
+    srcs = ["scripts/policy_improvement_full_runtime.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_test_open",
+    srcs = ["scripts/policy_improvement_test_open.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_test_open_cli",
+    srcs = ["scripts/policy_improvement_test_open_cli.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_audit_lib",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_test_open",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_audit_lib",
+    srcs = ["scripts/policy_improvement_audit.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_checkpoint_validator",
+        ":policy_improvement_evidence",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_test_open",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_checkpoint_validator",
+    srcs = ["policy_improvement_checkpoint_validator.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_smoke_checkpoint",
+        ":policy_improvement_smoke_runtime",
+        ":upi_trm_train_lib",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_consumer_entrypoint",
+    srcs = ["policy_improvement_consumer_entrypoint.py"],
+    base_module = "",
+    deps = [
+        ":runtime_archive_preflight",
+    ],
+)
+
+python_binary(
+    name = "policy_improvement_audit",
+    srcs = [
+        "policy_improvement_consumer_entrypoint.py",
+        "scripts/policy_improvement_audit.py",
+    ],
+    base_module = "",
+    compile = False,
+    main_module = "policy_improvement_consumer_entrypoint",
+    resources = glob([
+        "configs/policy_improvement_v1/*.json",
+        "configs/policy_improvement_v1/*.yaml",
+    ]),
+    deps = [
+        ":policy_improvement_checkpoint_validator",
+        ":policy_improvement_evidence",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_test_open",
+        ":policy_improvement_test_open_cli",
+        ":runtime_archive_preflight",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_statistics",
+    srcs = ["scripts/policy_improvement_statistics.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_analysis_lib",
+    srcs = ["scripts/policy_improvement_analysis.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_audit_lib",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_statistics",
+    ],
+)
+
+python_binary(
+    name = "policy_improvement_analysis",
+    srcs = [
+        "policy_improvement_consumer_entrypoint.py",
+        "scripts/policy_improvement_analysis.py",
+    ],
+    base_module = "",
+    compile = False,
+    main_module = "policy_improvement_consumer_entrypoint",
+    resources = glob([
+        "configs/policy_improvement_v1/*.json",
+        "configs/policy_improvement_v1/*.yaml",
+    ]),
+    deps = [
+        ":policy_improvement_audit_lib",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_statistics",
+        ":runtime_archive_preflight",
+    ],
+)
+
+python_library(
+    name = "policy_dataset_builder_impl",
+    srcs = [
+        "dataset/__init__.py",
+        "dataset/build_4x4_sudoku.py",
+        "dataset/build_iclr_confirmatory_4x4.py",
+        "dataset/build_policy_improvement_4x4.py",
+        "utils/__init__.py",
+        "utils/dataset_provenance.py",
+        "utils/run_identity.py",
+    ],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        ":phase4_runtime_profile",
+    ],
+)
+
+python_library(
+    name = "policy_dataset_builder_entrypoint",
+    srcs = ["policy_dataset_builder_entrypoint.py"],
+    base_module = "",
+    resources = glob([
+        "configs/policy_improvement_v1/*.json",
+        "configs/policy_improvement_v1/*.yaml",
+    ]),
+    deps = [
+        ":policy_dataset_builder_impl",
+        ":runtime_archive_preflight",
+    ],
+)
+
+python_binary(
+    name = "policy_dataset_builder",
+    srcs = ["policy_dataset_builder_entrypoint.py"],
+    base_module = "",
+    compile = False,
+    main_module = "policy_dataset_builder_entrypoint",
+    resources = glob([
+        "configs/policy_improvement_v1/*.json",
+        "configs/policy_improvement_v1/*.yaml",
+    ]),
+    deps = [
+        ":policy_dataset_builder_impl",
+        ":runtime_archive_preflight",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_smoke_checkpoint",
+    srcs = ["policy_improvement_smoke_checkpoint.py"],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        ":utils",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_smoke_runtime",
+    srcs = ["policy_improvement_smoke_runtime.py"],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
+        ":dataset",
+        ":models",
+        ":phase4_runtime_profile",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_smoke_checkpoint",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":utils",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_smoke_plan_lib",
+    srcs = ["scripts/policy_improvement_smoke_plan.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+    ],
+)
+
+python_binary(
+    name = "policy_improvement_smoke_plan",
+    srcs = [],
+    base_module = "",
+    main_module = "scripts.policy_improvement_smoke_plan",
+    deps = [
+        ":policy_improvement_smoke_plan_lib",
+    ],
+)
+
+python_library(
     name = "upi_trm_train_lib",
     srcs = ["upi_trm_train.py"],
     base_module = "",
     resources = glob([
         "configs/iclr_confirmatory/*.json",
         "configs/iclr_confirmatory/*.yaml",
+        "configs/policy_improvement_v1/*.json",
+        "configs/policy_improvement_v1/*.yaml",
     ]),
     deps = [
-        ":confirmatory_runtime_launcher_lib",
-        ":runtime_archive_preflight",
-        ":models",
-        ":rl",
-        ":utils",
-        ":evaluators",
-        ":puzzle_dataset_lib",
-        ":dataset",
-        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/coolname:coolname",
+        "fbsource//third-party/pypi/einops:einops",
         "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/tqdm:tqdm",
+        "fbsource//third-party/pypi/omegaconf:omegaconf",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
-        "fbsource//third-party/pypi/omegaconf:omegaconf",
-        "fbsource//third-party/pypi/einops:einops",
-        "fbsource//third-party/pypi/coolname:coolname",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/tqdm:tqdm",
+        ":confirmatory_runtime_launcher_lib",
+        ":dataset",
+        ":evaluators",
+        ":models",
+        ":policy_improvement_smoke_runtime",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":runtime_archive_preflight",
+        ":utils",
     ],
 )
 
@@ -174,24 +436,27 @@ python_binary(
     resources = glob([
         "configs/iclr_confirmatory/*.json",
         "configs/iclr_confirmatory/*.yaml",
+        "configs/policy_improvement_v1/*.json",
+        "configs/policy_improvement_v1/*.yaml",
     ]),
     deps = [
-        ":confirmatory_runtime_launcher_lib",
-        ":runtime_archive_preflight",
-        ":models",
-        ":rl",
-        ":utils",
-        ":evaluators",
-        ":puzzle_dataset_lib",
-        ":dataset",
-        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/coolname:coolname",
+        "fbsource//third-party/pypi/einops:einops",
         "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/tqdm:tqdm",
+        "fbsource//third-party/pypi/omegaconf:omegaconf",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
-        "fbsource//third-party/pypi/omegaconf:omegaconf",
-        "fbsource//third-party/pypi/einops:einops",
-        "fbsource//third-party/pypi/coolname:coolname",
+        "fbsource//third-party/pypi/torch:torch",
+        "fbsource//third-party/pypi/tqdm:tqdm",
+        ":confirmatory_runtime_launcher_lib",
+        ":dataset",
+        ":evaluators",
+        ":models",
+        ":policy_improvement_smoke_runtime",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":runtime_archive_preflight",
+        ":utils",
     ],
 )
 
@@ -202,12 +467,12 @@ python_binary(
     keep_gpu_sections = True,
     main_module = "rl.cleanrl.cleanrl_runner",
     deps = [
-        ":puzzle_dataset_lib",
-        ":rl",
         "fbsource//third-party/pypi/gym:gym",
         "fbsource//third-party/pypi/gymnasium:gymnasium",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
         "fbsource//third-party/pypi/torch:torch",
+        ":puzzle_dataset_lib",
+        ":rl",
     ],
 )
 
@@ -240,8 +505,8 @@ python_binary(
     base_module = "",
     main_module = "dataset.build_iclr_confirmatory_4x4",
     deps = [
-        ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
+        ":utils",
     ],
 )
 
@@ -282,10 +547,10 @@ python_binary(
     base_module = "",
     main_module = "scripts.diagnose_contraction_lipschitz",
     deps = [
-        ":models",
-        ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":utils",
     ],
 )
 
@@ -295,10 +560,10 @@ python_binary(
     base_module = "",
     main_module = "scripts.diagnose_contraction_components",
     deps = [
-        ":models",
-        ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":utils",
     ],
 )
 
@@ -308,10 +573,10 @@ python_binary(
     base_module = "",
     main_module = "scripts.diagnose_contraction_fix",
     deps = [
-        ":models",
-        ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":utils",
     ],
 )
 
@@ -321,15 +586,15 @@ python_binary(
     base_module = "",
     main_module = "scripts.eval_theorem_facing_ordinal_check",
     deps = [
-        ":models",
-        ":utils",
-        ":rl",
-        ":puzzle_dataset_lib",
-        ":script_eval_unroll_sensitivity_lib",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":script_eval_unroll_sensitivity_lib",
+        ":utils",
     ],
 )
 
@@ -337,15 +602,15 @@ python_binary(
     name = "persistent_checkpoint_diagnostics",
     srcs = ["scripts/persistent_checkpoint_diagnostics.py"],
     base_module = "",
-    main_module = "scripts.persistent_checkpoint_diagnostics",
     keep_gpu_sections = True,
+    main_module = "scripts.persistent_checkpoint_diagnostics",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":puzzle_dataset_lib",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -355,10 +620,10 @@ python_binary(
     base_module = "",
     main_module = "scripts.materialize_hard4x4_closure_batch",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
         ":models",
         ":puzzle_dataset_lib",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -371,36 +636,36 @@ python_binary(
     base_module = "",
     main_module = "scripts.episodic_z_hard_suite_diagnostics",
     deps = [
-        ":models",
-        ":utils",
-        ":rl",
-        ":puzzle_dataset_lib",
-        ":script_eval_unroll_sensitivity_lib",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":script_eval_unroll_sensitivity_lib",
+        ":utils",
     ],
 )
 
 python_binary(
     name = "run_exp1_finite_r_primary",
     srcs = [
-        "scripts/run_exp1_finite_r_primary.py",
         "scripts/eval_theorem_facing_ordinal_check.py",
+        "scripts/run_exp1_finite_r_primary.py",
     ],
     base_module = "",
     main_module = "scripts.run_exp1_finite_r_primary",
     deps = [
-        ":models",
-        ":utils",
-        ":rl",
-        ":puzzle_dataset_lib",
-        ":script_eval_unroll_sensitivity_lib",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/pydantic:pydantic",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":script_eval_unroll_sensitivity_lib",
+        ":utils",
     ],
 )
 
@@ -427,7 +692,127 @@ python_binary(
     ],
 )
 
-load("@fbcode_macros//build_defs:python_unittest.bzl", "python_unittest")
+python_unittest(
+    name = "test_policy_improvement_v1",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_v1_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        ":dataset",
+        ":models",
+        ":policy_improvement_analysis_lib",
+        ":policy_improvement_audit_lib",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_smoke_plan_lib",
+        ":policy_improvement_statistics",
+        ":policy_improvement_test_open",
+        ":policy_improvement_test_open_cli",
+        ":rl",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_evidence",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_evidence_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":policy_improvement_evidence",
+        ":policy_improvement_schema",
+        ":policy_improvement_test_open",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_full_runtime",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_full_runtime_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":policy_improvement_full_runtime",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_dataset_builder",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_dataset_builder_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        ":policy_dataset_builder_impl",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_smoke_checkpoint",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_smoke_checkpoint_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":policy_improvement_smoke_checkpoint",
+        ":rl",
+        ":utils",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_smoke_runtime",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_smoke_runtime_unittest.py",
+    ],
+    base_module = "",
+    resources = glob([
+        "configs/policy_improvement_v1/*.json",
+        "configs/policy_improvement_v1/*.yaml",
+    ]),
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_smoke_runtime",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_checkpoint_validator",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_checkpoint_validator_unittest.py",
+    ],
+    base_module = "",
+    resources = glob([
+        "configs/policy_improvement_v1/*.json",
+        "configs/policy_improvement_v1/*.yaml",
+    ]),
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        ":policy_improvement_checkpoint_validator",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_smoke_runtime",
+        ":utils",
+    ],
+)
 
 python_unittest(
     name = "test_run_identity",
@@ -454,14 +839,14 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":models",
-        ":rl",
-        ":utils",
-        ":evaluators",
-        ":puzzle_dataset_lib",
-        ":upi_trm_train_lib",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":upi_trm_train_lib",
+        ":utils",
     ],
 )
 
@@ -473,11 +858,11 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
+        ":puzzle_dataset_lib",
         ":rl",
         ":utils",
-        ":puzzle_dataset_lib",
-        "fbsource//third-party/pypi/torch:torch",
     ],
 )
 
@@ -489,14 +874,14 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":models",
-        ":rl",
-        ":utils",
-        ":evaluators",
-        ":puzzle_dataset_lib",
-        ":upi_trm_train_lib",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":upi_trm_train_lib",
+        ":utils",
     ],
 )
 
@@ -508,15 +893,15 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":models",
-        ":rl",
-        ":utils",
-        ":evaluators",
-        ":puzzle_dataset_lib",
-        ":upi_trm_train_lib",
         "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":upi_trm_train_lib",
+        ":utils",
     ],
 )
 
@@ -528,10 +913,10 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":rl",
-        ":evaluators",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
+        ":rl",
     ],
 )
 
@@ -543,12 +928,12 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
         ":models",
         ":rl",
         ":utils",
-        ":evaluators",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
@@ -560,10 +945,10 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
@@ -576,11 +961,11 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
         ":rl",
         ":utils",
-        ":evaluators",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
@@ -592,14 +977,14 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":models",
-        ":rl",
-        ":utils",
-        ":evaluators",
-        ":puzzle_dataset_lib",
-        ":upi_trm_train_lib",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":upi_trm_train_lib",
+        ":utils",
     ],
 )
 
@@ -611,9 +996,9 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":models",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
     ],
 )
 
@@ -625,10 +1010,10 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
@@ -640,10 +1025,10 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
@@ -655,12 +1040,12 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
         ":models",
         ":rl",
         ":utils",
-        ":evaluators",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
@@ -672,10 +1057,10 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":rl",
-        ":evaluators",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
+        ":rl",
     ],
 )
 
@@ -687,10 +1072,10 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":rl",
-        ":evaluators",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
+        ":rl",
     ],
 )
 
@@ -702,14 +1087,14 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":models",
-        ":rl",
-        ":utils",
-        ":evaluators",
-        ":puzzle_dataset_lib",
-        ":upi_trm_train_lib",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":upi_trm_train_lib",
+        ":utils",
     ],
 )
 
@@ -721,10 +1106,10 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
@@ -736,22 +1121,22 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
+        ":evaluators",
         ":models",
         ":puzzle_dataset_lib",
         ":rl",
         ":utils",
-        ":evaluators",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
 python_unittest(
     name = "test_diagnostic_postprocess",
     srcs = [
+        "scripts/postprocess_episodic_z_hard_suite.py",
         "tests/__init__.py",
         "tests/test_diagnostic_postprocess_unittest.py",
-        "scripts/postprocess_episodic_z_hard_suite.py",
     ],
     base_module = "",
 )
@@ -759,15 +1144,15 @@ python_unittest(
 python_unittest(
     name = "test_result_provenance",
     srcs = [
-        "tests/__init__.py",
-        "tests/test_result_provenance_unittest.py",
         "scripts/aggregate_exp1_results.py",
         "scripts/aggregate_hard4x4_trusted_baselines.py",
+        "tests/__init__.py",
+        "tests/test_result_provenance_unittest.py",
     ],
     base_module = "",
     resources = [
-        "README.md",
         "AUDIT_REPORT.md",
+        "README.md",
         "scripts/build_artifact_zip.sh",
     ],
     deps = [
@@ -800,14 +1185,14 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":external_baselines_lib",
-        ":puzzle_dataset_lib",
-        ":rl",
         "fbsource//third-party/pypi/gym:gym",
         "fbsource//third-party/pypi/gymnasium:gymnasium",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
         "fbsource//third-party/pypi/torch:torch",
+        ":external_baselines_lib",
+        ":puzzle_dataset_lib",
+        ":rl",
     ],
 )
 
@@ -815,17 +1200,17 @@ python_unittest(
     name = "test_baselines",
     srcs = [
         "tests/__init__.py",
-        "tests/test_baselines_unittest.py",
         "tests/test_baseline_selection.py",
+        "tests/test_baselines_unittest.py",
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -837,11 +1222,11 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
@@ -853,11 +1238,11 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
@@ -869,10 +1254,10 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
     ],
 )
 
@@ -884,32 +1269,32 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/torch:torch",
         ":replay_theory_diagnostics",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
     ],
 )
 
 python_unittest(
     name = "test_persistent_checkpoint_diagnostics",
     srcs = [
-        "tests/__init__.py",
-        "tests/test_persistent_checkpoint_diagnostics_unittest.py",
         "scripts/episodic_z_hard_suite_diagnostics.py",
         "scripts/eval_theorem_facing_ordinal_check.py",
         "scripts/persistent_checkpoint_diagnostics.py",
+        "tests/__init__.py",
+        "tests/test_persistent_checkpoint_diagnostics_unittest.py",
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pydantic:pydantic",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":puzzle_dataset_lib",
         ":rl",
         ":script_eval_unroll_sensitivity_lib",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/pydantic:pydantic",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -921,10 +1306,10 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
         ":rl",
         ":upi_trm_train_lib",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -935,14 +1320,15 @@ python_unittest(
         "tests/test_config_integrity.py",
     ],
     base_module = "",
-    resources = ["README.md"] + glob([
+    resources = ["README.md"]
+    + glob([
         "configs/**/*.json",
         "configs/**/*.yaml",
         "data/iclr-confirmatory-sudoku4x4-v1/**/*.json",
     ]),
     deps = [
-        ":rl",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
+        ":rl",
     ],
 )
 
@@ -954,11 +1340,11 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
-        ":utils",
         ":upi_trm_train_lib",
-        "fbsource//third-party/pypi/torch:torch",
+        ":utils",
     ],
 )
 
@@ -968,9 +1354,9 @@ python_binary(
     base_module = "",
     main_module = "scripts.sanity_check_feasibility",
     deps = [
+        "fbsource//third-party/pypi/torch:torch",
         ":rl",
         ":upi_trm_train_lib",
-        "fbsource//third-party/pypi/torch:torch",
     ],
 )
 
@@ -980,8 +1366,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.test_solved_termination",
     deps = [
-        ":rl",
         "fbsource//third-party/pypi/torch:torch",
+        ":rl",
     ],
 )
 
@@ -1029,10 +1415,10 @@ python_binary(
     base_module = "",
     main_module = "scripts.diagnostics.diagnose_latent_collapse",
     deps = [
-        ":models",
-        ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":utils",
     ],
 )
 
@@ -1042,10 +1428,10 @@ python_binary(
     base_module = "",
     main_module = "scripts.diagnostics.diagnose_latent_collapse_v2",
     deps = [
-        ":models",
-        ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":utils",
     ],
 )
 
@@ -1055,16 +1441,16 @@ python_binary(
     base_module = "",
     main_module = "scripts.diagnostics.run_contraction_collapse_isolation_2x2",
     deps = [
-        ":models",
-        ":rl",
-        ":utils",
-        ":puzzle_dataset_lib",
-        ":upi_trm_train_lib",
-        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
         "fbsource//third-party/pypi/omegaconf:omegaconf",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
         "fbsource//third-party/pypi/tqdm:tqdm",
+        ":models",
+        ":puzzle_dataset_lib",
+        ":rl",
+        ":upi_trm_train_lib",
+        ":utils",
     ],
 )
 
@@ -1075,8 +1461,8 @@ python_binary(
     main_module = "scripts.plot_zonly_contraction_preview",
     deps = [
         "fbsource//third-party/pypi/matplotlib:matplotlib",
-        "fbsource//third-party/pypi/pandas:pandas",
         "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pandas:pandas",
     ],
 )
 
@@ -1084,17 +1470,17 @@ python_binary(
 python_library(
     name = "eval_unroll_sensitivity_lib",
     srcs = [
-        "scripts/eval_unroll_sensitivity.py",
         "scripts/eval/__init__.py",
         "scripts/eval/unroll_sensitivity.py",
+        "scripts/eval_unroll_sensitivity.py",
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1111,16 +1497,16 @@ python_binary(
 python_unittest(
     name = "test_unroll_sensitivity",
     srcs = [
+        "scripts/eval/unroll_sensitivity.py",
+        "scripts/eval_unroll_sensitivity.py",
         "tests/__init__.py",
         "tests/test_unroll_sensitivity_unittest.py",
-        "scripts/eval_unroll_sensitivity.py",
-        "scripts/eval/unroll_sensitivity.py",
     ],
     base_module = "",
     deps = [
-        ":eval_unroll_sensitivity_lib",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":eval_unroll_sensitivity_lib",
     ],
 )
 
@@ -1131,8 +1517,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.plot_exp1_unroll_sensitivity",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1142,8 +1528,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.plot_exp1_radius_sweep",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1162,8 +1548,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.plot_exp1_v4_1",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1174,8 +1560,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.make_paper_figures_exp1",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1185,8 +1571,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.make_paper_figures_exp1_split",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1196,8 +1582,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.make_paper_figures_exp1_final",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1227,10 +1613,10 @@ python_binary(
     base_module = "",
     main_module = "scripts.make_paper_figures_exp2",
     deps = [
-        ":eval_unroll_sensitivity_lib",
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":eval_unroll_sensitivity_lib",
     ],
 )
 
@@ -1248,10 +1634,10 @@ python_binary(
     base_module = "",
     main_module = "scripts.diagnose_contraction_saturation",
     deps = [
-        ":eval_unroll_sensitivity_lib",
-        ":models",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":eval_unroll_sensitivity_lib",
+        ":models",
     ],
 )
 
@@ -1261,11 +1647,11 @@ python_binary(
     base_module = "",
     main_module = "scripts.eval_exp2c_lite",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
         ":eval_unroll_sensitivity_lib",
         ":models",
         ":rl",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
     ],
 )
 
@@ -1286,12 +1672,12 @@ python_binary(
     base_module = "",
     main_module = "scripts.reevaluate_upi_baseline_interface",
     deps = [
-        ":eval_unroll_sensitivity_lib",
-        ":puzzle_dataset_lib",
-        ":rl",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/pyyaml:pyyaml",
         "fbsource//third-party/pypi/torch:torch",
+        ":eval_unroll_sensitivity_lib",
+        ":puzzle_dataset_lib",
+        ":rl",
     ],
 )
 
@@ -1301,8 +1687,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.make_paper_figures_exp2_final",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1319,10 +1705,10 @@ python_binary(
     base_module = "",
     main_module = "scripts.exp1_lipschitz_diag",
     deps = [
-        ":models",
-        ":rl",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":rl",
     ],
 )
 
@@ -1332,10 +1718,10 @@ python_binary(
     base_module = "",
     main_module = "scripts.exp1_value_head_lipschitz",
     deps = [
-        ":eval_unroll_sensitivity_lib",
-        ":utils",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":eval_unroll_sensitivity_lib",
+        ":utils",
     ],
 )
 
@@ -1370,12 +1756,12 @@ python_binary(
     base_module = "",
     main_module = "scripts.exp4_range_test",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/scipy:scipy",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/scipy:scipy",
     ],
 )
 
@@ -1385,13 +1771,13 @@ python_binary(
     base_module = "",
     main_module = "scripts.exp4_final",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/scipy:scipy",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/scipy:scipy",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -1415,13 +1801,13 @@ python_binary(
     base_module = "",
     main_module = "scripts.exp4_final_v2",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/scipy:scipy",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/scipy:scipy",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -1431,8 +1817,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.generate_exp4_figures",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/scipy:scipy",
     ],
 )
@@ -1454,12 +1840,12 @@ python_binary(
     base_module = "",
     main_module = "scripts.exp5_tradeoff_curve",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -1469,8 +1855,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.generate_exp5_figures",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1487,12 +1873,12 @@ python_binary(
     base_module = "",
     main_module = "scripts.diagnose_success_discrepancy",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -1502,12 +1888,12 @@ python_binary(
     base_module = "",
     main_module = "scripts.diagnose_success_rate_discrepancy",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -1517,13 +1903,13 @@ python_binary(
     base_module = "",
     main_module = "scripts.phase5_centering_alpha",
     deps = [
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
-        "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
 
@@ -1559,8 +1945,8 @@ python_unittest(
     ],
     base_module = "",
     deps = [
-        ":exact_finite_mdp_sanity_lib",
         "fbsource//third-party/pypi/numpy:numpy",
+        ":exact_finite_mdp_sanity_lib",
     ],
 )
 
@@ -1579,9 +1965,9 @@ python_library(
     srcs = ["scripts/phase4_diagnostic_inputs.py"],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
         ":phase4_result_schema",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1645,14 +2031,14 @@ python_library(
     srcs = ["scripts/phase4_checkpoint.py"],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":phase4_result_schema",
         ":puzzle_dataset_lib",
         ":rl",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -1677,19 +2063,19 @@ python_binary(
     compile = False,
     main_module = "phase4_runtime_entrypoint",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/scipy:scipy",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":phase4_checkpoint",
         ":phase4_diagnostic_inputs",
         ":phase4_result_schema",
         ":phase4_runtime_profile",
         ":phase4_source",
-        ":runtime_archive_preflight",
         ":rl",
+        ":runtime_archive_preflight",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/scipy:scipy",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -1703,6 +2089,8 @@ python_binary(
     compile = False,
     main_module = "phase4_runtime_entrypoint",
     deps = [
+        "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
         ":phase4_checkpoint",
         ":phase4_diagnostic_inputs",
         ":phase4_figure_publication",
@@ -1711,8 +2099,6 @@ python_binary(
         ":phase4_source",
         ":runtime_archive_preflight",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/matplotlib:matplotlib",
     ],
 )
 
@@ -1726,33 +2112,36 @@ python_binary(
     compile = False,
     main_module = "phase4_runtime_entrypoint",
     deps = [
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
         ":phase4_checkpoint",
         ":phase4_diagnostic_inputs",
         ":phase4_result_schema",
         ":phase4_runtime_profile",
         ":phase4_source",
-        ":runtime_archive_preflight",
-        ":models",
         ":rl",
+        ":runtime_archive_preflight",
         ":utils",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
 python_unittest(
     name = "test_phase4_reporting",
     srcs = [
-        "tests/__init__.py",
-        "tests/test_phase4_reporting_unittest.py",
         "scripts/audit_phase4_paper_ready.py",
         "scripts/eval_phase4_2x2_norm_ablation.py",
         "scripts/make_paper_figures_phase4.py",
         "scripts/phase4_diagnostic_inputs.py",
         "scripts/run_phase4_training.py",
+        "tests/__init__.py",
+        "tests/test_phase4_reporting_unittest.py",
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
         ":models",
         ":phase4_checkpoint",
         ":phase4_diagnostic_inputs",
@@ -1761,12 +2150,9 @@ python_unittest(
         ":phase4_runtime_launcher_lib",
         ":phase4_runtime_profile",
         ":phase4_source",
-        ":runtime_archive_preflight",
         ":rl",
+        ":runtime_archive_preflight",
         ":utils",
-        "fbsource//third-party/pypi/numpy:numpy",
-        "fbsource//third-party/pypi/torch:torch",
-        "fbsource//third-party/pypi/pyyaml:pyyaml",
     ],
 )
 
@@ -1804,8 +2190,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.plot_table3_baselines",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1815,8 +2201,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.plot_table3_hard",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1826,8 +2212,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.plot_table3_hard_controlled",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1837,8 +2223,8 @@ python_binary(
     base_module = "",
     main_module = "scripts.generate_figure2",
     deps = [
-        "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/matplotlib:matplotlib",
+        "fbsource//third-party/pypi/numpy:numpy",
     ],
 )
 
@@ -1874,9 +2260,9 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/pytest:pytest",
         ":rl",
         "//caffe2:torch",
-        "fbsource//third-party/pypi/pytest:pytest",
     ],
 )
 
@@ -1918,10 +2304,10 @@ python_library(
     srcs = glob(["external_baselines/*.py"]),
     base_module = "",
     deps = [
-        ":utils",
         "fbsource//third-party/pypi/gym:gym",
         "fbsource//third-party/pypi/gymnasium:gymnasium",
         "fbsource//third-party/pypi/numpy:numpy",
+        ":utils",
     ],
 )
 
@@ -1931,11 +2317,11 @@ python_binary(
     base_module = "",
     main_module = "run_baseline",
     deps = [
-        ":external_baselines_lib",
         "fbsource//third-party/pypi/gym:gym",
         "fbsource//third-party/pypi/gymnasium:gymnasium",
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/shimmy:shimmy",
         "fbsource//third-party/pypi/stable-baselines3:stable-baselines3",
+        ":external_baselines_lib",
     ],
 )

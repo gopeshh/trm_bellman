@@ -16,6 +16,9 @@ from zipfile import BadZipFile, ZipFile
 PHASE4_EVALUATOR_SOURCE_PROFILE = "evaluator"
 PHASE4_AUDIT_SOURCE_PROFILE = "audit"
 PHASE4_FIGURE_SOURCE_PROFILE = "figure"
+POLICY_DATASET_BUILDER_SOURCE_PROFILE = "policy-dataset-builder"
+POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE = "policy-improvement-audit"
+POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE = "policy-improvement-analysis"
 PHASE4_SOURCE_MANIFEST_SCHEMA_VERSION = 1
 PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH = (
     "configs/iclr_confirmatory/producer_source_manifest.json"
@@ -44,6 +47,77 @@ PHASE4_PROFILE_ENTRYPOINTS = {
     PHASE4_FIGURE_SOURCE_PROFILE: (
         "scripts/phase4_figure_publication.py",
         "scripts/make_paper_figures_phase4.py",
+    ),
+    POLICY_DATASET_BUILDER_SOURCE_PROFILE: (
+        "policy_dataset_builder_entrypoint.py",
+    ),
+    POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE: (
+        "policy_improvement_consumer_entrypoint.py",
+        "scripts/policy_improvement_audit.py",
+    ),
+    POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE: (
+        "policy_improvement_consumer_entrypoint.py",
+        "scripts/policy_improvement_analysis.py",
+    ),
+}
+POLICY_DATASET_BUILDER_PROFILE_PATHS = (
+    "configs/policy_improvement_v1/fixed_base_exact_episodic.yaml",
+    "configs/policy_improvement_v1/fixed_base_exact_persistent.yaml",
+    "configs/policy_improvement_v1/legacy_parameter_interpolation.yaml",
+    "configs/policy_improvement_v1/matched_ppo.yaml",
+    "configs/policy_improvement_v1/protocol.json",
+    "configs/policy_improvement_v1/registry.json",
+    "dataset/__init__.py",
+    "dataset/build_4x4_sudoku.py",
+    "dataset/build_iclr_confirmatory_4x4.py",
+    "dataset/build_policy_improvement_4x4.py",
+    "phase4_runtime_profile.py",
+    "policy_dataset_builder_entrypoint.py",
+    "runtime_archive_preflight.py",
+    "utils/__init__.py",
+    "utils/dataset_provenance.py",
+    "utils/run_identity.py",
+)
+_POLICY_IMPROVEMENT_CONFIG_PATHS = (
+    "configs/policy_improvement_v1/fixed_base_exact_episodic.yaml",
+    "configs/policy_improvement_v1/fixed_base_exact_persistent.yaml",
+    "configs/policy_improvement_v1/legacy_parameter_interpolation.yaml",
+    "configs/policy_improvement_v1/matched_ppo.yaml",
+    "configs/policy_improvement_v1/protocol.json",
+    "configs/policy_improvement_v1/registry.json",
+)
+POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS = (
+    *_POLICY_IMPROVEMENT_CONFIG_PATHS,
+    "policy_improvement_checkpoint_validator.py",
+    "policy_improvement_consumer_entrypoint.py",
+    "runtime_archive_preflight.py",
+    "scripts/policy_improvement_audit.py",
+    "scripts/policy_improvement_evidence.py",
+    "scripts/policy_improvement_registry.py",
+    "scripts/policy_improvement_schema.py",
+    "scripts/policy_improvement_test_open.py",
+    "scripts/policy_improvement_test_open_cli.py",
+)
+POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS = (
+    *_POLICY_IMPROVEMENT_CONFIG_PATHS,
+    "policy_improvement_checkpoint_validator.py",
+    "policy_improvement_consumer_entrypoint.py",
+    "runtime_archive_preflight.py",
+    "scripts/policy_improvement_analysis.py",
+    "scripts/policy_improvement_audit.py",
+    "scripts/policy_improvement_evidence.py",
+    "scripts/policy_improvement_registry.py",
+    "scripts/policy_improvement_schema.py",
+    "scripts/policy_improvement_statistics.py",
+    "scripts/policy_improvement_test_open.py",
+)
+_EXACT_PROFILE_PATHS = {
+    POLICY_DATASET_BUILDER_SOURCE_PROFILE: POLICY_DATASET_BUILDER_PROFILE_PATHS,
+    POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE: (
+        POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS
+    ),
+    POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE: (
+        POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS
     ),
 }
 _LOWER_COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -125,6 +199,19 @@ def _is_directory_source(relative_path: str) -> bool:
 
 
 def phase4_profile_relative_paths(root: Path, profile: str) -> list[str]:
+    if profile in _EXACT_PROFILE_PATHS:
+        paths = set(_EXACT_PROFILE_PATHS[profile])
+        if profile in {
+            POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+            POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+        }:
+            paths.update(_training_source_relative_paths(root))
+        for relative_path in paths:
+            if not (root / relative_path).is_file():
+                raise Phase4RuntimeProfileError(
+                    f"Exact-profile source {relative_path!r} is missing."
+                )
+        return sorted(paths)
     paths = {
         *PHASE4_ROOT_SOURCES,
         *PHASE4_SHARED_SOURCES,
@@ -150,6 +237,28 @@ def phase4_profile_relative_paths(root: Path, profile: str) -> list[str]:
 
 
 def _git_profile_paths(root: Path, profile: str) -> list[str]:
+    if profile in _EXACT_PROFILE_PATHS:
+        requested_paths = set(_EXACT_PROFILE_PATHS[profile])
+        if profile in {
+            POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+            POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+        }:
+            requested_paths.update(_training_source_relative_paths(root))
+        output = _run_git(
+            root,
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+            "--",
+            *sorted(requested_paths),
+        )
+        paths = output.splitlines() if output else []
+        if len(paths) != len(set(paths)):
+            raise Phase4RuntimeProfileError(
+                "Exact-profile Git source inventory contains duplicates."
+            )
+        return sorted(paths)
     pathspecs = [
         *PHASE4_SOURCE_DIRECTORIES,
         *PHASE4_ROOT_SOURCES,
@@ -243,12 +352,19 @@ def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 def _training_source_relative_paths(root: Path) -> list[str]:
     root_sources = (
         "confirmatory_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_smoke_checkpoint.py",
+        "policy_improvement_smoke_runtime.py",
         "puzzle_dataset.py",
         "runtime_archive_preflight.py",
         "upi_trm_train.py",
     )
+    additional_sources = (
+        "scripts/policy_improvement_registry.py",
+        "scripts/policy_improvement_schema.py",
+    )
     directories = ("dataset", "evaluators", "models", "rl", "utils")
-    paths = set(root_sources)
+    paths = {*root_sources, *additional_sources}
     for directory_name in directories:
         directory = root / directory_name
         if not directory.is_dir():
@@ -260,20 +376,24 @@ def _training_source_relative_paths(root: Path) -> list[str]:
             for path in directory.rglob("*.py")
             if "__pycache__" not in path.parts
         )
-    config_directory = root / "configs" / "iclr_confirmatory"
-    if not config_directory.is_dir():
-        raise Phase4RuntimeProfileError(
-            "Producer confirmatory configuration directory is missing."
+    for config_relative in (
+        "configs/iclr_confirmatory",
+        "configs/policy_improvement_v1",
+    ):
+        config_directory = root / config_relative
+        if not config_directory.is_dir():
+            raise Phase4RuntimeProfileError(
+                "Producer registered configuration directory is missing."
+            )
+        paths.update(
+            str(path.relative_to(root))
+            for path in config_directory.iterdir()
+            if path.is_file()
+            and path.suffix in {".json", ".yaml"}
+            and str(path.relative_to(root))
+            != PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH
         )
-    paths.update(
-        str(path.relative_to(root))
-        for path in config_directory.iterdir()
-        if path.is_file()
-        and path.suffix in {".json", ".yaml"}
-        and str(path.relative_to(root))
-        != PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH
-    )
-    for relative_path in root_sources:
+    for relative_path in (*root_sources, *additional_sources):
         if not (root / relative_path).is_file():
             raise Phase4RuntimeProfileError(
                 f"Producer source {relative_path!r} is missing."
@@ -498,6 +618,11 @@ def _is_selected_bytecode(relative_path: str) -> bool:
                 for entrypoints in PHASE4_PROFILE_ENTRYPOINTS.values()
                 for entrypoint in entrypoints
             ),
+            *(
+                relative_path
+                for paths in _EXACT_PROFILE_PATHS.values()
+                for relative_path in paths
+            ),
         )
     }
     return any(
@@ -506,6 +631,89 @@ def _is_selected_bytecode(relative_path: str) -> bool:
         or path.name.startswith(f"{stem}.")
         for stem in selected_stems
     )
+
+
+def _is_dataset_builder_selected(relative_path: str) -> bool:
+    path = PurePosixPath(relative_path)
+    if relative_path in POLICY_DATASET_BUILDER_PROFILE_PATHS:
+        return True
+    if (
+        len(path.parts) >= 2
+        and path.parts[0] in {"dataset", "utils"}
+        and path.suffix == ".py"
+    ):
+        return True
+    if (
+        len(path.parts) == 3
+        and path.parts[:2] == ("configs", "policy_improvement_v1")
+        and path.suffix in {".json", ".yaml"}
+    ):
+        return True
+    return path.name in {
+        "phase4_runtime_profile.py",
+        "policy_dataset_builder_entrypoint.py",
+        "runtime_archive_preflight.py",
+    }
+
+
+def _is_policy_consumer_selected(relative_path: str) -> bool:
+    path = PurePosixPath(relative_path)
+    if (
+        len(path.parts) == 2
+        and path.parts[0] == "scripts"
+        and path.name.startswith("policy_improvement_")
+        and path.suffix == ".py"
+    ):
+        return True
+    if (
+        len(path.parts) == 3
+        and path.parts[:2] == ("configs", "policy_improvement_v1")
+        and path.suffix in {".json", ".yaml"}
+    ):
+        return True
+    return relative_path in {
+        "confirmatory_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_checkpoint_validator.py",
+        "policy_improvement_consumer_entrypoint.py",
+        "policy_improvement_smoke_checkpoint.py",
+        "policy_improvement_smoke_runtime.py",
+        "puzzle_dataset.py",
+        "runtime_archive_preflight.py",
+        "upi_trm_train.py",
+    }
+
+
+def _is_training_source_selected(relative_path: str) -> bool:
+    path = PurePosixPath(relative_path)
+    if (
+        len(path.parts) >= 2
+        and path.parts[0] in {"dataset", "evaluators", "models", "rl", "utils"}
+        and path.suffix == ".py"
+    ):
+        return True
+    if (
+        len(path.parts) == 3
+        and path.parts[:2]
+        in {
+            ("configs", "iclr_confirmatory"),
+            ("configs", "policy_improvement_v1"),
+        }
+        and path.suffix in {".json", ".yaml"}
+    ):
+        return relative_path != PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH
+    return relative_path in {
+        "confirmatory_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_checkpoint_validator.py",
+        "policy_improvement_smoke_checkpoint.py",
+        "policy_improvement_smoke_runtime.py",
+        "puzzle_dataset.py",
+        "runtime_archive_preflight.py",
+        "scripts/policy_improvement_registry.py",
+        "scripts/policy_improvement_schema.py",
+        "upi_trm_train.py",
+    }
 
 
 def _hash_archive_member(archive: ZipFile, relative_path: str) -> str:
@@ -534,11 +742,26 @@ def assert_phase4_archive_matches_profile(
             "Phase 4 runtime contains selected-source bytecode."
         )
     expected = set(authorized.sources)
-    selected = {
-        name
-        for name in names
-        if name in expected or _is_directory_source(name)
-    }
+    if authorized.profile == POLICY_DATASET_BUILDER_SOURCE_PROFILE:
+        selected = {
+            name for name in names if _is_dataset_builder_selected(name)
+        }
+    elif authorized.profile in {
+        POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+        POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+    }:
+        selected = {
+            name
+            for name in names
+            if _is_policy_consumer_selected(name)
+            or _is_training_source_selected(name)
+        }
+    else:
+        selected = {
+            name
+            for name in names
+            if name in expected or _is_directory_source(name)
+        }
     if selected != expected:
         raise Phase4RuntimeProfileError(
             "Phase 4 runtime source inventory differs from the authorized profile."

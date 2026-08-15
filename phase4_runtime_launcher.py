@@ -4,7 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
+import re
+import stat
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -18,28 +22,395 @@ from confirmatory_runtime_launcher import (
     validate_runtime_archive,
 )
 from phase4_runtime_profile import (
-    PHASE4_AUDIT_SOURCE_PROFILE,
-    PHASE4_EVALUATOR_SOURCE_PROFILE,
-    PHASE4_FIGURE_SOURCE_PROFILE,
-    PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH,
-    Phase4RuntimeProfileError,
     assert_phase4_archive_matches_profile,
     authorize_phase4_source_profile,
     authorize_phase4_training_source,
+    PHASE4_AUDIT_SOURCE_PROFILE,
+    PHASE4_EVALUATOR_SOURCE_PROFILE,
+    PHASE4_FIGURE_SOURCE_PROFILE,
+    Phase4RuntimeProfileError,
+    POLICY_DATASET_BUILDER_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+    PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH,
 )
 
 
 PHASE4_RUNTIME_ROLE_ENV = "UPI_TRM_PHASE4_RUNTIME_ROLE"
 PHASE4_SOURCE_COMMIT_ENV = "UPI_TRM_PHASE4_SOURCE_COMMIT"
-PHASE4_SOURCE_MANIFEST_SHA256_ENV = (
-    "UPI_TRM_PHASE4_SOURCE_MANIFEST_SHA256"
+PHASE4_SOURCE_MANIFEST_SHA256_ENV = "UPI_TRM_PHASE4_SOURCE_MANIFEST_SHA256"
+POLICY_SMOKE_LAUNCHER_SHA256_ENV = "UPI_TRM_POLICY_SMOKE_LAUNCHER_SHA256"
+POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV = "UPI_TRM_POLICY_SMOKE_RUNTIME_AUTHORIZATION"
+POLICY_SMOKE_RUNTIME_AUTHORIZATION_SHA256_ENV = (
+    "UPI_TRM_POLICY_SMOKE_RUNTIME_AUTHORIZATION_SHA256"
+)
+POLICY_SMOKE_RUNTIME_PROFILE_SHA256_ENV = "UPI_TRM_POLICY_SMOKE_RUNTIME_PROFILE_SHA256"
+POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV = (
+    "UPI_TRM_POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256"
+)
+POLICY_SMOKE_PURPOSE = "policy-improvement-smoke"
+POLICY_DATASET_BUILDER_LAUNCHER_SHA256_ENV = (
+    "UPI_TRM_POLICY_DATASET_BUILDER_LAUNCHER_SHA256"
+)
+POLICY_DATASET_BUILDER_PURPOSE = "policy-dataset-builder"
+POLICY_IMPROVEMENT_AUDIT_PURPOSE = "policy-improvement-audit"
+POLICY_IMPROVEMENT_ANALYSIS_PURPOSE = "policy-improvement-analysis"
+POLICY_CONSUMER_LAUNCHER_SHA256_ENV = "UPI_TRM_POLICY_CONSUMER_LAUNCHER_SHA256"
+POLICY_PRODUCER_SOURCE_MANIFEST_SHA256_ENV = (
+    "UPI_TRM_POLICY_PRODUCER_SOURCE_MANIFEST_SHA256"
+)
+POLICY_PRODUCER_GIT_COMMIT_ENV = "UPI_TRM_POLICY_PRODUCER_GIT_COMMIT"
+POLICY_CONSUMER_RUNTIME_AUTHORIZATION_ENV = (
+    "UPI_TRM_POLICY_CONSUMER_RUNTIME_AUTHORIZATION"
+)
+POLICY_CONSUMER_RUNTIME_AUTHORIZATION_SHA256_ENV = (
+    "UPI_TRM_POLICY_CONSUMER_RUNTIME_AUTHORIZATION_SHA256"
 )
 
 _PURPOSE_TO_PROFILE = {
     "phase4-evaluator": PHASE4_EVALUATOR_SOURCE_PROFILE,
     "phase4-audit": PHASE4_AUDIT_SOURCE_PROFILE,
     "phase4-figure": PHASE4_FIGURE_SOURCE_PROFILE,
+    POLICY_DATASET_BUILDER_PURPOSE: POLICY_DATASET_BUILDER_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_AUDIT_PURPOSE: (POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE),
+    POLICY_IMPROVEMENT_ANALYSIS_PURPOSE: (POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE),
 }
+_LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_LOWER_COMMIT = re.compile(r"^[0-9a-f]{40}$")
+_POLICY_RUNTIME_ROLES = (
+    "policy-improvement-training",
+    "policy-improvement-evaluation",
+    "policy-improvement-audit",
+    "policy-improvement-analysis",
+)
+
+
+def _strict_json_object(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ConfirmatoryRuntimeError(
+                "Runtime authorization contains a duplicate JSON key."
+            )
+        value[key] = item
+    return value
+
+
+def _canonical_json_bytes(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization is not canonical JSON."
+        ) from exc
+
+
+def _stable_regular_file(path: Path) -> bytes:
+    if not path.is_absolute() or ".." in path.parts:
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization path must be absolute and canonical."
+        )
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization cannot be opened safely."
+        ) from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ConfirmatoryRuntimeError(
+                "Runtime authorization must be a singly linked regular file."
+            )
+        chunks: list[bytes] = []
+        for block in iter(lambda: os.read(descriptor, 1024 * 1024), b""):
+            chunks.append(block)
+        after = os.fstat(descriptor)
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Runtime authorization changed while it was authenticated."
+            )
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
+
+
+def _load_policy_runtime_authorization(
+    path_value: str,
+    expected_sha256: str,
+    *,
+    runtime_sha256: str,
+    source_git_commit: str,
+    source_manifest_sha256: str,
+    launcher_sha256: str,
+) -> tuple[str, str, str]:
+    """Authenticate the external Stage 0 freeze before behavior imports."""
+
+    if _LOWER_SHA256.fullmatch(expected_sha256) is None:
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization SHA-256 must be lowercase hexadecimal."
+        )
+    payload = _stable_regular_file(Path(path_value))
+    try:
+        value = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_strict_json_object,
+            parse_constant=lambda constant: (_ for _ in ()).throw(
+                ConfirmatoryRuntimeError(
+                    f"Runtime authorization contains {constant!r}."
+                )
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization is not strict UTF-8 JSON."
+        ) from exc
+    expected_fields = {
+        "schema_name",
+        "schema_version",
+        "authorization_id",
+        "created_at_utc",
+        "protocol_sha256",
+        "producer_git_commit",
+        "producer_source_manifest_sha256",
+        "launcher_sha256",
+        "roles",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise ConfirmatoryRuntimeError("Runtime authorization field inventory differs.")
+    if (
+        value["schema_name"] != "policy_improvement_runtime_authorization_v1"
+        or value["schema_version"] != 1
+        or not isinstance(value["authorization_id"], str)
+        or not value["authorization_id"]
+        or not isinstance(value["created_at_utc"], str)
+        or re.fullmatch(
+            r"20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+            value["created_at_utc"],
+        )
+        is None
+        or not isinstance(value["protocol_sha256"], str)
+        or _LOWER_SHA256.fullmatch(value["protocol_sha256"]) is None
+        or value["producer_git_commit"] != source_git_commit
+        or value["producer_source_manifest_sha256"] != source_manifest_sha256
+        or value["launcher_sha256"] != launcher_sha256
+    ):
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization does not authorize this producer or launcher."
+        )
+    roles = value["roles"]
+    if not isinstance(roles, list) or len(roles) != len(_POLICY_RUNTIME_ROLES):
+        raise ConfirmatoryRuntimeError("Runtime authorization role inventory differs.")
+    role_fields = {
+        "role",
+        "source_git_commit",
+        "runtime_sha256",
+        "runtime_profile_sha256",
+        "selected_source_manifest_sha256",
+    }
+    for index, role_name in enumerate(_POLICY_RUNTIME_ROLES):
+        role = roles[index]
+        if (
+            not isinstance(role, dict)
+            or set(role) != role_fields
+            or role["role"] != role_name
+            or not isinstance(role["source_git_commit"], str)
+            or _LOWER_COMMIT.fullmatch(role["source_git_commit"]) is None
+            or any(
+                not isinstance(role[field], str)
+                or _LOWER_SHA256.fullmatch(role[field]) is None
+                for field in (
+                    "runtime_sha256",
+                    "runtime_profile_sha256",
+                    "selected_source_manifest_sha256",
+                )
+            )
+            or role["runtime_profile_sha256"] != role["selected_source_manifest_sha256"]
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Runtime authorization contains an invalid role."
+            )
+    training_role = roles[0]
+    evaluation_role = roles[1]
+    assert isinstance(training_role, dict)
+    assert isinstance(evaluation_role, dict)
+    if (
+        training_role["source_git_commit"] != source_git_commit
+        or training_role["runtime_sha256"] != runtime_sha256
+        or training_role["runtime_profile_sha256"] != source_manifest_sha256
+        or evaluation_role["source_git_commit"] != source_git_commit
+        or evaluation_role["runtime_sha256"] != runtime_sha256
+        or evaluation_role["runtime_profile_sha256"]
+        != training_role["runtime_profile_sha256"]
+        or evaluation_role["selected_source_manifest_sha256"]
+        != training_role["selected_source_manifest_sha256"]
+    ):
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization does not authorize this Stage 0 training and "
+            "evaluation artifact."
+        )
+    canonical = _canonical_json_bytes(value)
+    if hashlib.sha256(canonical).hexdigest() != expected_sha256:
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization digest differs from its canonical document."
+        )
+    return (
+        canonical.decode("ascii"),
+        str(training_role["runtime_profile_sha256"]),
+        str(training_role["selected_source_manifest_sha256"]),
+    )
+
+
+def _load_policy_consumer_runtime_authorization(
+    path_value: str,
+    expected_sha256: str,
+    *,
+    purpose: str,
+    runtime_sha256: str,
+    source_git_commit: str,
+    source_manifest_sha256: str,
+    launcher_sha256: str,
+    producer_git_commit: str,
+    producer_source_manifest_sha256: str,
+) -> str:
+    """Authenticate the externally frozen authorization for an evidence consumer."""
+
+    if _LOWER_SHA256.fullmatch(expected_sha256) is None:
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization SHA-256 must be lowercase hexadecimal."
+        )
+    payload = _stable_regular_file(Path(path_value))
+    try:
+        value = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_strict_json_object,
+            parse_constant=lambda constant: (_ for _ in ()).throw(
+                ConfirmatoryRuntimeError(
+                    f"Runtime authorization contains {constant!r}."
+                )
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization is not strict UTF-8 JSON."
+        ) from exc
+    expected_fields = {
+        "schema_name",
+        "schema_version",
+        "authorization_id",
+        "created_at_utc",
+        "protocol_sha256",
+        "producer_git_commit",
+        "producer_source_manifest_sha256",
+        "launcher_sha256",
+        "roles",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise ConfirmatoryRuntimeError("Runtime authorization field inventory differs.")
+    if (
+        value["schema_name"] != "policy_improvement_runtime_authorization_v1"
+        or value["schema_version"] != 1
+        or not isinstance(value["authorization_id"], str)
+        or not value["authorization_id"]
+        or not isinstance(value["created_at_utc"], str)
+        or re.fullmatch(
+            r"20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+            value["created_at_utc"],
+        )
+        is None
+        or not isinstance(value["protocol_sha256"], str)
+        or _LOWER_SHA256.fullmatch(value["protocol_sha256"]) is None
+        or value["producer_git_commit"] != producer_git_commit
+        or value["producer_source_manifest_sha256"]
+        != producer_source_manifest_sha256
+        or value["launcher_sha256"] != launcher_sha256
+    ):
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization does not authorize this producer or launcher."
+        )
+    roles = value["roles"]
+    if not isinstance(roles, list) or len(roles) != len(_POLICY_RUNTIME_ROLES):
+        raise ConfirmatoryRuntimeError("Runtime authorization role inventory differs.")
+    role_fields = {
+        "role",
+        "source_git_commit",
+        "runtime_sha256",
+        "runtime_profile_sha256",
+        "selected_source_manifest_sha256",
+    }
+    checked_roles: dict[str, dict[str, object]] = {}
+    for index, role_name in enumerate(_POLICY_RUNTIME_ROLES):
+        role = roles[index]
+        if (
+            not isinstance(role, dict)
+            or set(role) != role_fields
+            or role["role"] != role_name
+            or not isinstance(role["source_git_commit"], str)
+            or _LOWER_COMMIT.fullmatch(role["source_git_commit"]) is None
+            or any(
+                not isinstance(role[field], str)
+                or _LOWER_SHA256.fullmatch(role[field]) is None
+                for field in (
+                    "runtime_sha256",
+                    "runtime_profile_sha256",
+                    "selected_source_manifest_sha256",
+                )
+            )
+            or role["runtime_profile_sha256"]
+            != role["selected_source_manifest_sha256"]
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Runtime authorization contains an invalid role."
+            )
+        checked_roles[role_name] = role
+    if checked_roles["policy-improvement-training"]["source_git_commit"] != (
+        producer_git_commit
+    ):
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization training source differs from the producer."
+        )
+    expected_role = {
+        POLICY_IMPROVEMENT_AUDIT_PURPOSE: "policy-improvement-audit",
+        POLICY_IMPROVEMENT_ANALYSIS_PURPOSE: "policy-improvement-analysis",
+    }.get(purpose)
+    if expected_role is None:
+        raise ConfirmatoryRuntimeError("Unsupported policy consumer purpose.")
+    active = checked_roles[expected_role]
+    if (
+        active["runtime_sha256"] != runtime_sha256
+        or active["source_git_commit"] != source_git_commit
+        or active["runtime_profile_sha256"] != source_manifest_sha256
+    ):
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization does not authorize this consumer artifact."
+        )
+    canonical = _canonical_json_bytes(value)
+    if hashlib.sha256(canonical).hexdigest() != expected_sha256:
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization digest differs from its canonical document."
+        )
+    return canonical.decode("ascii")
 
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -49,12 +420,16 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--purpose",
         required=True,
-        choices=["phase4-training", *_PURPOSE_TO_PROFILE],
+        choices=["phase4-training", POLICY_SMOKE_PURPOSE, *_PURPOSE_TO_PROFILE],
     )
     parser.add_argument("--runtime-archive", required=True)
     parser.add_argument("--expected-runtime-sha256", required=True)
     parser.add_argument("--source-project-root", required=True)
     parser.add_argument("--expected-source-git-commit", required=True)
+    parser.add_argument("--producer-source-project-root")
+    parser.add_argument("--expected-producer-git-commit")
+    parser.add_argument("--runtime-authorization")
+    parser.add_argument("--expected-runtime-authorization-sha256")
     parser.add_argument("runtime_args", nargs=argparse.REMAINDER)
     return parser.parse_args(argv)
 
@@ -115,6 +490,133 @@ def _normalize_child_args(
         raise ConfirmatoryRuntimeError(
             "Phase 4 publication runtimes cannot use confirmatory mode."
         )
+    if purpose in {
+        POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+        POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+    }:
+        protected = {
+            "--policy-improvement-consumer-entrypoint",
+            "--audit-runtime-sha256",
+            "--audit-runtime-profile-sha256",
+            "--audit-source-git-commit",
+            "--analysis-runtime-sha256",
+            "--analysis-runtime-profile-sha256",
+            "--analysis-source-git-commit",
+            "--launcher-sha256",
+            "--producer-git-commit",
+            "--producer-source-manifest-sha256",
+            "--runtime-authorization",
+            "--runtime-authorization-json",
+            "--runtime-authorization-sha256",
+            "--source-project-root",
+            "--expected-source-git-commit",
+            "--producer-source-project-root",
+            "--expected-producer-git-commit",
+            "--runtime-archive",
+            "--expected-runtime-sha256",
+        }
+        supplied_option_names = {
+            argument.partition("=")[0]
+            for argument in arguments
+            if argument.startswith("--")
+        }
+        if any(
+            protected_option.startswith(supplied_name)
+            for supplied_name in supplied_option_names
+            for protected_option in protected
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Policy consumer arguments contain a launcher-owned option."
+            )
+        if arguments == ["--help"]:
+            return ["--policy-improvement-consumer-entrypoint", "--help"]
+        return ["--policy-improvement-consumer-entrypoint", *arguments]
+    if purpose == POLICY_DATASET_BUILDER_PURPOSE:
+        if arguments == ["--help"]:
+            return ["--policy-dataset-builder-entrypoint", "--help"]
+        if len(arguments) != 5 or arguments[0] not in {"build", "verify"}:
+            raise ConfirmatoryRuntimeError(
+                "Dataset-builder arguments must select exactly one build or "
+                "verify operation."
+            )
+        expected_target_option = (
+            "--output-root" if arguments[0] == "build" else "--root"
+        )
+        if (
+            arguments[1] != "--owner-root"
+            or arguments[3] != expected_target_option
+            or not arguments[2]
+            or not arguments[4]
+            or arguments[2].startswith("--")
+            or arguments[4].startswith("--")
+            or not Path(arguments[2]).is_absolute()
+            or not Path(arguments[4]).is_absolute()
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Dataset-builder arguments contain a protected or unsupported "
+                "child option."
+            )
+        return ["--policy-dataset-builder-entrypoint", *arguments]
+    if purpose == POLICY_SMOKE_PURPOSE:
+        allowed_value_options = {
+            "--dataset-root",
+            "--evidence-root",
+            "--policy-improvement-protocol",
+            "--policy-improvement-row-id",
+            "--policy-improvement-smoke-segment",
+            "--train-manifest-sha256",
+            "--validation-manifest-sha256",
+        }
+        if arguments == ["--help"]:
+            return [
+                "--policy-improvement-smoke-entrypoint",
+                "--source-project-root",
+                source_project_root,
+                "--help",
+            ]
+        index = 0
+        seen: set[str] = set()
+        while index < len(arguments):
+            argument = arguments[index]
+            matching = next(
+                (
+                    option
+                    for option in allowed_value_options
+                    if argument.startswith(f"{option}=")
+                ),
+                None,
+            )
+            if matching is not None:
+                if matching in seen or argument == f"{matching}=":
+                    raise ConfirmatoryRuntimeError(
+                        "Policy-improvement smoke arguments contain a duplicate "
+                        "or empty child option."
+                    )
+                seen.add(matching)
+                index += 1
+                continue
+            if argument not in allowed_value_options or index + 1 >= len(arguments):
+                raise ConfirmatoryRuntimeError(
+                    "Policy-improvement smoke arguments contain a protected or "
+                    "unsupported child option."
+                )
+            if argument in seen or arguments[index + 1].startswith("--"):
+                raise ConfirmatoryRuntimeError(
+                    "Policy-improvement smoke arguments contain a duplicate or "
+                    "missing child value."
+                )
+            seen.add(argument)
+            index += 2
+        if seen != allowed_value_options:
+            raise ConfirmatoryRuntimeError(
+                "Policy-improvement smoke arguments omit a required child option."
+            )
+        return [
+            "--policy-improvement-smoke-entrypoint",
+            "--source-project-root",
+            source_project_root,
+            *arguments,
+        ]
     if purpose != "phase4-training":
         if contains_option("--phase4-publication"):
             raise ConfirmatoryRuntimeError(
@@ -135,32 +637,99 @@ def _normalize_child_args(
     ]
 
 
+def _launcher_artifact_sha256() -> str:
+    path = Path(sys.argv[0])
+    try:
+        requested = path.lstat()
+        resolved = path.resolve(strict=True)
+        status = resolved.lstat()
+    except OSError as exc:
+        raise ConfirmatoryRuntimeError(
+            "Phase 4 launcher artifact cannot be inspected."
+        ) from exc
+    if stat.S_ISLNK(requested.st_mode) or not stat.S_ISREG(status.st_mode):
+        raise ConfirmatoryRuntimeError(
+            "Phase 4 launcher artifact must be a regular non-symlink file."
+        )
+    digest = hashlib.sha256()
+    try:
+        with resolved.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError as exc:
+        raise ConfirmatoryRuntimeError(
+            "Phase 4 launcher artifact cannot be hashed."
+        ) from exc
+    return digest.hexdigest()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        source_root = str(
-            Path(arguments.source_project_root).resolve(strict=True)
+        source_root = str(Path(arguments.source_project_root).resolve(strict=True))
+        policy_consumer = arguments.purpose in {
+            POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+            POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+        }
+        producer_options_present = (
+            arguments.producer_source_project_root is not None,
+            arguments.expected_producer_git_commit is not None,
+        )
+        if policy_consumer != all(producer_options_present) or (
+            not policy_consumer and any(producer_options_present)
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Policy consumers require a separate complete producer-source "
+                "authorization; other roles cannot accept one."
+            )
+        authorization_options_present = (
+            arguments.runtime_authorization is not None,
+            arguments.expected_runtime_authorization_sha256 is not None,
+        )
+        requires_runtime_authorization = (
+            arguments.purpose == POLICY_SMOKE_PURPOSE or policy_consumer
+        )
+        if requires_runtime_authorization != all(authorization_options_present):
+            raise ConfirmatoryRuntimeError(
+                "Policy-improvement smoke and evidence consumers require one "
+                "complete externally digested runtime authorization."
+            )
+        producer_source_root = (
+            str(Path(arguments.producer_source_project_root).resolve(strict=True))
+            if policy_consumer
+            else None
         )
         child_args = _normalize_child_args(
             arguments.purpose,
             source_root,
             arguments.runtime_args,
         )
-        if arguments.purpose == "phase4-training":
+        producer_authorized = None
+        if arguments.purpose in {"phase4-training", POLICY_SMOKE_PURPOSE}:
             authorized = authorize_phase4_training_source(
                 source_root,
                 arguments.expected_source_git_commit,
             )
-            role = "training"
-            archive_validator = _training_archive_validator(
-                authorized.manifest_bytes
+            role = (
+                "training"
+                if arguments.purpose == "phase4-training"
+                else POLICY_SMOKE_PURPOSE
             )
+            archive_validator = _training_archive_validator(authorized.manifest_bytes)
         else:
             profile = _PURPOSE_TO_PROFILE[arguments.purpose]
             authorized = authorize_phase4_source_profile(
                 source_root,
                 arguments.expected_source_git_commit,
                 profile,
+            )
+            producer_authorized = (
+                authorize_phase4_training_source(
+                    producer_source_root,
+                    arguments.expected_producer_git_commit,
+                )
+                if policy_consumer
+                else None
             )
             role = profile
             archive_validator = _consumer_archive_validator(authorized)
@@ -169,17 +738,85 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.expected_runtime_sha256,
             archive_validator=archive_validator,
         )
+        attestation_environment = {
+            PHASE4_RUNTIME_ROLE_ENV: role,
+            PHASE4_SOURCE_COMMIT_ENV: authorized.git_commit,
+            PHASE4_SOURCE_MANIFEST_SHA256_ENV: (authorized.source_manifest_sha256),
+        }
+        if arguments.purpose == POLICY_SMOKE_PURPOSE:
+            launcher_sha256 = _launcher_artifact_sha256()
+            assert arguments.runtime_authorization is not None
+            assert arguments.expected_runtime_authorization_sha256 is not None
+            (
+                authorization_json,
+                runtime_profile_sha256,
+                selected_source_manifest_sha256,
+            ) = _load_policy_runtime_authorization(
+                arguments.runtime_authorization,
+                arguments.expected_runtime_authorization_sha256,
+                runtime_sha256=arguments.expected_runtime_sha256,
+                source_git_commit=authorized.git_commit,
+                source_manifest_sha256=authorized.source_manifest_sha256,
+                launcher_sha256=launcher_sha256,
+            )
+            attestation_environment[POLICY_SMOKE_LAUNCHER_SHA256_ENV] = launcher_sha256
+            attestation_environment[POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV] = (
+                authorization_json
+            )
+            attestation_environment[POLICY_SMOKE_RUNTIME_AUTHORIZATION_SHA256_ENV] = (
+                arguments.expected_runtime_authorization_sha256
+            )
+            attestation_environment[POLICY_SMOKE_RUNTIME_PROFILE_SHA256_ENV] = (
+                runtime_profile_sha256
+            )
+            attestation_environment[
+                POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV
+            ] = selected_source_manifest_sha256
+        if arguments.purpose == POLICY_DATASET_BUILDER_PURPOSE:
+            attestation_environment[POLICY_DATASET_BUILDER_LAUNCHER_SHA256_ENV] = (
+                _launcher_artifact_sha256()
+            )
+        if arguments.purpose in {
+            POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+            POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+        }:
+            assert producer_authorized is not None
+            assert arguments.runtime_authorization is not None
+            assert arguments.expected_runtime_authorization_sha256 is not None
+            consumer_launcher_sha256 = _launcher_artifact_sha256()
+            authorization_json = _load_policy_consumer_runtime_authorization(
+                arguments.runtime_authorization,
+                arguments.expected_runtime_authorization_sha256,
+                purpose=arguments.purpose,
+                runtime_sha256=arguments.expected_runtime_sha256,
+                source_git_commit=authorized.git_commit,
+                source_manifest_sha256=authorized.source_manifest_sha256,
+                launcher_sha256=consumer_launcher_sha256,
+                producer_git_commit=producer_authorized.git_commit,
+                producer_source_manifest_sha256=(
+                    producer_authorized.source_manifest_sha256
+                ),
+            )
+            attestation_environment[POLICY_CONSUMER_LAUNCHER_SHA256_ENV] = (
+                consumer_launcher_sha256
+            )
+            attestation_environment[POLICY_PRODUCER_SOURCE_MANIFEST_SHA256_ENV] = (
+                producer_authorized.source_manifest_sha256
+            )
+            attestation_environment[POLICY_PRODUCER_GIT_COMMIT_ENV] = (
+                producer_authorized.git_commit
+            )
+            attestation_environment[
+                POLICY_CONSUMER_RUNTIME_AUTHORIZATION_ENV
+            ] = authorization_json
+            attestation_environment[
+                POLICY_CONSUMER_RUNTIME_AUTHORIZATION_SHA256_ENV
+            ] = arguments.expected_runtime_authorization_sha256
         return_code = launch_verified_runtime(
             runtime,
             child_args,
             required_argument=None,
-            attestation_environment={
-                PHASE4_RUNTIME_ROLE_ENV: role,
-                PHASE4_SOURCE_COMMIT_ENV: authorized.git_commit,
-                PHASE4_SOURCE_MANIFEST_SHA256_ENV: (
-                    authorized.source_manifest_sha256
-                ),
-            },
+            attestation_environment=attestation_environment,
         )
     except (
         ConfirmatoryRuntimeError,

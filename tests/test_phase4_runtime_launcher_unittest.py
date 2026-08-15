@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import tempfile
@@ -20,18 +21,38 @@ from confirmatory_runtime_launcher import (
     validate_runtime_archive,
 )
 from phase4_runtime_launcher import (
+    _load_policy_runtime_authorization,
     _normalize_child_args,
     _training_archive_validator,
+    POLICY_CONSUMER_LAUNCHER_SHA256_ENV,
+    POLICY_DATASET_BUILDER_LAUNCHER_SHA256_ENV,
+    POLICY_DATASET_BUILDER_PURPOSE,
+    POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+    POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+    POLICY_PRODUCER_GIT_COMMIT_ENV,
+    POLICY_PRODUCER_SOURCE_MANIFEST_SHA256_ENV,
+    POLICY_SMOKE_LAUNCHER_SHA256_ENV,
+    POLICY_SMOKE_PURPOSE,
+    POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV,
+    POLICY_SMOKE_RUNTIME_AUTHORIZATION_SHA256_ENV,
+    POLICY_SMOKE_RUNTIME_PROFILE_SHA256_ENV,
+    POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV,
 )
 from phase4_runtime_profile import (
+    assert_phase4_archive_matches_profile,
+    authorize_phase4_source_profile,
+    AuthorizedPhase4Profile,
     PHASE4_EVALUATOR_SOURCE_PROFILE,
     PHASE4_PROFILE_ENTRYPOINTS,
     PHASE4_ROOT_SOURCES,
     PHASE4_SHARED_SOURCES,
-    AuthorizedPhase4Profile,
     Phase4RuntimeProfileError,
-    assert_phase4_archive_matches_profile,
-    authorize_phase4_source_profile,
+    POLICY_DATASET_BUILDER_PROFILE_PATHS,
+    POLICY_DATASET_BUILDER_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS,
+    POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS,
+    POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
 )
 from runtime_archive_preflight import preflight_runtime
 
@@ -74,11 +95,37 @@ def _profile_sources() -> dict[str, bytes]:
     }
 
 
-def _authorized(sources: dict[str, bytes]) -> AuthorizedPhase4Profile:
+_POLICY_TRAINING_TEST_PATHS = (
+    "confirmatory_runtime_launcher.py",
+    "phase4_runtime_profile.py",
+    "policy_improvement_smoke_checkpoint.py",
+    "policy_improvement_smoke_runtime.py",
+    "puzzle_dataset.py",
+    "runtime_archive_preflight.py",
+    "scripts/policy_improvement_registry.py",
+    "scripts/policy_improvement_schema.py",
+    "upi_trm_train.py",
+    "configs/iclr_confirmatory/cell.yaml",
+    "dataset/source.py",
+    "evaluators/source.py",
+    "models/source.py",
+    "rl/source.py",
+    "utils/source.py",
+)
+
+
+def _policy_consumer_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(sorted({*paths, *_POLICY_TRAINING_TEST_PATHS}))
+
+
+def _authorized(
+    sources: dict[str, bytes],
+    profile: str = PHASE4_EVALUATOR_SOURCE_PROFILE,
+) -> AuthorizedPhase4Profile:
     return AuthorizedPhase4Profile(
         git_commit="a" * 40,
         source_manifest_sha256="b" * 64,
-        profile=PHASE4_EVALUATOR_SOURCE_PROFILE,
+        profile=profile,
         sources={
             relative_path: hashlib.sha256(payload).hexdigest()
             for relative_path, payload in sources.items()
@@ -87,6 +134,303 @@ def _authorized(sources: dict[str, bytes]) -> AuthorizedPhase4Profile:
 
 
 class Phase4RuntimeLauncherTest(unittest.TestCase):
+    def test_policy_smoke_authorization_is_strict_and_stable(self) -> None:
+        authorization = {
+            "schema_name": "policy_improvement_runtime_authorization_v1",
+            "schema_version": 1,
+            "authorization_id": "strict-launcher-test-v1",
+            "created_at_utc": "2026-08-14T12:00:00Z",
+            "protocol_sha256": "f" * 64,
+            "producer_git_commit": "a" * 40,
+            "producer_source_manifest_sha256": "c" * 64,
+            "launcher_sha256": "e" * 64,
+            "roles": [
+                {
+                    "role": role,
+                    "source_git_commit": "a" * 40,
+                    "runtime_sha256": "d" * 64,
+                    "runtime_profile_sha256": "c" * 64,
+                    "selected_source_manifest_sha256": "c" * 64,
+                }
+                for role in (
+                    "policy-improvement-training",
+                    "policy-improvement-evaluation",
+                    "policy-improvement-audit",
+                    "policy-improvement-analysis",
+                )
+            ],
+        }
+        payload = json.dumps(
+            authorization,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "authorization.json"
+            path.write_bytes(payload)
+            digest = hashlib.sha256(payload).hexdigest()
+            canonical, profile, selected = _load_policy_runtime_authorization(
+                str(path),
+                digest,
+                runtime_sha256="d" * 64,
+                source_git_commit="a" * 40,
+                source_manifest_sha256="c" * 64,
+                launcher_sha256="e" * 64,
+            )
+            self.assertEqual(json.loads(canonical), authorization)
+            self.assertEqual(profile, "c" * 64)
+            self.assertEqual(selected, "c" * 64)
+
+            with self.assertRaisesRegex(
+                ConfirmatoryRuntimeError,
+                "digest differs",
+            ):
+                _load_policy_runtime_authorization(
+                    str(path),
+                    "0" * 64,
+                    runtime_sha256="d" * 64,
+                    source_git_commit="a" * 40,
+                    source_manifest_sha256="c" * 64,
+                    launcher_sha256="e" * 64,
+                )
+
+            alias = root / "authorization-alias.json"
+            alias.symlink_to(path)
+            with self.assertRaisesRegex(
+                ConfirmatoryRuntimeError,
+                "opened safely",
+            ):
+                _load_policy_runtime_authorization(
+                    str(alias),
+                    digest,
+                    runtime_sha256="d" * 64,
+                    source_git_commit="a" * 40,
+                    source_manifest_sha256="c" * 64,
+                    launcher_sha256="e" * 64,
+                )
+
+            duplicate = root / "duplicate.json"
+            duplicate.write_text(
+                '{"schema_name":"a","schema_name":"b"}',
+                encoding="ascii",
+            )
+            with self.assertRaisesRegex(
+                ConfirmatoryRuntimeError,
+                "duplicate JSON key",
+            ):
+                _load_policy_runtime_authorization(
+                    str(duplicate),
+                    hashlib.sha256(duplicate.read_bytes()).hexdigest(),
+                    runtime_sha256="d" * 64,
+                    source_git_commit="a" * 40,
+                    source_manifest_sha256="c" * 64,
+                    launcher_sha256="e" * 64,
+                )
+
+    def test_dataset_builder_launcher_owns_entrypoint_and_identity(self) -> None:
+        self.assertEqual(
+            _normalize_child_args(
+                POLICY_DATASET_BUILDER_PURPOSE,
+                "/repo",
+                [
+                    "--",
+                    "build",
+                    "--owner-root",
+                    "/data",
+                    "--output-root",
+                    "/data/frozen",
+                ],
+            ),
+            [
+                "--policy-dataset-builder-entrypoint",
+                "build",
+                "--owner-root",
+                "/data",
+                "--output-root",
+                "/data/frozen",
+            ],
+        )
+        self.assertEqual(
+            _normalize_child_args(
+                POLICY_DATASET_BUILDER_PURPOSE,
+                "/repo",
+                [
+                    "verify",
+                    "--owner-root",
+                    "/data",
+                    "--root",
+                    "/data/frozen",
+                ],
+            ),
+            [
+                "--policy-dataset-builder-entrypoint",
+                "verify",
+                "--owner-root",
+                "/data",
+                "--root",
+                "/data/frozen",
+            ],
+        )
+        for child_args in (
+            [
+                "build",
+                "--owner-root",
+                "/data",
+                "--output-root",
+                "/data/frozen",
+                "--source-root",
+                "/repo",
+            ],
+            ["build", "--expected-source-commit", "a" * 40],
+            [
+                "build",
+                "--owner-root",
+                "/data",
+                "--output-root",
+                "--source-project-root",
+            ],
+            [
+                "build",
+                "--owner-root",
+                "relative",
+                "--output-root",
+                "/data/frozen",
+            ],
+            ["--policy-dataset-builder-entrypoint"],
+            [
+                "verify",
+                "--owner-root",
+                "/data",
+                "--output-root",
+                "/data/frozen",
+            ],
+        ):
+            with (
+                self.subTest(child_args=child_args),
+                self.assertRaises(ConfirmatoryRuntimeError),
+            ):
+                _normalize_child_args(
+                    POLICY_DATASET_BUILDER_PURPOSE,
+                    "/repo",
+                    child_args,
+                )
+
+    def test_policy_smoke_launcher_owns_entrypoint_and_source_flags(self) -> None:
+        child_args = _normalize_child_args(
+            POLICY_SMOKE_PURPOSE,
+            "/repo",
+            [
+                "--",
+                "--policy-improvement-protocol",
+                "/repo/configs/policy_improvement_v1/protocol.json",
+                "--policy-improvement-row-id",
+                "s0-matched-ppo-s1",
+                "--policy-improvement-smoke-segment",
+                "prepare",
+                "--dataset-root",
+                "/data/frozen",
+                "--train-manifest-sha256",
+                "a" * 64,
+                "--validation-manifest-sha256",
+                "b" * 64,
+                "--evidence-root",
+                "/evidence",
+            ],
+        )
+        self.assertEqual(
+            child_args[:3],
+            [
+                "--policy-improvement-smoke-entrypoint",
+                "--source-project-root",
+                "/repo",
+            ],
+        )
+        for protected in (
+            "--confirmatory",
+            "--policy-improvement-smoke-entrypoint",
+            "--source-project-root=/other",
+            "--resume-checkpoint=/tmp/forged.pt",
+            "--config=/tmp/unregistered.yaml",
+        ):
+            with (
+                self.subTest(protected=protected),
+                self.assertRaises(ConfirmatoryRuntimeError),
+            ):
+                _normalize_child_args(
+                    POLICY_SMOKE_PURPOSE,
+                    "/repo",
+                    [protected],
+                )
+        self.assertEqual(
+            _normalize_child_args(POLICY_SMOKE_PURPOSE, "/repo", ["--help"]),
+            [
+                "--policy-improvement-smoke-entrypoint",
+                "--source-project-root",
+                "/repo",
+                "--help",
+            ],
+        )
+
+    def test_policy_consumers_own_runtime_and_source_identity_flags(self) -> None:
+        for purpose in (
+            POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+            POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+        ):
+            with self.subTest(purpose=purpose):
+                normalized = _normalize_child_args(
+                    purpose,
+                    "/repo",
+                    [
+                        "--",
+                        "--protocol",
+                        "/evidence/protocol.json",
+                    ],
+                )
+                self.assertEqual(
+                    normalized[:3],
+                    [
+                        "--policy-improvement-consumer-entrypoint",
+                        "--protocol",
+                        "/evidence/protocol.json",
+                    ],
+                )
+                self.assertEqual(
+                    _normalize_child_args(purpose, "/repo", ["--help"]),
+                    ["--policy-improvement-consumer-entrypoint", "--help"],
+                )
+                for protected in (
+                    "--policy-improvement-consumer-entrypoint",
+                    "--launcher-sha256=" + "a" * 64,
+                    "--launcher-sha=" + "a" * 64,
+                    "--producer-git-commit=" + "a" * 40,
+                    "--producer-source-manifest-sha256=" + "a" * 64,
+                    "--audit-runtime-sha256=" + "a" * 64,
+                    "--audit-source-git-commit=" + "a" * 40,
+                    "--analysis-runtime-profile-sha256=" + "a" * 64,
+                    "--runtime-authorization=/forged.json",
+                    "--runtime-authorization-json={}",
+                    "--runtime-authorization-sha256=" + "a" * 64,
+                    "--source-project-root=/other",
+                ):
+                    with (
+                        self.subTest(
+                            purpose=purpose,
+                            protected=protected,
+                        ),
+                        self.assertRaisesRegex(
+                            ConfirmatoryRuntimeError,
+                            "launcher-owned",
+                        ),
+                    ):
+                        _normalize_child_args(
+                            purpose,
+                            "/repo",
+                            [protected],
+                        )
+
     def test_training_launcher_owns_publication_and_producer_flags(self) -> None:
         child_args = _normalize_child_args(
             "phase4-training",
@@ -134,14 +478,56 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                     b"different",
                 )
             validator = _training_archive_validator(b"authorized")
-            with ZipFile(archive_path) as archive, mock.patch.object(
-                phase4_runtime_launcher,
-                "validate_confirmatory_archive_sources",
-            ), self.assertRaisesRegex(
-                ConfirmatoryRuntimeError,
-                "differs from the authorized checkout",
+            with (
+                ZipFile(archive_path) as archive,
+                mock.patch.object(
+                    phase4_runtime_launcher,
+                    "validate_confirmatory_archive_sources",
+                ),
+                self.assertRaisesRegex(
+                    ConfirmatoryRuntimeError,
+                    "differs from the authorized checkout",
+                ),
             ):
                 validator(archive)
+
+    def test_policy_consumer_requires_distinct_complete_producer_authority(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = str(Path(directory).resolve())
+            base = [
+                "--runtime-archive",
+                "/runtime.par",
+                "--expected-runtime-sha256",
+                "d" * 64,
+                "--source-project-root",
+                root,
+                "--expected-source-git-commit",
+                "a" * 40,
+                "--",
+                "--help",
+            ]
+            self.assertEqual(
+                phase4_runtime_launcher.main(
+                    ["--purpose", POLICY_IMPROVEMENT_AUDIT_PURPOSE, *base]
+                ),
+                2,
+            )
+            self.assertEqual(
+                phase4_runtime_launcher.main(
+                    [
+                        "--purpose",
+                        "phase4-audit",
+                        "--producer-source-project-root",
+                        root,
+                        "--expected-producer-git-commit",
+                        "a" * 40,
+                        *base,
+                    ]
+                ),
+                2,
+            )
 
     def test_main_dispatches_every_role_with_bound_attestation(self) -> None:
         runtime = object()
@@ -156,61 +542,152 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
+            authorization = {
+                "schema_name": "policy_improvement_runtime_authorization_v1",
+                "schema_version": 1,
+                "authorization_id": "launcher-test-v1",
+                "created_at_utc": "2026-08-14T12:00:00Z",
+                "protocol_sha256": "f" * 64,
+                "producer_git_commit": "a" * 40,
+                "producer_source_manifest_sha256": "c" * 64,
+                "launcher_sha256": "e" * 64,
+                "roles": [
+                    {
+                        "role": role,
+                        "source_git_commit": "a" * 40,
+                        "runtime_sha256": "d" * 64,
+                        "runtime_profile_sha256": (
+                            "c" * 64
+                            if role
+                            in {
+                                "policy-improvement-training",
+                                "policy-improvement-evaluation",
+                            }
+                            else "b" * 64
+                        ),
+                        "selected_source_manifest_sha256": (
+                            "c" * 64
+                            if role
+                            in {
+                                "policy-improvement-training",
+                                "policy-improvement-evaluation",
+                            }
+                            else "b" * 64
+                        ),
+                    }
+                    for role in (
+                        "policy-improvement-training",
+                        "policy-improvement-evaluation",
+                        "policy-improvement-audit",
+                        "policy-improvement-analysis",
+                    )
+                ],
+            }
+            authorization_payload = json.dumps(
+                authorization,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("ascii")
+            authorization_path = root / "runtime-authorization.json"
+            authorization_path.write_bytes(authorization_payload)
+            authorization_sha256 = hashlib.sha256(authorization_payload).hexdigest()
             for purpose, expected_role in (
                 ("phase4-training", "training"),
+                (POLICY_SMOKE_PURPOSE, POLICY_SMOKE_PURPOSE),
+                (
+                    POLICY_DATASET_BUILDER_PURPOSE,
+                    POLICY_DATASET_BUILDER_SOURCE_PROFILE,
+                ),
+                (
+                    POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+                    POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+                ),
+                (
+                    POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+                    POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+                ),
                 ("phase4-evaluator", "evaluator"),
                 ("phase4-audit", "audit"),
                 ("phase4-figure", "figure"),
             ):
-                with self.subTest(purpose=purpose), mock.patch.object(
-                    phase4_runtime_launcher,
-                    "authorize_phase4_training_source",
-                    return_value=training_authorized,
-                ), mock.patch.object(
-                    phase4_runtime_launcher,
-                    "authorize_phase4_source_profile",
-                    return_value=consumer_authorized,
-                ), mock.patch.object(
-                    phase4_runtime_launcher,
-                    "validate_runtime_archive",
-                    return_value=runtime,
-                ), mock.patch.object(
-                    phase4_runtime_launcher,
-                    "launch_verified_runtime",
-                    return_value=0,
-                ) as launch:
-                    self.assertEqual(
-                        phase4_runtime_launcher.main(
+                with (
+                    self.subTest(purpose=purpose),
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "authorize_phase4_training_source",
+                        return_value=training_authorized,
+                    ),
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "authorize_phase4_source_profile",
+                        return_value=consumer_authorized,
+                    ),
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "validate_runtime_archive",
+                        return_value=runtime,
+                    ),
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "launch_verified_runtime",
+                        return_value=0,
+                    ) as launch,
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "_launcher_artifact_sha256",
+                        return_value="e" * 64,
+                    ),
+                ):
+                    launcher_arguments = [
+                        "--purpose",
+                        purpose,
+                        "--runtime-archive",
+                        "/runtime.par",
+                        "--expected-runtime-sha256",
+                        "d" * 64,
+                        "--source-project-root",
+                        str(root),
+                        "--expected-source-git-commit",
+                        "a" * 40,
+                    ]
+                    if purpose in {
+                        POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+                        POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+                    }:
+                        launcher_arguments.extend(
                             [
-                                "--purpose",
-                                purpose,
-                                "--runtime-archive",
-                                "/runtime.par",
-                                "--expected-runtime-sha256",
-                                "d" * 64,
-                                "--source-project-root",
+                                "--producer-source-project-root",
                                 str(root),
-                                "--expected-source-git-commit",
+                                "--expected-producer-git-commit",
                                 "a" * 40,
-                                "--",
-                                "--help",
                             ]
-                        ),
+                        )
+                    if purpose == POLICY_SMOKE_PURPOSE or purpose in {
+                        POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+                        POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+                    }:
+                        launcher_arguments.extend(
+                            [
+                                "--runtime-authorization",
+                                str(authorization_path),
+                                "--expected-runtime-authorization-sha256",
+                                authorization_sha256,
+                            ]
+                        )
+                    launcher_arguments.extend(["--", "--help"])
+                    self.assertEqual(
+                        phase4_runtime_launcher.main(launcher_arguments),
                         0,
                     )
-                    attestation = launch.call_args.kwargs[
-                        "attestation_environment"
-                    ]
+                    attestation = launch.call_args.kwargs["attestation_environment"]
                     self.assertEqual(
-                        attestation[
-                            phase4_runtime_launcher.PHASE4_RUNTIME_ROLE_ENV
-                        ],
+                        attestation[phase4_runtime_launcher.PHASE4_RUNTIME_ROLE_ENV],
                         expected_role,
                     )
                     self.assertEqual(
-                        attestation[
-                            phase4_runtime_launcher.PHASE4_SOURCE_COMMIT_ENV
-                        ],
+                        attestation[phase4_runtime_launcher.PHASE4_SOURCE_COMMIT_ENV],
                         "a" * 40,
                     )
                     if purpose == "phase4-training":
@@ -221,6 +698,89 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                                 "--phase4-publication",
                                 "--producer-repo-root",
                                 str(root),
+                            ],
+                        )
+                    if purpose == POLICY_SMOKE_PURPOSE:
+                        self.assertEqual(
+                            attestation[POLICY_SMOKE_RUNTIME_AUTHORIZATION_SHA256_ENV],
+                            authorization_sha256,
+                        )
+                        self.assertEqual(
+                            attestation[POLICY_SMOKE_RUNTIME_PROFILE_SHA256_ENV],
+                            "c" * 64,
+                        )
+                        self.assertEqual(
+                            attestation[
+                                POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV
+                            ],
+                            "c" * 64,
+                        )
+                        self.assertEqual(
+                            json.loads(
+                                attestation[POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV]
+                            ),
+                            authorization,
+                        )
+                        self.assertEqual(
+                            attestation[POLICY_SMOKE_LAUNCHER_SHA256_ENV],
+                            "e" * 64,
+                        )
+                        child_args = launch.call_args.args[1]
+                        self.assertEqual(
+                            child_args[:3],
+                            [
+                                "--policy-improvement-smoke-entrypoint",
+                                "--source-project-root",
+                                str(root),
+                            ],
+                        )
+                    if purpose == POLICY_DATASET_BUILDER_PURPOSE:
+                        self.assertEqual(
+                            attestation[POLICY_DATASET_BUILDER_LAUNCHER_SHA256_ENV],
+                            "e" * 64,
+                        )
+                        self.assertEqual(
+                            launch.call_args.args[1],
+                            [
+                                "--policy-dataset-builder-entrypoint",
+                                "--help",
+                            ],
+                        )
+                    if purpose in {
+                        POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+                        POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+                    }:
+                        self.assertEqual(
+                            attestation[POLICY_CONSUMER_LAUNCHER_SHA256_ENV],
+                            "e" * 64,
+                        )
+                        self.assertEqual(
+                            attestation[POLICY_PRODUCER_SOURCE_MANIFEST_SHA256_ENV],
+                            "c" * 64,
+                        )
+                        self.assertEqual(
+                            attestation[POLICY_PRODUCER_GIT_COMMIT_ENV],
+                            "a" * 40,
+                        )
+                        self.assertEqual(
+                            attestation[
+                                phase4_runtime_launcher.POLICY_CONSUMER_RUNTIME_AUTHORIZATION_SHA256_ENV
+                            ],
+                            authorization_sha256,
+                        )
+                        self.assertEqual(
+                            json.loads(
+                                attestation[
+                                    phase4_runtime_launcher.POLICY_CONSUMER_RUNTIME_AUTHORIZATION_ENV
+                                ]
+                            ),
+                            authorization,
+                        )
+                        self.assertEqual(
+                            launch.call_args.args[1],
+                            [
+                                "--policy-improvement-consumer-entrypoint",
+                                "--help",
                             ],
                         )
 
@@ -235,6 +795,22 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 environ={},
                 attestation_required=True,
                 allowed_phase4_roles=frozenset({"evaluator"}),
+            )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "verified packaged-runtime launcher",
+        ):
+            preflight_runtime(
+                module_file=__file__,
+                expected_module_name="policy_improvement_consumer_entrypoint.py",
+                environ={},
+                attestation_required=True,
+                allowed_phase4_roles=frozenset(
+                    {
+                        POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+                        POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+                    }
+                ),
             )
 
     def test_archive_profile_requires_exact_source_bytes_and_no_bytecode(
@@ -272,9 +848,7 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                     def validate_tampered(archive: ZipFile) -> None:
                         validate_archive_layout(archive)
                         try:
-                            assert_phase4_archive_matches_profile(
-                                archive, authorized
-                            )
+                            assert_phase4_archive_matches_profile(archive, authorized)
                         except Phase4RuntimeProfileError as exc:
                             raise ConfirmatoryRuntimeError(str(exc)) from exc
 
@@ -290,22 +864,220 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
 
             for bytecode_path in ("models/model.pyc", "dataset/common.pyc"):
                 with self.subTest(bytecode_path=bytecode_path):
-                    bytecode_archive = root / (
-                        bytecode_path.replace("/", "_") + ".par"
-                    )
+                    bytecode_archive = root / (bytecode_path.replace("/", "_") + ".par")
                     with ZipFile(bytecode_archive, "w") as archive:
                         for relative_path, payload in sources.items():
                             archive.writestr(relative_path, payload)
                         archive.writestr(bytecode_path, b"bytecode")
-                    with ZipFile(
-                        bytecode_archive, "r"
-                    ) as archive, self.assertRaisesRegex(
-                        Phase4RuntimeProfileError,
-                        "bytecode",
+                    with (
+                        ZipFile(bytecode_archive, "r") as archive,
+                        self.assertRaisesRegex(
+                            Phase4RuntimeProfileError,
+                            "bytecode",
+                        ),
+                    ):
+                        assert_phase4_archive_matches_profile(archive, authorized)
+
+    def test_dataset_builder_profile_rejects_extra_or_tampered_source(self) -> None:
+        sources = {
+            relative_path: f"# {relative_path}\n".encode("ascii")
+            for relative_path in POLICY_DATASET_BUILDER_PROFILE_PATHS
+        }
+        authorized = _authorized(
+            sources,
+            profile=POLICY_DATASET_BUILDER_SOURCE_PROFILE,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            valid = root / "valid.par"
+            with ZipFile(valid, "w") as archive:
+                for relative_path, payload in sources.items():
+                    archive.writestr(relative_path, payload)
+            with ZipFile(valid) as archive:
+                assert_phase4_archive_matches_profile(archive, authorized)
+
+            for name, payload in (
+                ("dataset/unregistered.py", b"pass\n"),
+                (
+                    "configs/policy_improvement_v1/unregistered.json",
+                    b"{}\n",
+                ),
+            ):
+                archive_path = root / name.replace("/", "_")
+                with ZipFile(archive_path, "w") as archive:
+                    for relative_path, expected_payload in sources.items():
+                        archive.writestr(relative_path, expected_payload)
+                    archive.writestr(name, payload)
+                with (
+                    ZipFile(archive_path) as archive,
+                    self.assertRaises(Phase4RuntimeProfileError),
+                ):
+                    assert_phase4_archive_matches_profile(archive, authorized)
+
+            tampered = root / "tampered.par"
+            with ZipFile(tampered, "w") as archive:
+                for relative_path, payload in sources.items():
+                    archive.writestr(
+                        relative_path,
+                        b"tampered\n"
+                        if relative_path == "dataset/build_policy_improvement_4x4.py"
+                        else payload,
+                    )
+            with (
+                ZipFile(tampered) as archive,
+                self.assertRaises(Phase4RuntimeProfileError),
+            ):
+                assert_phase4_archive_matches_profile(archive, authorized)
+
+    def test_dataset_builder_profile_authorizes_exact_clean_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative_path in POLICY_DATASET_BUILDER_PROFILE_PATHS:
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"# {relative_path}\n", encoding="ascii")
+            _run_git(root, "init", "-q")
+            _run_git(root, "add", ".")
+            _run_git(root, "commit", "-q", "-m", "dataset profile")
+            commit = _run_git(root, "rev-parse", "HEAD")
+            identity = authorize_phase4_source_profile(
+                root,
+                commit,
+                POLICY_DATASET_BUILDER_SOURCE_PROFILE,
+            )
+            self.assertEqual(identity.git_commit, commit)
+            self.assertEqual(
+                set(identity.sources),
+                set(POLICY_DATASET_BUILDER_PROFILE_PATHS),
+            )
+            (root / "dataset/build_policy_improvement_4x4.py").write_text(
+                "tampered\n",
+                encoding="ascii",
+            )
+            with self.assertRaisesRegex(
+                Phase4RuntimeProfileError,
+                "authorized clean commit",
+            ):
+                authorize_phase4_source_profile(
+                    root,
+                    commit,
+                    POLICY_DATASET_BUILDER_SOURCE_PROFILE,
+                )
+
+    def test_policy_consumer_profiles_reject_extra_tampered_and_bytecode(
+        self,
+    ) -> None:
+        profiles = (
+            (
+                POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+                _policy_consumer_paths(POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS),
+                "scripts/policy_improvement_audit.py",
+            ),
+            (
+                POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+                _policy_consumer_paths(POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS),
+                "scripts/policy_improvement_analysis.py",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for profile, paths, tampered_name in profiles:
+                sources = {
+                    relative_path: f"# {relative_path}\n".encode("ascii")
+                    for relative_path in paths
+                }
+                authorized = _authorized(sources, profile=profile)
+                with self.subTest(profile=profile, case="valid"):
+                    valid = root / f"{profile}.par"
+                    with ZipFile(valid, "w") as archive:
+                        for relative_path, payload in sources.items():
+                            archive.writestr(relative_path, payload)
+                    with ZipFile(valid) as archive:
+                        assert_phase4_archive_matches_profile(
+                            archive,
+                            authorized,
+                        )
+                for case, extra_name in (
+                    ("extra-source", "scripts/policy_improvement_unregistered.py"),
+                    (
+                        "extra-config",
+                        "configs/policy_improvement_v1/unregistered.json",
+                    ),
+                    ("bytecode", "scripts/policy_improvement_schema.pyc"),
+                ):
+                    with self.subTest(profile=profile, case=case):
+                        archive_path = root / f"{profile}-{case}.par"
+                        with ZipFile(archive_path, "w") as archive:
+                            for relative_path, payload in sources.items():
+                                archive.writestr(relative_path, payload)
+                            archive.writestr(extra_name, b"extra")
+                        with (
+                            ZipFile(archive_path) as archive,
+                            self.assertRaises(Phase4RuntimeProfileError),
+                        ):
+                            assert_phase4_archive_matches_profile(
+                                archive,
+                                authorized,
+                            )
+                with self.subTest(profile=profile, case="tampered"):
+                    tampered = root / f"{profile}-tampered.par"
+                    with ZipFile(tampered, "w") as archive:
+                        for relative_path, payload in sources.items():
+                            archive.writestr(
+                                relative_path,
+                                b"tampered\n"
+                                if relative_path == tampered_name
+                                else payload,
+                            )
+                    with (
+                        ZipFile(tampered) as archive,
+                        self.assertRaises(Phase4RuntimeProfileError),
                     ):
                         assert_phase4_archive_matches_profile(
-                            archive, authorized
+                            archive,
+                            authorized,
                         )
+
+    def test_policy_consumer_profiles_authorize_exact_clean_tree(self) -> None:
+        for profile, paths in (
+            (
+                POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+                _policy_consumer_paths(POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS),
+            ),
+            (
+                POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+                _policy_consumer_paths(POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS),
+            ),
+        ):
+            with (
+                self.subTest(profile=profile),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                for relative_path in paths:
+                    path = root / relative_path
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(f"# {relative_path}\n", encoding="ascii")
+                _run_git(root, "init", "-q")
+                _run_git(root, "add", ".")
+                _run_git(root, "commit", "-q", "-m", "policy profile")
+                commit = _run_git(root, "rev-parse", "HEAD")
+                identity = authorize_phase4_source_profile(
+                    root,
+                    commit,
+                    profile,
+                )
+                self.assertEqual(identity.git_commit, commit)
+                self.assertEqual(set(identity.sources), set(paths))
+                (root / "scripts/policy_improvement_schema.py").write_text(
+                    "tampered\n",
+                    encoding="ascii",
+                )
+                with self.assertRaisesRegex(
+                    Phase4RuntimeProfileError,
+                    "authorized clean commit",
+                ):
+                    authorize_phase4_source_profile(root, commit, profile)
 
     def test_source_profile_requires_exact_clean_commit_and_safe_index(
         self,

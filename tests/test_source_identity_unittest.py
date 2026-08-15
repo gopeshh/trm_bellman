@@ -36,8 +36,13 @@ class TestSourceIdentity(unittest.TestCase):
     def _source_tree(self, root: Path) -> None:
         for relative_path in (
             "confirmatory_runtime_launcher.py",
+            "phase4_runtime_profile.py",
+            "policy_improvement_smoke_checkpoint.py",
+            "policy_improvement_smoke_runtime.py",
             "puzzle_dataset.py",
             "runtime_archive_preflight.py",
+            "scripts/policy_improvement_registry.py",
+            "scripts/policy_improvement_schema.py",
             "upi_trm_train.py",
         ):
             destination = root / relative_path
@@ -51,6 +56,12 @@ class TestSourceIdentity(unittest.TestCase):
         config_dir.mkdir(parents=True)
         (config_dir / "cell.yaml").write_text("gamma: 0.9\n", encoding="ascii")
         (config_dir / "registry.json").write_text("{}\n", encoding="ascii")
+        policy_config_dir = root / "configs" / "policy_improvement_v1"
+        policy_config_dir.mkdir(parents=True)
+        (policy_config_dir / "protocol.json").write_text("{}\n", encoding="ascii")
+        (policy_config_dir / "method.yaml").write_text(
+            "gamma: 0.9\n", encoding="ascii"
+        )
 
     def _runtime_archive(
         self,

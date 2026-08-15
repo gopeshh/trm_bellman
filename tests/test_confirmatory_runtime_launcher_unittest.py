@@ -49,8 +49,13 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
     def _sources(self) -> dict[str, bytes]:
         sources = {
             "confirmatory_runtime_launcher.py": b"# launcher\n",
+            "phase4_runtime_profile.py": b"# profile\n",
+            "policy_improvement_smoke_checkpoint.py": b"# checkpoint\n",
+            "policy_improvement_smoke_runtime.py": b"# smoke runtime\n",
             "puzzle_dataset.py": b"# puzzle\n",
             "runtime_archive_preflight.py": b"# preflight\n",
+            "scripts/policy_improvement_registry.py": b"# registry\n",
+            "scripts/policy_improvement_schema.py": b"# schema\n",
             "upi_trm_train.py": b"# trainer\n",
         }
         for directory in ("dataset", "evaluators", "models", "rl", "utils"):
@@ -64,6 +69,9 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
         }
         entries["configs/iclr_confirmatory/cell.yaml"] = hashlib.sha256(
             b"gamma: 0.9\n"
+        ).hexdigest()
+        entries["configs/policy_improvement_v1/protocol.json"] = hashlib.sha256(
+            b"{}\n"
         ).hexdigest()
         return {
             "source_manifest_schema_version": 1,
@@ -96,6 +104,11 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
                     archive.writestr(
                         "configs/iclr_confirmatory/cell.yaml",
                         config_content,
+                    )
+                if omit != "configs/policy_improvement_v1/protocol.json":
+                    archive.writestr(
+                        "configs/policy_improvement_v1/protocol.json",
+                        b"{}\n",
                     )
                 for relative_path, content in sources.items():
                     if relative_path == omit:
@@ -210,6 +223,9 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
             "missing": {"omit": "rl/module.py"},
             "missing_config": {
                 "omit": "configs/iclr_confirmatory/cell.yaml",
+            },
+            "missing_policy_config": {
+                "omit": "configs/policy_improvement_v1/protocol.json",
             },
             "extra": {"extra": "models/extra.py"},
             "duplicate": {"duplicate": "utils/module.py"},

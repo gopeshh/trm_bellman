@@ -25,6 +25,9 @@ class DatasetSourceBuildMetadata(TypedDict):
     build_config_sha256: str | None
     split_generation_seeds: NotRequired[dict[str, int]]
     producer_git_commit: NotRequired[str]
+    producer_launcher_sha256: NotRequired[str]
+    producer_runtime_sha256: NotRequired[str]
+    producer_source_manifest_sha256: NotRequired[str]
 
 
 def dataset_source_build_metadata(
@@ -78,6 +81,30 @@ def dataset_source_build_metadata(
                         )
                     split_generation_seeds[name] = split_seed
             producer_git_commit = config.get("producer_git_commit")
+            producer_launcher_sha256: str | None = None
+            producer_runtime_sha256: str | None = None
+            producer_source_manifest_sha256: str | None = None
+            producer_source = config.get("producer_source")
+            if producer_source is not None:
+                if (
+                    not isinstance(producer_source, Mapping)
+                    or set(producer_source)
+                    != {
+                        "git_commit",
+                        "launcher_sha256",
+                        "runtime_sha256",
+                        "source_manifest_sha256",
+                    }
+                ):
+                    raise DatasetProvenanceError(
+                        f"Dataset source {root.name!r} has invalid producer identity."
+                    )
+                producer_git_commit = producer_source["git_commit"]
+                producer_launcher_sha256 = producer_source["launcher_sha256"]
+                producer_runtime_sha256 = producer_source["runtime_sha256"]
+                producer_source_manifest_sha256 = producer_source[
+                    "source_manifest_sha256"
+                ]
             if producer_git_commit is not None and (
                 not isinstance(producer_git_commit, str)
                 or len(producer_git_commit) != 40
@@ -89,6 +116,22 @@ def dataset_source_build_metadata(
                 raise DatasetProvenanceError(
                     f"Dataset source {root.name!r} has invalid producer commit."
                 )
+            for label, digest in (
+                ("launcher", producer_launcher_sha256),
+                ("runtime", producer_runtime_sha256),
+                ("source manifest", producer_source_manifest_sha256),
+            ):
+                if digest is not None and (
+                    not isinstance(digest, str)
+                    or len(digest) != 64
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in digest
+                    )
+                ):
+                    raise DatasetProvenanceError(
+                        f"Dataset source {root.name!r} has invalid producer {label}."
+                    )
             if not isinstance(builder_name, str) or not builder_name:
                 raise DatasetProvenanceError(
                     f"Dataset source {root.name!r} has no recorded builder."
@@ -120,6 +163,14 @@ def dataset_source_build_metadata(
                 source["split_generation_seeds"] = split_generation_seeds
             if producer_git_commit is not None:
                 source["producer_git_commit"] = producer_git_commit
+            if producer_launcher_sha256 is not None:
+                source["producer_launcher_sha256"] = producer_launcher_sha256
+            if producer_runtime_sha256 is not None:
+                source["producer_runtime_sha256"] = producer_runtime_sha256
+            if producer_source_manifest_sha256 is not None:
+                source["producer_source_manifest_sha256"] = (
+                    producer_source_manifest_sha256
+                )
         sources.append(source)
     if not sources:
         raise ValueError("At least one dataset source is required.")

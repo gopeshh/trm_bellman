@@ -2079,8 +2079,13 @@ class Phase4RuntimeSourceIdentityTest(unittest.TestCase):
     def _write_producer_source_tree(root: Path) -> None:
         for relative_path in (
             "confirmatory_runtime_launcher.py",
+            "phase4_runtime_profile.py",
+            "policy_improvement_smoke_checkpoint.py",
+            "policy_improvement_smoke_runtime.py",
             "puzzle_dataset.py",
             "runtime_archive_preflight.py",
+            "scripts/policy_improvement_registry.py",
+            "scripts/policy_improvement_schema.py",
             "upi_trm_train.py",
         ):
             destination = root / relative_path
@@ -2093,6 +2098,11 @@ class Phase4RuntimeSourceIdentityTest(unittest.TestCase):
         confirmatory_config = root / "configs" / "iclr_confirmatory" / "cell.yaml"
         confirmatory_config.parent.mkdir(parents=True, exist_ok=True)
         confirmatory_config.write_text("gamma: 0.9\n")
+        policy_config = (
+            root / "configs" / "policy_improvement_v1" / "protocol.json"
+        )
+        policy_config.parent.mkdir(parents=True, exist_ok=True)
+        policy_config.write_text("{}\n")
         phase4_config = root / "configs" / "phase4_2x2_norm_ablation"
         phase4_config.mkdir(parents=True, exist_ok=True)
         for condition in ("nc_nv", "nc_yv", "yc_nv", "yc_yv"):

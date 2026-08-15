@@ -15,11 +15,22 @@ SOURCE_MANIFEST_RELATIVE_PATH = (
 )
 _ROOT_SOURCES = (
     "confirmatory_runtime_launcher.py",
+    "phase4_runtime_profile.py",
+    "policy_improvement_smoke_checkpoint.py",
+    "policy_improvement_smoke_runtime.py",
     "puzzle_dataset.py",
     "runtime_archive_preflight.py",
     "upi_trm_train.py",
 )
+_ADDITIONAL_SOURCES = (
+    "scripts/policy_improvement_registry.py",
+    "scripts/policy_improvement_schema.py",
+)
 _SOURCE_DIRECTORIES = ("dataset", "evaluators", "models", "rl", "utils")
+_CONFIG_DIRECTORIES = (
+    "configs/iclr_confirmatory",
+    "configs/policy_improvement_v1",
+)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -36,6 +47,12 @@ def behavior_source_relative_paths(root: str | Path) -> list[str]:
                 f"Producer repository is missing source {relative_path!r}."
             )
         paths.add(relative_path)
+    for relative_path in _ADDITIONAL_SOURCES:
+        if not (source_root / relative_path).is_file():
+            raise SourceIdentityError(
+                f"Producer repository is missing source {relative_path!r}."
+            )
+        paths.add(relative_path)
     for relative_directory in _SOURCE_DIRECTORIES:
         directory = source_root / relative_directory
         if not directory.is_dir():
@@ -47,18 +64,19 @@ def behavior_source_relative_paths(root: str | Path) -> list[str]:
             for path in directory.rglob("*.py")
             if "__pycache__" not in path.parts
         )
-    config_directory = source_root / "configs" / "iclr_confirmatory"
-    if not config_directory.is_dir():
-        raise SourceIdentityError(
-            "Producer repository is missing confirmatory configuration sources."
+    for relative_directory in _CONFIG_DIRECTORIES:
+        config_directory = source_root / relative_directory
+        if not config_directory.is_dir():
+            raise SourceIdentityError(
+                "Producer repository is missing registered configuration sources."
+            )
+        paths.update(
+            str(path.relative_to(source_root))
+            for path in config_directory.iterdir()
+            if path.is_file()
+            and path.suffix in {".json", ".yaml"}
+            and str(path.relative_to(source_root)) != SOURCE_MANIFEST_RELATIVE_PATH
         )
-    paths.update(
-        str(path.relative_to(source_root))
-        for path in config_directory.iterdir()
-        if path.is_file()
-        and path.suffix in {".json", ".yaml"}
-        and str(path.relative_to(source_root)) != SOURCE_MANIFEST_RELATIVE_PATH
-    )
     return sorted(paths)
 
 
@@ -128,6 +146,8 @@ def _is_behavior_python_archive_member(relative_path: str) -> bool:
         return False
     if len(path.parts) == 1:
         return relative_path in _ROOT_SOURCES
+    if relative_path in _ADDITIONAL_SOURCES:
+        return True
     return path.parts[0] in _SOURCE_DIRECTORIES
 
 
@@ -143,6 +163,16 @@ def _is_behavior_bytecode_archive_member(relative_path: str) -> bool:
     root_stems = tuple(PurePosixPath(source).stem for source in _ROOT_SOURCES)
     if len(path.parts) == 1:
         return path.stem in root_stems
+    if path.parent.as_posix() == "scripts":
+        return any(
+            path.stem == PurePosixPath(source).stem
+            for source in _ADDITIONAL_SOURCES
+        )
+    if path.parts[:2] == ("scripts", "__pycache__"):
+        return any(
+            path.name.startswith(f"{PurePosixPath(source).stem}.")
+            for source in _ADDITIONAL_SOURCES
+        )
     return (
         path.parts[0] == "__pycache__"
         and any(path.name.startswith(f"{stem}.") for stem in root_stems)

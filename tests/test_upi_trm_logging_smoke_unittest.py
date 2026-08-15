@@ -42,6 +42,7 @@ from upi_trm_train import (
     _fixed_base_effective_config,
     _phase4_condition_from_run_id,
     _phase4_run_requested,
+    _policy_smoke_requested,
     _phase4_training_invocation,
     _preflight_confirmatory_runtime,
     _preflight_training_runtime,
@@ -239,6 +240,58 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             )
         )
         self.assertFalse(_phase4_run_requested(["--run-id", "ordinary.seed41"]))
+
+    def test_policy_smoke_preflight_requires_its_separate_attestation(self):
+        self.assertTrue(
+            _policy_smoke_requested(
+                ["--policy-improvement-smoke-entrypoint"]
+            )
+        )
+        self.assertFalse(_policy_smoke_requested(["--phase4-publication"]))
+        with self.assertRaisesRegex(RuntimeError, "packaged-runtime launcher"):
+            _preflight_training_runtime(
+                argv=["--policy-improvement-smoke-entrypoint"],
+                module_file=__file__,
+                environ={},
+            )
+
+        sentinel = upi_trm_train.RuntimePreflight(
+            runtime_sha256="d" * 64,
+            private_unpack_descriptor=11,
+            runtime_descriptor=12,
+            phase4_role="policy-improvement-smoke",
+            source_git_commit="a" * 40,
+            source_manifest_sha256="b" * 64,
+        )
+        with patch.object(
+            upi_trm_train,
+            "preflight_runtime",
+            return_value=sentinel,
+        ) as preflight:
+            result = _preflight_training_runtime(
+                argv=["--policy-improvement-smoke-entrypoint"],
+                module_file="/proc/self/fd/12/upi_trm_train.py",
+                environ={},
+            )
+        self.assertIs(result, sentinel)
+        self.assertEqual(
+            preflight.call_args.kwargs["allowed_phase4_roles"],
+            frozenset({"policy-improvement-smoke"}),
+        )
+
+    def test_policy_smoke_is_mutually_exclusive_with_existing_evidence_modes(self):
+        for conflict in ("--confirmatory", "--phase4-publication"):
+            with self.subTest(conflict=conflict), self.assertRaisesRegex(
+                RuntimeError, "cannot be combined"
+            ):
+                _preflight_training_runtime(
+                    argv=[
+                        "--policy-improvement-smoke-entrypoint",
+                        conflict,
+                    ],
+                    module_file=__file__,
+                    environ={},
+                )
 
     def test_phase4_preflight_requires_training_attestation(self):
         with self.assertRaisesRegex(RuntimeError, "packaged-runtime launcher"):
@@ -502,8 +555,13 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             producer_root = Path(directory) / "producer"
             for relative_path in (
                 "confirmatory_runtime_launcher.py",
+                "phase4_runtime_profile.py",
+                "policy_improvement_smoke_checkpoint.py",
+                "policy_improvement_smoke_runtime.py",
                 "puzzle_dataset.py",
                 "runtime_archive_preflight.py",
+                "scripts/policy_improvement_registry.py",
+                "scripts/policy_improvement_schema.py",
                 "upi_trm_train.py",
             ):
                 destination = producer_root / relative_path
@@ -527,6 +585,11 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             (config_root / "cell.yaml").write_text(
                 "gamma: 0.9\n",
                 encoding="ascii",
+            )
+            policy_root = producer_root / "configs" / "policy_improvement_v1"
+            policy_root.mkdir(parents=True)
+            (policy_root / "protocol.json").write_text(
+                "{}\n", encoding="ascii"
             )
             manifest = build_producer_source_manifest(producer_root)
             (producer_root / SOURCE_MANIFEST_RELATIVE_PATH).write_text(
@@ -559,8 +622,13 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             producer_root = Path(directory) / "producer"
             for relative_path in (
                 "confirmatory_runtime_launcher.py",
+                "phase4_runtime_profile.py",
+                "policy_improvement_smoke_checkpoint.py",
+                "policy_improvement_smoke_runtime.py",
                 "puzzle_dataset.py",
                 "runtime_archive_preflight.py",
+                "scripts/policy_improvement_registry.py",
+                "scripts/policy_improvement_schema.py",
                 "upi_trm_train.py",
             ):
                 destination = producer_root / relative_path
@@ -584,6 +652,11 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             (config_root / "cell.yaml").write_text(
                 "gamma: 0.9\n",
                 encoding="ascii",
+            )
+            policy_root = producer_root / "configs" / "policy_improvement_v1"
+            policy_root.mkdir(parents=True)
+            (policy_root / "protocol.json").write_text(
+                "{}\n", encoding="ascii"
             )
 
             manifest = build_producer_source_manifest(producer_root)

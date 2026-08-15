@@ -211,6 +211,13 @@ class UPITrmTrainer:
             getattr(self.rl_cfg, "training_protocol", "legacy")
             == "fixed_base_exact"
         )
+        self._fixed_base_ablation = self.rl_cfg.training_protocol in {
+            "fixed_base_ablation_batch_only_centering",
+            "fixed_base_ablation_distilled_realization",
+        }
+        self._fixed_base_ownership = (
+            self._fixed_base_exact or self._fixed_base_ablation
+        )
         self._capture_preinterpolation_pair = bool(
             getattr(self.rl_cfg, "capture_preinterpolation_policy_pair", False)
         )
@@ -223,7 +230,7 @@ class UPITrmTrainer:
                     "preinterpolation_exact_mixture evaluation requires "
                     "capture_preinterpolation_policy_pair=True."
                 )
-            if self._fixed_base_exact or self.rl_cfg.theory_exact_mixture:
+            if self._fixed_base_ownership or self.rl_cfg.theory_exact_mixture:
                 raise ValueError(
                     "preinterpolation_exact_mixture is a legacy parameter-"
                     "interpolation bridge evaluator, not a fixed-base training mode."
@@ -233,7 +240,7 @@ class UPITrmTrainer:
                     "preinterpolation_exact_mixture requires policy_epsilon=0."
                 )
         if self._capture_preinterpolation_pair and (
-            self._fixed_base_exact
+            self._fixed_base_ownership
             or self.rl_cfg.theory_exact_mixture
             or self.rl_cfg.distill_mixture_policy
         ):
@@ -247,6 +254,14 @@ class UPITrmTrainer:
                 "targets, exact baseline summation, exact mixture deployment, "
                 "zero policy epsilon, no distillation, and no scheduled "
                 "operator-norm clamping."
+            )
+        if (
+            self._fixed_base_ablation
+            and not self.rl_cfg.is_registered_fixed_base_ablation()
+        ):
+            raise ValueError(
+                f"training_protocol={self.rl_cfg.training_protocol!r} does not "
+                "match its registered Stage 3 intervention contract."
             )
         assert math.isclose(
             self.env_config.gamma,
@@ -301,7 +316,9 @@ class UPITrmTrainer:
         # Policy models:
         # - policy_model_old: deployed policy (data collection)
         # - policy_model_candidate: receives policy-gradient updates
-        if getattr(self.rl_cfg, "theory_exact_mixture", False):
+        if self._fixed_base_ownership or getattr(
+            self.rl_cfg, "theory_exact_mixture", False
+        ):
             # The critic is updated before each candidate step. Keep the base
             # actor in a separate frozen module so that those value updates do
             # not silently change the policy or recurrent transition map.
@@ -316,9 +333,9 @@ class UPITrmTrainer:
         ).to(device)
         self.policy_model_candidate.load_state_dict(self.model.state_dict())
 
-        if self._fixed_base_exact:
+        if self._fixed_base_ownership:
             if self.model.value_head is None:
-                raise ValueError("fixed_base_exact requires an enabled value head.")
+                raise ValueError("Fixed-base protocols require an enabled value head.")
             for name, param in self.model.named_parameters():
                 param.requires_grad_(name.startswith("value_head."))
             for buffer in self.model.buffers():
@@ -331,7 +348,7 @@ class UPITrmTrainer:
                 continue
             if "edit_policy" in name:
                 continue
-            if self._fixed_base_exact and not name.startswith("value_head."):
+            if self._fixed_base_ownership and not name.startswith("value_head."):
                 continue
             value_params.append(param)
 
@@ -489,7 +506,7 @@ class UPITrmTrainer:
         tau = self.rl_cfg.target_ema_tau
         source_module: nn.Module = self.model
         target_module: nn.Module = self.target_model
-        if self._fixed_base_exact:
+        if self._fixed_base_ownership:
             if self.model.value_head is None or self.target_model.value_head is None:
                 raise RuntimeError(
                     "Fixed-base target update requires source and target value heads."
@@ -530,7 +547,7 @@ class UPITrmTrainer:
             return
         clamp_interval = getattr(self.rl_cfg, "opnorm_clamp_interval", 0)
         if (
-            self._fixed_base_exact
+            self._fixed_base_ownership
             and getattr(self.rl_cfg, "enable_contraction", False)
             and clamp_interval > 0
         ):
@@ -727,7 +744,7 @@ class UPITrmTrainer:
     ):
         """Return the policy used to generate replay transitions."""
 
-        if self._fixed_base_exact:
+        if self._fixed_base_ownership:
             return self.policy_model_old.policy_dist(
                 x_batch,
                 y_batch,
@@ -755,8 +772,10 @@ class UPITrmTrainer:
         outside the exact-mixture theory.
         """
 
-        if self._fixed_base_exact:
-            raise RuntimeError("The fixed base policy cannot be interpolated or promoted.")
+        if self._fixed_base_ownership:
+            raise RuntimeError(
+                "A fixed-base policy cannot be parameter-interpolated or promoted."
+            )
 
         alpha = self.rl_cfg.mixture_alpha
         if alpha <= 0.0:
@@ -863,7 +882,7 @@ class UPITrmTrainer:
 
         source_model = (
             self.policy_model_old
-            if getattr(self.rl_cfg, "theory_exact_mixture", False)
+            if self._fixed_base_ownership
             else self.model
         )
         self._copy_nonpolicy_state(source_model, self.policy_model_candidate)
@@ -888,7 +907,7 @@ class UPITrmTrainer:
 
         if not getattr(self.rl_cfg, "theory_exact_mixture", False):
             return
-        if self._fixed_base_exact:
+        if self._fixed_base_ownership:
             self._copy_value_head_state(self.model, self.policy_model_old)
             self._copy_value_head_state(self.model, self.policy_model_candidate)
             return
@@ -991,7 +1010,9 @@ class UPITrmTrainer:
             batch_y = self._prepare_plan(y, batched=batched)
             with torch.no_grad():
                 latent_model = (
-                    self.policy_model_old if self._fixed_base_exact else self.model
+                    self.policy_model_old
+                    if self._fixed_base_ownership
+                    else self.model
                 )
                 latent = latent_model.init_latent(batch_x, batch_y)
 
@@ -2955,9 +2976,9 @@ class UPITrmTrainer:
     ) -> None:
         """Attach the sparse embedding optimizer at the value-update boundary."""
 
-        if self._fixed_base_exact:
+        if self._fixed_base_ownership:
             raise ValueError(
-                "fixed_base_exact forbids trainable puzzle embeddings because "
+                "Fixed-base protocols forbid trainable puzzle embeddings because "
                 "they change the recurrent actor map."
             )
         self.puzzle_emb_optimizer = optimizer
@@ -3327,7 +3348,7 @@ class UPITrmTrainer:
         
         # Imitation may initialize the candidate proposal, but the fixed base
         # remains immutable after protocol selection.
-        if not self._fixed_base_exact:
+        if not self._fixed_base_ownership:
             self._sync_policy_old_towards_candidate()
         
         return {

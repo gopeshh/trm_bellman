@@ -1,0 +1,330 @@
+{
+  "amendments": [],
+  "architecture": {
+    "backbone": "trm",
+    "h_cycles": 2,
+    "hidden_size": 64,
+    "l_cycles": 2,
+    "l_layers": 1,
+    "puzzle_emb_ndim": 0
+  },
+  "budgets": {
+    "compute_matching": {
+      "compute_unit": "recurrent_map_applications",
+      "compute_matched": true,
+      "interaction_matched": true,
+      "maximum_relative_mismatch": 0.05,
+      "measured_smoke_required": true
+    },
+    "confirmatory": {
+      "checkpoint_environment_interactions": [10000, 20000, 40000, 80000],
+      "environment_interactions": 80000,
+      "evaluation_records": 512
+    },
+    "pilot": {
+      "checkpoint_environment_interactions": [10000, 20000, 40000, 80000],
+      "environment_interactions": 80000,
+      "evaluation_records": 256
+    },
+    "smoke": {
+      "checkpoint_environment_interactions": [16, 32],
+      "environment_interactions": 32,
+      "evaluation_records": 8
+    }
+  },
+  "created_date": "2026-08-14",
+  "dataset": {
+    "builder_schema_version": 2,
+    "domain": "sudoku_4x4",
+    "manifest_schema_version": 2,
+    "manifest_sha256": {
+      "reason": "manifest_not_materialized",
+      "status": "unavailable"
+    },
+    "name": "policy-improvement-hard-4x4-v1",
+    "producer_source": {
+      "git_commit": {
+        "reason": "manifest_not_materialized",
+        "status": "unavailable"
+      },
+      "launcher_sha256": {
+        "reason": "manifest_not_materialized",
+        "status": "unavailable"
+      },
+      "runtime_sha256": {
+        "reason": "manifest_not_materialized",
+        "status": "unavailable"
+      },
+      "source_manifest_sha256": {
+        "reason": "manifest_not_materialized",
+        "status": "unavailable"
+      }
+    },
+    "root": "data/policy-improvement-v1-owner/policy-improvement-hard-4x4-v1",
+    "splits": {
+      "test": {
+        "count": 512,
+        "generation_seed": 26081403,
+        "manifest_sha256": {
+          "reason": "manifest_not_materialized",
+          "status": "unavailable"
+        },
+        "ordered_record_sha256": {
+          "reason": "manifest_not_materialized",
+          "status": "unavailable"
+        }
+      },
+      "train": {
+        "count": 1024,
+        "generation_seed": 26081401,
+        "manifest_sha256": {
+          "reason": "manifest_not_materialized",
+          "status": "unavailable"
+        },
+        "ordered_record_sha256": {
+          "reason": "manifest_not_materialized",
+          "status": "unavailable"
+        }
+      },
+      "validation": {
+        "count": 256,
+        "generation_seed": 26081402,
+        "manifest_sha256": {
+          "reason": "manifest_not_materialized",
+          "status": "unavailable"
+        },
+        "ordered_record_sha256": {
+          "reason": "manifest_not_materialized",
+          "status": "unavailable"
+        }
+      }
+    },
+    "symmetry_canonicalization": {
+      "group_order": 3072,
+      "reject_cross_split_overlap": true,
+      "scheme": "sudoku4x4_spatial_digit_lexicographic_v1"
+    }
+  },
+  "evaluation_populations": {
+    "confirmatory": {
+      "count": 512,
+      "indices": {
+        "first": 0,
+        "last_inclusive": 511,
+        "scheme": "contiguous_registered_indices_v1"
+      },
+      "ordered_record_sha256": {
+        "reason": "manifest_not_materialized",
+        "status": "unavailable"
+      },
+      "split": "test"
+    },
+    "pilot": {
+      "count": 256,
+      "indices": {
+        "first": 0,
+        "last_inclusive": 255,
+        "scheme": "contiguous_registered_indices_v1"
+      },
+      "ordered_record_sha256": {
+        "reason": "manifest_not_materialized",
+        "status": "unavailable"
+      },
+      "split": "validation"
+    },
+    "smoke": {
+      "count": 8,
+      "indices": {
+        "first": 0,
+        "last_inclusive": 7,
+        "scheme": "contiguous_registered_indices_v1"
+      },
+      "ordered_record_sha256": {
+        "reason": "manifest_not_materialized",
+        "status": "unavailable"
+      },
+      "split": "validation"
+    }
+  },
+  "full_execution_gate": {
+    "environment_variable": "RUN_UPITRM_FULL_EXPERIMENTS",
+    "required_value": "1"
+  },
+  "grid": {
+    "stage0": {
+      "K": 1,
+      "alpha": 0.1,
+      "expected_rows": 4,
+      "method_ids": [
+        "fixed_base_exact_persistent",
+        "fixed_base_exact_episodic",
+        "legacy_parameter_interpolation",
+        "matched_ppo"
+      ],
+      "n": 2,
+      "ppo_rollout_environment_interactions": 16,
+      "upi_optimizer_batch_size": 1,
+      "upi_rollout_episodes_per_step": 1
+    },
+    "stage1_alpha": {
+      "alpha_values": [0.05, 0.1, 0.2],
+      "expected_rows": 9,
+      "selection_rule": "best_validation_exact_configuration_v1"
+    },
+    "stage1_screen": {
+      "K_values": [1, 5],
+      "alpha": 0.1,
+      "expected_rows": 48,
+      "method_ids": [
+        "fixed_base_exact_persistent",
+        "fixed_base_exact_episodic",
+        "legacy_parameter_interpolation",
+        "matched_ppo"
+      ],
+      "n_values": [2, 4]
+    },
+    "stage2": {
+      "expected_rows": 32,
+      "method_ids": [
+        "fixed_base_exact_persistent",
+        "fixed_base_exact_episodic",
+        "legacy_parameter_interpolation",
+        "matched_ppo"
+      ],
+      "selection_rule": "best_validation_alpha_v1"
+    },
+    "stage3": {
+      "expected_rows": 64,
+      "reused_contrasts": [
+        "persistent_vs_episodic",
+        "exact_mixture_vs_parameter_interpolation"
+      ],
+      "selection_rule": "frozen_best_exact_ablation_v1",
+      "training_variants": [
+        "batch_only_centering",
+        "distilled_realization",
+        "projection_identity",
+        "contraction_enabled",
+        "target_retention_0p9",
+        "target_retention_0p999",
+        "depth_lower_neighbor",
+        "depth_upper_neighbor"
+      ]
+    }
+  },
+  "methods": [
+    {
+      "centering": "exact_statewise",
+      "config_path": "configs/policy_improvement_v1/fixed_base_exact_persistent.yaml",
+      "canonical_config_sha256": "a7321e16d00e4dbe6e7694a8e0e1cee3f114e35ad960ee7c65f8f8526e7b8e4d",
+      "config_sha256": "2c101307f77ef788d588928b694b0ef01de186c3f9f1ae6f561e52d5e8f433a9",
+      "deployment": "exact_probability_mixture",
+      "id": "fixed_base_exact_persistent",
+      "latent_mode": "persistent",
+      "primary_policy": "exact_mixture",
+      "training_protocol": "fixed_base_exact"
+    },
+    {
+      "centering": "exact_statewise",
+      "config_path": "configs/policy_improvement_v1/fixed_base_exact_episodic.yaml",
+      "canonical_config_sha256": "6f78dfd43e5ec579a943f688a55223e105ff6c92401f7c402426f43c021aa5e1",
+      "config_sha256": "2f16dbbba406ae67f2b62342483800f0ae4c3a0d61019e3616697e1256dac36b",
+      "deployment": "exact_probability_mixture",
+      "id": "fixed_base_exact_episodic",
+      "latent_mode": "episodic",
+      "primary_policy": "exact_mixture",
+      "training_protocol": "fixed_base_exact"
+    },
+    {
+      "centering": "batch_only",
+      "config_path": "configs/policy_improvement_v1/legacy_parameter_interpolation.yaml",
+      "canonical_config_sha256": "3963cbd17496da6d3a52a45b05c94de63745cc769cd98fe2a57b9f14ddc68e3d",
+      "config_sha256": "2489a5d053379f140b54c1d23cffe68554afc0d9f80045527717cdb6ebd07e7c",
+      "deployment": "parameter_interpolation",
+      "id": "legacy_parameter_interpolation",
+      "latent_mode": "persistent",
+      "primary_policy": "realized_policy",
+      "training_protocol": "legacy"
+    },
+    {
+      "centering": "ppo_gae",
+      "config_path": "configs/policy_improvement_v1/matched_ppo.yaml",
+      "canonical_config_sha256": "396399c83f02693f51a8850549f17468a94df7a73df186a8a2ea5780818da72d",
+      "config_sha256": "1aadcd2340d5de3bb6a344c101ba7a89b33f53b5681354ee97dfb2d37a4cd2ba",
+      "deployment": "greedy_policy",
+      "id": "matched_ppo",
+      "latent_mode": "episodic",
+      "primary_policy": "realized_policy",
+      "training_protocol": "ppo"
+    }
+  ],
+  "selection_rules": {
+    "alpha": {
+      "endpoint": "mean_seed_level_primary_interaction_matched_solve_rate",
+      "id": "best_validation_alpha_v1",
+      "maximize": true,
+      "tie_break": ["alpha_ascending"]
+    },
+    "screen": {
+      "eligible_methods": [
+        "fixed_base_exact_persistent",
+        "fixed_base_exact_episodic"
+      ],
+      "endpoint": "mean_seed_level_primary_interaction_matched_solve_rate",
+      "id": "best_validation_exact_configuration_v1",
+      "maximize": true,
+      "tie_break": ["method_order", "n_ascending", "K_ascending"]
+    }
+  },
+  "output_root": {
+    "environment_variable": "UPI_TRM_EVIDENCE_ROOT",
+    "relative_path": "policy_improvement_v1"
+  },
+  "protocol_id": "policy-improvement-v1-20260814",
+  "schema_name": "policy_improvement_v1",
+  "schema_version": 1,
+  "seeds": {
+    "confirmatory": [
+      2081976412,
+      781025396,
+      1148619853,
+      913535362,
+      2143253519,
+      2279379379,
+      402312153,
+      2736405725
+    ],
+    "derivation": "sha256_namespace_tier_index_u32be_v1",
+    "namespace": "upi-trm-policy-improvement-v1",
+    "pilot": [784831257, 2087907586, 4056782312],
+    "smoke": [1257297357]
+  },
+  "statistics": {
+    "bootstrap": {
+      "replicates": 10000,
+      "scheme": "paired_seed_cluster_then_paired_puzzle_v1",
+      "seed": 3472274560
+    },
+    "confidence_level": 0.95,
+    "multiplicity": {
+      "other": "exploratory",
+      "prespecified_secondary": "holm",
+      "primary": "unadjusted"
+    },
+    "primary_contrast": "fixed_base_exact_persistent-minus-matched_ppo",
+    "primary_endpoint": "final_test_solve_rate_percentage_points",
+    "prespecified_secondary_contrasts": [
+      "fixed_base_exact_episodic-minus-matched_ppo",
+      "legacy_parameter_interpolation-minus-matched_ppo"
+    ],
+    "seed_level_permutation_test": true
+  },
+  "status": "registered_not_authorized",
+  "test_isolation": {
+    "amendment_policy": "document_before_consistent_rerun_of_all_affected_cells",
+    "confirmatory_split": "test",
+    "owner_root_binding": "evidence_root",
+    "pilot_split": "validation",
+    "test_open_count": 1
+  }
+}

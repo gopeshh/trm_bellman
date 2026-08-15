@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import json
 import os
 import re
 import stat
@@ -21,9 +22,16 @@ PRIVATE_UNPACK_BASE_ENV = "UPI_TRM_PRIVATE_UNPACK_BASE"
 PRIVATE_UNPACK_FD_ENV = "UPI_TRM_PRIVATE_UNPACK_FD"
 PHASE4_RUNTIME_ROLE_ENV = "UPI_TRM_PHASE4_RUNTIME_ROLE"
 PHASE4_SOURCE_COMMIT_ENV = "UPI_TRM_PHASE4_SOURCE_COMMIT"
-PHASE4_SOURCE_MANIFEST_SHA256_ENV = (
-    "UPI_TRM_PHASE4_SOURCE_MANIFEST_SHA256"
+PHASE4_SOURCE_MANIFEST_SHA256_ENV = "UPI_TRM_PHASE4_SOURCE_MANIFEST_SHA256"
+POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV = "UPI_TRM_POLICY_SMOKE_RUNTIME_AUTHORIZATION"
+POLICY_SMOKE_RUNTIME_AUTHORIZATION_SHA256_ENV = (
+    "UPI_TRM_POLICY_SMOKE_RUNTIME_AUTHORIZATION_SHA256"
 )
+POLICY_SMOKE_RUNTIME_PROFILE_SHA256_ENV = "UPI_TRM_POLICY_SMOKE_RUNTIME_PROFILE_SHA256"
+POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV = (
+    "UPI_TRM_POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256"
+)
+POLICY_SMOKE_ROLE = "policy-improvement-smoke"
 
 _LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _LOWER_COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -59,6 +67,10 @@ class RuntimePreflight:
     phase4_role: str | None
     source_git_commit: str | None
     source_manifest_sha256: str | None
+    policy_runtime_authorization_json: str | None = None
+    policy_runtime_authorization_sha256: str | None = None
+    policy_runtime_profile_sha256: str | None = None
+    policy_selected_source_manifest_sha256: str | None = None
 
 
 def _hash_runtime(path: Path) -> str:
@@ -104,6 +116,22 @@ def preflight_runtime(
         PHASE4_SOURCE_MANIFEST_SHA256_ENV,
         None,
     )
+    policy_runtime_authorization_json = environ.pop(
+        POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV,
+        None,
+    )
+    policy_runtime_authorization_sha256 = environ.pop(
+        POLICY_SMOKE_RUNTIME_AUTHORIZATION_SHA256_ENV,
+        None,
+    )
+    policy_runtime_profile_sha256 = environ.pop(
+        POLICY_SMOKE_RUNTIME_PROFILE_SHA256_ENV,
+        None,
+    )
+    policy_selected_source_manifest_sha256 = environ.pop(
+        POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV,
+        None,
+    )
     attestation_values = (
         attested_path_raw,
         attested_sha256,
@@ -113,6 +141,10 @@ def preflight_runtime(
         phase4_role,
         source_git_commit,
         source_manifest_sha256,
+        policy_runtime_authorization_json,
+        policy_runtime_authorization_sha256,
+        policy_runtime_profile_sha256,
+        policy_selected_source_manifest_sha256,
     )
     if not attestation_required:
         if any(value is not None for value in attestation_values):
@@ -133,8 +165,7 @@ def preflight_runtime(
         )
     ):
         raise RuntimeError(
-            "Authenticated execution requires the verified packaged-runtime "
-            "launcher."
+            "Authenticated execution requires the verified packaged-runtime launcher."
         )
     assert attested_sha256 is not None
     assert attested_fd_raw is not None
@@ -166,6 +197,60 @@ def preflight_runtime(
             or not _LOWER_SHA256.fullmatch(source_manifest_sha256)
         ):
             raise RuntimeError("Phase 4 runtime attestation is invalid.")
+        policy_values = (
+            policy_runtime_authorization_json,
+            policy_runtime_authorization_sha256,
+            policy_runtime_profile_sha256,
+            policy_selected_source_manifest_sha256,
+        )
+        if phase4_role == POLICY_SMOKE_ROLE:
+            if (
+                any(value is None for value in policy_values)
+                or not isinstance(policy_runtime_authorization_json, str)
+                or not isinstance(policy_runtime_authorization_sha256, str)
+                or not _LOWER_SHA256.fullmatch(policy_runtime_authorization_sha256)
+                or not isinstance(policy_runtime_profile_sha256, str)
+                or not _LOWER_SHA256.fullmatch(policy_runtime_profile_sha256)
+                or not isinstance(policy_selected_source_manifest_sha256, str)
+                or not _LOWER_SHA256.fullmatch(policy_selected_source_manifest_sha256)
+                or policy_runtime_profile_sha256
+                != policy_selected_source_manifest_sha256
+            ):
+                raise RuntimeError(
+                    "Policy-improvement runtime authorization is invalid."
+                )
+            try:
+                authorization_bytes = policy_runtime_authorization_json.encode("ascii")
+                decoded_authorization = json.loads(policy_runtime_authorization_json)
+                canonical_authorization = json.dumps(
+                    decoded_authorization,
+                    allow_nan=False,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("ascii")
+            except (
+                UnicodeEncodeError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+            ) as exc:
+                raise RuntimeError(
+                    "Policy-improvement runtime authorization is invalid."
+                ) from exc
+            if (
+                canonical_authorization != authorization_bytes
+                or hashlib.sha256(authorization_bytes).hexdigest()
+                != policy_runtime_authorization_sha256
+            ):
+                raise RuntimeError(
+                    "Policy-improvement runtime authorization changed in transit."
+                )
+        elif any(value is not None for value in policy_values):
+            raise RuntimeError(
+                "Policy-improvement authorization is valid only for its smoke role."
+            )
     if not _MEMFD_SEALING_AVAILABLE:
         raise RuntimeError("This host cannot inspect a sealed runtime.")
     if not re.fullmatch(r"[0-9]+", attested_fd_raw):
@@ -176,17 +261,13 @@ def preflight_runtime(
     if not re.fullmatch(r"[0-9]+", private_unpack_fd_raw):
         raise RuntimeError("Private unpack descriptor must be a decimal integer.")
     private_unpack_descriptor = int(private_unpack_fd_raw)
-    if (
-        private_unpack_descriptor < 3
-        or private_unpack_descriptor == runtime_descriptor
-    ):
+    if private_unpack_descriptor < 3 or private_unpack_descriptor == runtime_descriptor:
         raise RuntimeError("Private unpack descriptor is reserved or invalid.")
 
     descriptor_path = Path(f"/proc/self/fd/{runtime_descriptor}")
-    if (
-        attested_path_raw != str(descriptor_path)
-        or environ.get("FB_PAR_FILENAME") != str(descriptor_path)
-    ):
+    if attested_path_raw != str(descriptor_path) or environ.get(
+        "FB_PAR_FILENAME"
+    ) != str(descriptor_path):
         raise RuntimeError("Runtime attestation has an invalid path.")
     module_match = re.fullmatch(
         rf"/proc/self/fd/([0-9]+)/{re.escape(expected_module_name)}",
@@ -228,11 +309,9 @@ def preflight_runtime(
         )
 
     private_unpack_path = Path(f"/proc/self/fd/{private_unpack_descriptor}")
-    if (
-        private_unpack_raw != str(private_unpack_path)
-        or environ.pop("FB_PAR_UNPACK_BASEDIR", None)
-        != str(private_unpack_path)
-    ):
+    if private_unpack_raw != str(private_unpack_path) or environ.pop(
+        "FB_PAR_UNPACK_BASEDIR", None
+    ) != str(private_unpack_path):
         raise RuntimeError("Private unpack attestation has an invalid path.")
     try:
         unpack_before = os.fstat(private_unpack_descriptor)
@@ -276,9 +355,7 @@ def preflight_runtime(
         or stat.S_IMODE(unpack_after.st_mode) != 0o700
         or not os.get_inheritable(private_unpack_descriptor)
     ):
-        raise RuntimeError(
-            "Private unpack directory has an invalid identity or mode."
-        )
+        raise RuntimeError("Private unpack directory has an invalid identity or mode.")
     try:
         os.set_inheritable(runtime_descriptor, False)
         if module_descriptor != runtime_descriptor:
@@ -293,4 +370,8 @@ def preflight_runtime(
         phase4_role=phase4_role,
         source_git_commit=source_git_commit,
         source_manifest_sha256=source_manifest_sha256,
+        policy_runtime_authorization_json=(policy_runtime_authorization_json),
+        policy_runtime_authorization_sha256=(policy_runtime_authorization_sha256),
+        policy_runtime_profile_sha256=policy_runtime_profile_sha256,
+        policy_selected_source_manifest_sha256=(policy_selected_source_manifest_sha256),
     )
