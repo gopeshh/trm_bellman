@@ -38,26 +38,26 @@
     "domain": "sudoku_4x4",
     "manifest_schema_version": 2,
     "manifest_sha256": {
-      "reason": "manifest_not_materialized",
-      "status": "unavailable"
+      "status": "available",
+      "value": "2572bb79faeec976dc83cb75b8520e59691a7c9dc3f8fe252554fc29bfe90ccd"
     },
     "name": "policy-improvement-hard-4x4-v1",
     "producer_source": {
       "git_commit": {
-        "reason": "manifest_not_materialized",
-        "status": "unavailable"
+        "status": "available",
+        "value": "7317d7011c31ac622c0723d22cf9f4bb0571bdf1"
       },
       "launcher_sha256": {
-        "reason": "manifest_not_materialized",
-        "status": "unavailable"
+        "status": "available",
+        "value": "8e73d60512934705f8a295fb67845f5a90b8c6f3006e1ea6ebcb373881c76d6a"
       },
       "runtime_sha256": {
-        "reason": "manifest_not_materialized",
-        "status": "unavailable"
+        "status": "available",
+        "value": "8ded72fa7dc774caad11e62ad10e62604f3393e483109a7c1c2d51d2bbd5ebe8"
       },
       "source_manifest_sha256": {
-        "reason": "manifest_not_materialized",
-        "status": "unavailable"
+        "status": "available",
+        "value": "5833f7cb1884651015d66901a31ed78cbf620826ee5035bed4192e5e5590f6b1"
       }
     },
     "root": "data/policy-improvement-v1-owner/policy-improvement-hard-4x4-v1",
@@ -66,36 +66,36 @@
         "count": 512,
         "generation_seed": 26081403,
         "manifest_sha256": {
-          "reason": "manifest_not_materialized",
-          "status": "unavailable"
+          "status": "available",
+          "value": "bf14acfc94e580bb3678102729f88432fda599610b2ca2578949f8c4cbc775bd"
         },
         "ordered_record_sha256": {
-          "reason": "manifest_not_materialized",
-          "status": "unavailable"
+          "status": "available",
+          "value": "94647c77419ef6ec150aa1dde6d07de1a3f9112c2fb768168404a520138ef6ac"
         }
       },
       "train": {
         "count": 1024,
         "generation_seed": 26081401,
         "manifest_sha256": {
-          "reason": "manifest_not_materialized",
-          "status": "unavailable"
+          "status": "available",
+          "value": "05146037857b1adb42520e80a0c2ab250053a517196c8b8ac95e002aa40c6f74"
         },
         "ordered_record_sha256": {
-          "reason": "manifest_not_materialized",
-          "status": "unavailable"
+          "status": "available",
+          "value": "73110263bb388e0f6e0976156d03f499b83541a58d07c39b8b634e94a98ad446"
         }
       },
       "validation": {
         "count": 256,
         "generation_seed": 26081402,
         "manifest_sha256": {
-          "reason": "manifest_not_materialized",
-          "status": "unavailable"
+          "status": "available",
+          "value": "a4b1bffb92f9c7c1ebe7baf9dcaaed83191f9c6249bec0887ed8ff7fb6b4a937"
         },
         "ordered_record_sha256": {
-          "reason": "manifest_not_materialized",
-          "status": "unavailable"
+          "status": "available",
+          "value": "9257ae46c71fa24afd8c0284af6087c5662faffd724b395037c9016ac4110380"
         }
       }
     },
@@ -114,8 +114,8 @@
         "scheme": "contiguous_registered_indices_v1"
       },
       "ordered_record_sha256": {
-        "reason": "manifest_not_materialized",
-        "status": "unavailable"
+        "status": "available",
+        "value": "94647c77419ef6ec150aa1dde6d07de1a3f9112c2fb768168404a520138ef6ac"
       },
       "split": "test"
     },
@@ -127,8 +127,8 @@
         "scheme": "contiguous_registered_indices_v1"
       },
       "ordered_record_sha256": {
-        "reason": "manifest_not_materialized",
-        "status": "unavailable"
+        "status": "available",
+        "value": "9257ae46c71fa24afd8c0284af6087c5662faffd724b395037c9016ac4110380"
       },
       "split": "validation"
     },
@@ -140,8 +140,8 @@
         "scheme": "contiguous_registered_indices_v1"
       },
       "ordered_record_sha256": {
-        "reason": "manifest_not_materialized",
-        "status": "unavailable"
+        "status": "available",
+        "value": "802aac0e37e363b7dbdd065043a0e2d6174f2ed152bfe629c9e53894093ce272"
       },
       "split": "validation"
     }
