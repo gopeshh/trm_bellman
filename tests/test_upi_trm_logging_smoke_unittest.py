@@ -61,6 +61,7 @@ from upi_trm_train import (
     _verify_producer_source_matches_runtime,
     resume_from_checkpoint,
     save_checkpoint,
+    validate_checkpoint_state_for_audit,
 )
 from utils.dataset_provenance import (
     build_dataset_provenance,
@@ -112,6 +113,25 @@ def _tiny_trm_cfg(seq_len: int, vocab_size: int, num_identifiers: int, batch_siz
 
 
 class TestUPITrmLoggingSmoke(unittest.TestCase):
+    def test_audit_checkpoint_restore_suppresses_progress_output(self):
+        with patch(
+            "upi_trm_train._resume_from_checkpoint_impl",
+            return_value=7,
+        ) as resume_impl:
+            result = validate_checkpoint_state_for_audit(
+                "/tmp/checkpoint.pt",
+                MagicMock(),
+                MagicMock(),
+                "cuda",
+                expected_dataset_provenance={},
+                expected_run_identity=None,
+                expected_checkpoint_sha256="a" * 64,
+                authorized_originating_runtime_sha256="b" * 64,
+            )
+
+        self.assertEqual(result, 7)
+        self.assertFalse(resume_impl.call_args.kwargs["emit_progress"])
+
     @staticmethod
     def _open_private_unpack(path: Path) -> tuple[int, str]:
         descriptor = os.open(

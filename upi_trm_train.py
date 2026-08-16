@@ -2681,6 +2681,7 @@ def _resume_from_checkpoint_impl(
     expected_checkpoint_sha256: Optional[str] = None,
     allow_legacy_warm_start: bool = False,
     originating_runtime_artifact_sha256: Optional[str] = None,
+    emit_progress: bool = True,
 ) -> int:
     """
     Resume RL training from a saved checkpoint.
@@ -2690,7 +2691,8 @@ def _resume_from_checkpoint_impl(
     """
     if bool(getattr(trainer, "_train_step_active", False)):
         raise RuntimeError("Cannot resume while a trainer step is active.")
-    print(f"[Checkpoint] Resuming from {checkpoint_path}")
+    if emit_progress:
+        print(f"[Checkpoint] Resuming from {checkpoint_path}")
     # Resume checkpoints contain replay Transition dataclasses, so this is a
     # trusted local artifact rather than a weights-only file.
     checkpoint, loaded_checkpoint_sha256 = _load_checkpoint_payload(
@@ -3515,12 +3517,13 @@ def _resume_from_checkpoint_impl(
     _restore_rng_state(rng_state)
 
     start_step = trainer._train_step_count
-    print(
-        f"[Checkpoint] Resumed at env_step={trainer._env_step_count}, "
-        f"outer_step={start_step}, "
-        f"value_optimizer_steps={trainer._value_optimizer_step_count}, "
-        f"policy_optimizer_steps={trainer._policy_optimizer_step_count}"
-    )
+    if emit_progress:
+        print(
+            f"[Checkpoint] Resumed at env_step={trainer._env_step_count}, "
+            f"outer_step={start_step}, "
+            f"value_optimizer_steps={trainer._value_optimizer_step_count}, "
+            f"policy_optimizer_steps={trainer._policy_optimizer_step_count}"
+        )
 
     return start_step
 
@@ -3580,6 +3583,7 @@ def validate_checkpoint_state_for_audit(
         expected_checkpoint_sha256,
         False,
         originating_runtime_artifact_sha256=originating_runtime,
+        emit_progress=False,
     )
 
 
