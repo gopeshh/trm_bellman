@@ -239,6 +239,7 @@ python_binary(
     ],
     base_module = "",
     compile = False,
+    keep_gpu_sections = True,
     main_module = "policy_improvement_consumer_entrypoint",
     resources = glob([
         "configs/policy_improvement_v1/*.json",
@@ -285,6 +286,7 @@ python_binary(
     ],
     base_module = "",
     compile = False,
+    keep_gpu_sections = True,
     main_module = "policy_improvement_consumer_entrypoint",
     resources = glob([
         "configs/policy_improvement_v1/*.json",
