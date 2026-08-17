@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -21,6 +22,8 @@ from confirmatory_runtime_launcher import (
     validate_runtime_archive,
 )
 from phase4_runtime_launcher import (
+    _canonical_policy_protocol_sha256,
+    _load_policy_consumer_runtime_authorization,
     _load_policy_runtime_authorization,
     _normalize_child_args,
     _training_archive_validator,
@@ -29,8 +32,13 @@ from phase4_runtime_launcher import (
     POLICY_DATASET_BUILDER_PURPOSE,
     POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
     POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+    POLICY_IMPROVEMENT_FULL_LAUNCHER_SHA256_ENV,
+    POLICY_IMPROVEMENT_FULL_PURPOSE,
+    POLICY_IMPROVEMENT_THEORY_BRIDGE_LAUNCHER_SHA256_ENV,
+    POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
     POLICY_PRODUCER_GIT_COMMIT_ENV,
     POLICY_PRODUCER_SOURCE_MANIFEST_SHA256_ENV,
+    POLICY_PROTOCOL_SHA256_ENV,
     POLICY_SMOKE_LAUNCHER_SHA256_ENV,
     POLICY_SMOKE_PURPOSE,
     POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV,
@@ -54,11 +62,18 @@ from phase4_runtime_profile import (
     POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS,
     POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
 )
-from runtime_archive_preflight import preflight_runtime
+from runtime_archive_preflight import (
+    _validate_policy_runtime_authorization,
+    POLICY_FULL_ROLE,
+    POLICY_THEORY_BRIDGE_ROLE,
+    preflight_runtime,
+)
 
 
 def _run_git(root: Path, *arguments: str) -> str:
-    environment = dict(os.environ)
+    environment = {
+        name: value for name, value in os.environ.items() if not name.startswith("GIT_")
+    }
     environment.update(
         {
             "GIT_AUTHOR_NAME": "Phase4 Test",
@@ -133,6 +148,44 @@ def _authorized(
     )
 
 
+def _policy_authorization_v2() -> dict[str, object]:
+    role_values = {
+        "policy-improvement-training": ("a" * 40, "d" * 64, "b" * 64),
+        "policy-improvement-evaluation": ("e" * 40, "9" * 64, "f" * 64),
+        "policy-improvement-audit": ("e" * 40, "7" * 64, "6" * 64),
+        "policy-improvement-analysis": ("e" * 40, "8" * 64, "5" * 64),
+        "policy-improvement-full": ("a" * 40, "d" * 64, "b" * 64),
+        "policy-improvement-theory-bridge": ("e" * 40, "9" * 64, "f" * 64),
+    }
+    return {
+        "schema_name": "policy_improvement_runtime_authorization_v2",
+        "schema_version": 2,
+        "authorization_id": "strict-launcher-test-v2",
+        "created_at_utc": "2026-08-16T12:00:00Z",
+        "protocol_sha256": "1" * 64,
+        "producer_git_commit": "a" * 40,
+        "producer_source_manifest_sha256": "c" * 64,
+        "launcher_sha256": "2" * 64,
+        "roles": [
+            {
+                "role": role,
+                "source_git_commit": role_values[role][0],
+                "runtime_sha256": role_values[role][1],
+                "runtime_profile_sha256": role_values[role][2],
+                "selected_source_manifest_sha256": role_values[role][2],
+            }
+            for role in (
+                "policy-improvement-training",
+                "policy-improvement-evaluation",
+                "policy-improvement-audit",
+                "policy-improvement-analysis",
+                "policy-improvement-full",
+                "policy-improvement-theory-bridge",
+            )
+        ],
+    }
+
+
 class Phase4RuntimeLauncherTest(unittest.TestCase):
     def test_policy_smoke_authorization_is_strict_and_stable(self) -> None:
         authorization = {
@@ -179,10 +232,22 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 source_git_commit="a" * 40,
                 source_manifest_sha256="c" * 64,
                 launcher_sha256="e" * 64,
+                protocol_sha256="f" * 64,
             )
             self.assertEqual(json.loads(canonical), authorization)
             self.assertEqual(profile, "c" * 64)
             self.assertEqual(selected, "c" * 64)
+
+            with self.assertRaisesRegex(ConfirmatoryRuntimeError, "protocol"):
+                _load_policy_runtime_authorization(
+                    str(path),
+                    digest,
+                    runtime_sha256="d" * 64,
+                    source_git_commit="a" * 40,
+                    source_manifest_sha256="c" * 64,
+                    launcher_sha256="e" * 64,
+                    protocol_sha256="0" * 64,
+                )
 
             with self.assertRaisesRegex(
                 ConfirmatoryRuntimeError,
@@ -195,6 +260,7 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                     source_git_commit="a" * 40,
                     source_manifest_sha256="c" * 64,
                     launcher_sha256="e" * 64,
+                    protocol_sha256="f" * 64,
                 )
 
             alias = root / "authorization-alias.json"
@@ -210,6 +276,7 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                     source_git_commit="a" * 40,
                     source_manifest_sha256="c" * 64,
                     launcher_sha256="e" * 64,
+                    protocol_sha256="f" * 64,
                 )
 
             duplicate = root / "duplicate.json"
@@ -228,7 +295,184 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                     source_git_commit="a" * 40,
                     source_manifest_sha256="c" * 64,
                     launcher_sha256="e" * 64,
+                    protocol_sha256="f" * 64,
                 )
+
+    def test_v2_full_and_theory_authorization_bind_semantic_roles(self) -> None:
+        authorization = _policy_authorization_v2()
+        payload = json.dumps(
+            authorization,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "authorization-v2.json"
+            path.write_bytes(payload)
+            digest = hashlib.sha256(payload).hexdigest()
+            for purpose, runtime_sha256, source_commit, profile in (
+                (
+                    POLICY_IMPROVEMENT_FULL_PURPOSE,
+                    "d" * 64,
+                    "a" * 40,
+                    "b" * 64,
+                ),
+                (
+                    POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+                    "9" * 64,
+                    "e" * 40,
+                    "f" * 64,
+                ),
+            ):
+                with self.subTest(purpose=purpose):
+                    canonical = _load_policy_consumer_runtime_authorization(
+                        str(path),
+                        digest,
+                        purpose=purpose,
+                        runtime_sha256=runtime_sha256,
+                        source_git_commit=source_commit,
+                        source_manifest_sha256=profile,
+                        launcher_sha256="2" * 64,
+                        producer_git_commit="a" * 40,
+                        producer_source_manifest_sha256="c" * 64,
+                        protocol_sha256="1" * 64,
+                    )
+                    self.assertEqual(json.loads(canonical), authorization)
+
+            with self.assertRaisesRegex(ConfirmatoryRuntimeError, "protocol"):
+                _load_policy_consumer_runtime_authorization(
+                    str(path),
+                    digest,
+                    purpose=POLICY_IMPROVEMENT_FULL_PURPOSE,
+                    runtime_sha256="d" * 64,
+                    source_git_commit="a" * 40,
+                    source_manifest_sha256="b" * 64,
+                    launcher_sha256="2" * 64,
+                    producer_git_commit="a" * 40,
+                    producer_source_manifest_sha256="c" * 64,
+                    protocol_sha256="0" * 64,
+                )
+
+            mixed = json.loads(payload)
+            mixed["roles"][4]["runtime_sha256"] = "0" * 64
+            mixed_payload = json.dumps(
+                mixed,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("ascii")
+            mixed_path = Path(directory) / "mixed.json"
+            mixed_path.write_bytes(mixed_payload)
+            with self.assertRaisesRegex(
+                ConfirmatoryRuntimeError,
+                "semantic and launcher roles differ",
+            ):
+                _load_policy_consumer_runtime_authorization(
+                    str(mixed_path),
+                    hashlib.sha256(mixed_payload).hexdigest(),
+                    purpose=POLICY_IMPROVEMENT_FULL_PURPOSE,
+                    runtime_sha256="0" * 64,
+                    source_git_commit="a" * 40,
+                    source_manifest_sha256="b" * 64,
+                    launcher_sha256="2" * 64,
+                    producer_git_commit="a" * 40,
+                    producer_source_manifest_sha256="c" * 64,
+                    protocol_sha256="1" * 64,
+                )
+
+            legacy = copy.deepcopy(authorization)
+            legacy["schema_name"] = "policy_improvement_runtime_authorization_v1"
+            legacy["schema_version"] = 1
+            legacy["roles"] = legacy["roles"][:4]
+            legacy_payload = json.dumps(
+                legacy,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("ascii")
+            legacy_path = Path(directory) / "legacy.json"
+            legacy_path.write_bytes(legacy_payload)
+            with self.assertRaisesRegex(
+                ConfirmatoryRuntimeError,
+                "require runtime authorization v2",
+            ):
+                _load_policy_consumer_runtime_authorization(
+                    str(legacy_path),
+                    hashlib.sha256(legacy_payload).hexdigest(),
+                    purpose=POLICY_IMPROVEMENT_FULL_PURPOSE,
+                    runtime_sha256="d" * 64,
+                    source_git_commit="a" * 40,
+                    source_manifest_sha256="b" * 64,
+                    launcher_sha256="2" * 64,
+                    producer_git_commit="a" * 40,
+                    producer_source_manifest_sha256="c" * 64,
+                    protocol_sha256="1" * 64,
+                )
+
+    def test_policy_protocol_digest_is_canonical_and_source_bound(self) -> None:
+        protocol = {"protocol_id": "launcher-test", "schema_version": 1}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "configs/policy_improvement_v1/protocol.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(protocol, indent=2, sort_keys=False) + "\n",
+                encoding="ascii",
+            )
+            self.assertEqual(
+                _canonical_policy_protocol_sha256(str(root)),
+                hashlib.sha256(
+                    json.dumps(
+                        protocol,
+                        allow_nan=False,
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ).encode("ascii")
+                ).hexdigest(),
+            )
+
+    def test_v2_preflight_rejects_mixed_full_and_theory_roles(self) -> None:
+        authorization = _policy_authorization_v2()
+        _validate_policy_runtime_authorization(
+            authorization,
+            phase4_role=POLICY_FULL_ROLE,
+            runtime_sha256="d" * 64,
+            source_git_commit="a" * 40,
+            source_manifest_sha256="b" * 64,
+            protocol_sha256="1" * 64,
+        )
+        _validate_policy_runtime_authorization(
+            authorization,
+            phase4_role=POLICY_THEORY_BRIDGE_ROLE,
+            runtime_sha256="9" * 64,
+            source_git_commit="e" * 40,
+            source_manifest_sha256="f" * 64,
+            protocol_sha256="1" * 64,
+        )
+        mixed = copy.deepcopy(authorization)
+        mixed["roles"][5]["selected_source_manifest_sha256"] = "0" * 64
+        with self.assertRaisesRegex(RuntimeError, "authorization is invalid"):
+            _validate_policy_runtime_authorization(
+                mixed,
+                phase4_role=POLICY_THEORY_BRIDGE_ROLE,
+                runtime_sha256="9" * 64,
+                source_git_commit="e" * 40,
+                source_manifest_sha256="f" * 64,
+                protocol_sha256="1" * 64,
+            )
+        with self.assertRaisesRegex(RuntimeError, "authorization is invalid"):
+            _validate_policy_runtime_authorization(
+                authorization,
+                phase4_role=POLICY_FULL_ROLE,
+                runtime_sha256="d" * 64,
+                source_git_commit="a" * 40,
+                source_manifest_sha256="b" * 64,
+                protocol_sha256="0" * 64,
+            )
 
     def test_dataset_builder_launcher_owns_entrypoint_and_identity(self) -> None:
         self.assertEqual(
@@ -431,6 +675,148 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                             [protected],
                         )
 
+    def test_full_and_theory_launchers_own_registered_inputs(self) -> None:
+        theory_amendment = (
+            "/producer/configs/policy_improvement_v1/amendments/"
+            "theory_bridge_v1.json"
+        )
+        full = _normalize_child_args(
+            POLICY_IMPROVEMENT_FULL_PURPOSE,
+            "/producer",
+            [
+                "--evidence-root",
+                "/evidence",
+                "--dataset-root",
+                "/dataset",
+                "--row-id",
+                "stage1-row",
+                "--amendment",
+                "/evidence/compute-freeze.json",
+                "--print-contract",
+            ],
+            runtime_authorization_sha256="4" * 64,
+        )
+        self.assertEqual(
+            full,
+            [
+                "--project-root",
+                "/producer",
+                "--protocol",
+                "/producer/configs/policy_improvement_v1/protocol.json",
+                "--registry",
+                "/producer/configs/policy_improvement_v1/registry.json",
+                "--amendment",
+                theory_amendment,
+                "--amendment",
+                "/evidence/compute-freeze.json",
+                "--evidence-root",
+                "/evidence",
+                "--dataset-root",
+                "/dataset",
+                "--row-id",
+                "stage1-row",
+                "--runtime-authorization-sha256",
+                "4" * 64,
+                "--print-contract",
+            ],
+        )
+
+        theory = _normalize_child_args(
+            POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+            "/evaluator",
+            [
+                "--request=/evidence/request.json",
+                "--checkpoint",
+                "/evidence/checkpoint.pt",
+                "--evidence-root",
+                "/evidence",
+                "--dataset-root",
+                "/dataset",
+                "--row-id",
+                "stage1-row",
+                "--amendment",
+                "/evidence/compute-freeze.json",
+            ],
+            policy_project_root="/producer",
+        )
+        self.assertEqual(
+            theory,
+            [
+                "--policy-improvement-theory-bridge-entrypoint",
+                "--request",
+                "/evidence/request.json",
+                "--theory-amendment",
+                theory_amendment,
+                "--amendment",
+                theory_amendment,
+                "--amendment",
+                "/evidence/compute-freeze.json",
+                "--checkpoint",
+                "/evidence/checkpoint.pt",
+                "--project-root",
+                "/producer",
+                "--protocol",
+                "/producer/configs/policy_improvement_v1/protocol.json",
+                "--registry",
+                "/producer/configs/policy_improvement_v1/registry.json",
+                "--evidence-root",
+                "/evidence",
+                "--dataset-root",
+                "/dataset",
+                "--row-id",
+                "stage1-row",
+            ],
+        )
+
+        for purpose, option in (
+            (POLICY_IMPROVEMENT_FULL_PURPOSE, "--project-root=/forged"),
+            (POLICY_IMPROVEMENT_FULL_PURPOSE, "--protocol=/forged"),
+            (
+                POLICY_IMPROVEMENT_FULL_PURPOSE,
+                "--runtime-authorization-sha256=" + "0" * 64,
+            ),
+            (
+                POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+                "--policy-improvement-theory-bridge-entrypoint",
+            ),
+            (
+                POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+                "--theory-amendment=/forged",
+            ),
+        ):
+            with (
+                self.subTest(purpose=purpose, option=option),
+                self.assertRaisesRegex(
+                    ConfirmatoryRuntimeError,
+                    "protected or unsupported",
+                ),
+            ):
+                _normalize_child_args(
+                    purpose,
+                    "/evaluator",
+                    [option],
+                    policy_project_root="/producer",
+                    runtime_authorization_sha256="4" * 64,
+                )
+        with self.assertRaisesRegex(ConfirmatoryRuntimeError, "must be absolute"):
+            _normalize_child_args(
+                POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+                "/evaluator",
+                [
+                    "--request",
+                    "relative.json",
+                    "--checkpoint",
+                    "/evidence/checkpoint.pt",
+                    "--evidence-root",
+                    "/evidence",
+                    "--dataset-root",
+                    "/dataset",
+                    "--row-id",
+                    "stage1-row",
+                ],
+                policy_project_root="/producer",
+            )
+
     def test_training_launcher_owns_publication_and_producer_flags(self) -> None:
         child_args = _normalize_child_args(
             "phase4-training",
@@ -542,6 +928,8 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
+            producer_root = root / "producer"
+            producer_root.mkdir()
             authorization = {
                 "schema_name": "policy_improvement_runtime_authorization_v1",
                 "schema_version": 1,
@@ -639,6 +1027,11 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                         "_launcher_artifact_sha256",
                         return_value="e" * 64,
                     ),
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "_canonical_policy_protocol_sha256",
+                        return_value="f" * 64,
+                    ),
                 ):
                     launcher_arguments = [
                         "--purpose",
@@ -659,7 +1052,7 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                         launcher_arguments.extend(
                             [
                                 "--producer-source-project-root",
-                                str(root),
+                                str(producer_root),
                                 "--expected-producer-git-commit",
                                 "a" * 40,
                             ]
@@ -725,6 +1118,10 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                             attestation[POLICY_SMOKE_LAUNCHER_SHA256_ENV],
                             "e" * 64,
                         )
+                        self.assertEqual(
+                            attestation[POLICY_PROTOCOL_SHA256_ENV],
+                            "f" * 64,
+                        )
                         child_args = launch.call_args.args[1]
                         self.assertEqual(
                             child_args[:3],
@@ -784,6 +1181,178 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                             ],
                         )
 
+    def test_main_dispatches_v2_full_and_theory_roles(self) -> None:
+        runtime = object()
+        authorization = _policy_authorization_v2()
+        authorization_payload = json.dumps(
+            authorization,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            producer_root = root / "producer"
+            evaluator_root = root / "evaluator"
+            producer_root.mkdir()
+            evaluator_root.mkdir()
+            authorization_path = root / "runtime-authorization-v2.json"
+            authorization_path.write_bytes(authorization_payload)
+            authorization_sha256 = hashlib.sha256(authorization_payload).hexdigest()
+            producer = SimpleNamespace(
+                git_commit="a" * 40,
+                source_manifest_sha256="c" * 64,
+                manifest_bytes=b"manifest",
+            )
+            for purpose, source_root, source_commit, runtime_sha256, profile in (
+                (
+                    POLICY_IMPROVEMENT_FULL_PURPOSE,
+                    producer_root,
+                    "a" * 40,
+                    "d" * 64,
+                    "b" * 64,
+                ),
+                (
+                    POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+                    evaluator_root,
+                    "e" * 40,
+                    "9" * 64,
+                    "f" * 64,
+                ),
+            ):
+                consumer = SimpleNamespace(
+                    git_commit=source_commit,
+                    source_manifest_sha256=profile,
+                )
+                with (
+                    self.subTest(purpose=purpose),
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "authorize_phase4_training_source",
+                        return_value=producer,
+                    ) as authorize_producer,
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "authorize_phase4_source_profile",
+                        return_value=consumer,
+                    ),
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "validate_runtime_archive",
+                        return_value=runtime,
+                    ),
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "launch_verified_runtime",
+                        return_value=0,
+                    ) as launch,
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "_launcher_artifact_sha256",
+                        return_value="2" * 64,
+                    ),
+                    mock.patch.object(
+                        phase4_runtime_launcher,
+                        "_canonical_policy_protocol_sha256",
+                        return_value="1" * 64,
+                    ) as protocol_digest,
+                ):
+                    launcher_arguments = [
+                        "--purpose",
+                        purpose,
+                        "--runtime-archive",
+                        "/runtime.par",
+                        "--expected-runtime-sha256",
+                        runtime_sha256,
+                        "--source-project-root",
+                        str(source_root),
+                        "--expected-source-git-commit",
+                        source_commit,
+                        "--runtime-authorization",
+                        str(authorization_path),
+                        "--expected-runtime-authorization-sha256",
+                        authorization_sha256,
+                    ]
+                    if purpose == POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE:
+                        launcher_arguments.extend(
+                            [
+                                "--producer-source-project-root",
+                                str(producer_root),
+                                "--expected-producer-git-commit",
+                                "a" * 40,
+                            ]
+                        )
+                    runtime_arguments = [
+                        "--evidence-root",
+                        "/evidence",
+                        "--dataset-root",
+                        "/dataset",
+                        "--row-id",
+                        "stage1-row",
+                    ]
+                    if purpose == POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE:
+                        runtime_arguments.extend(
+                            [
+                                "--request",
+                                "/evidence/request.json",
+                                "--checkpoint",
+                                "/evidence/checkpoint.pt",
+                            ]
+                        )
+                    launcher_arguments.extend(["--", *runtime_arguments])
+                    self.assertEqual(
+                        phase4_runtime_launcher.main(launcher_arguments),
+                        0,
+                    )
+
+                    protocol_digest.assert_called_once_with(str(producer_root))
+                    authorize_producer.assert_called_once_with(
+                        str(producer_root),
+                        "a" * 40,
+                    )
+                    attestation = launch.call_args.kwargs["attestation_environment"]
+                    self.assertEqual(
+                        attestation[phase4_runtime_launcher.PHASE4_RUNTIME_ROLE_ENV],
+                        purpose,
+                    )
+                    self.assertEqual(
+                        attestation[POLICY_SMOKE_RUNTIME_AUTHORIZATION_SHA256_ENV],
+                        authorization_sha256,
+                    )
+                    self.assertEqual(
+                        json.loads(attestation[POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV]),
+                        authorization,
+                    )
+                    self.assertEqual(
+                        attestation[POLICY_PROTOCOL_SHA256_ENV],
+                        "1" * 64,
+                    )
+                    launcher_env = (
+                        POLICY_IMPROVEMENT_FULL_LAUNCHER_SHA256_ENV
+                        if purpose == POLICY_IMPROVEMENT_FULL_PURPOSE
+                        else POLICY_IMPROVEMENT_THEORY_BRIDGE_LAUNCHER_SHA256_ENV
+                    )
+                    self.assertEqual(attestation[launcher_env], "2" * 64)
+                    child_args = launch.call_args.args[1]
+                    self.assertIn(
+                        str(
+                            producer_root / "configs/policy_improvement_v1/amendments/"
+                            "theory_bridge_v1.json"
+                        ),
+                        child_args,
+                    )
+                    if purpose == POLICY_IMPROVEMENT_FULL_PURPOSE:
+                        self.assertIn(
+                            "--runtime-authorization-sha256",
+                            child_args,
+                        )
+                    else:
+                        self.assertEqual(
+                            child_args[0],
+                            "--policy-improvement-theory-bridge-entrypoint",
+                        )
+
     def test_direct_phase4_entrypoint_has_no_attestation(self) -> None:
         with self.assertRaisesRegex(
             RuntimeError,
@@ -837,9 +1406,11 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                         for relative_path, payload in sources.items():
                             archive.writestr(
                                 relative_path,
-                                b"# different\n"
-                                if relative_path == tampered_source
-                                else payload,
+                                (
+                                    b"# different\n"
+                                    if relative_path == tampered_source
+                                    else payload
+                                ),
                             )
                     tampered_digest = hashlib.sha256(
                         tampered_archive.read_bytes()
@@ -919,9 +1490,12 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 for relative_path, payload in sources.items():
                     archive.writestr(
                         relative_path,
-                        b"tampered\n"
-                        if relative_path == "dataset/build_policy_improvement_4x4.py"
-                        else payload,
+                        (
+                            b"tampered\n"
+                            if relative_path
+                            == "dataset/build_policy_improvement_4x4.py"
+                            else payload
+                        ),
                     )
             with (
                 ZipFile(tampered) as archive,
@@ -1025,9 +1599,11 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                         for relative_path, payload in sources.items():
                             archive.writestr(
                                 relative_path,
-                                b"tampered\n"
-                                if relative_path == tampered_name
-                                else payload,
+                                (
+                                    b"tampered\n"
+                                    if relative_path == tampered_name
+                                    else payload
+                                ),
                             )
                     with (
                         ZipFile(tampered) as archive,
@@ -1119,6 +1695,88 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 authorize_phase4_source_profile(
                     root,
                     commit,
+                    PHASE4_EVALUATOR_SOURCE_PROFILE,
+                )
+
+    def test_source_profile_ignores_ambient_git_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative_path, payload in _profile_sources().items():
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(payload)
+            _run_git(root, "init", "-q")
+            _run_git(root, "add", ".")
+            _run_git(root, "commit", "-q", "-m", "profile")
+            commit = _run_git(root, "rev-parse", "HEAD")
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GIT_DIR": "/tmp/hostile-git-dir",
+                    "GIT_NO_REPLACE_OBJECTS": "0",
+                    "GIT_REPLACE_REF_BASE": "refs/hostile/",
+                    "GIT_WORK_TREE": "/tmp/hostile-work-tree",
+                },
+            ):
+                identity = authorize_phase4_source_profile(
+                    root,
+                    commit,
+                    PHASE4_EVALUATOR_SOURCE_PROFILE,
+                )
+            self.assertEqual(identity.git_commit, commit)
+
+    def test_source_profile_rejects_tree_hidden_by_replacement_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = _profile_sources()
+            for relative_path, payload in sources.items():
+                path = root / relative_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(payload)
+            _run_git(root, "init", "-q")
+            _run_git(root, "add", ".")
+            _run_git(root, "commit", "-q", "-m", "authorized profile")
+            authorized_commit = _run_git(root, "rev-parse", "HEAD")
+
+            replacement_payload = b"# unauthorized replacement\n"
+            (root / "models/model.py").write_bytes(replacement_payload)
+            _run_git(root, "commit", "-q", "-am", "replacement profile")
+            replacement_commit = _run_git(root, "rev-parse", "HEAD")
+            _run_git(root, "checkout", "-q", "--detach", authorized_commit)
+            _run_git(root, "replace", authorized_commit, replacement_commit)
+
+            self.assertEqual(
+                _run_git(root, "show", "HEAD:models/model.py"),
+                replacement_payload.decode("ascii").strip(),
+            )
+            identity = authorize_phase4_source_profile(
+                root,
+                authorized_commit,
+                PHASE4_EVALUATOR_SOURCE_PROFILE,
+            )
+            self.assertEqual(
+                identity.sources["models/model.py"],
+                hashlib.sha256(sources["models/model.py"]).hexdigest(),
+            )
+
+            _run_git(root, "read-tree", "--reset", "-u", replacement_commit)
+            self.assertEqual(
+                _run_git(
+                    root,
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=all",
+                ),
+                "",
+            )
+            with self.assertRaisesRegex(
+                Phase4RuntimeProfileError,
+                "authorized clean commit",
+            ):
+                authorize_phase4_source_profile(
+                    root,
+                    authorized_commit,
                     PHASE4_EVALUATOR_SOURCE_PROFILE,
                 )
 

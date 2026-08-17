@@ -508,6 +508,29 @@ class PolicyImprovementSmokeCheckpointTest(unittest.TestCase):
         for name, value in live_before.items():
             self.assertTrue(torch.equal(value, trainer.model.state_dict()[name]))
 
+    def test_rejects_nonfinite_model_state_before_live_restore(self) -> None:
+        trainer = PPOTrainer()
+        payload = build_ppo_smoke_checkpoint(
+            trainer,
+            identity=_identity(),
+            parent_checkpoint_sha256=None,
+        )
+        first_name = next(iter(payload["model_state_dict"]))
+        payload["model_state_dict"][first_name].view(-1)[0] = float("nan")
+        live_before = copy.deepcopy(trainer.model.state_dict())
+        with self.assertRaisesRegex(
+            PolicyImprovementSmokeCheckpointError,
+            "non-finite",
+        ):
+            validate_ppo_smoke_checkpoint(
+                payload,
+                trainer,
+                expected_identity=_identity(),
+                validate_only=False,
+            )
+        for name, value in live_before.items():
+            self.assertTrue(torch.equal(value, trainer.model.state_dict()[name]))
+
     def test_rejects_wrong_optimizer_tensor_shape(self) -> None:
         trainer = PPOTrainer()
         payload = build_ppo_smoke_checkpoint(

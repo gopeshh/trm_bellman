@@ -520,6 +520,7 @@ def _load_context(
         dataset_root,
         owner_root=dataset_root.parent,
         expected_producer=registered_dataset_producer,
+        verify_test_content=False,
     )
     if verified_dataset.get("manifest_sha256") != registered_dataset_manifest:
         raise PolicyImprovementSmokeError(
@@ -2872,6 +2873,7 @@ def _revalidate_external_inputs(
         context.dataset_root,
         owner_root=context.dataset_root.parent,
         expected_producer=context.dataset_producer_source,
+        verify_test_content=False,
     )
     if not isinstance(verified, Mapping):
         raise PolicyImprovementSmokeError("Dataset revalidation failed.")

@@ -74,6 +74,9 @@ from scripts.policy_improvement_test_open_cli import main as test_open_main
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL_PATH = REPOSITORY_ROOT / "configs/policy_improvement_v1/protocol.json"
 REGISTRY_PATH = REPOSITORY_ROOT / "configs/policy_improvement_v1/registry.json"
+THEORY_AMENDMENT_PATH = (
+    REPOSITORY_ROOT / "configs/policy_improvement_v1/amendments/theory_bridge_v1.json"
+)
 HEX64 = "a" * 64
 
 
@@ -182,13 +185,25 @@ def _audit_execution(authorization: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _theory_amendment(protocol: dict[str, object]) -> dict[str, object]:
+    base = generate_registry(protocol)
+    theory = copy.deepcopy(load_strict_json(THEORY_AMENDMENT_PATH))
+    theory["protocol_id"] = protocol["protocol_id"]
+    theory["protocol_sha256"] = hashlib.sha256(
+        canonical_json_bytes(protocol)
+    ).hexdigest()
+    theory["source_registry_sha256"] = registry_sha256(base)
+    return theory
+
+
 def _amendment_history(
     protocol: dict[str, object],
     *,
     smoke_evidence: dict[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     authorization = _runtime_authorization(protocol)
-    base = generate_registry(protocol)
+    theory = _theory_amendment(protocol)
+    after_theory = generate_registry(protocol, [theory])
     compute = {
         "schema_name": "policy_improvement_compute_freeze_v1",
         "schema_version": 1,
@@ -196,8 +211,8 @@ def _amendment_history(
         "created_at_utc": "2026-08-14T12:01:00Z",
         "protocol_id": protocol["protocol_id"],
         "protocol_sha256": hashlib.sha256(canonical_json_bytes(protocol)).hexdigest(),
-        "prior_amendment_history_sha256": amendment_history_sha256([]),
-        "source_registry_sha256": registry_sha256(base),
+        "prior_amendment_history_sha256": amendment_history_sha256([theory]),
+        "source_registry_sha256": registry_sha256(after_theory),
         "runtime_authorization_sha256": runtime_authorization_sha256(authorization),
         "test_data_opened": False,
         "evidence": smoke_evidence or _evidence("stage0_smoke", 4, "1"),
@@ -209,7 +224,7 @@ def _amendment_history(
             "maximum_relative_mismatch": 0.05,
         },
     }
-    after_compute = generate_registry(protocol, [compute])
+    after_compute = generate_registry(protocol, [theory, compute])
     screen = {
         "schema_name": "policy_improvement_screen_selection_v1",
         "schema_version": 1,
@@ -217,7 +232,7 @@ def _amendment_history(
         "created_at_utc": "2026-08-14T12:02:00Z",
         "protocol_id": protocol["protocol_id"],
         "protocol_sha256": compute["protocol_sha256"],
-        "prior_amendment_history_sha256": amendment_history_sha256([compute]),
+        "prior_amendment_history_sha256": amendment_history_sha256([theory, compute]),
         "source_registry_sha256": registry_sha256(after_compute),
         "test_data_opened": False,
         "evidence": _evidence("stage1_screen", 48, "4"),
@@ -227,7 +242,7 @@ def _amendment_history(
             "K": 1,
         },
     }
-    after_screen = generate_registry(protocol, [compute, screen])
+    after_screen = generate_registry(protocol, [theory, compute, screen])
     selected = {
         "method_id": "fixed_base_exact_persistent",
         "n": 2,
@@ -266,14 +281,16 @@ def _amendment_history(
         "created_at_utc": "2026-08-14T12:03:00Z",
         "protocol_id": protocol["protocol_id"],
         "protocol_sha256": compute["protocol_sha256"],
-        "prior_amendment_history_sha256": amendment_history_sha256([compute, screen]),
+        "prior_amendment_history_sha256": amendment_history_sha256(
+            [theory, compute, screen]
+        ),
         "source_registry_sha256": registry_sha256(after_screen),
         "test_data_opened": False,
         "evidence": _evidence("stage1_alpha", 9, "7"),
         "selected_exact": selected,
         "stage3_variants": variants,
     }
-    return [compute, screen, final], authorization
+    return [theory, compute, screen, final], authorization
 
 
 def _frozen_protocol() -> dict[str, object]:
@@ -1486,7 +1503,7 @@ def _auditable_phase_results(
         identities["model_state_sha256"] = _available(interaction_model)
         result["artifacts"]["checkpoint"] = _available(interaction_checkpoint)
         budget = int(protocol["budgets"][tier]["environment_interactions"])
-        compute_target = int(history[0]["common_compute_targets"][tier])
+        compute_target = int(history[1]["common_compute_targets"][tier])
         snapshots = []
         for snapshot_kind in ("interaction_matched", "compute_matched"):
             interaction = snapshot_kind == "interaction_matched"
@@ -1616,6 +1633,7 @@ def _auditable_phase_results(
 class ProtocolAndRegistryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.protocol = validate_protocol(load_strict_json(PROTOCOL_PATH))
+        self.theory = _theory_amendment(self.protocol)
         self.registry = generate_registry(self.protocol)
 
     def test_protocol_and_deterministic_seed_derivation(self) -> None:
@@ -1661,16 +1679,20 @@ class ProtocolAndRegistryTest(unittest.TestCase):
             REGISTRY_PATH.read_bytes(),
             canonical_json_bytes(self.registry) + b"\n",
         )
-        validate_registry_document(load_strict_json(REGISTRY_PATH), self.protocol)
+        validate_registry_document(
+            load_strict_json(REGISTRY_PATH),
+            self.protocol,
+            [],
+        )
 
     def test_staged_freezes_materialize_only_the_next_registered_stage(self) -> None:
         history, authorization = _amendment_history(self.protocol)
         validate_runtime_authorization(authorization)
-        validate_compute_freeze(history[0])
-        validate_screen_selection(history[1])
-        validate_final_selection(history[2])
+        validate_compute_freeze(history[1])
+        validate_screen_selection(history[2])
+        validate_final_selection(history[3])
         validate_amendment_history(history, protocol=self.protocol)
-        after_compute = generate_registry(self.protocol, history[:1])
+        after_compute = generate_registry(self.protocol, history[:2])
         self.assertTrue(
             all(
                 row["row_kind"] == "concrete"
@@ -1690,7 +1712,7 @@ class ProtocolAndRegistryTest(unittest.TestCase):
                 }
             )
         )
-        after_screen = generate_registry(self.protocol, history[:2])
+        after_screen = generate_registry(self.protocol, history[:3])
         alpha_rows = [
             row for row in after_screen["rows"] if row["phase"] == "stage1_alpha"
         ]
@@ -1722,12 +1744,12 @@ class ProtocolAndRegistryTest(unittest.TestCase):
         self.assertTrue(all(row["config_override"] for row in stage3))
         self.assertTrue(all(row["expected_effective_config_sha256"] for row in stage3))
 
-        opened = copy.deepcopy(history[1])
+        opened = copy.deepcopy(history[2])
         opened["test_data_opened"] = True
-        wrong_source = copy.deepcopy(history[1])
+        wrong_source = copy.deepcopy(history[2])
         wrong_source["source_registry_sha256"] = "d" * 64
         wrong_prefix = copy.deepcopy(history)
-        wrong_prefix[2]["prior_amendment_history_sha256"] = "e" * 64
+        wrong_prefix[3]["prior_amendment_history_sha256"] = "e" * 64
         wrong_profile = copy.deepcopy(authorization)
         wrong_profile["roles"][0]["selected_source_manifest_sha256"] = "f" * 64
         wrong_training_source = copy.deepcopy(authorization)
@@ -1735,7 +1757,7 @@ class ProtocolAndRegistryTest(unittest.TestCase):
         with self.assertRaises(PolicyImprovementSchemaError):
             validate_screen_selection(opened)
         with self.assertRaises(PolicyImprovementSchemaError):
-            generate_registry(self.protocol, [history[0], wrong_source])
+            generate_registry(self.protocol, [*history[:2], wrong_source])
         with self.assertRaises(PolicyImprovementSchemaError):
             validate_amendment_history(wrong_prefix, protocol=self.protocol)
         with self.assertRaises(PolicyImprovementSchemaError):
@@ -1743,10 +1765,67 @@ class ProtocolAndRegistryTest(unittest.TestCase):
         with self.assertRaises(PolicyImprovementSchemaError):
             validate_runtime_authorization(wrong_training_source)
 
+    def test_compute_freeze_rejects_failed_stage0_rows(self) -> None:
+        history, _ = _amendment_history(self.protocol)
+        failed = copy.deepcopy(history[1])
+        failed["evidence"]["complete_rows"] = 0
+        failed["evidence"]["failed_rows"] = 4
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "four complete Stage-0 rows",
+        ):
+            validate_compute_freeze(failed)
+
+    def test_extended_runtime_authorization_is_strict_and_complete(self) -> None:
+        authorization = _runtime_authorization(self.protocol)
+        authorization["schema_name"] = "policy_improvement_runtime_authorization_v2"
+        authorization["schema_version"] = 2
+        authorization["roles"].extend(
+            [
+                {
+                    **authorization["roles"][0],
+                    "role": "policy-improvement-full",
+                },
+                {
+                    **authorization["roles"][1],
+                    "role": "policy-improvement-theory-bridge",
+                },
+            ]
+        )
+        validate_runtime_authorization(authorization)
+
+        missing = copy.deepcopy(authorization)
+        missing["roles"].pop()
+        with self.assertRaises(PolicyImprovementSchemaError):
+            validate_runtime_authorization(missing)
+
+        mixed = copy.deepcopy(authorization)
+        mixed["roles"][-1]["source_git_commit"] = "f" * 40
+        mixed["roles"][-1]["role"] = "policy-improvement-full"
+        with self.assertRaises(PolicyImprovementSchemaError):
+            validate_runtime_authorization(mixed)
+
+        mismatched_full = copy.deepcopy(authorization)
+        mismatched_full["roles"][4]["runtime_sha256"] = "e" * 64
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "full-runtime and training",
+        ):
+            validate_runtime_authorization(mismatched_full)
+
+        mismatched_theory = copy.deepcopy(authorization)
+        mismatched_theory["roles"][5]["runtime_profile_sha256"] = "e" * 64
+        mismatched_theory["roles"][5]["selected_source_manifest_sha256"] = "e" * 64
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "theory-bridge and evaluation",
+        ):
+            validate_runtime_authorization(mismatched_theory)
+
     def test_stage3_override_or_base_config_drift_fails_closed(self) -> None:
         history, _ = _amendment_history(self.protocol)
         bad_override = copy.deepcopy(history)
-        bad_override[2]["stage3_variants"][0]["override_payload"] = {
+        bad_override[3]["stage3_variants"][0]["override_payload"] = {
             "batch_centered_advantage": True
         }
         with self.assertRaises(PolicyImprovementSchemaError):
@@ -2212,6 +2291,69 @@ class ResultAuditTest(unittest.TestCase):
             self.authorization["roles"][2]["source_git_commit"],
         )
 
+    def test_stage0_audit_never_opens_held_out_test_content(self) -> None:
+        test_root = self.dataset_root / "test"
+        opened: list[Path] = []
+        real_open = os.open
+
+        def tracking_open(path: object, flags: int, *args: object, **kwargs: object):
+            candidate = Path(path)
+            opened.append(candidate)
+            if candidate == test_root or test_root in candidate.parents:
+                raise AssertionError(f"held-out test path was opened: {candidate}")
+            return real_open(path, flags, *args, **kwargs)
+
+        with mock.patch(
+            "scripts.policy_improvement_audit.os.open",
+            side_effect=tracking_open,
+        ):
+            report = audit_result_set(
+                self.protocol,
+                self.registry,
+                self.results,
+                self.documents,
+                phases=["stage0_smoke"],
+                dataset_root=self.dataset_root,
+                evidence_root=self.evidence_root,
+                runtime_authorization=self.authorization,
+                audit_execution_identity=self.audit_execution,
+            )
+        self.assertEqual(report["complete_rows"], 4)
+        self.assertTrue(
+            any(self.dataset_root / "train" in path.parents for path in opened)
+        )
+        self.assertTrue(
+            any(self.dataset_root / "validation" in path.parents for path in opened)
+        )
+        self.assertFalse(any(test_root in path.parents for path in opened))
+
+    def test_dataset_audit_still_verifies_train_and_validation_content(self) -> None:
+        for split in ("train", "validation"):
+            target = self.dataset_root / split / "all__inputs.npy"
+            original = target.read_bytes()
+            try:
+                target.write_bytes(original + b"tampered")
+                with self.subTest(split=split), self.assertRaises(
+                    PolicyImprovementSchemaError
+                ):
+                    _load_dataset_bindings(self.protocol, self.dataset_root)
+            finally:
+                target.write_bytes(original)
+
+        test_target = self.dataset_root / "test/all__inputs.npy"
+        original_test = test_target.read_bytes()
+        try:
+            test_target.write_bytes(original_test + b"tampered")
+            _load_dataset_bindings(self.protocol, self.dataset_root)
+            with self.assertRaises(PolicyImprovementSchemaError):
+                _load_dataset_bindings(
+                    self.protocol,
+                    self.dataset_root,
+                    verify_test_content=True,
+                )
+        finally:
+            test_target.write_bytes(original_test)
+
     def test_dataset_authentication_rejects_missing_tampered_extra_and_aliases(
         self,
     ) -> None:
@@ -2576,7 +2718,7 @@ class ResultAuditTest(unittest.TestCase):
         history, authorization = _amendment_history(
             self.protocol, smoke_evidence=smoke_evidence
         )
-        after_compute = generate_registry(self.protocol, history[:1])
+        after_compute = generate_registry(self.protocol, history[:2])
         with self.assertRaisesRegex(
             PolicyImprovementSchemaError, "Result inventory differs"
         ):
@@ -2586,7 +2728,7 @@ class ResultAuditTest(unittest.TestCase):
                 [],
                 {},
                 phases=["stage1_screen"],
-                amendment_history=history[:1],
+                amendment_history=history[:2],
                 dataset_root=self.dataset_root,
                 evidence_root=self.evidence_root,
                 runtime_authorization=authorization,
@@ -2598,8 +2740,8 @@ class ResultAuditTest(unittest.TestCase):
                     }
                 },
             )
-        tampered = copy.deepcopy(history[:1])
-        tampered[0]["evidence"]["result_set_sha256"] = "f" * 64
+        tampered = copy.deepcopy(history[:2])
+        tampered[1]["evidence"]["result_set_sha256"] = "f" * 64
         with self.assertRaisesRegex(
             PolicyImprovementSchemaError, "independent reaudit"
         ):
@@ -2732,14 +2874,15 @@ class RegisteredAnalysisConsumerTest(unittest.TestCase):
         template_history, _ = _amendment_history(
             self.protocol, smoke_evidence=evidence("stage0_smoke", smoke_report)
         )
-        compute = template_history[0]
+        theory = template_history[0]
+        compute = template_history[1]
         screen_registry = generate_registry(
-            self.protocol, [compute], base_configs=self.base_configs
+            self.protocol, [theory, compute], base_configs=self.base_configs
         )
         screen_results, screen_documents = _auditable_phase_results(
             self.protocol,
             screen_registry,
-            [compute],
+            [theory, compute],
             self.authorization,
             "stage1_screen",
             self.evidence_root,
@@ -2750,7 +2893,7 @@ class RegisteredAnalysisConsumerTest(unittest.TestCase):
             screen_results,
             screen_documents,
             phases=["stage1_screen"],
-            amendment_history=[compute],
+            amendment_history=[theory, compute],
             base_configs=self.base_configs,
             dataset_root=self.dataset_root,
             evidence_root=self.evidence_root,
@@ -2763,18 +2906,18 @@ class RegisteredAnalysisConsumerTest(unittest.TestCase):
                 }
             },
         )
-        screen = copy.deepcopy(template_history[1])
+        screen = copy.deepcopy(template_history[2])
         screen["evidence"] = evidence("stage1_screen", screen_report)
         screen["selected_exact"] = derive_registered_selection(
             "stage1_screen", screen_results
         )
         alpha_registry = generate_registry(
-            self.protocol, [compute, screen], base_configs=self.base_configs
+            self.protocol, [theory, compute, screen], base_configs=self.base_configs
         )
         alpha_results, alpha_documents = _auditable_phase_results(
             self.protocol,
             alpha_registry,
-            [compute, screen],
+            [theory, compute, screen],
             self.authorization,
             "stage1_alpha",
             self.evidence_root,
@@ -2795,7 +2938,7 @@ class RegisteredAnalysisConsumerTest(unittest.TestCase):
             alpha_results,
             alpha_documents,
             phases=["stage1_alpha"],
-            amendment_history=[compute, screen],
+            amendment_history=[theory, compute, screen],
             base_configs=self.base_configs,
             dataset_root=self.dataset_root,
             evidence_root=self.evidence_root,
@@ -2803,16 +2946,16 @@ class RegisteredAnalysisConsumerTest(unittest.TestCase):
             audit_execution_identity=_audit_execution(self.authorization),
             amendment_evidence=prior_evidence,
         )
-        final = copy.deepcopy(template_history[2])
+        final = copy.deepcopy(template_history[3])
         final["evidence"] = evidence("stage1_alpha", alpha_report)
         final["selected_exact"] = derive_registered_selection(
             "stage1_alpha", alpha_results
         )
         final["prior_amendment_history_sha256"] = amendment_history_sha256(
-            [compute, screen]
+            [theory, compute, screen]
         )
         final["source_registry_sha256"] = registry_sha256(alpha_registry)
-        self.history = [compute, screen, final]
+        self.history = [theory, compute, screen, final]
         self.screen_results = screen_results
         self.alpha_results = alpha_results
         self.registry = generate_registry(
@@ -2992,11 +3135,11 @@ class RegisteredAnalysisConsumerTest(unittest.TestCase):
     def test_analysis_accepts_only_complete_registered_primary_set(self) -> None:
         analysis = self._run(self.results)
         self.assertEqual(
-            self.history[1]["selected_exact"],
+            self.history[2]["selected_exact"],
             derive_registered_selection("stage1_screen", self.screen_results),
         )
         self.assertEqual(
-            self.history[2]["selected_exact"],
+            self.history[3]["selected_exact"],
             derive_registered_selection("stage1_alpha", self.alpha_results),
         )
         tied_screen = copy.deepcopy(self.screen_results)
@@ -3097,7 +3240,7 @@ class RegisteredAnalysisConsumerTest(unittest.TestCase):
 
     def test_analysis_refuses_unregistered_validation_selection(self) -> None:
         history = copy.deepcopy(self.history)
-        history[1]["selected_exact"] = {
+        history[2]["selected_exact"] = {
             "method_id": "fixed_base_exact_episodic",
             "n": 4,
             "K": 5,

@@ -6,7 +6,7 @@ dataset and producer identities are unavailable, and every selection-dependent
 row remains a template until a strict validation-only selection amendment is
 frozen.
 
-The deterministic registry contains 157 rows:
+The deterministic base registry contains 157 rows:
 
 - 4 Stage 0 smoke rows;
 - 48 Stage 1 validation-screen rows;
@@ -18,8 +18,14 @@ The 153 non-smoke rows require `RUN_UPITRM_FULL_EXPERIMENTS=1`. The smoke rows
 do not. They still require an authenticated runtime, committed dataset and
 producer identities, and the dedicated two-segment smoke contract.
 
-`registry.json` must equal byte-for-byte canonical base regeneration from
-`protocol.json`. Selection uses three immutable documents:
+`registry.json` must equal byte-for-byte canonical empty-history regeneration
+from `protocol.json`. Active registries are derived in memory from that base
+and the authenticated amendment prefix. A pre-outcome
+`policy_improvement_theory_bridge_amendment_v1` is the first amendment. It
+freezes the read-only theory schema, reference depths, checkpoint schedule,
+CRN rollout count, analysis, and multi-fidelity exact-method screen without
+changing any row or opening test data. Selection then uses three immutable
+documents:
 
 1. `policy_improvement_compute_freeze_v1` follows the four smoke rows. It binds
    an independently recomputed smoke audit, the external runtime/source

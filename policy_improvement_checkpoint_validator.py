@@ -67,6 +67,14 @@ _REQUEST_FIELDS = {
     "parent_checkpoint_sha256",
     "initialization_sha256",
 }
+_FULL_REQUEST_FIELDS = _REQUEST_FIELDS | {
+    "registry_sha256",
+    "amendment_history_sha256",
+    "runtime_authorization_sha256",
+    "recurrent_map_applications",
+    "compute_target_recurrent_map_applications",
+    "test_open_sha256",
+}
 _RESULT_FIELDS = {
     "schema_name",
     "schema_version",
@@ -183,7 +191,8 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
     Path,
     Path,
 ]:
-    if set(value) != _REQUEST_FIELDS:
+    request_fields = set(value)
+    if request_fields != _REQUEST_FIELDS and request_fields != _FULL_REQUEST_FIELDS:
         raise PolicyImprovementCheckpointValidationError(
             "Checkpoint validation request field inventory differs."
         )
@@ -217,38 +226,88 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
     method_id = value["method_id"]
     seed = value["seed"]
     environment_interactions = value["environment_interactions"]
-    if (
+    is_smoke = row["phase"] == "stage0_smoke"
+    common_row_mismatch = (
         row["row_kind"] != "concrete"
-        or row["phase"] != "stage0_smoke"
-        or row["tier"] != "smoke"
-        or row["evaluation_split"] != "validation"
         or row["run_id"] != run_id
         or row["method_id"] != method_id
-        or row["base_method_id"] != method_id
         or row["seed"] != seed
-        or value["snapshot_kind"] != "interaction_matched"
         or isinstance(environment_interactions, bool)
-        or environment_interactions not in {16, 32}
-    ):
+        or not isinstance(environment_interactions, int)
+        or environment_interactions <= 0
+    )
+    if common_row_mismatch:
         raise PolicyImprovementCheckpointValidationError(
-            "Checkpoint validation supports only a concrete registered "
-            "Stage-0 snapshot."
-        )
-    registered_budgets = protocol["budgets"]["smoke"]
-    if registered_budgets["environment_interactions"] != 32 or registered_budgets[
-        "checkpoint_environment_interactions"
-    ] != [16, 32]:
-        raise PolicyImprovementCheckpointValidationError(
-            "Registered Stage-0 checkpoint schedule is unsupported."
+            "Checkpoint validation request differs from its concrete row."
         )
     parent = value["parent_checkpoint_sha256"]
-    if environment_interactions == 16:
-        if parent is not None:
+    if is_smoke:
+        if set(value) != _REQUEST_FIELDS:
             raise PolicyImprovementCheckpointValidationError(
-                "Stage-0 prepare validation must not name a parent."
+                "Stage-0 validation request has non-smoke fields."
             )
+        if (
+            row["tier"] != "smoke"
+            or row["evaluation_split"] != "validation"
+            or row["base_method_id"] != method_id
+            or value["snapshot_kind"] != "interaction_matched"
+            or environment_interactions not in {16, 32}
+        ):
+            raise PolicyImprovementCheckpointValidationError(
+                "Checkpoint validation supports only a concrete registered "
+                "Stage-0 snapshot in its smoke branch."
+            )
+        registered_budgets = protocol["budgets"]["smoke"]
+        if registered_budgets["environment_interactions"] != 32 or registered_budgets[
+            "checkpoint_environment_interactions"
+        ] != [16, 32]:
+            raise PolicyImprovementCheckpointValidationError(
+                "Registered Stage-0 checkpoint schedule is unsupported."
+            )
+        if environment_interactions == 16:
+            if parent is not None:
+                raise PolicyImprovementCheckpointValidationError(
+                    "Stage-0 prepare validation must not name a parent."
+                )
+        else:
+            _sha256(parent, name="parent_checkpoint_sha256")
     else:
-        _sha256(parent, name="parent_checkpoint_sha256")
+        if set(value) != _FULL_REQUEST_FIELDS:
+            raise PolicyImprovementCheckpointValidationError(
+                "Non-smoke validation request omits full-run identities."
+            )
+        if (
+            row["tier"] == "smoke"
+            or row["evaluation_split"] not in {"validation", "test"}
+            or value["snapshot_kind"] not in {"interaction_matched", "compute_matched"}
+        ):
+            raise PolicyImprovementCheckpointValidationError(
+                "Non-smoke checkpoint row or snapshot kind is unsupported."
+            )
+        for field in (
+            "registry_sha256",
+            "amendment_history_sha256",
+            "runtime_authorization_sha256",
+        ):
+            _sha256(value[field], name=field)
+        for field in (
+            "recurrent_map_applications",
+            "compute_target_recurrent_map_applications",
+        ):
+            item = value[field]
+            if isinstance(item, bool) or not isinstance(item, int) or item <= 0:
+                raise PolicyImprovementCheckpointValidationError(
+                    f"{field} must be a positive integer."
+                )
+        test_open = value["test_open_sha256"]
+        if row["evaluation_split"] == "test":
+            _sha256(test_open, name="test_open_sha256")
+        elif test_open is not None:
+            raise PolicyImprovementCheckpointValidationError(
+                "Validation checkpoint cannot bind TEST_OPEN."
+            )
+        if parent is not None:
+            _sha256(parent, name="parent_checkpoint_sha256")
     _sha256(value["checkpoint_sha256"], name="checkpoint_sha256")
     _sha256(value["initialization_sha256"], name="initialization_sha256")
 
@@ -270,18 +329,38 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
         raise PolicyImprovementCheckpointValidationError(
             "Checkpoint path escaped the evidence root."
         ) from exc
-    expected_checkpoint_parent = (
-        evidence_root
-        / "runs"
-        / str(run_id)
-        / "segments"
-        / f"env_{environment_interactions:09d}"
-        / "checkpoints"
-    )
-    if checkpoint_path.parent != expected_checkpoint_parent:
-        raise PolicyImprovementCheckpointValidationError(
-            "Checkpoint path differs from its immutable Stage-0 generation."
+    if is_smoke:
+        expected_checkpoint_parent = (
+            evidence_root
+            / "runs"
+            / str(run_id)
+            / "segments"
+            / f"env_{environment_interactions:09d}"
+            / "checkpoints"
         )
+        if checkpoint_path.parent != expected_checkpoint_parent:
+            raise PolicyImprovementCheckpointValidationError(
+                "Checkpoint path differs from its immutable Stage-0 generation."
+            )
+    else:
+        tier = str(row["tier"])
+        budget_tier = "confirmatory" if tier in {"confirmatory", "ablation"} else tier
+        final_interactions = int(
+            protocol["budgets"][budget_tier]["environment_interactions"]
+        )
+        expected_checkpoint_parent = (
+            evidence_root
+            / "runs"
+            / str(run_id)
+            / "segments"
+            / f"env_{final_interactions:09d}"
+            / "checkpoints"
+            / str(value["snapshot_kind"])
+        )
+        if checkpoint_path.parent != expected_checkpoint_parent:
+            raise PolicyImprovementCheckpointValidationError(
+                "Full checkpoint path differs from its immutable snapshot."
+            )
     expected_dataset = project_root / str(protocol["dataset"]["root"])
     try:
         resolved_expected_dataset = expected_dataset.resolve(strict=True)
@@ -390,6 +469,7 @@ def _build_context(
         dataset_root,
         owner_root=dataset_root.parent,
         expected_producer=registered_dataset_producer,
+        verify_test_content=False,
     )
     if verified_dataset.get("manifest_sha256") != dataset_manifest_sha256:
         raise PolicyImprovementCheckpointValidationError(
@@ -634,6 +714,266 @@ def _validate_upi(
     )
 
 
+def _validate_full_checkpoint(
+    request: Mapping[str, object],
+    protocol: dict[str, Any],
+    row: dict[str, Any],
+    authorization: dict[str, Any],
+    project_root: Path,
+    dataset_root: Path,
+    evidence_root: Path,
+    checkpoint_path: Path,
+) -> dict[str, object]:
+    """Reconstruct and validate one registered non-smoke checkpoint."""
+
+    from policy_improvement_full_backend import (
+        SealedRuntimeIdentity,
+        TorchLearnedRunEngine,
+    )
+    from policy_improvement_non_smoke_checkpoint import (
+        session_model_state_identity,
+        validate_full_checkpoint_identity,
+    )
+    from scripts.policy_improvement_full_runtime import RegisteredFullRun
+
+    source_identity = discover_clean_git_source(project_root)
+    training_role = _runtime_role(authorization, "policy-improvement-training")
+    if source_identity != {
+        "git_commit": training_role["source_git_commit"],
+        "git_clean": True,
+    }:
+        raise PolicyImprovementCheckpointValidationError(
+            "Full checkpoint source checkout differs from its training producer."
+        )
+    if (
+        training_role["runtime_profile_sha256"]
+        != training_role["selected_source_manifest_sha256"]
+    ):
+        raise PolicyImprovementCheckpointValidationError(
+            "Full checkpoint training source-profile identities differ."
+        )
+    authorization_sha256 = canonical_json_sha256(authorization)
+    if request["runtime_authorization_sha256"] != authorization_sha256:
+        raise PolicyImprovementCheckpointValidationError(
+            "Full checkpoint runtime authorization digest differs."
+        )
+    runtime = SealedRuntimeIdentity.from_mapping(
+        {
+            "role": "policy-improvement-full",
+            "runtime_sha256": training_role["runtime_sha256"],
+            "source_git_commit": training_role["source_git_commit"],
+            "source_manifest_sha256": training_role["runtime_profile_sha256"],
+            "producer_source_manifest_sha256": authorization[
+                "producer_source_manifest_sha256"
+            ],
+            "runtime_profile_sha256": training_role["runtime_profile_sha256"],
+            "selected_source_manifest_sha256": training_role[
+                "selected_source_manifest_sha256"
+            ],
+            "runtime_authorization_sha256": authorization_sha256,
+            "launcher_sha256": authorization["launcher_sha256"],
+        }
+    )
+    tier = str(row["tier"])
+    budget_tier = "confirmatory" if tier in {"confirmatory", "ablation"} else tier
+    budget = protocol["budgets"][budget_tier]
+    interaction_checkpoints = tuple(
+        int(value) for value in budget["checkpoint_environment_interactions"]
+    )
+    registered_run = RegisteredFullRun(
+        project_root=project_root,
+        protocol_path=project_root / "configs/policy_improvement_v1/protocol.json",
+        registry_path=project_root / "configs/policy_improvement_v1/registry.json",
+        evidence_root=evidence_root,
+        protocol=protocol,
+        registry={"rows": [row]},
+        amendment_history=(),
+        row=row,
+        protocol_sha256=str(request["protocol_sha256"]),
+        registry_sha256=str(request["registry_sha256"]),
+        amendment_history_sha256=str(request["amendment_history_sha256"]),
+        registry_row_sha256=str(request["registry_row_sha256"]),
+        runtime_authorization_sha256=authorization_sha256,
+        interaction_checkpoints=interaction_checkpoints,
+        final_environment_interactions=int(budget["environment_interactions"]),
+        compute_target_recurrent_map_applications=int(
+            request["compute_target_recurrent_map_applications"]
+        ),
+        evaluation_records=int(budget["evaluation_records"]),
+        test_open_sha256=(
+            str(request["test_open_sha256"])
+            if request["test_open_sha256"] is not None
+            else None
+        ),
+        dataset_root=dataset_root,
+    )
+    training_module = importlib.import_module("upi_trm_train")
+    engine = TorchLearnedRunEngine(training_module)
+    session = engine._build_session(registered_run, runtime)
+    initialization_sha256 = session.initialization_sha256
+    if initialization_sha256 != request["initialization_sha256"]:
+        raise PolicyImprovementCheckpointValidationError(
+            "Reconstructed full-run initialization differs from the result."
+        )
+    expected_sha256 = str(request["checkpoint_sha256"])
+
+    def validate_payload() -> tuple[
+        str,
+        object,
+        object,
+        str,
+        dict[str, str],
+        dict[str, object],
+    ]:
+        if type(session.trainer).__name__ == "PPOTrainer":
+            payload, observed_sha256 = load_stable_checkpoint(
+                checkpoint_path,
+                expected_sha256=expected_sha256,
+            )
+            if not isinstance(payload, Mapping):
+                raise PolicyImprovementCheckpointValidationError(
+                    "Full PPO checkpoint payload is not an object."
+                )
+            embedded = validate_full_checkpoint_identity(payload.get("identity"))
+            validate_ppo_smoke_checkpoint(
+                payload,
+                session.trainer,
+                expected_identity=embedded,
+                validate_only=True,
+            )
+            progress = _object(payload.get("progress"), name="full_ppo.progress")
+            role_hashes = {"model": state_dict_sha256(payload["model_state_dict"])}
+            return (
+                observed_sha256,
+                progress.get("environment_interactions"),
+                payload.get("parent_checkpoint_sha256"),
+                canonical_json_sha256(role_hashes),
+                role_hashes,
+                embedded,
+            )
+
+        raw, observed_sha256 = training_module._load_checkpoint_payload(
+            str(checkpoint_path),
+            expected_sha256=expected_sha256,
+        )
+        if not isinstance(raw, Mapping):
+            raise PolicyImprovementCheckpointValidationError(
+                "Full UPI checkpoint payload is not an object."
+            )
+        embedded = validate_full_checkpoint_identity(
+            raw.get("policy_improvement_full_identity")
+        )
+        if raw.get("policy_improvement_full_identity_sha256") != (
+            canonical_json_sha256(embedded)
+        ):
+            raise PolicyImprovementCheckpointValidationError(
+                "Full UPI checkpoint identity digest differs."
+            )
+        training_module.validate_checkpoint_state_for_audit(
+            str(checkpoint_path),
+            session.model,
+            session.trainer,
+            str(session.device),
+            expected_dataset_provenance=session.dataset_provenance,
+            expected_run_identity=session.run_identity,
+            expected_checkpoint_sha256=expected_sha256,
+            authorized_originating_runtime_sha256=str(training_role["runtime_sha256"]),
+        )
+        evaluation_states = raw.get(
+            "policy_improvement_full_evaluation_state_dicts", {}
+        )
+        if not isinstance(evaluation_states, Mapping):
+            raise PolicyImprovementCheckpointValidationError(
+                "Full UPI checkpoint auxiliary-state inventory is invalid."
+            )
+        model_sha256, role_hashes = session_model_state_identity(
+            session,
+            evaluation_state_dicts=evaluation_states,
+        )
+        progress = _object(raw.get("progress"), name="full_upi.progress")
+        return (
+            observed_sha256,
+            progress.get("env_steps"),
+            embedded["parent_checkpoint_sha256"],
+            model_sha256,
+            role_hashes,
+            embedded,
+        )
+
+    with _forbid_training_and_optimizer_steps(session.trainer) as calls:
+        (
+            observed_sha256,
+            observed_interactions,
+            parent,
+            model_sha256,
+            role_hashes,
+            embedded,
+        ) = validate_payload()
+
+    expected_embedded = {
+        "run_id": row["run_id"],
+        "method_id": row["method_id"],
+        "protocol_sha256": request["protocol_sha256"],
+        "registry_row_sha256": request["registry_row_sha256"],
+        "amendment_history_sha256": request["amendment_history_sha256"],
+        "runtime_authorization_sha256": authorization_sha256,
+        "training_runtime_sha256": training_role["runtime_sha256"],
+        "training_source_git_commit": training_role["source_git_commit"],
+        "training_source_manifest_sha256": training_role["runtime_profile_sha256"],
+        "launcher_sha256": authorization["launcher_sha256"],
+        "dataset_manifest_sha256": session.dataset_manifest_sha256,
+        "dataset_provenance_sha256": canonical_json_sha256(session.dataset_provenance),
+        "effective_config_sha256": session.effective_config_sha256,
+        "snapshot_kind": request["snapshot_kind"],
+        "environment_interactions": request["environment_interactions"],
+        "recurrent_map_applications": request["recurrent_map_applications"],
+        "parent_checkpoint_sha256": request["parent_checkpoint_sha256"],
+        "test_open_sha256": request["test_open_sha256"],
+    }
+    if any(embedded.get(field) != value for field, value in expected_embedded.items()):
+        raise PolicyImprovementCheckpointValidationError(
+            "Full checkpoint embedded identity differs from registered evidence."
+        )
+    if (
+        observed_sha256 != expected_sha256
+        or observed_interactions != request["environment_interactions"]
+        or parent != request["parent_checkpoint_sha256"]
+    ):
+        raise PolicyImprovementCheckpointValidationError(
+            "Full checkpoint progress, digest, or lineage differs."
+        )
+    result: dict[str, object] = {
+        "schema_name": "policy_improvement_checkpoint_semantic_validation_v1",
+        "schema_version": 1,
+        "run_id": request["run_id"],
+        "method_id": request["method_id"],
+        "seed": request["seed"],
+        "snapshot_kind": request["snapshot_kind"],
+        "environment_interactions": request["environment_interactions"],
+        "parent_checkpoint_sha256": request["parent_checkpoint_sha256"],
+        "checkpoint_sha256": observed_sha256,
+        "initialization_sha256": initialization_sha256,
+        "model_state_sha256": model_sha256,
+        "role_state_sha256s": role_hashes,
+        "method_config_sha256": session.method_config_sha256,
+        "registered_effective_config_sha256": row["expected_effective_config_sha256"],
+        "effective_config_sha256": session.effective_config_sha256,
+        "dataset_manifest_sha256": session.dataset_manifest_sha256,
+        "dataset_provenance_sha256": canonical_json_sha256(session.dataset_provenance),
+        "run_identity_sha256": (
+            canonical_json_sha256(session.run_identity)
+            if session.run_identity is not None
+            else None
+        ),
+        "training_call_delta": calls["training"],
+        "evaluation_call_delta": int(session.evaluation_started),
+        "optimizer_step_delta": calls["optimizer"],
+    }
+    if set(result) != _RESULT_FIELDS:
+        raise AssertionError("Full semantic checkpoint result inventory drifted.")
+    return result
+
+
 def validate_checkpoint(request: Mapping[str, object]) -> dict[str, object]:
     """Strictly reconstruct and reload one immutable registered smoke checkpoint."""
 
@@ -651,6 +991,30 @@ def validate_checkpoint(request: Mapping[str, object]) -> dict[str, object]:
             evidence_root,
             checkpoint_path,
         ) = _validate_request(request)
+        if row["phase"] != "stage0_smoke":
+            python_rng = random.getstate()
+            numpy_rng = np.random.get_state()
+            torch_rng = torch.get_rng_state()
+            cuda_rng = (
+                torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+            )
+            try:
+                return _validate_full_checkpoint(
+                    request,
+                    protocol,
+                    row,
+                    authorization,
+                    project_root,
+                    dataset_root,
+                    evidence_root,
+                    checkpoint_path,
+                )
+            finally:
+                random.setstate(python_rng)
+                np.random.set_state(numpy_rng)
+                torch.set_rng_state(torch_rng)
+                if cuda_rng is not None:
+                    torch.cuda.set_rng_state_all(cuda_rng)
         context = _build_context(
             request,
             protocol,

@@ -898,9 +898,12 @@ def _input_sha256(inputs: Sequence[int]) -> str:
 
 
 def _load_dataset_bindings(
-    protocol: Mapping[str, Any], dataset_root: str | Path
+    protocol: Mapping[str, Any],
+    dataset_root: str | Path,
+    *,
+    verify_test_content: bool = False,
 ) -> dict[str, dict[str, Any]]:
-    """Authenticate the complete materialized corpus and return per-index bindings."""
+    """Authenticate registered metadata and the splits authorized for opening."""
 
     supplied = Path(dataset_root)
     if not supplied.is_absolute():
@@ -1169,11 +1172,6 @@ def _load_dataset_bindings(
                 f"Dataset {split} ordered-record identity differs."
             )
 
-        split_root = root / split
-        if {item.name for item in split_root.iterdir()} != _DATASET_SPLIT_FILE_NAMES:
-            raise PolicyImprovementSchemaError(
-                f"Dataset {split} materialized file inventory differs."
-            )
         expected_relative_names = {
             f"{split}/{name}" for name in _DATASET_SPLIT_FILE_NAMES
         }
@@ -1183,6 +1181,35 @@ def _load_dataset_bindings(
         if set(files) != expected_relative_names:
             raise PolicyImprovementSchemaError(
                 f"Dataset {split} registered file inventory differs."
+            )
+        for relative in sorted(expected_relative_names):
+            entry = _fields(
+                files[relative],
+                {"bytes", "sha256"},
+                path=f"dataset_split_manifest.{split}.files.{relative}",
+            )
+            if (
+                isinstance(entry["bytes"], bool)
+                or not isinstance(entry["bytes"], int)
+                or entry["bytes"] < 0
+            ):
+                raise PolicyImprovementSchemaError(
+                    f"Dataset file {relative!r} has invalid registered size."
+                )
+            _hex(entry["sha256"], path=f"dataset_file.{relative}", length=64)
+        bindings[split] = {
+            "record_sha256s": tuple(checked_records),
+            "input_sha256s": tuple(checked_inputs),
+            "puzzle_ids": tuple(f"{split}-{index:06d}" for index in range(count)),
+        }
+        if split == "test" and not verify_test_content:
+            identifier_offset += count
+            continue
+
+        split_root = root / split
+        if {item.name for item in split_root.iterdir()} != _DATASET_SPLIT_FILE_NAMES:
+            raise PolicyImprovementSchemaError(
+                f"Dataset {split} materialized file inventory differs."
             )
         materialized: dict[str, bytes] = {}
         for name in sorted(_DATASET_SPLIT_FILE_NAMES):
@@ -1295,11 +1322,6 @@ def _load_dataset_bindings(
             raise PolicyImprovementSchemaError(
                 f"Dataset {split} manifest identities differ from its arrays."
             )
-        bindings[split] = {
-            "record_sha256s": tuple(checked_records),
-            "input_sha256s": tuple(checked_inputs),
-            "puzzle_ids": tuple(f"{split}-{index:06d}" for index in range(count)),
-        }
         identifier_offset += count
     return bindings
 
@@ -1720,7 +1742,10 @@ def audit_result_set(
         protocol_sha256=protocol_digest,
         producer_source_authenticator=producer_source_authenticator,
     )
-    if history and history[0]["runtime_authorization_sha256"] != authorization_digest:
+    if (
+        len(history) >= 2
+        and history[1]["runtime_authorization_sha256"] != authorization_digest
+    ):
         raise PolicyImprovementSchemaError(
             "Compute freeze binds a different runtime/source authorization."
         )
@@ -1734,11 +1759,6 @@ def audit_result_set(
         "policy-improvement-analysis",
     }:
         raise PolicyImprovementSchemaError("Unsupported evidence-audit execution role.")
-    dataset_bindings = (
-        _load_dataset_bindings(protocol, dataset_root)
-        if _dataset_bindings is None
-        else _dataset_bindings
-    )
     registry = validate_registry_document(
         registry_value,
         protocol,
@@ -1764,17 +1784,38 @@ def audit_result_set(
     registry_digest = registry_sha256(registry)
     history_digest = amendment_history_sha256(history)
 
-    if _verify_amendment_evidence and history:
-        expected_prior_phases = (
-            "stage0_smoke",
-            "stage1_screen",
-            "stage1_alpha",
+    uses_test = any(PHASE_CONTRACTS[phase][1] == "test" for phase in phases)
+    if not uses_test and any(
+        value is not None
+        for value in (test_open_record, test_open_owner_root, test_open_sha256)
+    ):
+        raise PolicyImprovementSchemaError(
+            "Validation-only audits must not carry a test-open record."
+        )
+
+    dataset_bindings = (
+        _load_dataset_bindings(
+            protocol,
+            dataset_root,
+            verify_test_content=False,
+        )
+        if _dataset_bindings is None
+        else _dataset_bindings
+    )
+
+    if _verify_amendment_evidence and len(history) > 1:
+        evidence_amendments = (
+            (1, "stage0_smoke", 0),
+            (2, "stage1_screen", 2),
+            (3, "stage1_alpha", 3),
         )
         if amendment_evidence is None:
             raise PolicyImprovementSchemaError(
                 "Amendment history requires prior result evidence for recomputation."
             )
-        for index, phase in enumerate(expected_prior_phases[: len(history)]):
+        for amendment_index, phase, prior_prefix_length in evidence_amendments:
+            if amendment_index >= len(history):
+                break
             if phase not in amendment_evidence:
                 raise PolicyImprovementSchemaError(
                     f"Missing recomputation evidence for {phase}."
@@ -1794,7 +1835,7 @@ def audit_result_set(
                 supplied["per_instance_documents"],
                 path=f"amendment_evidence.{phase}.per_instance_documents",
             )
-            prior_history = history[:index]
+            prior_history = history[:prior_prefix_length]
             prior_registry = generate_registry(
                 protocol,
                 prior_history,
@@ -1836,7 +1877,7 @@ def audit_result_set(
                         ],
                     }
                 )
-            evidence = history[index]["evidence"]
+            evidence = history[amendment_index]["evidence"]
             expected_evidence = {
                 "phase": phase,
                 "audit_report_sha256": hashlib.sha256(
@@ -1854,14 +1895,17 @@ def audit_result_set(
                 )
             if phase in {"stage1_screen", "stage1_alpha"}:
                 derived = derive_registered_selection(phase, list(supplied["results"]))
-                if history[index]["selected_exact"] != derived:
+                if history[amendment_index]["selected_exact"] != derived:
                     raise PolicyImprovementSchemaError(
                         f"{phase} frozen selection differs from the registered "
                         "endpoint and tie-break rule."
                     )
-    uses_test = any(PHASE_CONTRACTS[phase][1] == "test" for phase in phases)
     if uses_test:
-        if len(history) != 3 or test_open_record is None:
+        if _dataset_bindings is not None:
+            raise PolicyImprovementSchemaError(
+                "Test audits must independently authenticate materialized test data."
+            )
+        if len(history) != 4 or test_open_record is None:
             raise PolicyImprovementSchemaError(
                 "Test results require frozen selection and a test-open record."
             )
@@ -1896,14 +1940,11 @@ def audit_result_set(
             raise PolicyImprovementSchemaError(
                 "Supplied test-open record differs from immutable TEST_OPEN.json."
             )
-    elif any(
-        value is not None
-        for value in (test_open_record, test_open_owner_root, test_open_sha256)
-    ):
-        raise PolicyImprovementSchemaError(
-            "Validation-only audits must not carry a test-open record."
+        dataset_bindings = _load_dataset_bindings(
+            protocol,
+            dataset_root,
+            verify_test_content=True,
         )
-
     checked_results = [validate_result(result) for result in results]
     by_run_id = {str(result["run_id"]): result for result in checked_results}
     if len(by_run_id) != len(checked_results):
@@ -2097,33 +2138,41 @@ def audit_result_set(
         generation_manifest_sha256s.extend(historical_manifests)
         historical_failed_attempt_manifest_sha256s.extend(historical_manifests)
         complete_count += 1
-        evaluation_role = _authorized_role(
-            result_authorization, "policy-improvement-evaluation"
-        )
-        for field, expected in (
-            ("evaluation_runtime_sha256", evaluation_role["runtime_sha256"]),
-            (
+        observed_evaluation_identity = {
+            field: _available_value(
+                result["identities"][field], path=f"result.identities.{field}"
+            )
+            for field in (
+                "evaluation_runtime_sha256",
                 "evaluation_source_git_commit",
-                evaluation_role["source_git_commit"],
-            ),
-            (
                 "evaluation_runtime_profile_sha256",
-                evaluation_role["runtime_profile_sha256"],
-            ),
-            (
                 "evaluation_selected_source_manifest_sha256",
-                evaluation_role["selected_source_manifest_sha256"],
-            ),
-        ):
-            if (
-                _available_value(
-                    result["identities"][field], path=f"result.identities.{field}"
-                )
-                != expected
-            ):
-                raise PolicyImprovementSchemaError(
-                    f"Result evaluation identity {field} is not authorized."
-                )
+            )
+        }
+        allowed_evaluation_roles = [
+            _authorized_role(result_authorization, "policy-improvement-evaluation")
+        ]
+        if result["tier"] != "smoke":
+            allowed_evaluation_roles.append(
+                _authorized_role(result_authorization, "policy-improvement-training")
+            )
+        authorized_evaluation_identities = [
+            {
+                "evaluation_runtime_sha256": role["runtime_sha256"],
+                "evaluation_source_git_commit": role["source_git_commit"],
+                "evaluation_runtime_profile_sha256": role[
+                    "runtime_profile_sha256"
+                ],
+                "evaluation_selected_source_manifest_sha256": role[
+                    "selected_source_manifest_sha256"
+                ],
+            }
+            for role in allowed_evaluation_roles
+        ]
+        if observed_evaluation_identity not in authorized_evaluation_identities:
+            raise PolicyImprovementSchemaError(
+                "Result evaluation identity is not authorized."
+            )
         initialization = str(result["identities"]["initialization_sha256"])
         initialization_key = (str(result["phase"]), int(result["seed"]))
         prior_initialization = paired_initializations.setdefault(
@@ -2210,7 +2259,7 @@ def audit_result_set(
                 raise PolicyImprovementSchemaError(
                     "Non-smoke compute snapshots require the post-smoke freeze."
                 )
-            targets = history[0]["common_compute_targets"]
+            targets = history[1]["common_compute_targets"]
             if (
                 compute["status"] != "available"
                 or _available_value(

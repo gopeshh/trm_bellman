@@ -111,7 +111,10 @@ def _validate_checkpoint_validator_identity(
         path=path,
     )
     result_identities = _object(result["identities"], path="result.identities")
-    if validator == "policy_improvement_smoke_runtime":
+    if validator in {
+        "policy_improvement_smoke_runtime",
+        "policy_improvement_full_runtime",
+    }:
         expected = {
             "role": "policy-improvement-training",
             "source_git_commit": result_identities["training_source_git_commit"],
@@ -167,6 +170,7 @@ def _semantic_checkpoint_validation(
     validation: Mapping[str, object],
     protocol: Mapping[str, object],
     protocol_sha256: str,
+    registry_sha256: str,
     registry_row: Mapping[str, object],
     registry_row_sha256: str,
     project_root: str | Path,
@@ -200,6 +204,48 @@ def _semantic_checkpoint_validation(
         "parent_checkpoint_sha256": parent_checkpoint_sha256,
         "initialization_sha256": result["identities"]["initialization_sha256"],
     }
+    if result.get("tier") != "smoke":
+        matching_snapshots = [
+            snapshot
+            for snapshot in result["evaluation_snapshots"]
+            if snapshot["snapshot_kind"] == validation["snapshot_kind"]
+        ]
+        compute_snapshots = [
+            snapshot
+            for snapshot in result["evaluation_snapshots"]
+            if snapshot["snapshot_kind"] == "compute_matched"
+        ]
+        if len(matching_snapshots) != 1 or len(compute_snapshots) != 1:
+            raise PolicyImprovementSchemaError(
+                "Full checkpoint validation cannot resolve registered snapshots."
+            )
+        test_open_identity = _object(
+            result["identities"]["test_open_sha256"],
+            path="result.identities.test_open_sha256",
+        )
+        test_open_sha256 = (
+            _sha256(test_open_identity.get("value"), path="test_open_sha256")
+            if test_open_identity.get("status") == "available"
+            else None
+        )
+        request.update(
+            {
+                "registry_sha256": registry_sha256,
+                "amendment_history_sha256": result["amendment_history_sha256"],
+                "runtime_authorization_sha256": result["identities"][
+                    "runtime_authorization_sha256"
+                ],
+                "recurrent_map_applications": _available(
+                    matching_snapshots[0]["observed_recurrent_map_applications"],
+                    path="snapshot.observed_recurrent_map_applications",
+                ),
+                "compute_target_recurrent_map_applications": _available(
+                    compute_snapshots[0]["target"]["registered_quantity"],
+                    path="compute.target.registered_quantity",
+                ),
+                "test_open_sha256": test_open_sha256,
+            }
+        )
     computed = _fields(
         checkpoint_validator(request),
         _SEMANTIC_VALIDATION_FIELDS,
@@ -615,15 +661,44 @@ def _authenticate_historical_failed_attempts(
                 "dataset_manifest_sha256",
                 "train_ordered_records_sha256",
                 "evaluation_ordered_records_sha256",
-                "initialization_sha256",
                 "test_open_sha256",
-                "device",
             ):
                 if raw_identities[field] != complete_identities[field]:
                     raise PolicyImprovementSchemaError(
                         "Historical failed-attempt registered identity "
                         f"{field} differs from its retry."
                     )
+            failed_initialization = raw_identities["initialization_sha256"]
+            if (
+                not (
+                    isinstance(failed_initialization, Mapping)
+                    and failed_initialization
+                    == {
+                        "status": "unavailable",
+                        "reason": "initialization_not_materialized",
+                    }
+                )
+                and failed_initialization
+                != complete_identities["initialization_sha256"]
+            ):
+                raise PolicyImprovementSchemaError(
+                    "Historical failed-attempt initialization differs from its retry."
+                )
+            failed_device = raw_identities["device"]
+            if (
+                not (
+                    isinstance(failed_device, Mapping)
+                    and failed_device
+                    == {
+                        "status": "unavailable",
+                        "reason": "execution_device_not_materialized",
+                    }
+                )
+                and failed_device != complete_identities["device"]
+            ):
+                raise PolicyImprovementSchemaError(
+                    "Historical failed-attempt device differs from its retry."
+                )
             manifest_fields = {
                 "schema_name",
                 "schema_version",
@@ -1057,7 +1132,7 @@ def authenticate_complete_generation(
         "outputs",
         "storage_bytes",
     }
-    if is_smoke and segment_schema_version == 2:
+    if segment_schema_version == 2:
         manifest_fields.add("prior_failed_attempts")
     manifest = _fields(
         raw_manifest,
@@ -1066,7 +1141,7 @@ def authenticate_complete_generation(
     )
     if (
         manifest["schema_name"] not in _COMPLETE_SEGMENT_SCHEMAS
-        or segment_schema_version not in ({1, 2} if is_smoke else {1})
+        or segment_schema_version not in {1, 2}
         or manifest["protocol_sha256"] != protocol_sha256
         or manifest["registry_sha256"] != registry_sha256
         or manifest["registry_row_sha256"] != registry_row_sha256
@@ -1117,7 +1192,7 @@ def authenticate_complete_generation(
             manifest["prior_failed_attempts"],
             path="generation.prior_failed_attempts",
         )
-        if is_smoke and segment_schema_version == 2
+        if segment_schema_version == 2
         else []
     )
     observed_attempts = _historical_attempt_commitments(historical_attempts)
@@ -1420,6 +1495,7 @@ def authenticate_complete_generation(
                 validation=parent_validation,
                 protocol=protocol,
                 protocol_sha256=protocol_sha256,
+                registry_sha256=registry_sha256,
                 registry_row=registry_row,
                 registry_row_sha256=registry_row_sha256,
                 project_root=project_root,
@@ -1491,12 +1567,19 @@ def authenticate_complete_generation(
             snapshot["observed_environment_interactions"],
             path="snapshot.observed_environment_interactions",
         )
+        validation_parent = validation["parent_checkpoint_sha256"]
+        if validation_parent is not None:
+            _sha256(
+                validation_parent,
+                path=f"checkpoint_validation.{kind}.parent_checkpoint_sha256",
+            )
         if (
             validation["schema_name"] != "policy_improvement_checkpoint_validation_v1"
             or validation["schema_version"] != 1
             or validation["validator"]
             not in {
                 "policy_improvement_smoke_runtime",
+                "policy_improvement_full_runtime",
                 "policy_improvement_checkpoint_validator",
             }
             or validation["run_id"] != run_id
@@ -1505,11 +1588,14 @@ def authenticate_complete_generation(
             or validation["environment_interactions"] != observed_interactions
             or validation["checkpoint_sha256"] != snapshot_checkpoint_sha256
             or validation["model_state_sha256"] != snapshot_model_sha256
-            or validation["parent_checkpoint_sha256"]
-            != (
-                manifest["parent_checkpoint_sha256"]
-                if kind == "interaction_matched"
-                else None
+            or (
+                is_smoke
+                and validation["parent_checkpoint_sha256"]
+                != (
+                    manifest["parent_checkpoint_sha256"]
+                    if kind == "interaction_matched"
+                    else None
+                )
             )
             or hashlib.sha256(
                 canonical_json_bytes(validation["role_state_sha256s"])
@@ -1534,6 +1620,7 @@ def authenticate_complete_generation(
                 validation=validation,
                 protocol=protocol,
                 protocol_sha256=protocol_sha256,
+                registry_sha256=registry_sha256,
                 registry_row=registry_row,
                 registry_row_sha256=registry_row_sha256,
                 project_root=project_root,
@@ -1543,9 +1630,8 @@ def authenticate_complete_generation(
                 result=result,
                 environment_interactions=int(observed_interactions),
                 parent_checkpoint_sha256=(
-                    str(manifest["parent_checkpoint_sha256"])
-                    if kind == "interaction_matched"
-                    and manifest["parent_checkpoint_sha256"] is not None
+                    str(validation["parent_checkpoint_sha256"])
+                    if validation["parent_checkpoint_sha256"] is not None
                     else None
                 ),
             )
@@ -1751,9 +1837,9 @@ def authenticate_failed_attempt(
         ) from exc
     is_smoke = result.get("tier") == "smoke"
     allowed_segments = {"prepare", "resume"} if is_smoke else {"complete"}
-    if len(segment_entries) != 1:
+    if (is_smoke and len(segment_entries) != 1) or not segment_entries:
         raise PolicyImprovementSchemaError(
-            "Failed result must contain exactly one failed segment."
+            "Failed result has an invalid failed-segment inventory."
         )
     for segment in segment_entries:
         try:
@@ -1789,22 +1875,32 @@ def authenticate_failed_attempt(
                     "Failed-attempt generation is invalid."
                 )
             attempt_directories.append(attempt)
-    if len(attempt_directories) != 1:
+    if (is_smoke and len(attempt_directories) != 1) or not attempt_directories:
         raise PolicyImprovementSchemaError(
-            f"Failed result {run_id} must have exactly one immutable attempt."
+            f"Failed result {run_id} has an invalid immutable-attempt inventory."
         )
     matches: list[tuple[Path, Mapping[str, object], dict[str, object]]] = []
     for generation in attempt_directories:
         candidate = generation / "result.json"
         try:
-            loaded = _load_ascii_json(candidate)
+            loaded = validate_result(_load_ascii_json(candidate))
         except PolicyImprovementSchemaError:
             raise PolicyImprovementSchemaError(
                 "Failed-attempt result is missing or invalid."
             )
-        if canonical_json_bytes(loaded) != canonical_json_bytes(result):
+        matches_supplied_result = canonical_json_bytes(loaded) == canonical_json_bytes(
+            result
+        )
+        if (
+            loaded["status"] != "failed"
+            or loaded["run_id"] != run_id
+            or loaded["protocol_sha256"] != protocol_sha256
+            or loaded["registry_row_sha256"] != registry_row_sha256
+            or loaded["identities"]["runtime_authorization_sha256"]
+            != runtime_authorization_sha256
+        ):
             raise PolicyImprovementSchemaError(
-                "Failed-attempt result differs from the audited result."
+                "Failed-attempt result identity differs from its run."
             )
         attempt_id = generation.name
         if len(attempt_id) != 32 or any(
@@ -1845,7 +1941,7 @@ def authenticate_failed_attempt(
             or manifest["runtime_authorization_sha256"] != runtime_authorization_sha256
             or manifest["run_id"] != run_id
             or manifest["segment"] != generation.parent.name
-            or manifest["failure_phase"] != result["failure"]["phase"]
+            or manifest["failure_phase"] != loaded["failure"]["phase"]
             or manifest["result"]
             != {
                 "path": "result.json",
@@ -1855,8 +1951,8 @@ def authenticate_failed_attempt(
         ):
             raise PolicyImprovementSchemaError("Failed-attempt identity differs.")
         if not is_smoke and (
-            manifest["phase"] != result["phase"]
-            or manifest["tier"] != result["tier"]
+            manifest["phase"] != loaded["phase"]
+            or manifest["tier"] != loaded["tier"]
             or manifest["environment_interactions"] != expected_environment_interactions
         ):
             raise PolicyImprovementSchemaError(
@@ -1865,12 +1961,13 @@ def authenticate_failed_attempt(
         actual_files, actual_directories = _inventory(generation)
         if set(actual_files) != {"MANIFEST.json", "result.json"} or actual_directories:
             raise PolicyImprovementSchemaError("Failed-attempt inventory differs.")
-        matches.append((generation, manifest, result_identity))
-    if len(matches) != 1:
+        if matches_supplied_result:
+            matches.append((generation, manifest, result_identity))
+    if not matches or (is_smoke and len(matches) != 1):
         raise PolicyImprovementSchemaError(
             f"Failed result {run_id} must resolve to exactly one immutable attempt."
         )
-    generation, _, result_identity = matches[0]
+    generation, _, result_identity = max(matches, key=lambda item: item[0].name)
     _, manifest_identity = _stable_regular_file(generation / "MANIFEST.json")
     return {
         "generation_path": str(generation),

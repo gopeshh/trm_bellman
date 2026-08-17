@@ -512,11 +512,11 @@ def generate_registry(
             raise PolicyImprovementSchemaError(
                 "Amendment does not bind the exact prior registry generation."
             )
-        if index == 1:
+        if index == 2:
             registry = _materialize_screen_selection(
                 registry, amendment, protocol, base_configs
             )
-        elif index == 2:
+        elif index == 3:
             registry = _materialize_final_selection(
                 registry, amendment, protocol, base_configs
             )
@@ -538,18 +538,30 @@ def validate_registry_document(
     *,
     base_configs: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, Any]:
-    """Reject any registry that is not exact regeneration output."""
+    """Authenticate the immutable base registry and derive the active prefix.
+
+    The committed registry remains the empty-history base so historical Stage 0
+    evidence keeps its exact registry digest.  Callers supplying an amendment
+    history receive the deterministic active registry.  An exact active
+    generation is also accepted for compatibility with already materialized
+    in-memory audit fixtures; no third representation is accepted.
+    """
 
     if not isinstance(value, Mapping):
         raise PolicyImprovementSchemaError("Registry document must be an object.")
-    expected = generate_registry(
-        protocol_value, amendment_history, base_configs=base_configs
+    base = generate_registry(protocol_value, [], base_configs=base_configs)
+    active = generate_registry(
+        protocol_value,
+        amendment_history,
+        base_configs=base_configs,
     )
-    if canonical_json_bytes(value) != canonical_json_bytes(expected):
+    supplied = canonical_json_bytes(value)
+    if supplied not in {canonical_json_bytes(base), canonical_json_bytes(active)}:
         raise PolicyImprovementSchemaError(
-            "Registry bytes do not match deterministic regeneration."
+            "Registry bytes match neither the immutable base nor the exact active "
+            "amendment generation."
         )
-    return expected
+    return active
 
 
 def registry_sha256(registry: object) -> str:

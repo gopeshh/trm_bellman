@@ -151,6 +151,63 @@ class _UPITrainer:
 
 
 class PolicyImprovementCheckpointValidatorTest(unittest.TestCase):
+    def test_stage0_context_verifies_only_train_and_validation_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = _context(root)
+            authorization = _authorization(fixture.protocol_sha256)
+            dataset = fixture.protocol["dataset"]
+            split_manifests = {
+                split: dataset["splits"][split]["manifest_sha256"]["value"]
+                for split in ("train", "validation", "test")
+            }
+            split_orders = {
+                split: dataset["splits"][split]["ordered_record_sha256"]["value"]
+                for split in ("train", "validation", "test")
+            }
+            verified = {
+                "manifest_sha256": dataset["manifest_sha256"]["value"],
+                "split_manifest_sha256": split_manifests,
+                "split_ordered_record_sha256": split_orders,
+            }
+            with (
+                mock.patch.object(
+                    validator,
+                    "discover_clean_git_source",
+                    return_value={"git_commit": "a" * 40, "git_clean": True},
+                ),
+                mock.patch.object(
+                    validator,
+                    "load_registered_base_configs",
+                    return_value={},
+                ),
+                mock.patch.object(
+                    validator,
+                    "generate_registry",
+                    return_value=fixture.registry,
+                ),
+                mock.patch.object(
+                    validator,
+                    "verify_dataset",
+                    return_value=verified,
+                ) as verify_dataset,
+            ):
+                validator._build_context(
+                    {"environment_interactions": 16},
+                    fixture.protocol,
+                    fixture.row,
+                    authorization,
+                    root,
+                    root / "dataset",
+                    root / "evidence",
+                )
+            verify_dataset.assert_called_once_with(
+                root / "dataset",
+                owner_root=root,
+                expected_producer=mock.ANY,
+                verify_test_content=False,
+            )
+
     def test_request_rejects_non_smoke_interaction_budget(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

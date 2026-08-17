@@ -19,6 +19,10 @@ PHASE4_FIGURE_SOURCE_PROFILE = "figure"
 POLICY_DATASET_BUILDER_SOURCE_PROFILE = "policy-dataset-builder"
 POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE = "policy-improvement-audit"
 POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE = "policy-improvement-analysis"
+POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE = "policy-improvement-full"
+POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE = (
+    "policy-improvement-theory-bridge"
+)
 PHASE4_SOURCE_MANIFEST_SCHEMA_VERSION = 1
 PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH = (
     "configs/iclr_confirmatory/producer_source_manifest.json"
@@ -59,6 +63,12 @@ PHASE4_PROFILE_ENTRYPOINTS = {
         "policy_improvement_consumer_entrypoint.py",
         "scripts/policy_improvement_analysis.py",
     ),
+    POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE: (
+        "policy_improvement_full_entrypoint.py",
+    ),
+    POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE: (
+        "policy_improvement_theory_bridge_entrypoint.py",
+    ),
 }
 POLICY_DATASET_BUILDER_PROFILE_PATHS = (
     "configs/policy_improvement_v1/fixed_base_exact_episodic.yaml",
@@ -79,6 +89,7 @@ POLICY_DATASET_BUILDER_PROFILE_PATHS = (
     "utils/run_identity.py",
 )
 _POLICY_IMPROVEMENT_CONFIG_PATHS = (
+    "configs/policy_improvement_v1/amendments/theory_bridge_v1.json",
     "configs/policy_improvement_v1/fixed_base_exact_episodic.yaml",
     "configs/policy_improvement_v1/fixed_base_exact_persistent.yaml",
     "configs/policy_improvement_v1/legacy_parameter_interpolation.yaml",
@@ -90,26 +101,54 @@ POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_CONFIG_PATHS,
     "policy_improvement_checkpoint_validator.py",
     "policy_improvement_consumer_entrypoint.py",
+    "policy_improvement_full_backend.py",
+    "policy_improvement_non_smoke_checkpoint.py",
     "runtime_archive_preflight.py",
     "scripts/policy_improvement_audit.py",
     "scripts/policy_improvement_evidence.py",
+    "scripts/policy_improvement_full_runtime.py",
     "scripts/policy_improvement_registry.py",
     "scripts/policy_improvement_schema.py",
     "scripts/policy_improvement_test_open.py",
     "scripts/policy_improvement_test_open_cli.py",
+    "scripts/policy_improvement_theory_schema.py",
 )
 POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_CONFIG_PATHS,
     "policy_improvement_checkpoint_validator.py",
     "policy_improvement_consumer_entrypoint.py",
+    "policy_improvement_full_backend.py",
+    "policy_improvement_non_smoke_checkpoint.py",
     "runtime_archive_preflight.py",
     "scripts/policy_improvement_analysis.py",
     "scripts/policy_improvement_audit.py",
     "scripts/policy_improvement_evidence.py",
+    "scripts/policy_improvement_full_runtime.py",
     "scripts/policy_improvement_registry.py",
     "scripts/policy_improvement_schema.py",
     "scripts/policy_improvement_statistics.py",
     "scripts/policy_improvement_test_open.py",
+    "scripts/policy_improvement_theory_schema.py",
+)
+_POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS = (
+    *_POLICY_IMPROVEMENT_CONFIG_PATHS,
+    "policy_improvement_full_backend.py",
+    "policy_improvement_non_smoke_checkpoint.py",
+    "runtime_archive_preflight.py",
+    "scripts/policy_improvement_full_runtime.py",
+    "scripts/policy_improvement_registry.py",
+    "scripts/policy_improvement_schema.py",
+    "scripts/policy_improvement_theory_schema.py",
+)
+POLICY_IMPROVEMENT_FULL_PROFILE_PATHS = (
+    *_POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS,
+    "policy_improvement_full_entrypoint.py",
+)
+POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS = (
+    *_POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS,
+    "policy_improvement_theory_bridge_entrypoint.py",
+    "scripts/policy_improvement_theory_backend.py",
+    "scripts/policy_improvement_theory_bridge.py",
 )
 _EXACT_PROFILE_PATHS = {
     POLICY_DATASET_BUILDER_SOURCE_PROFILE: POLICY_DATASET_BUILDER_PROFILE_PATHS,
@@ -119,6 +158,16 @@ _EXACT_PROFILE_PATHS = {
     POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE: (
         POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS
     ),
+    POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE: POLICY_IMPROVEMENT_FULL_PROFILE_PATHS,
+    POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE: (
+        POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS
+    ),
+}
+_PROFILES_WITH_TRAINING_SOURCE = {
+    POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE,
 }
 _LOWER_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _READ_SIZE = 1024 * 1024
@@ -149,6 +198,8 @@ class AuthorizedTrainingSource:
 
 def _run_git(root: Path, *arguments: str) -> str:
     environment = {
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
         "PATH": "/usr/bin:/bin",
         "LC_ALL": "C",
     }
@@ -156,6 +207,7 @@ def _run_git(root: Path, *arguments: str) -> str:
         completed = subprocess.run(
             [
                 "git",
+                "--no-replace-objects",
                 "--no-optional-locks",
                 "-C",
                 str(root),
@@ -201,10 +253,7 @@ def _is_directory_source(relative_path: str) -> bool:
 def phase4_profile_relative_paths(root: Path, profile: str) -> list[str]:
     if profile in _EXACT_PROFILE_PATHS:
         paths = set(_EXACT_PROFILE_PATHS[profile])
-        if profile in {
-            POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
-            POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
-        }:
+        if profile in _PROFILES_WITH_TRAINING_SOURCE:
             paths.update(_training_source_relative_paths(root))
         for relative_path in paths:
             if not (root / relative_path).is_file():
@@ -239,10 +288,7 @@ def phase4_profile_relative_paths(root: Path, profile: str) -> list[str]:
 def _git_profile_paths(root: Path, profile: str) -> list[str]:
     if profile in _EXACT_PROFILE_PATHS:
         requested_paths = set(_EXACT_PROFILE_PATHS[profile])
-        if profile in {
-            POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
-            POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
-        }:
+        if profile in _PROFILES_WITH_TRAINING_SOURCE:
             requested_paths.update(_training_source_relative_paths(root))
         output = _run_git(
             root,
@@ -676,8 +722,12 @@ def _is_policy_consumer_selected(relative_path: str) -> bool:
         "phase4_runtime_profile.py",
         "policy_improvement_checkpoint_validator.py",
         "policy_improvement_consumer_entrypoint.py",
+        "policy_improvement_full_backend.py",
+        "policy_improvement_full_entrypoint.py",
+        "policy_improvement_non_smoke_checkpoint.py",
         "policy_improvement_smoke_checkpoint.py",
         "policy_improvement_smoke_runtime.py",
+        "policy_improvement_theory_bridge_entrypoint.py",
         "puzzle_dataset.py",
         "runtime_archive_preflight.py",
         "upi_trm_train.py",
@@ -746,14 +796,12 @@ def assert_phase4_archive_matches_profile(
         selected = {
             name for name in names if _is_dataset_builder_selected(name)
         }
-    elif authorized.profile in {
-        POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
-        POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
-    }:
+    elif authorized.profile in _PROFILES_WITH_TRAINING_SOURCE:
         selected = {
             name
             for name in names
-            if _is_policy_consumer_selected(name)
+            if name in expected
+            or _is_policy_consumer_selected(name)
             or _is_training_source_selected(name)
         }
     else:

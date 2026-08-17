@@ -10,7 +10,7 @@ import os
 import re
 import stat
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
@@ -32,6 +32,8 @@ from phase4_runtime_profile import (
     POLICY_DATASET_BUILDER_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE,
     PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH,
 )
 
@@ -48,6 +50,7 @@ POLICY_SMOKE_RUNTIME_PROFILE_SHA256_ENV = "UPI_TRM_POLICY_SMOKE_RUNTIME_PROFILE_
 POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV = (
     "UPI_TRM_POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256"
 )
+POLICY_PROTOCOL_SHA256_ENV = "UPI_TRM_POLICY_PROTOCOL_SHA256"
 POLICY_SMOKE_PURPOSE = "policy-improvement-smoke"
 POLICY_DATASET_BUILDER_LAUNCHER_SHA256_ENV = (
     "UPI_TRM_POLICY_DATASET_BUILDER_LAUNCHER_SHA256"
@@ -55,6 +58,12 @@ POLICY_DATASET_BUILDER_LAUNCHER_SHA256_ENV = (
 POLICY_DATASET_BUILDER_PURPOSE = "policy-dataset-builder"
 POLICY_IMPROVEMENT_AUDIT_PURPOSE = "policy-improvement-audit"
 POLICY_IMPROVEMENT_ANALYSIS_PURPOSE = "policy-improvement-analysis"
+POLICY_IMPROVEMENT_FULL_PURPOSE = "policy-improvement-full"
+POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE = "policy-improvement-theory-bridge"
+POLICY_IMPROVEMENT_FULL_LAUNCHER_SHA256_ENV = "UPI_TRM_POLICY_FULL_LAUNCHER_SHA256"
+POLICY_IMPROVEMENT_THEORY_BRIDGE_LAUNCHER_SHA256_ENV = (
+    "UPI_TRM_POLICY_THEORY_BRIDGE_LAUNCHER_SHA256"
+)
 POLICY_CONSUMER_LAUNCHER_SHA256_ENV = "UPI_TRM_POLICY_CONSUMER_LAUNCHER_SHA256"
 POLICY_PRODUCER_SOURCE_MANIFEST_SHA256_ENV = (
     "UPI_TRM_POLICY_PRODUCER_SOURCE_MANIFEST_SHA256"
@@ -74,6 +83,10 @@ _PURPOSE_TO_PROFILE = {
     POLICY_DATASET_BUILDER_PURPOSE: POLICY_DATASET_BUILDER_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_AUDIT_PURPOSE: (POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE),
     POLICY_IMPROVEMENT_ANALYSIS_PURPOSE: (POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE),
+    POLICY_IMPROVEMENT_FULL_PURPOSE: POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE: (
+        POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE
+    ),
 }
 _LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _LOWER_COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -83,6 +96,25 @@ _POLICY_RUNTIME_ROLES = (
     "policy-improvement-audit",
     "policy-improvement-analysis",
 )
+_POLICY_RUNTIME_ROLES_V2 = (
+    *_POLICY_RUNTIME_ROLES,
+    POLICY_IMPROVEMENT_FULL_PURPOSE,
+    POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+)
+_POLICY_PROTOCOL_RELATIVE_PATH = "configs/policy_improvement_v1/protocol.json"
+_POLICY_REGISTRY_RELATIVE_PATH = "configs/policy_improvement_v1/registry.json"
+_POLICY_THEORY_AMENDMENT_RELATIVE_PATH = (
+    "configs/policy_improvement_v1/amendments/theory_bridge_v1.json"
+)
+
+
+def _policy_authorization_roles(value: Mapping[str, object]) -> tuple[str, ...]:
+    schema = (value.get("schema_name"), value.get("schema_version"))
+    if schema == ("policy_improvement_runtime_authorization_v1", 1):
+        return _POLICY_RUNTIME_ROLES
+    if schema == ("policy_improvement_runtime_authorization_v2", 2):
+        return _POLICY_RUNTIME_ROLES_V2
+    raise ConfirmatoryRuntimeError("Unsupported runtime authorization schema.")
 
 
 def _strict_json_object(
@@ -111,6 +143,26 @@ def _canonical_json_bytes(value: object) -> bytes:
         raise ConfirmatoryRuntimeError(
             "Runtime authorization is not canonical JSON."
         ) from exc
+
+
+def _canonical_policy_protocol_sha256(project_root: str) -> str:
+    path = Path(project_root) / _POLICY_PROTOCOL_RELATIVE_PATH
+    payload = _stable_regular_file(path)
+    try:
+        value = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_strict_json_object,
+            parse_constant=lambda constant: (_ for _ in ()).throw(
+                ConfirmatoryRuntimeError(f"Policy protocol contains {constant!r}.")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ConfirmatoryRuntimeError(
+            "Policy protocol is not strict UTF-8 JSON."
+        ) from exc
+    if not isinstance(value, dict):
+        raise ConfirmatoryRuntimeError("Policy protocol must be one JSON object.")
+    return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
 
 
 def _stable_regular_file(path: Path) -> bytes:
@@ -164,6 +216,7 @@ def _load_policy_runtime_authorization(
     source_git_commit: str,
     source_manifest_sha256: str,
     launcher_sha256: str,
+    protocol_sha256: str,
 ) -> tuple[str, str, str]:
     """Authenticate the external Stage 0 freeze before behavior imports."""
 
@@ -199,10 +252,9 @@ def _load_policy_runtime_authorization(
     }
     if not isinstance(value, dict) or set(value) != expected_fields:
         raise ConfirmatoryRuntimeError("Runtime authorization field inventory differs.")
+    role_names = _policy_authorization_roles(value)
     if (
-        value["schema_name"] != "policy_improvement_runtime_authorization_v1"
-        or value["schema_version"] != 1
-        or not isinstance(value["authorization_id"], str)
+        not isinstance(value["authorization_id"], str)
         or not value["authorization_id"]
         or not isinstance(value["created_at_utc"], str)
         or re.fullmatch(
@@ -212,15 +264,17 @@ def _load_policy_runtime_authorization(
         is None
         or not isinstance(value["protocol_sha256"], str)
         or _LOWER_SHA256.fullmatch(value["protocol_sha256"]) is None
+        or value["protocol_sha256"] != protocol_sha256
         or value["producer_git_commit"] != source_git_commit
         or value["producer_source_manifest_sha256"] != source_manifest_sha256
         or value["launcher_sha256"] != launcher_sha256
     ):
         raise ConfirmatoryRuntimeError(
-            "Runtime authorization does not authorize this producer or launcher."
+            "Runtime authorization does not authorize this producer, protocol, "
+            "or launcher."
         )
     roles = value["roles"]
-    if not isinstance(roles, list) or len(roles) != len(_POLICY_RUNTIME_ROLES):
+    if not isinstance(roles, list) or len(roles) != len(role_names):
         raise ConfirmatoryRuntimeError("Runtime authorization role inventory differs.")
     role_fields = {
         "role",
@@ -229,7 +283,7 @@ def _load_policy_runtime_authorization(
         "runtime_profile_sha256",
         "selected_source_manifest_sha256",
     }
-    for index, role_name in enumerate(_POLICY_RUNTIME_ROLES):
+    for index, role_name in enumerate(role_names):
         role = roles[index]
         if (
             not isinstance(role, dict)
@@ -250,6 +304,37 @@ def _load_policy_runtime_authorization(
         ):
             raise ConfirmatoryRuntimeError(
                 "Runtime authorization contains an invalid role."
+            )
+    if role_names == _POLICY_RUNTIME_ROLES_V2:
+        checked_roles = {
+            role_name: roles[index] for index, role_name in enumerate(role_names)
+        }
+        for semantic_role, launcher_role in (
+            ("policy-improvement-training", POLICY_IMPROVEMENT_FULL_PURPOSE),
+            (
+                "policy-improvement-evaluation",
+                POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+            ),
+        ):
+            if any(
+                checked_roles[semantic_role][field]
+                != checked_roles[launcher_role][field]
+                for field in (
+                    "source_git_commit",
+                    "runtime_sha256",
+                    "runtime_profile_sha256",
+                    "selected_source_manifest_sha256",
+                )
+            ):
+                raise ConfirmatoryRuntimeError(
+                    "Runtime authorization semantic and launcher roles differ."
+                )
+        if (
+            checked_roles[POLICY_IMPROVEMENT_FULL_PURPOSE]["source_git_commit"]
+            != value["producer_git_commit"]
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Runtime authorization full source differs from the producer."
             )
     training_role = roles[0]
     evaluation_role = roles[1]
@@ -293,6 +378,7 @@ def _load_policy_consumer_runtime_authorization(
     launcher_sha256: str,
     producer_git_commit: str,
     producer_source_manifest_sha256: str,
+    protocol_sha256: str,
 ) -> str:
     """Authenticate the externally frozen authorization for an evidence consumer."""
 
@@ -328,10 +414,20 @@ def _load_policy_consumer_runtime_authorization(
     }
     if not isinstance(value, dict) or set(value) != expected_fields:
         raise ConfirmatoryRuntimeError("Runtime authorization field inventory differs.")
+    role_names = _policy_authorization_roles(value)
     if (
-        value["schema_name"] != "policy_improvement_runtime_authorization_v1"
-        or value["schema_version"] != 1
-        or not isinstance(value["authorization_id"], str)
+        purpose
+        in {
+            POLICY_IMPROVEMENT_FULL_PURPOSE,
+            POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+        }
+        and role_names != _POLICY_RUNTIME_ROLES_V2
+    ):
+        raise ConfirmatoryRuntimeError(
+            "Full and theory-bridge execution require runtime authorization v2."
+        )
+    if (
+        not isinstance(value["authorization_id"], str)
         or not value["authorization_id"]
         or not isinstance(value["created_at_utc"], str)
         or re.fullmatch(
@@ -341,16 +437,17 @@ def _load_policy_consumer_runtime_authorization(
         is None
         or not isinstance(value["protocol_sha256"], str)
         or _LOWER_SHA256.fullmatch(value["protocol_sha256"]) is None
+        or value["protocol_sha256"] != protocol_sha256
         or value["producer_git_commit"] != producer_git_commit
-        or value["producer_source_manifest_sha256"]
-        != producer_source_manifest_sha256
+        or value["producer_source_manifest_sha256"] != producer_source_manifest_sha256
         or value["launcher_sha256"] != launcher_sha256
     ):
         raise ConfirmatoryRuntimeError(
-            "Runtime authorization does not authorize this producer or launcher."
+            "Runtime authorization does not authorize this producer, protocol, "
+            "or launcher."
         )
     roles = value["roles"]
-    if not isinstance(roles, list) or len(roles) != len(_POLICY_RUNTIME_ROLES):
+    if not isinstance(roles, list) or len(roles) != len(role_names):
         raise ConfirmatoryRuntimeError("Runtime authorization role inventory differs.")
     role_fields = {
         "role",
@@ -360,7 +457,7 @@ def _load_policy_consumer_runtime_authorization(
         "selected_source_manifest_sha256",
     }
     checked_roles: dict[str, dict[str, object]] = {}
-    for index, role_name in enumerate(_POLICY_RUNTIME_ROLES):
+    for index, role_name in enumerate(role_names):
         role = roles[index]
         if (
             not isinstance(role, dict)
@@ -377,8 +474,7 @@ def _load_policy_consumer_runtime_authorization(
                     "selected_source_manifest_sha256",
                 )
             )
-            or role["runtime_profile_sha256"]
-            != role["selected_source_manifest_sha256"]
+            or role["runtime_profile_sha256"] != role["selected_source_manifest_sha256"]
         ):
             raise ConfirmatoryRuntimeError(
                 "Runtime authorization contains an invalid role."
@@ -393,6 +489,10 @@ def _load_policy_consumer_runtime_authorization(
     expected_role = {
         POLICY_IMPROVEMENT_AUDIT_PURPOSE: "policy-improvement-audit",
         POLICY_IMPROVEMENT_ANALYSIS_PURPOSE: "policy-improvement-analysis",
+        POLICY_IMPROVEMENT_FULL_PURPOSE: POLICY_IMPROVEMENT_FULL_PURPOSE,
+        POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE: (
+            POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE
+        ),
     }.get(purpose)
     if expected_role is None:
         raise ConfirmatoryRuntimeError("Unsupported policy consumer purpose.")
@@ -405,6 +505,34 @@ def _load_policy_consumer_runtime_authorization(
         raise ConfirmatoryRuntimeError(
             "Runtime authorization does not authorize this consumer artifact."
         )
+    if role_names == _POLICY_RUNTIME_ROLES_V2:
+        for semantic_role, launcher_role in (
+            ("policy-improvement-training", POLICY_IMPROVEMENT_FULL_PURPOSE),
+            (
+                "policy-improvement-evaluation",
+                POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+            ),
+        ):
+            if any(
+                checked_roles[semantic_role][field]
+                != checked_roles[launcher_role][field]
+                for field in (
+                    "source_git_commit",
+                    "runtime_sha256",
+                    "runtime_profile_sha256",
+                    "selected_source_manifest_sha256",
+                )
+            ):
+                raise ConfirmatoryRuntimeError(
+                    "Runtime authorization semantic and launcher roles differ."
+                )
+        if (
+            checked_roles[POLICY_IMPROVEMENT_FULL_PURPOSE]["source_git_commit"]
+            != producer_git_commit
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Runtime authorization full source differs from the producer."
+            )
     canonical = _canonical_json_bytes(value)
     if hashlib.sha256(canonical).hexdigest() != expected_sha256:
         raise ConfirmatoryRuntimeError(
@@ -475,6 +603,9 @@ def _normalize_child_args(
     purpose: str,
     source_project_root: str,
     runtime_args: Sequence[str],
+    *,
+    policy_project_root: str | None = None,
+    runtime_authorization_sha256: str | None = None,
 ) -> list[str]:
     arguments = list(runtime_args)
     if arguments[:1] == ["--"]:
@@ -617,6 +748,178 @@ def _normalize_child_args(
             source_project_root,
             *arguments,
         ]
+    if purpose in {
+        POLICY_IMPROVEMENT_FULL_PURPOSE,
+        POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+    }:
+        project_root = policy_project_root or source_project_root
+        protocol_path = str(Path(project_root) / _POLICY_PROTOCOL_RELATIVE_PATH)
+        registry_path = str(Path(project_root) / _POLICY_REGISTRY_RELATIVE_PATH)
+        theory_amendment_path = str(
+            Path(project_root) / _POLICY_THEORY_AMENDMENT_RELATIVE_PATH
+        )
+        if purpose == POLICY_IMPROVEMENT_FULL_PURPOSE and (
+            not isinstance(runtime_authorization_sha256, str)
+            or _LOWER_SHA256.fullmatch(runtime_authorization_sha256) is None
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Full runtime lacks its launcher-owned authorization digest."
+            )
+        if arguments == ["--help"]:
+            if purpose == POLICY_IMPROVEMENT_FULL_PURPOSE:
+                return [
+                    "--project-root",
+                    project_root,
+                    "--protocol",
+                    protocol_path,
+                    "--registry",
+                    registry_path,
+                    "--amendment",
+                    theory_amendment_path,
+                    "--runtime-authorization-sha256",
+                    runtime_authorization_sha256,
+                    "--help",
+                ]
+            return [
+                "--policy-improvement-theory-bridge-entrypoint",
+                "--theory-amendment",
+                theory_amendment_path,
+                "--amendment",
+                theory_amendment_path,
+                "--project-root",
+                project_root,
+                "--protocol",
+                protocol_path,
+                "--registry",
+                registry_path,
+                "--help",
+            ]
+        value_options = {
+            "--evidence-root",
+            "--dataset-root",
+            "--row-id",
+            "--amendment",
+        }
+        if purpose == POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE:
+            value_options.update({"--request", "--checkpoint"})
+        flag_options = (
+            {"--print-contract"}
+            if purpose == POLICY_IMPROVEMENT_FULL_PURPOSE
+            else set()
+        )
+        required_options = {
+            "--evidence-root",
+            "--dataset-root",
+            "--row-id",
+        }
+        if purpose == POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE:
+            required_options.update({"--request", "--checkpoint"})
+        values: dict[str, list[str]] = {option: [] for option in value_options}
+        flags: set[str] = set()
+        index = 0
+        while index < len(arguments):
+            argument = arguments[index]
+            name, separator, inline_value = argument.partition("=")
+            if name in flag_options:
+                if separator or name in flags:
+                    raise ConfirmatoryRuntimeError(
+                        "Policy runtime arguments contain a duplicate or valued flag."
+                    )
+                flags.add(name)
+                index += 1
+                continue
+            if name not in value_options:
+                raise ConfirmatoryRuntimeError(
+                    "Policy runtime arguments contain a protected or unsupported "
+                    "child option."
+                )
+            if separator:
+                value = inline_value
+                index += 1
+            else:
+                if index + 1 >= len(arguments):
+                    raise ConfirmatoryRuntimeError(
+                        "Policy runtime child option is missing its value."
+                    )
+                value = arguments[index + 1]
+                index += 2
+            if not value or value.startswith("--"):
+                raise ConfirmatoryRuntimeError(
+                    "Policy runtime child option has an empty or missing value."
+                )
+            if name != "--amendment" and values[name]:
+                raise ConfirmatoryRuntimeError(
+                    "Policy runtime arguments repeat a singleton child option."
+                )
+            if name != "--row-id":
+                supplied_path = Path(value)
+                if not supplied_path.is_absolute() or ".." in supplied_path.parts:
+                    raise ConfirmatoryRuntimeError(
+                        "Policy runtime data and amendment paths must be absolute."
+                    )
+            values[name].append(value)
+        if any(not values[option] for option in required_options):
+            raise ConfirmatoryRuntimeError(
+                "Policy runtime arguments omit a required safe child option."
+            )
+        if theory_amendment_path in values["--amendment"]:
+            raise ConfirmatoryRuntimeError(
+                "The launcher-owned theory amendment cannot be supplied again."
+            )
+        additional_amendments = [
+            item
+            for amendment in values["--amendment"]
+            for item in ("--amendment", amendment)
+        ]
+        common = [
+            "--project-root",
+            project_root,
+            "--protocol",
+            protocol_path,
+            "--registry",
+            registry_path,
+            "--amendment",
+            theory_amendment_path,
+            *additional_amendments,
+            "--evidence-root",
+            values["--evidence-root"][0],
+            "--dataset-root",
+            values["--dataset-root"][0],
+            "--row-id",
+            values["--row-id"][0],
+        ]
+        if purpose == POLICY_IMPROVEMENT_FULL_PURPOSE:
+            assert runtime_authorization_sha256 is not None
+            return [
+                *common,
+                "--runtime-authorization-sha256",
+                runtime_authorization_sha256,
+                *(["--print-contract"] if "--print-contract" in flags else []),
+            ]
+        return [
+            "--policy-improvement-theory-bridge-entrypoint",
+            "--request",
+            values["--request"][0],
+            "--theory-amendment",
+            theory_amendment_path,
+            "--amendment",
+            theory_amendment_path,
+            *additional_amendments,
+            "--checkpoint",
+            values["--checkpoint"][0],
+            "--project-root",
+            project_root,
+            "--protocol",
+            protocol_path,
+            "--registry",
+            registry_path,
+            "--evidence-root",
+            values["--evidence-root"][0],
+            "--dataset-root",
+            values["--dataset-root"][0],
+            "--row-id",
+            values["--row-id"][0],
+        ]
     if purpose != "phase4-training":
         if contains_option("--phase4-publication"):
             raise ConfirmatoryRuntimeError(
@@ -667,16 +970,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
         source_root = str(Path(arguments.source_project_root).resolve(strict=True))
-        policy_consumer = arguments.purpose in {
+        separate_producer_consumer = arguments.purpose in {
             POLICY_IMPROVEMENT_AUDIT_PURPOSE,
             POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+            POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
         }
         producer_options_present = (
             arguments.producer_source_project_root is not None,
             arguments.expected_producer_git_commit is not None,
         )
-        if policy_consumer != all(producer_options_present) or (
-            not policy_consumer and any(producer_options_present)
+        if separate_producer_consumer != all(producer_options_present) or (
+            not separate_producer_consumer and any(producer_options_present)
         ):
             raise ConfirmatoryRuntimeError(
                 "Policy consumers require a separate complete producer-source "
@@ -686,9 +990,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.runtime_authorization is not None,
             arguments.expected_runtime_authorization_sha256 is not None,
         )
-        requires_runtime_authorization = (
-            arguments.purpose == POLICY_SMOKE_PURPOSE or policy_consumer
-        )
+        requires_runtime_authorization = arguments.purpose in {
+            POLICY_SMOKE_PURPOSE,
+            POLICY_IMPROVEMENT_AUDIT_PURPOSE,
+            POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
+            POLICY_IMPROVEMENT_FULL_PURPOSE,
+            POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+        }
         if requires_runtime_authorization != all(authorization_options_present):
             raise ConfirmatoryRuntimeError(
                 "Policy-improvement smoke and evidence consumers require one "
@@ -696,13 +1004,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         producer_source_root = (
             str(Path(arguments.producer_source_project_root).resolve(strict=True))
-            if policy_consumer
+            if separate_producer_consumer
             else None
         )
+        if separate_producer_consumer and producer_source_root == source_root:
+            raise ConfirmatoryRuntimeError(
+                "Policy evaluator and producer checkouts must be distinct paths."
+            )
         child_args = _normalize_child_args(
             arguments.purpose,
             source_root,
             arguments.runtime_args,
+            policy_project_root=(
+                producer_source_root
+                if arguments.purpose == POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE
+                else source_root
+            ),
+            runtime_authorization_sha256=(
+                arguments.expected_runtime_authorization_sha256
+            ),
         )
         producer_authorized = None
         if arguments.purpose in {"phase4-training", POLICY_SMOKE_PURPOSE}:
@@ -728,11 +1048,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                     producer_source_root,
                     arguments.expected_producer_git_commit,
                 )
-                if policy_consumer
-                else None
+                if separate_producer_consumer
+                else (
+                    authorize_phase4_training_source(
+                        source_root,
+                        arguments.expected_source_git_commit,
+                    )
+                    if arguments.purpose == POLICY_IMPROVEMENT_FULL_PURPOSE
+                    else None
+                )
             )
             role = profile
             archive_validator = _consumer_archive_validator(authorized)
+        policy_protocol_sha256 = (
+            _canonical_policy_protocol_sha256(
+                producer_source_root if separate_producer_consumer else source_root
+            )
+            if requires_runtime_authorization
+            else None
+        )
         runtime = validate_runtime_archive(
             arguments.runtime_archive,
             arguments.expected_runtime_sha256,
@@ -747,6 +1081,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             launcher_sha256 = _launcher_artifact_sha256()
             assert arguments.runtime_authorization is not None
             assert arguments.expected_runtime_authorization_sha256 is not None
+            assert policy_protocol_sha256 is not None
             (
                 authorization_json,
                 runtime_profile_sha256,
@@ -758,6 +1093,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 source_git_commit=authorized.git_commit,
                 source_manifest_sha256=authorized.source_manifest_sha256,
                 launcher_sha256=launcher_sha256,
+                protocol_sha256=policy_protocol_sha256,
             )
             attestation_environment[POLICY_SMOKE_LAUNCHER_SHA256_ENV] = launcher_sha256
             attestation_environment[POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV] = (
@@ -772,6 +1108,51 @@ def main(argv: Sequence[str] | None = None) -> int:
             attestation_environment[
                 POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV
             ] = selected_source_manifest_sha256
+            attestation_environment[POLICY_PROTOCOL_SHA256_ENV] = policy_protocol_sha256
+        if arguments.purpose in {
+            POLICY_IMPROVEMENT_FULL_PURPOSE,
+            POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+        }:
+            assert producer_authorized is not None
+            assert arguments.runtime_authorization is not None
+            assert arguments.expected_runtime_authorization_sha256 is not None
+            assert policy_protocol_sha256 is not None
+            policy_launcher_sha256 = _launcher_artifact_sha256()
+            authorization_json = _load_policy_consumer_runtime_authorization(
+                arguments.runtime_authorization,
+                arguments.expected_runtime_authorization_sha256,
+                purpose=arguments.purpose,
+                runtime_sha256=arguments.expected_runtime_sha256,
+                source_git_commit=authorized.git_commit,
+                source_manifest_sha256=authorized.source_manifest_sha256,
+                launcher_sha256=policy_launcher_sha256,
+                producer_git_commit=producer_authorized.git_commit,
+                producer_source_manifest_sha256=(
+                    producer_authorized.source_manifest_sha256
+                ),
+                protocol_sha256=policy_protocol_sha256,
+            )
+            attestation_environment[POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV] = (
+                authorization_json
+            )
+            attestation_environment[POLICY_SMOKE_RUNTIME_AUTHORIZATION_SHA256_ENV] = (
+                arguments.expected_runtime_authorization_sha256
+            )
+            attestation_environment[POLICY_SMOKE_RUNTIME_PROFILE_SHA256_ENV] = (
+                authorized.source_manifest_sha256
+            )
+            attestation_environment[
+                POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV
+            ] = authorized.source_manifest_sha256
+            attestation_environment[POLICY_PROTOCOL_SHA256_ENV] = policy_protocol_sha256
+            if arguments.purpose == POLICY_IMPROVEMENT_FULL_PURPOSE:
+                attestation_environment[POLICY_IMPROVEMENT_FULL_LAUNCHER_SHA256_ENV] = (
+                    policy_launcher_sha256
+                )
+            else:
+                attestation_environment[
+                    POLICY_IMPROVEMENT_THEORY_BRIDGE_LAUNCHER_SHA256_ENV
+                ] = policy_launcher_sha256
         if arguments.purpose == POLICY_DATASET_BUILDER_PURPOSE:
             attestation_environment[POLICY_DATASET_BUILDER_LAUNCHER_SHA256_ENV] = (
                 _launcher_artifact_sha256()
@@ -783,6 +1164,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             assert producer_authorized is not None
             assert arguments.runtime_authorization is not None
             assert arguments.expected_runtime_authorization_sha256 is not None
+            assert policy_protocol_sha256 is not None
             consumer_launcher_sha256 = _launcher_artifact_sha256()
             authorization_json = _load_policy_consumer_runtime_authorization(
                 arguments.runtime_authorization,
@@ -796,6 +1178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 producer_source_manifest_sha256=(
                     producer_authorized.source_manifest_sha256
                 ),
+                protocol_sha256=policy_protocol_sha256,
             )
             attestation_environment[POLICY_CONSUMER_LAUNCHER_SHA256_ENV] = (
                 consumer_launcher_sha256
@@ -806,9 +1189,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             attestation_environment[POLICY_PRODUCER_GIT_COMMIT_ENV] = (
                 producer_authorized.git_commit
             )
-            attestation_environment[
-                POLICY_CONSUMER_RUNTIME_AUTHORIZATION_ENV
-            ] = authorization_json
+            attestation_environment[POLICY_CONSUMER_RUNTIME_AUTHORIZATION_ENV] = (
+                authorization_json
+            )
             attestation_environment[
                 POLICY_CONSUMER_RUNTIME_AUTHORIZATION_SHA256_ENV
             ] = arguments.expected_runtime_authorization_sha256

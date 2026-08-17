@@ -146,6 +146,15 @@ python_library(
 )
 
 python_library(
+    name = "policy_improvement_theory_schema",
+    srcs = ["scripts/policy_improvement_theory_schema.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
     name = "policy_improvement_registry",
     srcs = ["scripts/policy_improvement_registry.py"],
     base_module = "",
@@ -170,6 +179,118 @@ python_library(
     deps = [
         ":policy_improvement_registry",
         ":policy_improvement_schema",
+        ":policy_improvement_theory_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_non_smoke_checkpoint",
+    srcs = ["policy_improvement_non_smoke_checkpoint.py"],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        ":policy_improvement_smoke_checkpoint",
+        ":rl",
+        ":utils",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_full_backend",
+    srcs = ["policy_improvement_full_backend.py"],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/pyyaml:pyyaml",
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":policy_improvement_full_runtime",
+        ":policy_improvement_non_smoke_checkpoint",
+        ":policy_improvement_schema",
+        ":policy_improvement_smoke_runtime",
+        ":rl",
+        ":upi_trm_train_lib",
+        ":utils",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_full_entrypoint",
+    srcs = ["policy_improvement_full_entrypoint.py"],
+    base_module = "",
+    deps = [
+        ":runtime_archive_preflight",
+    ],
+)
+
+python_binary(
+    name = "policy_improvement_full",
+    srcs = ["policy_improvement_full_entrypoint.py"],
+    base_module = "",
+    compile = False,
+    keep_gpu_sections = True,
+    main_module = "policy_improvement_full_entrypoint",
+    resources = glob([
+        "configs/policy_improvement_v1/*.json",
+        "configs/policy_improvement_v1/*.yaml",
+        "configs/policy_improvement_v1/amendments/*.json",
+    ]),
+    deps = [
+        ":policy_improvement_full_backend",
+        ":policy_improvement_full_runtime",
+        ":policy_improvement_non_smoke_checkpoint",
+        ":policy_improvement_theory_schema",
+        ":runtime_archive_preflight",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_theory_bridge_lib",
+    srcs = ["scripts/policy_improvement_theory_bridge.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_schema",
+        ":policy_improvement_theory_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_theory_backend",
+    srcs = ["scripts/policy_improvement_theory_backend.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_full_backend",
+        ":policy_improvement_schema",
+        ":policy_improvement_theory_bridge_lib",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_theory_bridge_entrypoint",
+    srcs = ["policy_improvement_theory_bridge_entrypoint.py"],
+    base_module = "",
+    deps = [
+        ":runtime_archive_preflight",
+    ],
+)
+
+python_binary(
+    name = "policy_improvement_theory_bridge",
+    srcs = ["policy_improvement_theory_bridge_entrypoint.py"],
+    base_module = "",
+    compile = False,
+    keep_gpu_sections = True,
+    main_module = "policy_improvement_theory_bridge_entrypoint",
+    resources = glob([
+        "configs/policy_improvement_v1/*.json",
+        "configs/policy_improvement_v1/*.yaml",
+        "configs/policy_improvement_v1/amendments/*.json",
+    ]),
+    deps = [
+        ":policy_improvement_full_backend",
+        ":policy_improvement_theory_backend",
+        ":policy_improvement_theory_bridge_lib",
+        ":policy_improvement_theory_schema",
+        ":runtime_archive_preflight",
     ],
 )
 
@@ -214,11 +335,17 @@ python_library(
     srcs = ["policy_improvement_checkpoint_validator.py"],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        ":policy_improvement_full_backend",
+        ":policy_improvement_full_runtime",
+        ":policy_improvement_non_smoke_checkpoint",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
         ":policy_improvement_smoke_checkpoint",
         ":policy_improvement_smoke_runtime",
         ":upi_trm_train_lib",
+        ":utils",
     ],
 )
 
@@ -244,6 +371,7 @@ python_binary(
     resources = glob([
         "configs/policy_improvement_v1/*.json",
         "configs/policy_improvement_v1/*.yaml",
+        "configs/policy_improvement_v1/amendments/*.json",
     ]),
     deps = [
         ":policy_improvement_checkpoint_validator",
@@ -291,6 +419,7 @@ python_binary(
     resources = glob([
         "configs/policy_improvement_v1/*.json",
         "configs/policy_improvement_v1/*.yaml",
+        "configs/policy_improvement_v1/amendments/*.json",
     ]),
     deps = [
         ":policy_improvement_audit_lib",
@@ -758,6 +887,44 @@ python_unittest(
         ":policy_improvement_full_runtime",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_full_backend",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_full_backend_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":policy_improvement_checkpoint_validator",
+        ":policy_improvement_full_backend",
+        ":policy_improvement_full_runtime",
+        ":policy_improvement_non_smoke_checkpoint",
+        ":policy_improvement_schema",
+        ":policy_improvement_smoke_checkpoint",
+        ":rl",
+        ":utils",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_theory_bridge",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_theory_bridge_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":policy_improvement_full_backend",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_theory_backend",
+        ":policy_improvement_theory_bridge_lib",
+        ":policy_improvement_theory_schema",
     ],
 )
 

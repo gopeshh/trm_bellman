@@ -239,10 +239,12 @@ class PolicyImprovementSmokeRuntimeTest(unittest.TestCase):
                 *,
                 owner_root: str | Path,
                 expected_producer: object,
+                verify_test_content: bool,
             ) -> dict[str, object]:
                 self.assertEqual(Path(supplied_root), dataset_root)
                 self.assertEqual(Path(owner_root), dataset_root.parent)
                 self.assertEqual(expected_producer, producer)
+                self.assertFalse(verify_test_content)
                 verifier_calls.append((Path(supplied_root), Path(owner_root)))
                 return {
                     "manifest_sha256": dataset_manifest,

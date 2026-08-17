@@ -54,6 +54,24 @@ def _clone(value: Any) -> Any:
     return copy.deepcopy(value)
 
 
+def _require_finite_tensor_tree(value: object, *, label: str) -> None:
+    if torch.is_tensor(value):
+        if (value.is_floating_point() or value.is_complex()) and not bool(
+            torch.isfinite(value).all().item()
+        ):
+            raise PolicyImprovementSmokeCheckpointError(
+                f"PPO smoke {label} contains a non-finite tensor."
+            )
+        return
+    if isinstance(value, Mapping):
+        for item in value.values():
+            _require_finite_tensor_tree(item, label=label)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _require_finite_tensor_tree(item, label=label)
+
+
 def _capture_rng_state() -> dict[str, Any]:
     return {
         "python": random.getstate(),
@@ -590,6 +608,7 @@ def validate_ppo_smoke_checkpoint(
             "PPO smoke termination counts differ from completed episodes."
         )
 
+    _require_finite_tensor_tree(value["model_state_dict"], label="model state")
     model_probe = copy.deepcopy(trainer.model)
     try:
         model_probe.load_state_dict(value["model_state_dict"], strict=True)
@@ -681,19 +700,21 @@ def _hash_descriptor(descriptor: int) -> str:
 
 
 def load_stable_checkpoint(
-    path: str | Path, *, expected_sha256: str
+    path: str | Path | int, *, expected_sha256: str
 ) -> tuple[object, str]:
-    source = Path(path)
+    source = None if isinstance(path, int) else Path(path)
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        descriptor = os.open(source, flags)
+        descriptor = os.dup(path) if isinstance(path, int) else os.open(source, flags)
     except OSError as exc:
         raise PolicyImprovementSmokeCheckpointError(
             "PPO smoke checkpoint cannot be opened."
         ) from exc
     try:
         before = os.fstat(descriptor)
-        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        if not stat.S_ISREG(before.st_mode) or (
+            source is not None and before.st_nlink != 1
+        ):
             raise PolicyImprovementSmokeCheckpointError(
                 "PPO smoke checkpoint must be a singly linked regular file."
             )
@@ -705,21 +726,35 @@ def load_stable_checkpoint(
         with os.fdopen(os.dup(descriptor), "rb") as handle:
             value = torch.load(handle, map_location="cpu", weights_only=False)
         after = os.fstat(descriptor)
+        path_changed = False
+        if source is not None:
+            try:
+                after_path = source.lstat()
+            except OSError:
+                path_changed = True
+            else:
+                path_changed = (after_path.st_dev, after_path.st_ino) != (
+                    after.st_dev,
+                    after.st_ino,
+                )
         if (
-            before.st_dev,
-            before.st_ino,
-            before.st_size,
-            before.st_mtime_ns,
-            before.st_ctime_ns,
-        ) != (
-            after.st_dev,
-            after.st_ino,
-            after.st_size,
-            after.st_mtime_ns,
-            after.st_ctime_ns,
-        ) or _hash_descriptor(
-            descriptor
-        ) != digest:
+            (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            )
+            or path_changed
+            or _hash_descriptor(descriptor) != digest
+        ):
             raise PolicyImprovementSmokeCheckpointError(
                 "PPO smoke checkpoint changed while it was loaded."
             )

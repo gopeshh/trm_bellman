@@ -1,0 +1,110 @@
+{
+  "amendment_id": "pre-stage1-theory-bridge-v1",
+  "analysis": {
+    "aggregation": "per_state_rows_plus_mean_and_maximum",
+    "claims": "none_from_smoke_or_theory_bridge_values",
+    "mc_reporting": "operator_mean_standard_error_and_B_nm_standard_error",
+    "scientific_selection": false,
+    "scope": "finite_batch_proxy_only"
+  },
+  "bellman_estimators": {
+    "K1": {
+      "horizon": 1,
+      "kind": "exact_masked_action_sum_v1",
+      "rollout_count": 0,
+      "uncertainty": "exact_zero_monte_carlo_standard_error"
+    },
+    "K5": {
+      "base_seed": 26081601,
+      "horizon": 5,
+      "kind": "common_random_number_monte_carlo_v1",
+      "rollout_count": 64,
+      "seed_derivation": "sha256_base_record_state_repeat_v1",
+      "uncertainty": "sample_standard_error_of_operator_mean"
+    }
+  },
+  "created_at_utc": "2026-08-16T00:00:00Z",
+  "evaluator_contract": {
+    "checkpoint_access": "read_only_stable_regular_file",
+    "launcher_purpose": "policy-improvement-theory-bridge",
+    "persistent_reference_semantics": "m_changes_endpoint_evaluator_only_F_n_and_augmented_transition_fixed",
+    "runtime_role": "policy-improvement-theory-bridge",
+    "source_tree_fallback": false,
+    "training_state_mutation": "forbidden"
+  },
+  "metrics": [
+    "D_nm",
+    "bellman_residual_proxy",
+    "B_nm",
+    "policy_overlap_tau",
+    "centering_defect",
+    "deployment_tv"
+  ],
+  "multi_fidelity_exact_method_screen": {
+    "fidelities": [
+      {
+        "checkpoint_environment_interactions": 10000,
+        "record_count": 64,
+        "reference_depths": [
+          8
+        ]
+      },
+      {
+        "checkpoint_environment_interactions": 20000,
+        "record_count": 64,
+        "reference_depths": [
+          8
+        ]
+      },
+      {
+        "checkpoint_environment_interactions": 40000,
+        "record_count": 128,
+        "reference_depths": [
+          8
+        ]
+      },
+      {
+        "checkpoint_environment_interactions": 80000,
+        "record_count": 256,
+        "reference_depths": [
+          8,
+          16
+        ]
+      }
+    ],
+    "methods": [
+      "fixed_base_exact_persistent",
+      "fixed_base_exact_episodic"
+    ],
+    "record_selector": "registered_contiguous_prefix_v1",
+    "selection_use": "none",
+    "split": "validation"
+  },
+  "outcome_evidence_inspected": false,
+  "protocol_id": "policy-improvement-v1-20260814",
+  "protocol_sha256": "583e99828d877f9a33503e84af58f1ccb8aa643f7ecc5baa826d6662de6a48b2",
+  "prior_amendment_history_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "reference_depths": {
+    "optional_exploratory_m": [
+      16
+    ],
+    "primary_m": 8,
+    "selection_use": "none"
+  },
+  "result_schema": {
+    "schema_name": "policy_improvement_theory_bridge_result_v1",
+    "schema_version": 1
+  },
+  "schema_name": "policy_improvement_theory_bridge_amendment_v1",
+  "schema_version": 1,
+  "smoke_policy": {
+    "allowed_sources": [
+      "synthetic",
+      "train"
+    ],
+    "scientific_selection": false,
+    "test_records": false
+  },
+  "source_registry_sha256": "6f618e6f3db0b60079ffc41d37982b781a9ff22a2ddab512c36e44db84a162f6",
+  "test_data_opened": false
+}

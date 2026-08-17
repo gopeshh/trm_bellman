@@ -867,8 +867,14 @@ def verify_dataset(
     *,
     owner_root: str | Path,
     expected_producer: Mapping[str, object],
+    verify_test_content: bool = True,
 ) -> dict[str, object]:
-    """Recompute corpus identity and require an external producer identity."""
+    """Recompute corpus identity and require an external producer identity.
+
+    Stage-0 callers set ``verify_test_content`` to false. In that mode the
+    authenticated split manifest supplies the registered test metadata, while
+    no path below the held-out test directory is opened or deserialized.
+    """
 
     producer = _producer_attestation(expected_producer)
     owner, owner_descriptor, owner_identity = _validate_private_owner_root(owner_root)
@@ -971,11 +977,6 @@ def verify_dataset(
     identifier_offset = 0
     total_count = sum(count for _, count, _ in DEFAULT_SPLITS)
     for split_name, expected_count, expected_seed in DEFAULT_SPLITS:
-        split_path = path / split_name
-        if split_path.is_symlink() or not split_path.is_dir():
-            raise PolicyImprovementDatasetError("Split path is not a real directory.")
-        if {item.name for item in split_path.iterdir()} != _SPLIT_FILE_NAMES:
-            raise PolicyImprovementDatasetError("Split file inventory differs.")
         split_registration = manifest["splits"][split_name]
         materialized_manifest_path = manifests_path / f"{split_name}.json"
         if split_registration["manifest_sha256"] != _regular_file_sha256(
@@ -1008,11 +1009,66 @@ def verify_dataset(
         ):
             raise PolicyImprovementDatasetError("Split registration differs.")
         expected_relative_names = {f"{split_name}/{name}" for name in _SPLIT_FILE_NAMES}
-        if set(split_manifest["files"]) != expected_relative_names:
+        files = split_manifest["files"]
+        record_hashes = split_manifest["record_sha256s"]
+        input_hashes = split_manifest["input_sha256s"]
+        symmetry_hashes = split_manifest["symmetry_canonical_sha256s"]
+        if (
+            not isinstance(files, Mapping)
+            or set(files) != expected_relative_names
+            or not isinstance(record_hashes, list)
+            or not isinstance(input_hashes, list)
+            or not isinstance(symmetry_hashes, list)
+            or len(record_hashes) != expected_count
+            or len(input_hashes) != expected_count
+            or len(symmetry_hashes) != expected_count
+            or any(
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+                for values in (record_hashes, input_hashes, symmetry_hashes)
+                for digest in values
+            )
+        ):
+            raise PolicyImprovementDatasetError("Split file inventory differs.")
+        for relative_name in sorted(expected_relative_names):
+            entry = files[relative_name]
+            if (
+                not isinstance(entry, Mapping)
+                or set(entry) != {"bytes", "sha256"}
+                or isinstance(entry["bytes"], bool)
+                or not isinstance(entry["bytes"], int)
+                or entry["bytes"] < 0
+                or not isinstance(entry["sha256"], str)
+                or len(entry["sha256"]) != 64
+                or any(
+                    character not in "0123456789abcdef" for character in entry["sha256"]
+                )
+            ):
+                raise PolicyImprovementDatasetError("Split file identity is malformed.")
+        if (
+            split_manifest["ordered_record_sha256"] != ordered_sha256(record_hashes)
+            or split_registration["ordered_record_sha256"]
+            != ordered_sha256(record_hashes)
+            or split_manifest["ordered_symmetry_sha256"]
+            != ordered_sha256(symmetry_hashes)
+            or split_registration["ordered_symmetry_sha256"]
+            != ordered_sha256(symmetry_hashes)
+        ):
+            raise PolicyImprovementDatasetError("Ordered split identity differs.")
+        symmetry_by_split[split_name] = symmetry_hashes
+        if split_name == "test" and not verify_test_content:
+            identifier_offset += expected_count
+            continue
+
+        split_path = path / split_name
+        if split_path.is_symlink() or not split_path.is_dir():
+            raise PolicyImprovementDatasetError("Split path is not a real directory.")
+        if {item.name for item in split_path.iterdir()} != _SPLIT_FILE_NAMES:
             raise PolicyImprovementDatasetError("Split file inventory differs.")
         for relative_name in sorted(expected_relative_names):
             source_path = path / relative_name
-            entry = split_manifest["files"][relative_name]
+            entry = files[relative_name]
             if entry != {
                 "bytes": source_path.stat().st_size,
                 "sha256": _regular_file_sha256(source_path),
@@ -1053,9 +1109,9 @@ def verify_dataset(
         records = _strict_json(split_path / "records.json")
         if not isinstance(records, list) or len(records) != expected_count:
             raise PolicyImprovementDatasetError("Record manifest length differs.")
-        record_hashes: list[str] = []
-        input_hashes: list[str] = []
-        symmetry_hashes: list[str] = []
+        computed_record_hashes: list[str] = []
+        computed_input_hashes: list[str] = []
+        computed_symmetry_hashes: list[str] = []
         for index, record in enumerate(records):
             puzzle, solution = _validate_record_arrays(inputs[index], labels[index])
             if not _is_valid_solution(solution):
@@ -1075,26 +1131,16 @@ def verify_dataset(
                 "symmetry_canonical_sha256": expected_symmetry,
             }:
                 raise PolicyImprovementDatasetError("Record identity differs.")
-            record_hashes.append(expected_record)
-            input_hashes.append(input_sha256(inputs[index]))
-            symmetry_hashes.append(expected_symmetry)
+            computed_record_hashes.append(expected_record)
+            computed_input_hashes.append(input_sha256(inputs[index]))
+            computed_symmetry_hashes.append(expected_symmetry)
         if (
-            split_manifest["record_sha256s"] != record_hashes
-            or split_manifest["input_sha256s"] != input_hashes
-            or split_manifest["ordered_record_sha256"] != ordered_sha256(record_hashes)
-            or split_registration["ordered_record_sha256"]
-            != ordered_sha256(record_hashes)
+            record_hashes != computed_record_hashes
+            or input_hashes != computed_input_hashes
         ):
             raise PolicyImprovementDatasetError("Ordered record identity differs.")
-        if (
-            split_manifest["symmetry_canonical_sha256s"] != symmetry_hashes
-            or split_manifest["ordered_symmetry_sha256"]
-            != ordered_sha256(symmetry_hashes)
-            or split_registration["ordered_symmetry_sha256"]
-            != ordered_sha256(symmetry_hashes)
-        ):
+        if symmetry_hashes != computed_symmetry_hashes:
             raise PolicyImprovementDatasetError("Ordered symmetry identity differs.")
-        symmetry_by_split[split_name] = symmetry_hashes
         identifier_offset += expected_count
     verify_cross_split_symmetry_hashes(symmetry_by_split)
     return {

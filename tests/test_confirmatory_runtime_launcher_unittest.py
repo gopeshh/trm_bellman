@@ -391,6 +391,10 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
                         ["--confirmatory", "--config", "cell.yaml"],
                         environ={
                             "KEEP": "yes",
+                            "GIT_DIR": "/tmp/hostile-git-dir",
+                            "GIT_NO_REPLACE_OBJECTS": "0",
+                            "GIT_REPLACE_REF_BASE": "refs/hostile/",
+                            "GIT_WORK_TREE": "/tmp/hostile-work-tree",
                             "LD_PRELOAD": "/tmp/untrusted.so",
                             "PAR_MAIN_OVERRIDE": "untrusted.module",
                             "PYTHONWARNINGS": "error::untrusted.Warning",
@@ -418,6 +422,10 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
                 ],
             )
             self.assertEqual(environment["KEEP"], "yes")
+            self.assertNotIn("GIT_DIR", environment)
+            self.assertEqual(environment["GIT_NO_REPLACE_OBJECTS"], "1")
+            self.assertNotIn("GIT_REPLACE_REF_BASE", environment)
+            self.assertNotIn("GIT_WORK_TREE", environment)
             self.assertNotIn("LD_PRELOAD", environment)
             self.assertNotIn("PAR_MAIN_OVERRIDE", environment)
             self.assertNotIn("PYTHONWARNINGS", environment)
@@ -436,6 +444,23 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
                 (descriptor, private_unpack_descriptor),
             )
             self.assertFalse(Path(private_unpack_path).exists())
+
+    def test_exec_rejects_git_attestation_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runtime.par"
+            expected = self._archive(path)
+            runtime = validate_runtime_archive(path, expected)
+            with mock.patch("confirmatory_runtime_launcher.subprocess.Popen") as popen:
+                with self.assertRaisesRegex(
+                    ConfirmatoryRuntimeError,
+                    "reserved field",
+                ):
+                    launch_verified_runtime(
+                        runtime,
+                        ["--confirmatory"],
+                        attestation_environment={"GIT_DIR": "/tmp/hostile"},
+                    )
+            popen.assert_not_called()
 
     def test_unpack_descriptor_survives_path_replacement_at_exec(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

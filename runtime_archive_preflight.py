@@ -31,7 +31,24 @@ POLICY_SMOKE_RUNTIME_PROFILE_SHA256_ENV = "UPI_TRM_POLICY_SMOKE_RUNTIME_PROFILE_
 POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV = (
     "UPI_TRM_POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256"
 )
+POLICY_PROTOCOL_SHA256_ENV = "UPI_TRM_POLICY_PROTOCOL_SHA256"
 POLICY_SMOKE_ROLE = "policy-improvement-smoke"
+POLICY_FULL_ROLE = "policy-improvement-full"
+POLICY_THEORY_BRIDGE_ROLE = "policy-improvement-theory-bridge"
+POLICY_AUTHORIZED_ROLES = frozenset(
+    {POLICY_SMOKE_ROLE, POLICY_FULL_ROLE, POLICY_THEORY_BRIDGE_ROLE}
+)
+_POLICY_RUNTIME_ROLES_V1 = (
+    "policy-improvement-training",
+    "policy-improvement-evaluation",
+    "policy-improvement-audit",
+    "policy-improvement-analysis",
+)
+_POLICY_RUNTIME_ROLES_V2 = (
+    *_POLICY_RUNTIME_ROLES_V1,
+    POLICY_FULL_ROLE,
+    POLICY_THEORY_BRIDGE_ROLE,
+)
 
 _LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _LOWER_COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -71,6 +88,140 @@ class RuntimePreflight:
     policy_runtime_authorization_sha256: str | None = None
     policy_runtime_profile_sha256: str | None = None
     policy_selected_source_manifest_sha256: str | None = None
+    policy_protocol_sha256: str | None = None
+
+
+def _validate_policy_runtime_authorization(
+    value: object,
+    *,
+    phase4_role: str,
+    runtime_sha256: str,
+    source_git_commit: str,
+    source_manifest_sha256: str,
+    protocol_sha256: str,
+) -> None:
+    """Validate semantic role binding before any behavior import."""
+
+    expected_fields = {
+        "schema_name",
+        "schema_version",
+        "authorization_id",
+        "created_at_utc",
+        "protocol_sha256",
+        "producer_git_commit",
+        "producer_source_manifest_sha256",
+        "launcher_sha256",
+        "roles",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise RuntimeError("Policy-improvement runtime authorization is invalid.")
+    schema = (value["schema_name"], value["schema_version"])
+    if schema == ("policy_improvement_runtime_authorization_v1", 1):
+        role_names = _POLICY_RUNTIME_ROLES_V1
+    elif schema == ("policy_improvement_runtime_authorization_v2", 2):
+        role_names = _POLICY_RUNTIME_ROLES_V2
+    else:
+        raise RuntimeError("Policy-improvement runtime authorization is invalid.")
+    if phase4_role in {POLICY_FULL_ROLE, POLICY_THEORY_BRIDGE_ROLE} and (
+        role_names != _POLICY_RUNTIME_ROLES_V2
+    ):
+        raise RuntimeError("Policy-improvement runtime authorization is invalid.")
+    if (
+        not isinstance(value["authorization_id"], str)
+        or not value["authorization_id"]
+        or not isinstance(value["created_at_utc"], str)
+        or re.fullmatch(
+            r"20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+            value["created_at_utc"],
+        )
+        is None
+        or not isinstance(value["protocol_sha256"], str)
+        or _LOWER_SHA256.fullmatch(value["protocol_sha256"]) is None
+        or value["protocol_sha256"] != protocol_sha256
+        or not isinstance(value["producer_git_commit"], str)
+        or _LOWER_COMMIT.fullmatch(value["producer_git_commit"]) is None
+        or not isinstance(value["producer_source_manifest_sha256"], str)
+        or _LOWER_SHA256.fullmatch(value["producer_source_manifest_sha256"]) is None
+        or not isinstance(value["launcher_sha256"], str)
+        or _LOWER_SHA256.fullmatch(value["launcher_sha256"]) is None
+    ):
+        raise RuntimeError("Policy-improvement runtime authorization is invalid.")
+    roles = value["roles"]
+    if not isinstance(roles, list) or len(roles) != len(role_names):
+        raise RuntimeError("Policy-improvement runtime authorization is invalid.")
+    role_fields = {
+        "role",
+        "source_git_commit",
+        "runtime_sha256",
+        "runtime_profile_sha256",
+        "selected_source_manifest_sha256",
+    }
+    checked: dict[str, dict[str, object]] = {}
+    for index, role_name in enumerate(role_names):
+        role = roles[index]
+        if (
+            not isinstance(role, dict)
+            or set(role) != role_fields
+            or role["role"] != role_name
+            or not isinstance(role["source_git_commit"], str)
+            or _LOWER_COMMIT.fullmatch(role["source_git_commit"]) is None
+            or any(
+                not isinstance(role[field], str)
+                or _LOWER_SHA256.fullmatch(role[field]) is None
+                for field in (
+                    "runtime_sha256",
+                    "runtime_profile_sha256",
+                    "selected_source_manifest_sha256",
+                )
+            )
+            or role["runtime_profile_sha256"] != role["selected_source_manifest_sha256"]
+        ):
+            raise RuntimeError("Policy-improvement runtime authorization is invalid.")
+        checked[role_name] = role
+    if (
+        checked["policy-improvement-training"]["source_git_commit"]
+        != value["producer_git_commit"]
+    ):
+        raise RuntimeError("Policy-improvement runtime authorization is invalid.")
+    if role_names == _POLICY_RUNTIME_ROLES_V2:
+        for semantic_role, launcher_role in (
+            ("policy-improvement-training", POLICY_FULL_ROLE),
+            ("policy-improvement-evaluation", POLICY_THEORY_BRIDGE_ROLE),
+        ):
+            if any(
+                checked[semantic_role][field] != checked[launcher_role][field]
+                for field in (
+                    "source_git_commit",
+                    "runtime_sha256",
+                    "runtime_profile_sha256",
+                    "selected_source_manifest_sha256",
+                )
+            ):
+                raise RuntimeError(
+                    "Policy-improvement runtime authorization is invalid."
+                )
+        if (
+            checked[POLICY_FULL_ROLE]["source_git_commit"]
+            != value["producer_git_commit"]
+        ):
+            raise RuntimeError("Policy-improvement runtime authorization is invalid.")
+    active_roles = (
+        ("policy-improvement-training", "policy-improvement-evaluation")
+        if phase4_role == POLICY_SMOKE_ROLE
+        else (phase4_role,)
+    )
+    for active_role in active_roles:
+        role = checked.get(active_role)
+        if role is None or any(
+            role[field] != expected
+            for field, expected in (
+                ("source_git_commit", source_git_commit),
+                ("runtime_sha256", runtime_sha256),
+                ("runtime_profile_sha256", source_manifest_sha256),
+                ("selected_source_manifest_sha256", source_manifest_sha256),
+            )
+        ):
+            raise RuntimeError("Policy-improvement runtime authorization is invalid.")
 
 
 def _hash_runtime(path: Path) -> str:
@@ -132,6 +283,7 @@ def preflight_runtime(
         POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV,
         None,
     )
+    policy_protocol_sha256 = environ.pop(POLICY_PROTOCOL_SHA256_ENV, None)
     attestation_values = (
         attested_path_raw,
         attested_sha256,
@@ -145,6 +297,7 @@ def preflight_runtime(
         policy_runtime_authorization_sha256,
         policy_runtime_profile_sha256,
         policy_selected_source_manifest_sha256,
+        policy_protocol_sha256,
     )
     if not attestation_required:
         if any(value is not None for value in attestation_values):
@@ -202,8 +355,9 @@ def preflight_runtime(
             policy_runtime_authorization_sha256,
             policy_runtime_profile_sha256,
             policy_selected_source_manifest_sha256,
+            policy_protocol_sha256,
         )
-        if phase4_role == POLICY_SMOKE_ROLE:
+        if phase4_role in POLICY_AUTHORIZED_ROLES:
             if (
                 any(value is None for value in policy_values)
                 or not isinstance(policy_runtime_authorization_json, str)
@@ -213,6 +367,8 @@ def preflight_runtime(
                 or not _LOWER_SHA256.fullmatch(policy_runtime_profile_sha256)
                 or not isinstance(policy_selected_source_manifest_sha256, str)
                 or not _LOWER_SHA256.fullmatch(policy_selected_source_manifest_sha256)
+                or not isinstance(policy_protocol_sha256, str)
+                or not _LOWER_SHA256.fullmatch(policy_protocol_sha256)
                 or policy_runtime_profile_sha256
                 != policy_selected_source_manifest_sha256
             ):
@@ -247,9 +403,21 @@ def preflight_runtime(
                 raise RuntimeError(
                     "Policy-improvement runtime authorization changed in transit."
                 )
+            assert phase4_role is not None
+            assert source_git_commit is not None
+            assert source_manifest_sha256 is not None
+            _validate_policy_runtime_authorization(
+                decoded_authorization,
+                phase4_role=phase4_role,
+                runtime_sha256=attested_sha256,
+                source_git_commit=source_git_commit,
+                source_manifest_sha256=source_manifest_sha256,
+                protocol_sha256=policy_protocol_sha256,
+            )
         elif any(value is not None for value in policy_values):
             raise RuntimeError(
-                "Policy-improvement authorization is valid only for its smoke role."
+                "Policy-improvement authorization is valid only for an "
+                "authenticated policy runtime role."
             )
     if not _MEMFD_SEALING_AVAILABLE:
         raise RuntimeError("This host cannot inspect a sealed runtime.")
@@ -374,4 +542,5 @@ def preflight_runtime(
         policy_runtime_authorization_sha256=(policy_runtime_authorization_sha256),
         policy_runtime_profile_sha256=policy_runtime_profile_sha256,
         policy_selected_source_manifest_sha256=(policy_selected_source_manifest_sha256),
+        policy_protocol_sha256=policy_protocol_sha256,
     )

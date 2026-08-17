@@ -96,7 +96,7 @@ def main(
         [load_strict_json(path) for path in arguments.amendment],
         protocol=protocol,
     )
-    if len(history) != 3:
+    if len(history) != 4:
         raise PolicyImprovementSchemaError(
             "Test opening requires the complete frozen selection history."
         )
@@ -188,7 +188,7 @@ def main(
     )
     alpha_registry = generate_registry(
         protocol,
-        history[:2],
+        history[:3],
         base_configs=base_configs,
     )
     prior_evidence = {
@@ -200,7 +200,7 @@ def main(
         list(alpha_results),
         alpha_documents,
         phases=["stage1_alpha"],
-        amendment_history=history[:2],
+        amendment_history=history[:3],
         base_configs=base_configs,
         project_root=arguments.project_root,
         dataset_root=arguments.dataset_root,
@@ -229,20 +229,20 @@ def main(
         "complete_rows": alpha_report["complete_rows"],
         "failed_rows": alpha_report["failed_rows"],
     }
-    if history[2]["evidence"] != expected_alpha_evidence:
+    if history[3]["evidence"] != expected_alpha_evidence:
         raise PolicyImprovementSchemaError(
             "Final selection does not bind the independently re-audited alpha grid."
         )
-    if history[2]["selected_exact"] != derive_registered_selection(
+    if history[3]["selected_exact"] != derive_registered_selection(
         "stage1_alpha", list(alpha_results)
     ):
         raise PolicyImprovementSchemaError(
             "Final selection differs from the registered alpha rule."
         )
-    if history[2]["source_registry_sha256"] != registry_sha256(
+    if history[3]["source_registry_sha256"] != registry_sha256(
         alpha_registry
-    ) or history[2]["prior_amendment_history_sha256"] != amendment_history_sha256(
-        history[:2]
+    ) or history[3]["prior_amendment_history_sha256"] != amendment_history_sha256(
+        history[:3]
     ):
         raise PolicyImprovementSchemaError(
             "Final selection does not bind the audited alpha registry."

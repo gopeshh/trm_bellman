@@ -197,7 +197,7 @@ def expected_test_open_record(
     checked_history = validate_amendment_history(
         amendment_history, protocol=checked_protocol
     )
-    if len(checked_history) != 3:
+    if len(checked_history) != 4:
         raise PolicyImprovementSchemaError(
             "Test data cannot open before the final registered selection."
         )

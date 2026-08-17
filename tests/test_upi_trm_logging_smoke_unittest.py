@@ -7,6 +7,7 @@ import copy
 import fcntl
 import hashlib
 import importlib
+import io
 import json
 import os
 import py_compile
@@ -16,6 +17,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -60,6 +62,7 @@ from upi_trm_train import (
     _validate_run_identity_bindings,
     _verify_producer_source_matches_runtime,
     resume_from_checkpoint,
+    resume_from_checkpoint_for_theory_evaluation,
     save_checkpoint,
     validate_checkpoint_state_for_audit,
 )
@@ -113,6 +116,52 @@ def _tiny_trm_cfg(seq_len: int, vocab_size: int, num_identifiers: int, batch_siz
 
 
 class TestUPITrmLoggingSmoke(unittest.TestCase):
+    def test_theory_checkpoint_restore_is_quiet_without_changing_default(self):
+        observed_emit_progress = []
+
+        def resume_impl(*args, emit_progress=True, **kwargs):
+            observed_emit_progress.append(emit_progress)
+            if emit_progress:
+                print("checkpoint progress")
+            return 7
+
+        with patch.object(
+            upi_trm_train,
+            "_PREVERIFIED_RUNTIME_SHA256",
+            "b" * 64,
+        ), patch(
+            "upi_trm_train._resume_from_checkpoint_impl",
+            side_effect=resume_impl,
+        ):
+            theory_stdout = io.StringIO()
+            with redirect_stdout(theory_stdout):
+                theory_result = resume_from_checkpoint_for_theory_evaluation(
+                    11,
+                    MagicMock(),
+                    MagicMock(),
+                    "cpu",
+                    expected_dataset_provenance={},
+                    expected_run_identity=None,
+                    expected_checkpoint_sha256="a" * 64,
+                )
+            normal_stdout = io.StringIO()
+            with redirect_stdout(normal_stdout):
+                normal_result = resume_from_checkpoint(
+                    11,
+                    MagicMock(),
+                    MagicMock(),
+                    "cpu",
+                    expected_dataset_provenance={},
+                    expected_run_identity=None,
+                    expected_checkpoint_sha256="a" * 64,
+                )
+
+        self.assertEqual(theory_result, 7)
+        self.assertEqual(theory_stdout.getvalue(), "")
+        self.assertEqual(normal_result, 7)
+        self.assertEqual(normal_stdout.getvalue(), "checkpoint progress\n")
+        self.assertEqual(observed_emit_progress, [False, True])
+
     def test_audit_checkpoint_restore_suppresses_progress_output(self):
         with patch(
             "upi_trm_train._resume_from_checkpoint_impl",
@@ -3356,6 +3405,55 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "execution device"):
                     resume_from_checkpoint(
                         mismatch_path,
+                        restored_model,
+                        restored,
+                        "cpu",
+                        expected_dataset_provenance=provenance,
+                    )
+
+            model_load.assert_not_called()
+            optimizer_load.assert_not_called()
+            replay_clear.assert_not_called()
+
+    def test_resume_rejects_nonfinite_model_state_before_mutation(self):
+        model, trainer, cfg = self._make_persistent_budget_trainer()
+        provenance = self._checkpoint_provenance(trainer)
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint_path = save_checkpoint(
+                model,
+                trainer,
+                step=0,
+                checkpoint_dir=tmp,
+                rl_cfg=cfg,
+                dataset_provenance=provenance,
+            )
+            payload = torch.load(
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            first_name = next(iter(payload["model_state_dict"]))
+            payload["model_state_dict"][first_name].view(-1)[0] = float("nan")
+            corrupt_path = str(Path(tmp) / "nonfinite_model.pt")
+            torch.save(payload, corrupt_path)
+
+            restored_model, restored, _ = self._make_persistent_budget_trainer()
+            with patch.object(
+                restored_model,
+                "load_state_dict",
+                wraps=restored_model.load_state_dict,
+            ) as model_load, patch.object(
+                restored.value_opt,
+                "load_state_dict",
+                wraps=restored.value_opt.load_state_dict,
+            ) as optimizer_load, patch.object(
+                restored.replay,
+                "clear",
+                wraps=restored.replay.clear,
+            ) as replay_clear:
+                with self.assertRaisesRegex(RuntimeError, "failed preflight"):
+                    resume_from_checkpoint(
+                        corrupt_path,
                         restored_model,
                         restored,
                         "cpu",

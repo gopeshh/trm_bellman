@@ -97,6 +97,103 @@ class PolicyDatasetBuilderTest(unittest.TestCase):
                     expected_producer=wrong,
                 )
 
+    def test_stage0_verification_never_opens_test_content(self) -> None:
+        tiny_splits = (
+            ("train", 1, 26081401),
+            ("validation", 1, 26081402),
+            ("test", 1, 26081403),
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(
+                builder,
+                "DEFAULT_SPLITS",
+                tiny_splits,
+            ),
+        ):
+            owner = Path(directory)
+            output = owner / "corpus"
+            built = builder.build_dataset(
+                output,
+                owner_root=owner,
+                producer_attestation=_ATTESTATION,
+            )
+            opened: list[Path] = []
+            real_open = Path.open
+
+            def tracking_open(path: Path, *args: object, **kwargs: object):
+                opened.append(path)
+                if output / "test" == path or output / "test" in path.parents:
+                    raise AssertionError(f"held-out test path was opened: {path}")
+                return real_open(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "open", tracking_open):
+                verified = builder.verify_dataset(
+                    output,
+                    owner_root=owner,
+                    expected_producer=_ATTESTATION,
+                    verify_test_content=False,
+                )
+            self.assertEqual(verified, built)
+            self.assertTrue(any(output / "train" in path.parents for path in opened))
+            self.assertTrue(
+                any(output / "validation" in path.parents for path in opened)
+            )
+            self.assertFalse(any(output / "test" in path.parents for path in opened))
+
+            test_array = output / "test/all__inputs.npy"
+            test_array.write_bytes(test_array.read_bytes() + b"tampered")
+            builder.verify_dataset(
+                output,
+                owner_root=owner,
+                expected_producer=_ATTESTATION,
+                verify_test_content=False,
+            )
+            with self.assertRaisesRegex(
+                builder.PolicyImprovementDatasetError,
+                "hash differs",
+            ):
+                builder.verify_dataset(
+                    output,
+                    owner_root=owner,
+                    expected_producer=_ATTESTATION,
+                    verify_test_content=True,
+                )
+
+    def test_stage0_verification_still_hashes_train_and_validation_content(
+        self,
+    ) -> None:
+        tiny_splits = (
+            ("train", 1, 26081401),
+            ("validation", 1, 26081402),
+            ("test", 1, 26081403),
+        )
+        for split in ("train", "validation"):
+            with (
+                self.subTest(split=split),
+                tempfile.TemporaryDirectory() as directory,
+                mock.patch.object(builder, "DEFAULT_SPLITS", tiny_splits),
+            ):
+                owner = Path(directory)
+                output = owner / "corpus"
+                builder.build_dataset(
+                    output,
+                    owner_root=owner,
+                    producer_attestation=_ATTESTATION,
+                )
+                target = output / split / "all__inputs.npy"
+                target.write_bytes(target.read_bytes() + b"tampered")
+                with self.assertRaisesRegex(
+                    builder.PolicyImprovementDatasetError,
+                    "hash differs",
+                ):
+                    builder.verify_dataset(
+                        output,
+                        owner_root=owner,
+                        expected_producer=_ATTESTATION,
+                        verify_test_content=False,
+                    )
+
     def test_owner_root_is_private_and_output_cannot_escape(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             owner = Path(directory)

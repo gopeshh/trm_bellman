@@ -25,6 +25,7 @@ COMPUTE_FREEZE_SCHEMA_VERSION = 1
 SCREEN_SELECTION_SCHEMA_VERSION = 1
 FINAL_SELECTION_SCHEMA_VERSION = 1
 RUNTIME_AUTHORIZATION_SCHEMA_VERSION = 1
+RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V2 = 2
 METHOD_IDS = (
     "fixed_base_exact_persistent",
     "fixed_base_exact_episodic",
@@ -108,6 +109,8 @@ _UNAVAILABLE_REASONS = {
     "not_collected_by_registered_protocol",
     "compute_snapshot_not_registered",
     "test_data_not_opened",
+    "initialization_not_materialized",
+    "execution_device_not_materialized",
 }
 _PLACEHOLDER_STRINGS = {
     "-",
@@ -123,6 +126,7 @@ _PLACEHOLDER_STRINGS = {
 }
 
 AMENDMENT_SCHEMAS = (
+    "policy_improvement_theory_bridge_amendment_v1",
     "policy_improvement_compute_freeze_v1",
     "policy_improvement_screen_selection_v1",
     "policy_improvement_final_selection_v1",
@@ -133,12 +137,17 @@ RUNTIME_ROLES = (
     "policy-improvement-audit",
     "policy-improvement-analysis",
 )
+RUNTIME_ROLES_V2 = (
+    *RUNTIME_ROLES,
+    "policy-improvement-full",
+    "policy-improvement-theory-bridge",
+)
 PHASE_AMENDMENT_PREFIX_LENGTH = {
     "stage0_smoke": 0,
-    "stage1_screen": 1,
-    "stage1_alpha": 2,
-    "stage2_confirmatory": 3,
-    "stage3_ablation": 3,
+    "stage1_screen": 2,
+    "stage1_alpha": 3,
+    "stage2_confirmatory": 4,
+    "stage3_ablation": 4,
 }
 
 
@@ -655,6 +664,8 @@ def _validate_availability(
         elif kind == "mapping":
             normalized = dict(_mapping(raw, path=f"{path}.value"))
             canonical_json_bytes(normalized)
+        elif kind == "string":
+            normalized = _string(raw, path=f"{path}.value")
         elif kind == "terminal_reason_counts":
             counts = _exact_fields(
                 raw,
@@ -780,10 +791,30 @@ def validate_runtime_authorization(value: object) -> dict[str, Any]:
         },
         path="runtime_authorization",
     )
-    if authorization["schema_name"] != "policy_improvement_runtime_authorization_v1":
-        raise PolicyImprovementSchemaError("Unexpected runtime authorization schema.")
-    if authorization["schema_version"] != RUNTIME_AUTHORIZATION_SCHEMA_VERSION:
+    schema_name = authorization["schema_name"]
+    schema_version = authorization["schema_version"]
+    if (
+        not isinstance(schema_name, str)
+        or isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+    ):
+        raise PolicyImprovementSchemaError(
+            "Unsupported runtime authorization version."
+        )
+    schema = (schema_name, schema_version)
+    role_schemas = {
+        (
+            "policy_improvement_runtime_authorization_v1",
+            RUNTIME_AUTHORIZATION_SCHEMA_VERSION,
+        ): RUNTIME_ROLES,
+        (
+            "policy_improvement_runtime_authorization_v2",
+            RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V2,
+        ): RUNTIME_ROLES_V2,
+    }
+    if schema not in role_schemas:
         raise PolicyImprovementSchemaError("Unsupported runtime authorization version.")
+    expected_roles = role_schemas[schema]
     _string(
         authorization["authorization_id"],
         path="runtime_authorization.authorization_id",
@@ -810,12 +841,12 @@ def validate_runtime_authorization(value: object) -> dict[str, Any]:
         path="runtime_authorization.launcher_sha256",
     )
     roles = authorization["roles"]
-    if not isinstance(roles, list) or len(roles) != len(RUNTIME_ROLES):
+    if not isinstance(roles, list) or len(roles) != len(expected_roles):
         raise PolicyImprovementSchemaError(
             "Runtime authorization must contain every exact consumer role."
         )
     checked_roles: list[dict[str, Any]] = []
-    for index, expected_role in enumerate(RUNTIME_ROLES):
+    for index, expected_role in enumerate(expected_roles):
         path = f"runtime_authorization.roles[{index}]"
         role = _exact_fields(
             roles[index],
@@ -849,6 +880,31 @@ def validate_runtime_authorization(value: object) -> dict[str, Any]:
         raise PolicyImprovementSchemaError(
             "The training role source commit must equal the authorized producer commit."
         )
+    if len(checked_roles) == len(RUNTIME_ROLES_V2):
+        for semantic_index, launcher_index, label in (
+            (0, 4, "full-runtime and training"),
+            (1, 5, "theory-bridge and evaluation"),
+        ):
+            if any(
+                checked_roles[semantic_index][field]
+                != checked_roles[launcher_index][field]
+                for field in (
+                    "source_git_commit",
+                    "runtime_sha256",
+                    "runtime_profile_sha256",
+                    "selected_source_manifest_sha256",
+                )
+            ):
+                raise PolicyImprovementSchemaError(
+                    f"The {label} roles must bind the same sealed artifact."
+                )
+        if checked_roles[4]["source_git_commit"] != authorization[
+            "producer_git_commit"
+        ]:
+            raise PolicyImprovementSchemaError(
+                "The full-runtime role source commit must equal the authorized "
+                "producer."
+            )
     canonical_json_bytes(authorization)
     return {**dict(authorization), "roles": checked_roles}
 
@@ -906,7 +962,7 @@ def validate_compute_freeze(value: object) -> dict[str, Any]:
         path="compute_freeze",
     )
     if (
-        freeze["schema_name"] != AMENDMENT_SCHEMAS[0]
+        freeze["schema_name"] != AMENDMENT_SCHEMAS[1]
         or freeze["schema_version"] != COMPUTE_FREEZE_SCHEMA_VERSION
     ):
         raise PolicyImprovementSchemaError("Unexpected compute-freeze schema.")
@@ -920,18 +976,18 @@ def validate_compute_freeze(value: object) -> dict[str, Any]:
         "runtime_authorization_sha256",
     ):
         _sha256(freeze[field], path=f"compute_freeze.{field}")
-    if freeze["prior_amendment_history_sha256"] != amendment_history_sha256([]):
-        raise PolicyImprovementSchemaError(
-            "Compute freeze must be the first amendment."
-        )
     if freeze["test_data_opened"] is not False:
         raise PolicyImprovementSchemaError("Compute freeze must precede test opening.")
-    _validate_audit_evidence(
+    evidence = _validate_audit_evidence(
         freeze["evidence"],
         path="compute_freeze.evidence",
         expected_phase="stage0_smoke",
         expected_rows=4,
     )
+    if evidence["complete_rows"] != 4 or evidence["failed_rows"] != 0:
+        raise PolicyImprovementSchemaError(
+            "Compute freeze requires four complete Stage-0 rows and no failures."
+        )
     _validate_common_compute_targets(
         freeze["common_compute_targets"],
         path="compute_freeze.common_compute_targets",
@@ -980,7 +1036,7 @@ def validate_screen_selection(value: object) -> dict[str, Any]:
         path="screen_selection",
     )
     if (
-        selection["schema_name"] != AMENDMENT_SCHEMAS[1]
+        selection["schema_name"] != AMENDMENT_SCHEMAS[2]
         or selection["schema_version"] != SCREEN_SELECTION_SCHEMA_VERSION
     ):
         raise PolicyImprovementSchemaError("Unexpected screen-selection schema.")
@@ -1107,7 +1163,7 @@ def validate_final_selection(value: object) -> dict[str, Any]:
         path="final_selection",
     )
     if (
-        selection["schema_name"] != AMENDMENT_SCHEMAS[2]
+        selection["schema_name"] != AMENDMENT_SCHEMAS[3]
         or selection["schema_version"] != FINAL_SELECTION_SCHEMA_VERSION
     ):
         raise PolicyImprovementSchemaError("Unexpected final-selection schema.")
@@ -1187,6 +1243,20 @@ def validate_final_selection(value: object) -> dict[str, Any]:
     return dict(selection)
 
 
+def validate_theory_design_amendment(value: object) -> dict[str, Any]:
+    """Validate the pre-outcome theory design without creating an import cycle."""
+
+    from scripts.policy_improvement_theory_schema import (
+        TheoryBridgeSchemaError,
+        validate_theory_amendment,
+    )
+
+    try:
+        return validate_theory_amendment(value)
+    except TheoryBridgeSchemaError as exc:
+        raise PolicyImprovementSchemaError(str(exc)) from exc
+
+
 def validate_selection_amendment(value: object) -> dict[str, Any]:
     """Compatibility name for the final, post-alpha selection document."""
 
@@ -1196,11 +1266,12 @@ def validate_selection_amendment(value: object) -> dict[str, Any]:
 def validate_amendment_history(
     history: Sequence[object], *, protocol: Mapping[str, object] | None = None
 ) -> list[dict[str, Any]]:
-    if len(history) > 3:
+    if len(history) > 4:
         raise PolicyImprovementSchemaError(
             "Amendment history is longer than registered."
         )
     validators = (
+        validate_theory_design_amendment,
         validate_compute_freeze,
         validate_screen_selection,
         validate_final_selection,
@@ -1228,9 +1299,9 @@ def validate_amendment_history(
                     "Amendment does not bind the exact protocol."
                 )
         checked.append(amendment)
-    if len(checked) >= 3:
-        screen_selected = checked[1]["selected_exact"]
-        final_selected = checked[2]["selected_exact"]
+    if len(checked) >= 4:
+        screen_selected = checked[2]["selected_exact"]
+        final_selected = checked[3]["selected_exact"]
         for field in ("method_id", "n", "K"):
             if screen_selected[field] != final_selected[field]:
                 raise PolicyImprovementSchemaError(
@@ -1944,7 +2015,7 @@ def validate_registry_row(value: object) -> dict[str, Any]:
     return dict(row)
 
 
-def _validate_result_identities(value: object) -> dict[str, Any]:
+def _validate_result_identities(value: object, *, status: str) -> dict[str, Any]:
     identities = _exact_fields(
         value,
         {
@@ -2000,9 +2071,20 @@ def _validate_result_identities(value: object) -> dict[str, Any]:
         "dataset_manifest_sha256",
         "train_ordered_records_sha256",
         "evaluation_ordered_records_sha256",
-        "initialization_sha256",
     ):
         _sha256(identities[field], path=f"result.identities.{field}")
+    initialization = identities["initialization_sha256"]
+    if status == "failed" and isinstance(initialization, Mapping):
+        checked_initialization = _validate_available_sha256(
+            initialization,
+            path="result.identities.initialization_sha256",
+        )
+        if checked_initialization["status"] != "unavailable":
+            raise PolicyImprovementSchemaError(
+                "Failed initialization availability must be unavailable."
+            )
+    else:
+        _sha256(initialization, path="result.identities.initialization_sha256")
     for field in (
         "checkpoint_sha256",
         "model_state_sha256",
@@ -2018,7 +2100,19 @@ def _validate_result_identities(value: object) -> dict[str, Any]:
         path="result.identities.evaluation_source_git_commit",
         kind="git_commit",
     )
-    _string(identities["device"], path="result.identities.device")
+    device = identities["device"]
+    if status == "failed" and isinstance(device, Mapping):
+        checked_device = _validate_availability(
+            device,
+            path="result.identities.device",
+            kind="string",
+        )
+        if checked_device["status"] != "unavailable":
+            raise PolicyImprovementSchemaError(
+                "Failed execution-device availability must be unavailable."
+            )
+    else:
+        _string(device, path="result.identities.device")
     return dict(identities)
 
 
@@ -2723,7 +2817,7 @@ def validate_result(value: object) -> dict[str, Any]:
             failure["error_class"], path="result.failure.error_class", identifier=True
         )
         _sha256(failure["message_sha256"], path="result.failure.message_sha256")
-    identities = _validate_result_identities(result["identities"])
+    identities = _validate_result_identities(result["identities"], status=status)
     test_open_identity = identities["test_open_sha256"]
     if (split == "test") != (test_open_identity["status"] == "available"):
         raise PolicyImprovementSchemaError(

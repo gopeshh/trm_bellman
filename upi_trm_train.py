@@ -1211,6 +1211,22 @@ def _capture_parameter_gradients(module: nn.Module) -> Dict[str, Any]:
     }
 
 
+def _require_finite_checkpoint_tensors(value: Any, *, label: str) -> None:
+    if torch.is_tensor(value):
+        if (value.is_floating_point() or value.is_complex()) and not bool(
+            torch.isfinite(value).all().item()
+        ):
+            raise RuntimeError(f"Checkpoint {label} contains a non-finite tensor.")
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            _require_finite_checkpoint_tensors(item, label=label)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _require_finite_checkpoint_tensors(item, label=label)
+
+
 def _restore_parameter_gradients(
     module: nn.Module,
     saved_gradients: Any,
@@ -1231,6 +1247,10 @@ def _restore_parameter_gradients(
             not torch.is_tensor(gradient)
             or gradient.shape != parameter.shape
             or gradient.dtype != parameter.dtype
+            or (
+                (gradient.is_floating_point() or gradient.is_complex())
+                and not bool(torch.isfinite(gradient).all().item())
+            )
         ):
             raise RuntimeError(
                 f"Checkpoint {label} gradient shape or dtype mismatch for {name!r}."
@@ -2069,7 +2089,7 @@ def _load_schema_v5_resume_metadata(
 
 
 def _load_checkpoint_payload(
-    checkpoint_path: str,
+    checkpoint_path: str | int,
     *,
     expected_sha256: Optional[str] = None,
 ) -> Tuple[Any, str]:
@@ -2077,7 +2097,14 @@ def _load_checkpoint_payload(
 
     digest_before = hashlib.sha256()
     try:
-        with open(checkpoint_path, "rb") as handle:
+        if isinstance(checkpoint_path, int):
+            if checkpoint_path < 0:
+                raise RuntimeError("Resume checkpoint descriptor is invalid.")
+            handle_context = os.fdopen(os.dup(checkpoint_path), "rb")
+        else:
+            handle_context = open(checkpoint_path, "rb")
+        with handle_context as handle:
+            handle.seek(0)
             for block in iter(lambda: handle.read(1024 * 1024), b""):
                 digest_before.update(block)
             checkpoint_sha256 = digest_before.hexdigest()
@@ -2671,7 +2698,7 @@ def save_checkpoint(
 
 
 def _resume_from_checkpoint_impl(
-    checkpoint_path: str,
+    checkpoint_path: str | int,
     model: nn.Module,
     trainer: "UPITrmTrainer",
     device: str,
@@ -3320,6 +3347,10 @@ def _resume_from_checkpoint_impl(
     # A corrupt late field therefore cannot leave the live run half-restored.
     for name, module in modules.items():
         try:
+            _require_finite_checkpoint_tensors(
+                checkpoint[module_state_fields[name]],
+                label=f"{name} state",
+            )
             module_probe = copy.deepcopy(module)
             module_probe.load_state_dict(
                 checkpoint[module_state_fields[name]],
@@ -3356,6 +3387,10 @@ def _resume_from_checkpoint_impl(
             if field not in checkpoint:
                 raise RuntimeError(f"Checkpoint is missing {field}.")
             assert snapshot_module is not None
+            _require_finite_checkpoint_tensors(
+                checkpoint[field],
+                label=field,
+            )
             snapshot_probe = copy.deepcopy(snapshot_module)
             try:
                 snapshot_probe.load_state_dict(checkpoint[field], strict=True)
@@ -3392,6 +3427,10 @@ def _resume_from_checkpoint_impl(
     for optimizer, field in optimizer_state_pairs:
         if optimizer is not None:
             try:
+                _require_finite_checkpoint_tensors(
+                    checkpoint[field],
+                    label=field,
+                )
                 optimizer_probe = copy.deepcopy(optimizer)
                 optimizer_probe.load_state_dict(checkpoint[field])
                 del optimizer_probe
@@ -3529,7 +3568,7 @@ def _resume_from_checkpoint_impl(
 
 
 def resume_from_checkpoint(
-    checkpoint_path: str,
+    checkpoint_path: str | int,
     model: nn.Module,
     trainer: "UPITrmTrainer",
     device: str,
@@ -3552,6 +3591,37 @@ def resume_from_checkpoint(
         expected_checkpoint_sha256,
         allow_legacy_warm_start,
         originating_runtime_artifact_sha256=_PREVERIFIED_RUNTIME_SHA256,
+    )
+
+
+def resume_from_checkpoint_for_theory_evaluation(
+    checkpoint_path: str | int,
+    model: nn.Module,
+    trainer: "UPITrmTrainer",
+    device: str,
+    *,
+    expected_dataset_provenance: Dict[str, Any],
+    expected_run_identity: Optional[Dict[str, Any]],
+    expected_checkpoint_sha256: str,
+) -> int:
+    """Strictly restore a disposable theory session without writing stdout."""
+
+    originating_runtime = _validate_expected_sha256(
+        _PREVERIFIED_RUNTIME_SHA256,
+        field="Preverified theory runtime SHA-256",
+    )
+    return _resume_from_checkpoint_impl(
+        checkpoint_path,
+        model,
+        trainer,
+        device,
+        None,
+        expected_dataset_provenance,
+        expected_run_identity,
+        expected_checkpoint_sha256,
+        False,
+        originating_runtime_artifact_sha256=originating_runtime,
+        emit_progress=False,
     )
 
 

@@ -699,12 +699,14 @@ def launch_verified_runtime(
             name in _UNSAFE_CHILD_ENV_NAMES
             or name.startswith("BASH_FUNC_")
             or name.startswith("FB_PAR_")
+            or name.startswith("GIT_")
             or name.startswith("LD_")
             or name.startswith("PAR_")
             or (name.startswith("PYTHON") and name != "PYTHONHASHSEED")
         ):
             child_environment.pop(name)
     child_environment["PATH"] = "/usr/bin:/bin"
+    child_environment["GIT_NO_REPLACE_OBJECTS"] = "1"
     child_environment[VERIFIED_RUNTIME_SHA256_ENV] = runtime.sha256
     child_environment[VERIFIED_RUNTIME_FD_ENV] = str(runtime.descriptor)
     exec_path = f"/proc/self/fd/{runtime.descriptor}"
@@ -755,7 +757,10 @@ def launch_verified_runtime(
             PAR_FILENAME_ENV,
             "FB_PAR_UNPACK_BASEDIR",
         }
-        if any(name in reserved_names for name in attestation_environment):
+        if any(
+            name in reserved_names or name.startswith("GIT_")
+            for name in attestation_environment
+        ):
             os.close(runtime.descriptor)
             _remove_private_unpack_directory(
                 private_unpack_base,

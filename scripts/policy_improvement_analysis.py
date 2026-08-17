@@ -322,9 +322,10 @@ def analyze_stage2_confirmatory(
 
     protocol = validate_protocol(protocol_value)
     history = validate_amendment_history(amendment_history, protocol=protocol)
-    if len(history) != 3:
+    if len(history) != 4:
         raise PolicyImprovementSchemaError(
-            "Confirmatory analysis requires all three validation-only freezes."
+            "Confirmatory analysis requires the theory design and all three "
+            "validation-only freezes."
         )
     authorization = validate_runtime_authorization(runtime_authorization)
     execution = _validate_analysis_execution(analysis_execution_identity, authorization)
