@@ -255,7 +255,7 @@ class PolicyImprovementCheckpointValidatorTest(unittest.TestCase):
                 root / "dataset",
                 owner_root=root,
                 expected_producer=mock.ANY,
-                verify_test_content=False,
+                verify_content_splits={"train", "validation"},
             )
 
     def test_request_rejects_non_smoke_interaction_budget(self) -> None:

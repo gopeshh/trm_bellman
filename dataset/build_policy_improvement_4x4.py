@@ -14,7 +14,7 @@ import random
 import re
 import stat
 import tempfile
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -868,15 +868,36 @@ def verify_dataset(
     owner_root: str | Path,
     expected_producer: Mapping[str, object],
     verify_test_content: bool = True,
+    verify_content_splits: Collection[str] | None = None,
 ) -> dict[str, object]:
     """Recompute corpus identity and require an external producer identity.
 
-    Stage-0 callers set ``verify_test_content`` to false. In that mode the
-    authenticated split manifest supplies the registered test metadata, while
-    no path below the held-out test directory is opened or deserialized.
+    ``verify_content_splits`` names the only split directories whose files may
+    be opened. All three split manifests are still authenticated so callers can
+    bind the complete corpus identity without deserializing an unauthorized
+    population. ``verify_test_content`` remains as the v1 compatibility form.
     """
 
     producer = _producer_attestation(expected_producer)
+    split_names = {name for name, _, _ in DEFAULT_SPLITS}
+    if verify_content_splits is None:
+        content_splits = (
+            split_names if verify_test_content else {"train", "validation"}
+        )
+    else:
+        content_splits = set(verify_content_splits)
+        if any(not isinstance(name, str) for name in verify_content_splits):
+            raise PolicyImprovementDatasetError(
+                "Dataset content-split authorization must contain strings."
+            )
+        if not content_splits or not content_splits <= split_names:
+            raise PolicyImprovementDatasetError(
+                "Dataset content-split authorization is empty or unsupported."
+            )
+        if verify_test_content is not True:
+            raise PolicyImprovementDatasetError(
+                "Use either verify_test_content or verify_content_splits, not both."
+            )
     owner, owner_descriptor, owner_identity = _validate_private_owner_root(owner_root)
     path = _validate_output_path(root, owner)
     try:
@@ -1057,7 +1078,7 @@ def verify_dataset(
         ):
             raise PolicyImprovementDatasetError("Ordered split identity differs.")
         symmetry_by_split[split_name] = symmetry_hashes
-        if split_name == "test" and not verify_test_content:
+        if split_name not in content_splits:
             identifier_offset += expected_count
             continue
 

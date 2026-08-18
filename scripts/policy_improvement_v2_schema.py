@@ -1118,9 +1118,60 @@ def validate_v2_result(value: object) -> dict[str, Any]:
     ):
         if not isinstance(result[field], bool):
             raise PolicyImprovementV2SchemaError(f"result.{field} must be boolean.")
+    # The split-isolation attestations are derived, not declared.  Accepting
+    # them as free booleans would let a Stage 0 result assert that it opened
+    # test content, or a test result deny it, and still validate.
+    if result["validation_data_opened"] is not (split == "validation"):
+        raise PolicyImprovementV2SchemaError(
+            "result.validation_data_opened must hold exactly for the "
+            "validation split."
+        )
+    if result["test_data_opened"] is not (split == "test"):
+        raise PolicyImprovementV2SchemaError(
+            "result.test_data_opened must hold exactly for the test split."
+        )
+    # Stage 0 is a mechanics smoke: it performs no selection and is never
+    # paper evidence, whatever the payload claims.
+    if result["phase"] == "stage0_smoke" and (
+        result["scientific_selection"] or result["paper_evidence_eligible"]
+    ):
+        raise PolicyImprovementV2SchemaError(
+            "Stage 0 results cannot claim selection or paper eligibility."
+        )
     _mapping(result["payload"], path="result.payload")
     canonical_json_bytes(result)
     return result
+
+
+def bind_v2_result_to_row(
+    result: Mapping[str, Any],
+    row: Mapping[str, Any],
+) -> None:
+    """Cross-bind a validated v2 result to its authenticated registry row.
+
+    ``validate_v2_result`` can only enforce what the envelope derives from
+    itself.  ``scientific_selection`` and ``paper_evidence_eligible`` are
+    per-row policy, so a consumer holding the authenticated row must bind them
+    here rather than trust the envelope.
+    """
+
+    for field in (
+        "run_id",
+        "phase",
+        "method_id",
+        "evaluation_split",
+        "scientific_selection",
+        "paper_evidence_eligible",
+    ):
+        if result[field] != row[field]:
+            raise PolicyImprovementV2SchemaError(
+                f"Result {field} differs from its registered row."
+            )
+    population = row["evaluation_population"]
+    if result["evaluation_population_id"] != population:
+        raise PolicyImprovementV2SchemaError(
+            "Result population differs from its registered row."
+        )
 
 
 def validate_checkpoint_schedule(values: object) -> list[int]:

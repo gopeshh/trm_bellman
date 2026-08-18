@@ -87,6 +87,75 @@ class OfflinePuzzleDataset:
         return self.samples[idx]
 
 
+def select_materialized_dataset_records(
+    dataset: Any,
+    indices: list[int],
+    *,
+    expected_record_sha256s: list[str] | None = None,
+    expected_input_sha256s: list[str] | None = None,
+) -> OfflinePuzzleDataset:
+    """Clone one explicit ordered subset while retaining source indices.
+
+    The helper accepts only an already materialized finite dataset. It never
+    resolves another split or path, which makes it suitable for the train-only
+    Stage 0 and throughput populations.
+    """
+
+    from utils.dataset_provenance import input_sha256, sample_sha256
+
+    samples = getattr(dataset, "samples", None)
+    if not isinstance(samples, list):
+        raise TypeError("Dataset selection requires a materialized sample list.")
+    if (
+        not indices
+        or any(isinstance(index, bool) or not isinstance(index, int) for index in indices)
+        or any(index < 0 or index >= len(samples) for index in indices)
+        or len(indices) != len(set(indices))
+    ):
+        raise ValueError("Dataset selection indices are empty, duplicated, or invalid.")
+    if expected_record_sha256s is not None and len(expected_record_sha256s) != len(
+        indices
+    ):
+        raise ValueError("Expected record identities differ from the index count.")
+    if expected_input_sha256s is not None and len(expected_input_sha256s) != len(
+        indices
+    ):
+        raise ValueError("Expected input identities differ from the index count.")
+
+    selected: list[dict[str, Any]] = []
+    for position, source_index in enumerate(indices):
+        source = samples[source_index]
+        if not isinstance(source, dict) or "inputs" not in source:
+            raise TypeError("Selected dataset sample has the wrong shape.")
+        record_sha256 = sample_sha256(
+            source["inputs"], source.get("solution", source.get("labels"))
+        )
+        input_digest = input_sha256(source["inputs"])
+        if (
+            expected_record_sha256s is not None
+            and record_sha256 != expected_record_sha256s[position]
+        ):
+            raise ValueError("Selected dataset record identity differs from registration.")
+        if (
+            expected_input_sha256s is not None
+            and input_digest != expected_input_sha256s[position]
+        ):
+            raise ValueError("Selected dataset input identity differs from registration.")
+        cloned = {
+            name: value.clone() if torch.is_tensor(value) else value
+            for name, value in source.items()
+        }
+        cloned["original_dataset_index"] = source_index
+        selected.append(cloned)
+
+    return OfflinePuzzleDataset(
+        samples=selected,
+        seq_len=int(dataset.seq_len),
+        vocab_size=int(dataset.vocab_size),
+        num_identifiers=int(dataset.num_identifiers),
+    )
+
+
 def offset_puzzle_identifiers(dataset: Any, offset: int) -> int:
     """Move a materialized pool into a disjoint puzzle-identifier range."""
 

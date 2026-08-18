@@ -194,6 +194,64 @@ class PolicyDatasetBuilderTest(unittest.TestCase):
                         verify_test_content=False,
                     )
 
+    def test_explicit_train_only_verification_opens_no_validation_or_test_content(
+        self,
+    ) -> None:
+        tiny_splits = (
+            ("train", 1, 26081401),
+            ("validation", 1, 26081402),
+            ("test", 1, 26081403),
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(builder, "DEFAULT_SPLITS", tiny_splits),
+        ):
+            owner = Path(directory)
+            output = owner / "corpus"
+            built = builder.build_dataset(
+                output,
+                owner_root=owner,
+                producer_attestation=_ATTESTATION,
+            )
+            opened: list[Path] = []
+            real_open = Path.open
+
+            def tracking_open(path: Path, *args: object, **kwargs: object):
+                opened.append(path)
+                if any(
+                    output / split == path or output / split in path.parents
+                    for split in ("validation", "test")
+                ):
+                    raise AssertionError(f"non-training content was opened: {path}")
+                return real_open(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "open", tracking_open):
+                verified = builder.verify_dataset(
+                    output,
+                    owner_root=owner,
+                    expected_producer=_ATTESTATION,
+                    verify_content_splits={"train"},
+                )
+            self.assertEqual(verified, built)
+            self.assertTrue(any(output / "train" in path.parents for path in opened))
+            self.assertFalse(
+                any(
+                    output / split in path.parents
+                    for split in ("validation", "test")
+                    for path in opened
+                )
+            )
+
+            for split in ("validation", "test"):
+                target = output / split / "all__inputs.npy"
+                target.write_bytes(target.read_bytes() + b"tampered")
+            builder.verify_dataset(
+                output,
+                owner_root=owner,
+                expected_producer=_ATTESTATION,
+                verify_content_splits={"train"},
+            )
+
     def test_owner_root_is_private_and_output_cannot_escape(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             owner = Path(directory)

@@ -377,17 +377,17 @@ def _authenticate_test_split_state(
                 "Test-split result does not bind the authenticated test opening."
             )
         return
-    if split != "validation":
+    if split not in {"train", "validation"}:
         raise PolicyImprovementSchemaError(
-            "Complete evidence must be a validation or test evaluation."
+            "Complete evidence must be a train, validation, or test evaluation."
         )
     if authenticated_test_open_sha256 is not None:
         raise PolicyImprovementSchemaError(
-            "Validation-split evidence cannot carry an authenticated TEST_OPEN."
+            "Non-test evidence cannot carry an authenticated TEST_OPEN."
         )
     if declared.get("status") != "unavailable":
         raise PolicyImprovementSchemaError(
-            "Validation-split evidence cannot claim an opened test population."
+            "Non-test evidence cannot claim an opened test population."
         )
 
 

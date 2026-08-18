@@ -26,6 +26,7 @@ SCREEN_SELECTION_SCHEMA_VERSION = 1
 FINAL_SELECTION_SCHEMA_VERSION = 1
 RUNTIME_AUTHORIZATION_SCHEMA_VERSION = 1
 RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V2 = 2
+RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V3 = 3
 METHOD_IDS = (
     "fixed_base_exact_persistent",
     "fixed_base_exact_episodic",
@@ -776,19 +777,31 @@ def runtime_authorization_sha256(value: object) -> str:
 def validate_runtime_authorization(value: object) -> dict[str, Any]:
     """Validate the external, non-self-referential runtime/source freeze."""
 
-    authorization = _exact_fields(
-        value,
-        {
+    raw = _mapping(value, path="runtime_authorization")
+    schema = (raw.get("schema_name"), raw.get("schema_version"))
+    common_fields = {
             "schema_name",
             "schema_version",
             "authorization_id",
             "created_at_utc",
-            "protocol_sha256",
             "producer_git_commit",
             "producer_source_manifest_sha256",
             "launcher_sha256",
             "roles",
-        },
+    }
+    v3_fields = {
+        "protocol_sha256",
+        "protocol",
+        "registry",
+        "amendments",
+    }
+    authorization = _exact_fields(
+        raw,
+        common_fields
+        | ({"protocol_sha256"} if schema != (
+            "policy_improvement_runtime_authorization_v3",
+            RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V3,
+        ) else v3_fields),
         path="runtime_authorization",
     )
     schema_name = authorization["schema_name"]
@@ -811,6 +824,10 @@ def validate_runtime_authorization(value: object) -> dict[str, Any]:
             "policy_improvement_runtime_authorization_v2",
             RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V2,
         ): RUNTIME_ROLES_V2,
+        (
+            "policy_improvement_runtime_authorization_v3",
+            RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V3,
+        ): RUNTIME_ROLES_V2,
     }
     if schema not in role_schemas:
         raise PolicyImprovementSchemaError("Unsupported runtime authorization version.")
@@ -824,10 +841,81 @@ def validate_runtime_authorization(value: object) -> dict[str, Any]:
         authorization["created_at_utc"],
         path="runtime_authorization.created_at_utc",
     )
-    _sha256(
-        authorization["protocol_sha256"],
-        path="runtime_authorization.protocol_sha256",
-    )
+    if schema[1] < RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V3:
+        protocol_sha256 = _sha256(
+            authorization["protocol_sha256"],
+            path="runtime_authorization.protocol_sha256",
+        )
+    else:
+        protocol = _exact_fields(
+            authorization["protocol"],
+            {"schema_name", "schema_version", "protocol_id", "sha256"},
+            path="runtime_authorization.protocol",
+        )
+        if (
+            protocol["schema_name"] != "policy_improvement_protocol_v2"
+            or protocol["schema_version"] != 2
+            or protocol["protocol_id"] != "policy-improvement-v2-20260818"
+        ):
+            raise PolicyImprovementSchemaError(
+                "Runtime authorization v3 requires the exact protocol-v2 identity."
+            )
+        protocol_sha256 = _sha256(
+            protocol["sha256"], path="runtime_authorization.protocol.sha256"
+        )
+        if authorization["protocol_sha256"] != protocol_sha256:
+            raise PolicyImprovementSchemaError(
+                "Runtime authorization protocol digest fields differ."
+            )
+        registry = _exact_fields(
+            authorization["registry"],
+            {"schema_name", "schema_version", "sha256"},
+            path="runtime_authorization.registry",
+        )
+        if (
+            registry["schema_name"] != "policy_improvement_registry_v2"
+            or registry["schema_version"] != 1
+        ):
+            raise PolicyImprovementSchemaError(
+                "Runtime authorization v3 requires the exact registry-v2 identity."
+            )
+        _sha256(registry["sha256"], path="runtime_authorization.registry.sha256")
+        amendments = authorization["amendments"]
+        if not isinstance(amendments, list):
+            raise PolicyImprovementSchemaError(
+                "Runtime authorization amendments must be an ordered list."
+            )
+        seen_amendments: set[str] = set()
+        for index, item in enumerate(amendments):
+            amendment = _exact_fields(
+                item,
+                {"schema_name", "schema_version", "amendment_id", "sha256"},
+                path=f"runtime_authorization.amendments[{index}]",
+            )
+            _string(
+                amendment["schema_name"],
+                path=f"runtime_authorization.amendments[{index}].schema_name",
+                identifier=True,
+            )
+            _integer(
+                amendment["schema_version"],
+                path=f"runtime_authorization.amendments[{index}].schema_version",
+                minimum=1,
+            )
+            amendment_id = _string(
+                amendment["amendment_id"],
+                path=f"runtime_authorization.amendments[{index}].amendment_id",
+                identifier=True,
+            )
+            if amendment_id in seen_amendments:
+                raise PolicyImprovementSchemaError(
+                    "Runtime authorization amendments are duplicated."
+                )
+            seen_amendments.add(amendment_id)
+            _sha256(
+                amendment["sha256"],
+                path=f"runtime_authorization.amendments[{index}].sha256",
+            )
     _git_commit(
         authorization["producer_git_commit"],
         path="runtime_authorization.producer_git_commit",
@@ -880,7 +968,7 @@ def validate_runtime_authorization(value: object) -> dict[str, Any]:
         raise PolicyImprovementSchemaError(
             "The training role source commit must equal the authorized producer commit."
         )
-    if len(checked_roles) == len(RUNTIME_ROLES_V2):
+    if schema[1] == RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V2:
         for semantic_index, launcher_index, label in (
             (0, 4, "full-runtime and training"),
             (1, 5, "theory-bridge and evaluation"),
@@ -1312,6 +1400,13 @@ def validate_amendment_history(
 
 def validate_protocol(value: object) -> dict[str, Any]:
     """Validate and return one strict protocol registration."""
+
+    if isinstance(value, Mapping) and value.get("schema_name") == (
+        "policy_improvement_protocol_v2"
+    ):
+        from scripts.policy_improvement_v2_schema import validate_v2_protocol
+
+        return validate_v2_protocol(value)
 
     protocol = _exact_fields(
         value,
@@ -1761,6 +1856,13 @@ def validate_protocol(value: object) -> dict[str, Any]:
 
 def validate_registry_row(value: object) -> dict[str, Any]:
     """Validate one deterministic concrete row or selection template."""
+
+    if isinstance(value, Mapping) and value.get("schema_name") == (
+        "policy_improvement_registry_row_v2"
+    ):
+        from scripts.policy_improvement_v2_schema import validate_v2_registry_row
+
+        return validate_v2_registry_row(value)
 
     row = _exact_fields(
         value,
@@ -2694,6 +2796,13 @@ def _validate_metrics(
 
 def validate_result(value: object) -> dict[str, Any]:
     """Validate one immutable run result without accepting placeholder data."""
+
+    if isinstance(value, Mapping) and value.get("schema_name") == (
+        "policy_improvement_result_v2"
+    ):
+        from scripts.policy_improvement_v2_schema import validate_v2_result
+
+        return validate_v2_result(value)
 
     result = _exact_fields(
         value,

@@ -496,6 +496,14 @@ def generate_registry(
     """Generate the exact registry for one immutable amendment-history prefix."""
 
     protocol = validate_protocol(protocol_value)
+    if protocol.get("schema_name") == "policy_improvement_protocol_v2":
+        from scripts.policy_improvement_v2_registry import generate_v2_registry
+
+        return generate_v2_registry(
+            protocol,
+            [] if amendment_history is None else amendment_history,
+            base_configs=base_configs,
+        )
     if base_configs is None:
         base_configs = load_registered_base_configs(
             protocol,
@@ -549,6 +557,19 @@ def validate_registry_document(
 
     if not isinstance(value, Mapping):
         raise PolicyImprovementSchemaError("Registry document must be an object.")
+    if isinstance(protocol_value, Mapping) and protocol_value.get("schema_name") == (
+        "policy_improvement_protocol_v2"
+    ):
+        from scripts.policy_improvement_v2_registry import (
+            validate_v2_registry_document,
+        )
+
+        return validate_v2_registry_document(
+            value,
+            protocol_value,
+            [] if amendment_history is None else amendment_history,
+            base_configs=base_configs,
+        )
     base = generate_registry(protocol_value, [], base_configs=base_configs)
     active = generate_registry(
         protocol_value,

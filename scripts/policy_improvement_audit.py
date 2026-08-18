@@ -18,7 +18,7 @@ import os
 import stat
 import struct
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from fractions import Fraction
 from functools import lru_cache
 from pathlib import Path
@@ -909,8 +909,29 @@ def _load_dataset_bindings(
     dataset_root: str | Path,
     *,
     verify_test_content: bool = False,
+    verify_content_splits: Collection[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Authenticate registered metadata and the splits authorized for opening."""
+
+    known_splits = {"train", "validation", "test"}
+    if verify_content_splits is None:
+        content_splits = (
+            known_splits if verify_test_content else {"train", "validation"}
+        )
+    else:
+        content_splits = set(verify_content_splits)
+        if (
+            not content_splits
+            or not content_splits <= known_splits
+            or any(not isinstance(name, str) for name in verify_content_splits)
+        ):
+            raise PolicyImprovementSchemaError(
+                "Dataset content-split authorization is empty or unsupported."
+            )
+        if verify_test_content:
+            raise PolicyImprovementSchemaError(
+                "Use either verify_test_content or verify_content_splits, not both."
+            )
 
     supplied = Path(dataset_root)
     if not supplied.is_absolute():
@@ -1209,7 +1230,7 @@ def _load_dataset_bindings(
             "input_sha256s": tuple(checked_inputs),
             "puzzle_ids": tuple(f"{split}-{index:06d}" for index in range(count)),
         }
-        if split == "test" and not verify_test_content:
+        if split not in content_splits:
             identifier_offset += count
             continue
 
@@ -1800,11 +1821,23 @@ def audit_result_set(
             "Validation-only audits must not carry a test-open record."
         )
 
+    pre_test_content_splits = {
+        "train",
+        *(
+            ("validation",)
+            if uses_test
+            else tuple(
+                str(row["evaluation_split"])
+                for row in expected_rows
+                if str(row["evaluation_split"]) != "test"
+            )
+        ),
+    }
     dataset_bindings = (
         _load_dataset_bindings(
             protocol,
             dataset_root,
-            verify_test_content=False,
+            verify_content_splits=pre_test_content_splits,
         )
         if _dataset_bindings is None
         else _dataset_bindings

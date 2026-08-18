@@ -368,21 +368,54 @@ def load_registered_full_run(
         raise FullRuntimeError("Project root is not a directory.")
     protocol_file = _absolute_canonical_file(protocol_path, name="protocol path")
     registry_file = _absolute_canonical_file(registry_path, name="registry path")
-    if protocol_file != project / "configs/policy_improvement_v1/protocol.json":
-        raise FullRuntimeError("Only the canonical committed protocol is accepted.")
-    if registry_file != project / "configs/policy_improvement_v1/registry.json":
-        raise FullRuntimeError("Only the canonical committed registry is accepted.")
+    canonical_protocols = {
+        project / "configs/policy_improvement_v1/protocol.json": (
+            project / "configs/policy_improvement_v1/registry.json"
+        ),
+        project / "configs/policy_improvement_v2/protocol.json": (
+            project / "configs/policy_improvement_v2/registry.json"
+        ),
+    }
+    if protocol_file not in canonical_protocols:
+        raise FullRuntimeError("Only a canonical committed protocol is accepted.")
+    if registry_file != canonical_protocols[protocol_file]:
+        raise FullRuntimeError(
+            "Protocol and registry paths do not use one canonical namespace."
+        )
     raw_protocol, _ = _load_authenticated_json(protocol_file)
     try:
         protocol = validate_protocol(raw_protocol)
     except PolicyImprovementSchemaError as exc:
         raise FullRuntimeError("Protocol validation failed.") from exc
+    is_v2 = protocol.get("schema_name") == "policy_improvement_protocol_v2"
     expected_gate = protocol["full_execution_gate"]
-    if expected_gate != {
+    required_gate = {
         "environment_variable": FULL_EXECUTION_ENV,
         "required_value": FULL_EXECUTION_VALUE,
-    }:
+    }
+    if is_v2:
+        required_gate.update(
+            {
+                "stage0_exempt": True,
+                "stage1_to_stage3_blocked_by_base_policy": True,
+            }
+        )
+    if expected_gate != required_gate:
         raise FullRuntimeError("Protocol full-execution gate differs from the runtime.")
+    if is_v2:
+        base_policy = protocol.get("base_policy_artifact")
+        if (
+            not isinstance(base_policy, Mapping)
+            or base_policy.get("schema_name")
+            != "policy_improvement_base_policy_artifact_v2"
+            or base_policy.get("schema_version") != 1
+            or base_policy.get("status") != "available"
+            or base_policy.get("stage1_execution_allowed") is not True
+        ):
+            raise FullRuntimeError(
+                "Stage 1-3 execution is blocked until an authenticated train-only "
+                "base-policy artifact is frozen."
+            )
 
     history: list[dict[str, Any]] = []
     for index, raw_path in enumerate(amendment_paths):

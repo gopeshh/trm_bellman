@@ -22,10 +22,8 @@ from scripts.policy_improvement_populations import (
 from scripts.policy_improvement_registry import (
     load_flat_registered_yaml as load_v1_flat_registered_yaml,
 )
-from scripts.policy_improvement_schema import (
-    PolicyImprovementSchemaError,
-    validate_protocol as validate_v1_protocol,
-)
+from scripts.policy_improvement_schema import validate_protocol
+from scripts.policy_improvement_v2_schema import bind_v2_result_to_row
 from scripts.policy_improvement_v2_registry import (
     EXPECTED_PHASE_COUNTS,
     generate_v2_registry,
@@ -90,8 +88,7 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
         self.assertEqual(checked_registry, regenerated)
 
     def test_v1_and_v2_protocol_schemas_are_not_interchangeable(self) -> None:
-        with self.assertRaises(PolicyImprovementSchemaError):
-            validate_v1_protocol(self.protocol)
+        self.assertEqual(validate_protocol(self.protocol), self.protocol)
         with self.assertRaises(PolicyImprovementV2SchemaError):
             validate_v2_protocol(load_strict_json(V1_PROTOCOL))
 
@@ -335,9 +332,148 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
             "payload": {},
         }
         self.assertEqual(validate_v2_result(result), result)
+        self.stage0_result = copy.deepcopy(result)
         result["schema_name"] = "policy_improvement_v1"
         with self.assertRaises(PolicyImprovementV2SchemaError):
             validate_v2_result(result)
+
+    def _stage0_result(self) -> dict:
+        """Build the same validated Stage 0 envelope the test above checks."""
+
+        row = next(
+            item
+            for item in self.registry["rows"]
+            if item["phase"] == "stage0_smoke"
+        )
+        population = self.populations["populations"]["stage0_smoke"]
+        return {
+            "schema_name": "policy_improvement_result_v2",
+            "schema_version": 1,
+            "protocol_id": self.protocol["protocol_id"],
+            "protocol_schema_name": self.protocol["schema_name"],
+            "protocol_schema_version": self.protocol["schema_version"],
+            "protocol_sha256": sha256_json(self.protocol),
+            "population_registry_schema_name": self.populations["schema_name"],
+            "population_registry_schema_version": self.populations["schema_version"],
+            "population_registry_sha256": self.protocol["population_registry"][
+                "sha256"
+            ],
+            "registry_schema_name": self.registry["schema_name"],
+            "registry_schema_version": self.registry["registry_schema_version"],
+            "registry_sha256": sha256_json(self.registry),
+            "registry_row_schema_name": row["schema_name"],
+            "registry_row_schema_version": row["schema_version"],
+            "registry_row_sha256": sha256_json(row),
+            "run_id": row["run_id"],
+            "phase": row["phase"],
+            "method_id": row["method_id"],
+            "status": "complete",
+            "evaluation_split": row["evaluation_split"],
+            "evaluation_population_id": row["evaluation_population"],
+            "evaluation_population_binding_sha256": population["binding_sha256"],
+            "evaluation_population_ordered_record_sha256": population[
+                "ordered_record_sha256"
+            ],
+            "evaluation_population_ordered_input_sha256": population[
+                "ordered_input_sha256"
+            ],
+            "evaluation_record_count": 8,
+            "validation_data_opened": False,
+            "test_data_opened": False,
+            "scientific_selection": False,
+            "paper_evidence_eligible": False,
+            "payload": {},
+        }, row
+
+    def test_split_isolation_attestations_are_derived_not_declared(self) -> None:
+        """A Stage 0 result cannot claim it opened validation or test content."""
+
+        base, _row = self._stage0_result()
+        self.assertEqual(validate_v2_result(copy.deepcopy(base)), base)
+
+        for field in ("validation_data_opened", "test_data_opened"):
+            with self.subTest(field=field):
+                hostile = copy.deepcopy(base)
+                hostile[field] = True
+                with self.assertRaisesRegex(
+                    PolicyImprovementV2SchemaError, "must hold exactly"
+                ):
+                    validate_v2_result(hostile)
+
+        # And a validation-split result may not deny opening validation.
+        # (Stage 0 is train-only, so flip the split coherently.)
+        denied = copy.deepcopy(base)
+        denied["evaluation_split"] = "validation"
+        denied["evaluation_population_id"] = "validation_select"
+        denied["validation_data_opened"] = False
+        with self.assertRaisesRegex(
+            PolicyImprovementV2SchemaError, "must hold exactly"
+        ):
+            validate_v2_result(denied)
+
+    def test_stage0_cannot_claim_selection_or_paper_eligibility(self) -> None:
+        base, _row = self._stage0_result()
+        for field in ("scientific_selection", "paper_evidence_eligible"):
+            with self.subTest(field=field):
+                hostile = copy.deepcopy(base)
+                hostile[field] = True
+                with self.assertRaisesRegex(
+                    PolicyImprovementV2SchemaError, "selection or paper eligibility"
+                ):
+                    validate_v2_result(hostile)
+
+    def test_v1_and_v2_results_cannot_cross_schemas(self) -> None:
+        """The generic router dispatches on the exact schema name only."""
+
+        from scripts.policy_improvement_schema import (
+            PolicyImprovementSchemaError as V1Error,
+            validate_result as validate_router,
+        )
+
+        base, _row = self._stage0_result()
+        # The router accepts a genuine v2 envelope by dispatch.
+        self.assertEqual(validate_router(copy.deepcopy(base)), base)
+
+        # A v2 envelope wearing the v1 name must not be accepted by either.
+        spoofed = copy.deepcopy(base)
+        spoofed["schema_name"] = "policy_improvement_v1"
+        with self.assertRaises((V1Error, PolicyImprovementV2SchemaError)):
+            validate_router(spoofed)
+        with self.assertRaises(PolicyImprovementV2SchemaError):
+            validate_v2_result(spoofed)
+
+        # A v1-shaped envelope must never satisfy the v2 validator.
+        v1_shaped = {"schema_name": "policy_improvement_v1", "schema_version": 5}
+        with self.assertRaises(PolicyImprovementV2SchemaError):
+            validate_v2_result(v1_shaped)
+
+        # A v1 envelope wearing the v2 name must not be accepted either.
+        v1_as_v2 = dict(v1_shaped)
+        v1_as_v2["schema_name"] = "policy_improvement_result_v2"
+        with self.assertRaises((V1Error, PolicyImprovementV2SchemaError)):
+            validate_router(v1_as_v2)
+
+    def test_result_row_cross_binding_rejects_mixed_identities(self) -> None:
+        base, row = self._stage0_result()
+        validated = validate_v2_result(copy.deepcopy(base))
+        bind_v2_result_to_row(validated, row)
+
+        for field, value in (
+            ("run_id", "s0-not-this-run"),
+            ("method_id", "matched_ppo"
+                if row["method_id"] != "matched_ppo" else "fixed_base_exact_episodic"),
+            ("phase", "stage1_screen"),
+        ):
+            with self.subTest(field=field):
+                mixed = dict(row)
+                mixed[field] = value
+                with self.assertRaises(PolicyImprovementV2SchemaError):
+                    bind_v2_result_to_row(validated, mixed)
+
+        mixed_population = dict(row)
+        mixed_population["evaluation_population"] = "validation_select"
+        with self.assertRaises(PolicyImprovementV2SchemaError):
+            bind_v2_result_to_row(validated, mixed_population)
 
     def test_population_score_is_namespace_bound(self) -> None:
         record = self.populations["populations"]["stage0_smoke"]["record_sha256s"][0]

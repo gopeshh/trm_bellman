@@ -153,6 +153,7 @@ class SmokeSession:
     method_config_sha256: str
     run_identity: dict[str, Any] | None
     evidence_identity: dict[str, Any]
+    evaluation_population: dict[str, Any] | None = None
     evaluation_started: bool = False
 
 
@@ -453,7 +454,12 @@ def _load_context(
         name="policy-improvement protocol",
         must_exist=True,
     )
-    expected_protocol = source_root / "configs/policy_improvement_v1/protocol.json"
+    expected_protocol = source_root / (
+        "configs/policy_improvement_v2/protocol.json"
+        if authorization.get("schema_name")
+        == "policy_improvement_runtime_authorization_v3"
+        else "configs/policy_improvement_v1/protocol.json"
+    )
     if protocol_path != expected_protocol.resolve(strict=True):
         raise PolicyImprovementSmokeError(
             "Stage 0 accepts only the committed canonical protocol path."
@@ -516,11 +522,14 @@ def _load_context(
             "source_manifest_sha256",
         )
     }
+    is_v2 = protocol.get("schema_name") == "policy_improvement_protocol_v2"
     verified_dataset = verify_dataset(
         dataset_root,
         owner_root=dataset_root.parent,
         expected_producer=registered_dataset_producer,
-        verify_test_content=False,
+        verify_content_splits=(
+            {"train"} if is_v2 else {"train", "validation"}
+        ),
     )
     if verified_dataset.get("manifest_sha256") != registered_dataset_manifest:
         raise PolicyImprovementSmokeError(
@@ -708,6 +717,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
         )
     rl_config = module.RLConfig(**merged)
 
+    is_v2 = context.protocol.get("schema_name") == "policy_improvement_protocol_v2"
     train_dataset, seq_len, vocab_size, train_identifiers = (
         module.build_dataset_from_paths(
             dataset_paths=[str(context.dataset_root)],
@@ -715,38 +725,69 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
             split="train",
         )
     )
-    evaluation_dataset, eval_seq_len, eval_vocab_size, eval_identifiers = (
-        module.build_dataset_from_paths(
-            dataset_paths=[str(context.dataset_root)],
-            pool_size=int(context.protocol["dataset"]["splits"]["validation"]["count"]),
-            split="validation",
+    stage0_population: Mapping[str, Any] | None = None
+    if is_v2:
+        from scripts.policy_improvement_populations import (
+            load_registered_populations,
         )
-    )
+
+        population_document = load_registered_populations(
+            context.protocol,
+            context.source_root,
+        )
+        stage0_population = population_document["populations"]["stage0_smoke"]
+        if context.row.get("evaluation_population") != stage0_population.get(
+            "population_id"
+        ):
+            raise PolicyImprovementSmokeError(
+                "Stage 0 row differs from the registered train-only population."
+            )
+        evaluation_dataset = module.select_materialized_dataset_records(
+            train_dataset,
+            list(stage0_population["indices"]),
+            expected_record_sha256s=list(stage0_population["record_sha256s"]),
+            expected_input_sha256s=list(stage0_population["input_sha256s"]),
+        )
+        eval_seq_len = seq_len
+        eval_vocab_size = vocab_size
+        eval_identifiers = 0
+        num_identifiers = train_identifiers
+    else:
+        evaluation_dataset, eval_seq_len, eval_vocab_size, eval_identifiers = (
+            module.build_dataset_from_paths(
+                dataset_paths=[str(context.dataset_root)],
+                pool_size=int(
+                    context.protocol["dataset"]["splits"]["validation"]["count"]
+                ),
+                split="validation",
+            )
+        )
+        if set(dataset_input_sha256s(train_dataset)).intersection(
+            dataset_input_sha256s(evaluation_dataset)
+        ):
+            raise PolicyImprovementSmokeError("Train and validation inputs overlap.")
+        module.offset_puzzle_identifiers(evaluation_dataset, train_identifiers)
+        num_identifiers = train_identifiers + eval_identifiers
     if (eval_seq_len, eval_vocab_size) != (seq_len, vocab_size):
-        raise PolicyImprovementSmokeError("Train and validation shapes differ.")
-    if set(dataset_input_sha256s(train_dataset)).intersection(
-        dataset_input_sha256s(evaluation_dataset)
-    ):
-        raise PolicyImprovementSmokeError("Train and validation inputs overlap.")
-    module.offset_puzzle_identifiers(evaluation_dataset, train_identifiers)
-    num_identifiers = train_identifiers + eval_identifiers
+        raise PolicyImprovementSmokeError("Train and evaluation shapes differ.")
 
     train_manifest = file_sha256(context.dataset_root / "manifests/train.json")
-    validation_manifest = file_sha256(
-        context.dataset_root / "manifests/validation.json"
-    )
     module._validate_materialized_split_manifest(
         dataset_root=context.dataset_root,
         split="train",
         registered_sha256=train_manifest,
         dataset=train_dataset,
     )
-    module._validate_materialized_split_manifest(
-        dataset_root=context.dataset_root,
-        split="validation",
-        registered_sha256=validation_manifest,
-        dataset=evaluation_dataset,
-    )
+    if not is_v2:
+        validation_manifest = file_sha256(
+            context.dataset_root / "manifests/validation.json"
+        )
+        module._validate_materialized_split_manifest(
+            dataset_root=context.dataset_root,
+            split="validation",
+            registered_sha256=validation_manifest,
+            dataset=evaluation_dataset,
+        )
 
     checker, task, checker_kind = _task_config(
         rl_config, train_dataset, seq_len, module
@@ -792,9 +833,21 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
         "seq_len": seq_len,
         "vocab_size": vocab_size,
         "num_identifiers": num_identifiers,
-        "eval_puzzle_id_offset": train_identifiers,
+        "eval_puzzle_id_offset": 0 if is_v2 else train_identifiers,
         "materialization_seed": 0,
     }
+    if stage0_population is not None:
+        metadata.update(
+            {
+                "evaluation_population_id": stage0_population["population_id"],
+                "evaluation_population_binding_sha256": stage0_population[
+                    "binding_sha256"
+                ],
+                "evaluation_original_dataset_indices": list(
+                    stage0_population["indices"]
+                ),
+            }
+        )
     dataset_provenance = build_dataset_provenance(
         builder_name=str(source["builder_name"]),
         builder_version=source["builder_version"],
@@ -804,7 +857,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
             evaluation_dataset, count=evaluation_count
         ),
         train_split="train",
-        eval_split="validation",
+        eval_split=str(context.row["evaluation_split"]),
         environment_config=dict(vars(env_config)),
         action_mask_config={
             "task_config_class": type(task).__name__ if task is not None else None,
@@ -929,7 +982,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
             seed=context.row["seed"],
             backbone="trm",
             train_split="train",
-            eval_split="validation",
+            eval_split=str(context.row["evaluation_split"]),
             env_step_budget=32,
             save_interval=0,
             log_env_interval=16,
@@ -985,6 +1038,9 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
         method_config_sha256=method_config_sha256,
         run_identity=run_identity,
         evidence_identity=evidence_identity,
+        evaluation_population=(
+            dict(stage0_population) if stage0_population is not None else None
+        ),
     )
 
 
@@ -2255,13 +2311,34 @@ def _evaluation_payload(
             raise PolicyImprovementSmokeError(
                 "Held-out solved flag differs from its terminal reason."
             )
+        sample = session.evaluation_dataset[index]
+        original_dataset_index = sample.get("original_dataset_index")
+        if session.evaluation_population is not None and (
+            isinstance(original_dataset_index, bool)
+            or not isinstance(original_dataset_index, int)
+            or original_dataset_index
+            != session.evaluation_population["indices"][index]
+        ):
+            raise PolicyImprovementSmokeError(
+                "Stage 0 evaluation record lost its registered train index."
+            )
         evidence_records.append(
             {
                 "registered_index": index,
+                "population_position": index,
+                "original_dataset_index": (
+                    original_dataset_index
+                    if session.evaluation_population is not None
+                    else index
+                ),
                 "registered_record_sha256": registered_records[index],
-                "puzzle_id": f"validation-{index:06d}",
+                "puzzle_id": (
+                    f"train-{original_dataset_index:06d}"
+                    if session.evaluation_population is not None
+                    else f"validation-{index:06d}"
+                ),
                 "puzzle_sha256": input_sha256(
-                    session.evaluation_dataset[index]["inputs"]
+                    sample["inputs"]
                 ),
                 "solved": success,
                 "discounted_return": discounted_returns[index],
@@ -2274,8 +2351,12 @@ def _evaluation_payload(
             }
         )
     evidence = {
-        "schema_name": "policy_improvement_instances_v1",
-        "schema_version": 2,
+        "schema_name": (
+            "policy_improvement_instances_v2"
+            if session.evaluation_population is not None
+            else "policy_improvement_instances_v1"
+        ),
+        "schema_version": (1 if session.evaluation_population is not None else 2),
         "protocol_id": context.protocol["protocol_id"],
         "run_id": context.row["run_id"],
         "phase": context.row["phase"],
@@ -2286,6 +2367,16 @@ def _evaluation_payload(
         "snapshot_kind": "interaction_matched",
         "evaluation_id": (f"{context.row['run_id']}.interaction_matched.{variant}"),
         "policy_variant": variant,
+        "evaluation_population_id": (
+            session.evaluation_population["population_id"]
+            if session.evaluation_population is not None
+            else None
+        ),
+        "evaluation_population_binding_sha256": (
+            session.evaluation_population["binding_sha256"]
+            if session.evaluation_population is not None
+            else None
+        ),
         "evaluation_pool_sha256": canonical_json_sha256(
             dataset_sample_sha256s(session.evaluation_dataset, count=count)
         ),
@@ -2526,24 +2617,34 @@ def _build_final_result(
     evaluation_records = dataset_sample_sha256s(
         session.evaluation_dataset, count=evaluation_count
     )
-    evaluation_population_records = dataset_sample_sha256s(session.evaluation_dataset)
     train_ordered_records_sha256 = ordered_record_sha256(training_records)
     evaluation_ordered_records_sha256 = ordered_record_sha256(evaluation_records)
-    evaluation_population_ordered_records_sha256 = ordered_record_sha256(
-        evaluation_population_records
+    evaluation_population_ordered_records_sha256 = (
+        evaluation_ordered_records_sha256
+        if session.evaluation_population is not None
+        else ordered_record_sha256(
+            dataset_sample_sha256s(session.evaluation_dataset)
+        )
     )
     registered_train_order = _available_hex(
         context.protocol["dataset"]["splits"]["train"]["ordered_record_sha256"],
         name="registered train ordered records",
         length=64,
     )
-    registered_evaluation_order = _available_hex(
-        context.protocol["dataset"]["splits"][str(context.row["evaluation_split"])][
-            "ordered_record_sha256"
-        ],
-        name="registered evaluation ordered records",
-        length=64,
-    )
+    if session.evaluation_population is not None:
+        registered_evaluation_order = _available_hex(
+            session.evaluation_population["ordered_record_sha256"],
+            name="registered evaluation population ordered records",
+            length=64,
+        )
+    else:
+        registered_evaluation_order = _available_hex(
+            context.protocol["dataset"]["splits"][
+                str(context.row["evaluation_split"])
+            ]["ordered_record_sha256"],
+            name="registered evaluation ordered records",
+            length=64,
+        )
     if (
         train_ordered_records_sha256 != registered_train_order
         or evaluation_population_ordered_records_sha256 != registered_evaluation_order
@@ -2836,7 +2937,13 @@ def _revalidate_external_inputs(
         )
     protocol = validate_protocol(
         load_strict_json(
-            context.source_root / "configs/policy_improvement_v1/protocol.json"
+            context.source_root
+            / (
+                "configs/policy_improvement_v2/protocol.json"
+                if context.protocol.get("schema_name")
+                == "policy_improvement_protocol_v2"
+                else "configs/policy_improvement_v1/protocol.json"
+            )
         )
     )
     if (
@@ -2873,7 +2980,12 @@ def _revalidate_external_inputs(
         context.dataset_root,
         owner_root=context.dataset_root.parent,
         expected_producer=context.dataset_producer_source,
-        verify_test_content=False,
+        verify_content_splits=(
+            {"train"}
+            if context.protocol.get("schema_name")
+            == "policy_improvement_protocol_v2"
+            else {"train", "validation"}
+        ),
     )
     if not isinstance(verified, Mapping):
         raise PolicyImprovementSmokeError("Dataset revalidation failed.")

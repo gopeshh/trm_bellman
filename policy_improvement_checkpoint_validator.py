@@ -251,9 +251,14 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
             raise PolicyImprovementCheckpointValidationError(
                 "Stage-0 validation request has non-smoke fields."
             )
+        expected_smoke_split = (
+            "train"
+            if protocol.get("schema_name") == "policy_improvement_protocol_v2"
+            else "validation"
+        )
         if (
             row["tier"] != "smoke"
-            or row["evaluation_split"] != "validation"
+            or row["evaluation_split"] != expected_smoke_split
             or row["base_method_id"] != method_id
             or value["snapshot_kind"] != "interaction_matched"
             or environment_interactions not in {16, 32}
@@ -458,7 +463,11 @@ def _build_context(
         dataset_root,
         owner_root=dataset_root.parent,
         expected_producer=registered_dataset_producer,
-        verify_test_content=False,
+        verify_content_splits=(
+            {"train"}
+            if protocol.get("schema_name") == "policy_improvement_protocol_v2"
+            else {"train", "validation"}
+        ),
     )
     if verified_dataset.get("manifest_sha256") != dataset_manifest_sha256:
         raise PolicyImprovementCheckpointValidationError(

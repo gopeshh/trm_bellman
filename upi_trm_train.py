@@ -194,6 +194,7 @@ from rl.training_setup import (
     build_dataset_from_paths,
     offset_puzzle_identifiers,
     resolve_checker_from_dataset,
+    select_materialized_dataset_records,
 )
 from rl.sudoku_utils import sudoku_is_solved, sudoku_get_stats
 from utils.seeding import set_global_seed
@@ -243,6 +244,7 @@ __all__ = [
     "DummyPuzzleDataset",
     "OfflinePuzzleDataset",
     "build_dataset_from_paths",
+    "select_materialized_dataset_records",
     "resolve_checker_from_dataset",
     "dummy_checker",
     "sudoku_checker",
