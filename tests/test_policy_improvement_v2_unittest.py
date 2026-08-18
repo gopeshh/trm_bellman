@@ -3,18 +3,19 @@
 
 from __future__ import annotations
 
+import ast
 import copy
 import hashlib
 import unittest
 from pathlib import Path
 
 from scripts.policy_improvement_populations import (
-    PolicyImprovementPopulationError,
     canonical_json_bytes as population_json_bytes,
     derive_population_score,
     load_registered_populations,
     load_strict_json as load_population_json,
     materialize_v2_populations,
+    PolicyImprovementPopulationError,
     population_binding_sha256,
     population_for_id,
     validate_v2_populations,
@@ -27,7 +28,6 @@ from scripts.policy_improvement_schema import (
     validate_protocol,
     validate_runtime_authorization,
 )
-from scripts.policy_improvement_v2_schema import bind_v2_result_to_row
 from scripts.policy_improvement_v2_registry import (
     EXPECTED_PHASE_COUNTS,
     generate_v2_registry,
@@ -35,10 +35,11 @@ from scripts.policy_improvement_v2_registry import (
     validate_v2_registry_document,
 )
 from scripts.policy_improvement_v2_schema import (
-    IMMUTABLE_DATASET_V1,
-    PolicyImprovementV2SchemaError,
+    bind_v2_result_to_row,
     canonical_json_bytes,
+    IMMUTABLE_DATASET_V1,
     load_strict_json,
+    PolicyImprovementV2SchemaError,
     sha256_json,
     validate_v2_protocol,
     validate_v2_result,
@@ -56,6 +57,68 @@ V1_PROTOCOL = ROOT / "configs/policy_improvement_v1/protocol.json"
 
 def _digest(namespace: str, index: int) -> str:
     return hashlib.sha256(f"{namespace}:{index}".encode("ascii")).hexdigest()
+
+
+def _buck_targets() -> dict[str, dict[str, set[str]]]:
+    tree = ast.parse((ROOT / "BUCK").read_text(encoding="utf-8"))
+    targets: dict[str, dict[str, set[str]]] = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.Expr) or not isinstance(
+            statement.value, ast.Call
+        ):
+            continue
+        call = statement.value
+        if not isinstance(call.func, ast.Name) or call.func.id not in {
+            "python_binary",
+            "python_library",
+        }:
+            continue
+        keywords = {item.arg: item.value for item in call.keywords if item.arg}
+        name_value = keywords.get("name")
+        if not isinstance(name_value, ast.Constant) or not isinstance(
+            name_value.value, str
+        ):
+            continue
+        deps: set[str] = set()
+        deps_value = keywords.get("deps")
+        if isinstance(deps_value, ast.List):
+            deps = {
+                item.value.removeprefix(":")
+                for item in deps_value.elts
+                if isinstance(item, ast.Constant)
+                and isinstance(item.value, str)
+                and item.value.startswith(":")
+            }
+        resources: set[str] = set()
+        resource_value = keywords.get("resources")
+        if (
+            isinstance(resource_value, ast.Call)
+            and isinstance(resource_value.func, ast.Name)
+            and resource_value.func.id == "glob"
+            and resource_value.args
+            and isinstance(resource_value.args[0], ast.List)
+        ):
+            resources = {
+                item.value
+                for item in resource_value.args[0].elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            }
+        targets[name_value.value] = {"deps": deps, "resources": resources}
+    return targets
+
+
+def _local_dependency_closure(
+    targets: dict[str, dict[str, set[str]]], root: str
+) -> set[str]:
+    closure: set[str] = set()
+    pending = [root]
+    while pending:
+        target = pending.pop()
+        if target in closure:
+            continue
+        closure.add(target)
+        pending.extend(targets.get(target, {}).get("deps", set()) - closure)
+    return closure
 
 
 class PolicyImprovementV2RegistrationTest(unittest.TestCase):
@@ -90,6 +153,35 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
             REGISTRY.read_bytes(), canonical_json_bytes(regenerated) + b"\n"
         )
         self.assertEqual(checked_registry, regenerated)
+
+    def test_production_buck_targets_package_the_complete_v2_closure(self) -> None:
+        targets = _buck_targets()
+        v2_libraries = {
+            "policy_improvement_populations",
+            "policy_improvement_v2_registry",
+            "policy_improvement_v2_schema",
+        }
+        runtime_targets = {
+            "upi_trm_train",
+            "policy_improvement_full",
+            "policy_improvement_theory_bridge",
+            "policy_improvement_audit",
+            "policy_improvement_analysis",
+        }
+        for target in runtime_targets:
+            with self.subTest(target=target):
+                self.assertLessEqual(
+                    v2_libraries,
+                    _local_dependency_closure(targets, target),
+                )
+                self.assertLessEqual(
+                    {
+                        "configs/policy_improvement_v2/*.json",
+                        "configs/policy_improvement_v2/*.yaml",
+                        "configs/policy_improvement_v2/amendments/*.json",
+                    },
+                    targets[target]["resources"],
+                )
 
     def test_v1_and_v2_protocol_schemas_are_not_interchangeable(self) -> None:
         self.assertEqual(validate_protocol(self.protocol), self.protocol)

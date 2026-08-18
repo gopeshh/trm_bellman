@@ -1,5 +1,5 @@
 {
-  "source_manifest_schema_version": 2,
+  "source_manifest_schema_version": 3,
   "sources": {
     "configs/iclr_confirmatory/bridge_b0.yaml": "fc08db6cc3f584ff3a068856aa30b8adf0815fa9dc55704aa263d021ac3ec081",
     "configs/iclr_confirmatory/bridge_base.yaml": "8307b3465c8a8721fcfbc25610286efc79eb4b8eeb33668856b3ef7b02813694",
@@ -20,7 +20,15 @@
     "configs/policy_improvement_v1/matched_ppo.yaml": "1aadcd2340d5de3bb6a344c101ba7a89b33f53b5681354ee97dfb2d37a4cd2ba",
     "configs/policy_improvement_v1/protocol.json": "be986854e39776513e3cd6891ced583efd361a79ce5f1f194f5cc8af7c3c87c3",
     "configs/policy_improvement_v1/registry.json": "db8d4198409c94fda3174faffe56ba0d37b9b01f98319f217127342658be3ed4",
-    "confirmatory_runtime_launcher.py": "63494d571e798ad33fbc0b9516b69b651be71050ad67b1df1259a1e4ea491e6b",
+    "configs/policy_improvement_v2/amendments/theory_bridge_v2.json": "7901e3b6ca1b78cf672d68d2c3f6dacb6b3745aa7d0d85fdd88218e110b1a279",
+    "configs/policy_improvement_v2/fixed_base_exact_episodic.yaml": "972b3586aa251d9e7cbaf1933cdeb6019e893402d8c62c12c989ce7feea958a2",
+    "configs/policy_improvement_v2/fixed_base_exact_persistent.yaml": "6c42644c498f2dea39380e719583671e5ec9612b91d1052519522d18be6a4652",
+    "configs/policy_improvement_v2/legacy_parameter_interpolation.yaml": "fc721478d776d37bf49c4069c35c0a64297e19ac766495ff40753edfa78f7b26",
+    "configs/policy_improvement_v2/matched_ppo.yaml": "4009fd06c8295307d796ebd896beb0a229eb721fe4f0b3513c5d7ee8de114c16",
+    "configs/policy_improvement_v2/populations.json": "b15f202faf1bd531bc23e8b7e3229d504437c326b133a1b12f3bd4107f423f0d",
+    "configs/policy_improvement_v2/protocol.json": "a477a9970df55ca302c35ac83003bbe5ce90315a2badda1e474ab981e16e4e3d",
+    "configs/policy_improvement_v2/registry.json": "49d8ae77b9891534106804f463c05a048d97a8fd518f83ec8075388b89e37832",
+    "confirmatory_runtime_launcher.py": "d0dc7d117029d565bd14eae20cd7d0eedb8ce9ba72f13df26256af3d34269cd4",
     "dataset/__init__.py": "b5e0e8c6c99d4cf503ff5c82f352003c9ae7ef4c2263aeb7b97928591cd7a73e",
     "dataset/build_4x4_sudoku.py": "2809903efec8fda4efef8d62be675dda2f613134afc5041d474b6459b053eeb5",
     "dataset/build_4x4_trivial.py": "69c691a1af07d1ad08654a3a89665d5496a6989cd8cadf08ae38640a38c031b6",
@@ -49,7 +57,7 @@
     "models/recursive_reasoning/trm_singlez.py": "5f52e879b7b9fa84e52fc4b3100805f044132654a934d6b860fc5dc111dbda85",
     "models/sparse_embedding.py": "28040c620fb621b45bb5e1c58283678ddfbceb3d394499d066b9224dacc871ad",
     "models/value_head.py": "d3f098775bc16c97bbac2b188fd4bc8f0cdd4cdb1bb1e7041e552eedbebf9b21",
-    "phase4_runtime_profile.py": "8e97ffeb60a76d678f27c6f3b5e6310d7c5f34345a7e2c2ac66c61f02cfc5816",
+    "phase4_runtime_profile.py": "0bcd43f3029b4e9a10902fccc4d7f585b72d048272cfb8aedf24715f0003710d",
     "policy_improvement_checkpoint_allowlist.py": "fa22df0101cf3ab73f6e817c5d5483e6ec785e15df0672fd72e22dc651895476",
     "policy_improvement_smoke_checkpoint.py": "3c55f43977d5a1ce44e0a6ea691877d190e7fa549d274da3712cac0a10aef6b3",
     "policy_improvement_smoke_runtime.py": "33cebd2c46eb140eacf4818d26917286c81051596de03fc45bd2fc8afdbfc2f8",
@@ -82,8 +90,11 @@
     "rl/upi_trm_trainer.py": "c7bf9ec292c23c7063dbeb41a86fd0cbd1fc71db0ddc0e83b38960b6986e3222",
     "rl/value_targets.py": "8b935cb7c7dadf95ebb62887167217a66ed3f7d9d70f46c63d1e170cbad4baf9",
     "runtime_archive_preflight.py": "fd8106fd1f3f82811c282ef7c68dc8cc0819c4fdee0a3078de3d38964c70a163",
+    "scripts/policy_improvement_populations.py": "fb25eddcd05d6fd72d6c9ab54e41a4a47977571a26bed42b7c81e7308491bc6c",
     "scripts/policy_improvement_registry.py": "3baa8b7d57da40248d0650f48d07905f3f0d93693e6611b1328afa2507aed0a7",
     "scripts/policy_improvement_schema.py": "6afbf84a0ebbd567c7288b23e0a52292e8d20c2b2d10dc3bd2218a75ae039b26",
+    "scripts/policy_improvement_v2_registry.py": "bd354c0e3e784a59a1f3c7b4a6facd6938da7eeed2976f56e2378ab9f1e71809",
+    "scripts/policy_improvement_v2_schema.py": "47f63a6cf11bda8080e1eb1e27cf93d6f3ca46ce75cb918a5136ce40763c4853",
     "upi_trm_train.py": "0fc965682459ef60590a25d5022d22673f1c7e9c36bc9880e180c3e0505b6a56",
     "utils/__init__.py": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
     "utils/compute_accounting.py": "b1367ee405611914bc6e3d2c4c319992eb4c2b657ead4f4de994d5a2f98efe9d",
@@ -93,6 +104,6 @@
     "utils/lipschitz.py": "361254016d0bab61a07e8e8ae7a9a84403784755eae50e243cc310c590268fbc",
     "utils/run_identity.py": "af64163b7eb74b2ceb28e86b2cd45edf2f94f7799e15b4225a7a7e44e4420807",
     "utils/seeding.py": "1ed299ba22625bbe0e0056d4a3daca463c82c06436663a53817e1f6a83141265",
-    "utils/source_identity.py": "2a141c22c7b3075bc484ca311c0e7888d5e98feb43a82f502d24d327e4221f8c"
+    "utils/source_identity.py": "9c850ed9b4c6175fb95898485bffb86be7200c2e1bf4edfa822676449a10cb0f"
   }
 }

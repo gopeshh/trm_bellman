@@ -16,18 +16,18 @@ from unittest import mock
 from zipfile import ZipFile, ZipInfo
 
 from confirmatory_runtime_launcher import (
+    _assert_runtime_unchanged,
+    ConfirmatoryRuntimeError,
+    launch_verified_runtime,
     PAR_FILENAME_ENV,
     PRIVATE_UNPACK_BASE_ENV,
     PRIVATE_UNPACK_FD_ENV,
     SOURCE_MANIFEST_RELATIVE_PATH,
+    validate_runtime_archive,
+    VERIFIED_RUNTIME_FD_ENV,
     VERIFIED_RUNTIME_PATH_ENV,
     VERIFIED_RUNTIME_SHA256_ENV,
-    VERIFIED_RUNTIME_FD_ENV,
-    ConfirmatoryRuntimeError,
     VerifiedRuntime,
-    _assert_runtime_unchanged,
-    launch_verified_runtime,
-    validate_runtime_archive,
 )
 
 
@@ -37,13 +37,16 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
         encoded_raw_name = raw_name.encode("ascii")
         encoded_effective_name = effective_name.encode("utf-8")
         info = ZipInfo(raw_name)
-        info.extra = struct.pack(
-            "<HHBL",
-            0x7075,
-            5 + len(encoded_effective_name),
-            1,
-            zlib.crc32(encoded_raw_name),
-        ) + encoded_effective_name
+        info.extra = (
+            struct.pack(
+                "<HHBL",
+                0x7075,
+                5 + len(encoded_effective_name),
+                1,
+                zlib.crc32(encoded_raw_name),
+            )
+            + encoded_effective_name
+        )
         return info
 
     def _sources(self) -> dict[str, bytes]:
@@ -57,6 +60,9 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
             "runtime_archive_preflight.py": b"# preflight\n",
             "scripts/policy_improvement_registry.py": b"# registry\n",
             "scripts/policy_improvement_schema.py": b"# schema\n",
+            "scripts/policy_improvement_populations.py": b"# populations\n",
+            "scripts/policy_improvement_v2_registry.py": b"# v2 registry\n",
+            "scripts/policy_improvement_v2_schema.py": b"# v2 schema\n",
             "upi_trm_train.py": b"# trainer\n",
         }
         for directory in ("dataset", "evaluators", "models", "rl", "utils"):
@@ -74,8 +80,14 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
         entries["configs/policy_improvement_v1/protocol.json"] = hashlib.sha256(
             b"{}\n"
         ).hexdigest()
+        entries["configs/policy_improvement_v2/protocol.json"] = hashlib.sha256(
+            b"{}\n"
+        ).hexdigest()
+        entries["configs/policy_improvement_v2/amendments/theory_bridge_v2.json"] = (
+            hashlib.sha256(b"{}\n").hexdigest()
+        )
         return {
-            "source_manifest_schema_version": 1,
+            "source_manifest_schema_version": 3,
             "sources": entries,
         }
 
@@ -109,6 +121,19 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
                 if omit != "configs/policy_improvement_v1/protocol.json":
                     archive.writestr(
                         "configs/policy_improvement_v1/protocol.json",
+                        b"{}\n",
+                    )
+                if omit != "configs/policy_improvement_v2/protocol.json":
+                    archive.writestr(
+                        "configs/policy_improvement_v2/protocol.json",
+                        b"{}\n",
+                    )
+                if (
+                    omit
+                    != "configs/policy_improvement_v2/amendments/theory_bridge_v2.json"
+                ):
+                    archive.writestr(
+                        "configs/policy_improvement_v2/amendments/theory_bridge_v2.json",
                         b"{}\n",
                     )
                 for relative_path, content in sources.items():
@@ -227,6 +252,14 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
             },
             "missing_policy_config": {
                 "omit": "configs/policy_improvement_v1/protocol.json",
+            },
+            "missing_v2_policy_config": {
+                "omit": "configs/policy_improvement_v2/protocol.json",
+            },
+            "missing_v2_amendment": {
+                "omit": (
+                    "configs/policy_improvement_v2/amendments/" "theory_bridge_v2.json"
+                ),
             },
             "extra": {"extra": "models/extra.py"},
             "duplicate": {"duplicate": "utils/module.py"},
@@ -351,9 +384,7 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
             replacement = root / "replacement.par"
             replacement.write_bytes(b"unverified replacement")
             replacement.replace(path)
-            with mock.patch(
-                "confirmatory_runtime_launcher.subprocess.Popen"
-            ) as popen:
+            with mock.patch("confirmatory_runtime_launcher.subprocess.Popen") as popen:
                 popen.return_value.wait.return_value = 0
                 self.assertEqual(
                     launch_verified_runtime(runtime, ["--confirmatory"]),
@@ -382,9 +413,7 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
             expected = self._archive(path)
             runtime = validate_runtime_archive(path, expected)
             descriptor = runtime.descriptor
-            with mock.patch(
-                "confirmatory_runtime_launcher.subprocess.Popen"
-            ) as popen:
+            with mock.patch("confirmatory_runtime_launcher.subprocess.Popen") as popen:
                 popen.return_value.wait.return_value = 0
                 self.assertEqual(
                     launch_verified_runtime(
@@ -533,9 +562,7 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
                 sha256="a" * 64,
                 descriptor=descriptor,
             )
-            with mock.patch(
-                "confirmatory_runtime_launcher.subprocess.Popen"
-            ) as popen:
+            with mock.patch("confirmatory_runtime_launcher.subprocess.Popen") as popen:
                 with self.assertRaisesRegex(
                     ConfirmatoryRuntimeError,
                     "--confirmatory",
@@ -553,9 +580,7 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
                 sha256="a" * 64,
                 descriptor=descriptor,
             )
-            with mock.patch(
-                "confirmatory_runtime_launcher.subprocess.Popen"
-            ) as popen:
+            with mock.patch("confirmatory_runtime_launcher.subprocess.Popen") as popen:
                 with self.assertRaises(ConfirmatoryRuntimeError):
                     launch_verified_runtime(runtime, ["--confirmatory"])
             popen.assert_not_called()

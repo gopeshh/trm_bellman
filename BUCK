@@ -159,6 +159,9 @@ python_library(
     name = "policy_improvement_schema",
     srcs = ["scripts/policy_improvement_schema.py"],
     base_module = "",
+    deps = [
+        ":policy_improvement_v2_schema",
+    ],
 )
 
 python_library(
@@ -191,6 +194,7 @@ python_library(
     base_module = "",
     deps = [
         ":policy_improvement_schema",
+        ":policy_improvement_v2_registry",
     ],
 )
 
@@ -277,6 +281,9 @@ python_binary(
         "configs/policy_improvement_v1/*.json",
         "configs/policy_improvement_v1/*.yaml",
         "configs/policy_improvement_v1/amendments/*.json",
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/*.yaml",
+        "configs/policy_improvement_v2/amendments/*.json",
     ]),
     deps = [
         ":policy_improvement_full_backend",
@@ -328,6 +335,9 @@ python_binary(
         "configs/policy_improvement_v1/*.json",
         "configs/policy_improvement_v1/*.yaml",
         "configs/policy_improvement_v1/amendments/*.json",
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/*.yaml",
+        "configs/policy_improvement_v2/amendments/*.json",
     ]),
     deps = [
         ":policy_improvement_full_backend",
@@ -417,6 +427,9 @@ python_binary(
         "configs/policy_improvement_v1/*.json",
         "configs/policy_improvement_v1/*.yaml",
         "configs/policy_improvement_v1/amendments/*.json",
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/*.yaml",
+        "configs/policy_improvement_v2/amendments/*.json",
     ]),
     deps = [
         ":policy_improvement_checkpoint_validator",
@@ -466,6 +479,9 @@ python_binary(
         "configs/policy_improvement_v1/*.json",
         "configs/policy_improvement_v1/*.yaml",
         "configs/policy_improvement_v1/amendments/*.json",
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/*.yaml",
+        "configs/policy_improvement_v2/amendments/*.json",
     ]),
     deps = [
         ":policy_improvement_audit_lib",
@@ -549,6 +565,7 @@ python_library(
         ":phase4_runtime_profile",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
+        ":policy_improvement_populations",
         ":policy_improvement_smoke_checkpoint",
         ":puzzle_dataset_lib",
         ":rl",
@@ -585,6 +602,9 @@ python_library(
         "configs/iclr_confirmatory/*.yaml",
         "configs/policy_improvement_v1/*.json",
         "configs/policy_improvement_v1/*.yaml",
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/*.yaml",
+        "configs/policy_improvement_v2/amendments/*.json",
     ]),
     deps = [
         "fbsource//third-party/pypi/coolname:coolname",
@@ -620,6 +640,9 @@ python_binary(
         "configs/iclr_confirmatory/*.yaml",
         "configs/policy_improvement_v1/*.json",
         "configs/policy_improvement_v1/*.yaml",
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/*.yaml",
+        "configs/policy_improvement_v2/amendments/*.json",
     ]),
     deps = [
         "fbsource//third-party/pypi/coolname:coolname",
@@ -908,6 +931,7 @@ python_unittest(
     ],
     base_module = "",
     resources = [
+        "BUCK",
         "configs/policy_improvement_v1/fixed_base_exact_episodic.yaml",
         "configs/policy_improvement_v1/fixed_base_exact_persistent.yaml",
         "configs/policy_improvement_v1/legacy_parameter_interpolation.yaml",

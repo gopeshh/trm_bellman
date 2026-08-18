@@ -31,8 +31,8 @@ SOURCE_MANIFEST_RELATIVE_PATH = (
 )
 # Accept every producer inventory version, because the launcher may verify a
 # historical producer runtime whose manifest predates a later root source.
-SOURCE_MANIFEST_SCHEMA_VERSION = 2
-SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS = (1, 2)
+SOURCE_MANIFEST_SCHEMA_VERSION = 3
+SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS = (1, 2, 3)
 VERIFIED_RUNTIME_PATH_ENV = "UPI_TRM_VERIFIED_RUNTIME_PATH"
 VERIFIED_RUNTIME_SHA256_ENV = "UPI_TRM_VERIFIED_RUNTIME_SHA256"
 VERIFIED_RUNTIME_FD_ENV = "UPI_TRM_VERIFIED_RUNTIME_FD"
@@ -60,6 +60,16 @@ _ROOT_SOURCES_BY_VERSION: dict[int, tuple[str, ...]] = {
         "runtime_archive_preflight.py",
         "upi_trm_train.py",
     ),
+    3: (
+        "confirmatory_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_checkpoint_allowlist.py",
+        "policy_improvement_smoke_checkpoint.py",
+        "policy_improvement_smoke_runtime.py",
+        "puzzle_dataset.py",
+        "runtime_archive_preflight.py",
+        "upi_trm_train.py",
+    ),
 }
 _ROOT_SOURCES = (
     "confirmatory_runtime_launcher.py",
@@ -71,15 +81,41 @@ _ROOT_SOURCES = (
     "runtime_archive_preflight.py",
     "upi_trm_train.py",
 )
-_ADDITIONAL_SOURCES = (
-    "scripts/policy_improvement_registry.py",
-    "scripts/policy_improvement_schema.py",
-)
+_ADDITIONAL_SOURCES_BY_VERSION = {
+    1: (
+        "scripts/policy_improvement_registry.py",
+        "scripts/policy_improvement_schema.py",
+    ),
+    2: (
+        "scripts/policy_improvement_registry.py",
+        "scripts/policy_improvement_schema.py",
+    ),
+    3: (
+        "scripts/policy_improvement_registry.py",
+        "scripts/policy_improvement_schema.py",
+        "scripts/policy_improvement_populations.py",
+        "scripts/policy_improvement_v2_registry.py",
+        "scripts/policy_improvement_v2_schema.py",
+    ),
+}
+_ADDITIONAL_SOURCES = _ADDITIONAL_SOURCES_BY_VERSION[3]
 _SOURCE_DIRECTORIES = ("dataset", "evaluators", "models", "rl", "utils")
-_CONFIG_DIRECTORIES = (
-    PurePosixPath("configs/iclr_confirmatory"),
-    PurePosixPath("configs/policy_improvement_v1"),
-)
+_CONFIG_DIRECTORIES_BY_VERSION = {
+    1: (
+        PurePosixPath("configs/iclr_confirmatory"),
+        PurePosixPath("configs/policy_improvement_v1"),
+    ),
+    2: (
+        PurePosixPath("configs/iclr_confirmatory"),
+        PurePosixPath("configs/policy_improvement_v1"),
+    ),
+    3: (
+        PurePosixPath("configs/iclr_confirmatory"),
+        PurePosixPath("configs/policy_improvement_v1"),
+        PurePosixPath("configs/policy_improvement_v2"),
+    ),
+}
+_CONFIG_DIRECTORIES = _CONFIG_DIRECTORIES_BY_VERSION[3]
 _LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _READ_SIZE = 1024 * 1024
 _MEMFD_SEALING_AVAILABLE = all(
@@ -196,8 +232,7 @@ def _is_behavior_bytecode(relative_path: str) -> bool:
         return path.stem in root_stems
     if path.parent == PurePosixPath("scripts"):
         return any(
-            path.stem == PurePosixPath(source).stem
-            for source in _ADDITIONAL_SOURCES
+            path.stem == PurePosixPath(source).stem for source in _ADDITIONAL_SOURCES
         )
     if path.parts[:2] == ("scripts", "__pycache__"):
         return any(
@@ -213,8 +248,11 @@ def _is_confirmatory_config_source(relative_path: str) -> bool:
     if not _is_safe_relative_path(relative_path):
         return False
     path = PurePosixPath(relative_path)
+    registered_parent = path.parent in _CONFIG_DIRECTORIES or (
+        path.parent == PurePosixPath("configs/policy_improvement_v2/amendments")
+    )
     return (
-        path.parent in _CONFIG_DIRECTORIES
+        registered_parent
         and path.suffix in {".json", ".yaml"}
         and relative_path != SOURCE_MANIFEST_RELATIVE_PATH
     )
@@ -259,7 +297,10 @@ def _validate_manifest(value: object) -> dict[str, str]:
 
     # The manifest's own version selects the root sources its producer had.
     required_roots = _ROOT_SOURCES_BY_VERSION.get(schema_version, _ROOT_SOURCES)
-    missing_roots = set((*required_roots, *_ADDITIONAL_SOURCES)).difference(sources)
+    required_additional = _ADDITIONAL_SOURCES_BY_VERSION.get(
+        schema_version, _ADDITIONAL_SOURCES
+    )
+    missing_roots = set((*required_roots, *required_additional)).difference(sources)
     missing_directories = {
         directory
         for directory in _SOURCE_DIRECTORIES
@@ -275,7 +316,7 @@ def _validate_manifest(value: object) -> dict[str, str]:
         )
     missing_config_directories = {
         directory
-        for directory in _CONFIG_DIRECTORIES
+        for directory in _CONFIG_DIRECTORIES_BY_VERSION[schema_version]
         if not any(
             PurePosixPath(path).parent == directory
             and _is_confirmatory_config_source(path)
@@ -467,11 +508,7 @@ def _validate_archive_sources(archive: ZipFile) -> None:
             or _is_confirmatory_config_source(info.filename)
         )
     }
-    if any(
-        _is_behavior_bytecode(info.filename)
-        for info in infos
-        if not info.is_dir()
-    ):
+    if any(_is_behavior_bytecode(info.filename) for info in infos if not info.is_dir()):
         raise ConfirmatoryRuntimeError(
             "Runtime archive contains unverified behavior bytecode."
         )
@@ -530,9 +567,7 @@ def validate_runtime_archive(
     except OSError as exc:
         raise ConfirmatoryRuntimeError("Runtime artifact does not exist.") from exc
     if stat.S_ISLNK(requested_status.st_mode):
-        raise ConfirmatoryRuntimeError(
-            "Runtime artifact path must not be a symlink."
-        )
+        raise ConfirmatoryRuntimeError("Runtime artifact path must not be a symlink.")
     if not stat.S_ISREG(path_before.st_mode):
         raise ConfirmatoryRuntimeError("Runtime artifact must be a regular file.")
 
@@ -563,9 +598,7 @@ def validate_runtime_archive(
         raise
     except OSError as exc:
         os.close(descriptor)
-        raise ConfirmatoryRuntimeError(
-            "Runtime artifact validation failed."
-        ) from exc
+        raise ConfirmatoryRuntimeError("Runtime artifact validation failed.") from exc
 
     try:
         _assert_runtime_unchanged(

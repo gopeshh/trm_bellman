@@ -15,8 +15,8 @@ from zipfile import BadZipFile, ZipFile
 # own inventory.  Requiring today's inventory of a historical commit would make
 # that evidence permanently unauthenticatable, so each schema version pins the
 # exact root-source set that version's producers had.
-SOURCE_MANIFEST_SCHEMA_VERSION = 2
-SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS = (1, 2)
+SOURCE_MANIFEST_SCHEMA_VERSION = 3
+SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS = (1, 2, 3)
 SOURCE_MANIFEST_RELATIVE_PATH = (
     "configs/iclr_confirmatory/producer_source_manifest.json"
 )
@@ -41,17 +41,40 @@ _ROOT_SOURCES_V2 = (
     "runtime_archive_preflight.py",
     "upi_trm_train.py",
 )
-_ROOT_SOURCES_BY_VERSION = {1: _ROOT_SOURCES_V1, 2: _ROOT_SOURCES_V2}
-_ROOT_SOURCES = _ROOT_SOURCES_V2
-_ADDITIONAL_SOURCES = (
+_ROOT_SOURCES_V3 = _ROOT_SOURCES_V2
+_ROOT_SOURCES_BY_VERSION = {
+    1: _ROOT_SOURCES_V1,
+    2: _ROOT_SOURCES_V2,
+    3: _ROOT_SOURCES_V3,
+}
+_ROOT_SOURCES = _ROOT_SOURCES_V3
+_ADDITIONAL_SOURCES_V1 = (
     "scripts/policy_improvement_registry.py",
     "scripts/policy_improvement_schema.py",
 )
-_SOURCE_DIRECTORIES = ("dataset", "evaluators", "models", "rl", "utils")
-_CONFIG_DIRECTORIES = (
-    "configs/iclr_confirmatory",
-    "configs/policy_improvement_v1",
+_ADDITIONAL_SOURCES_V2 = _ADDITIONAL_SOURCES_V1
+_ADDITIONAL_SOURCES_V3 = (
+    *_ADDITIONAL_SOURCES_V2,
+    "scripts/policy_improvement_populations.py",
+    "scripts/policy_improvement_v2_registry.py",
+    "scripts/policy_improvement_v2_schema.py",
 )
+_ADDITIONAL_SOURCES_BY_VERSION = {
+    1: _ADDITIONAL_SOURCES_V1,
+    2: _ADDITIONAL_SOURCES_V2,
+    3: _ADDITIONAL_SOURCES_V3,
+}
+_ADDITIONAL_SOURCES = _ADDITIONAL_SOURCES_V3
+_SOURCE_DIRECTORIES = ("dataset", "evaluators", "models", "rl", "utils")
+_CONFIG_DIRECTORIES_BY_VERSION = {
+    1: ("configs/iclr_confirmatory", "configs/policy_improvement_v1"),
+    2: ("configs/iclr_confirmatory", "configs/policy_improvement_v1"),
+    3: (
+        "configs/iclr_confirmatory",
+        "configs/policy_improvement_v1",
+        "configs/policy_improvement_v2",
+    ),
+}
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -70,6 +93,44 @@ def required_root_sources(schema_version: int) -> tuple[str, ...]:
         ) from None
 
 
+def required_additional_sources(schema_version: int) -> tuple[str, ...]:
+    """Additional script sources required by one producer inventory version."""
+
+    try:
+        return _ADDITIONAL_SOURCES_BY_VERSION[schema_version]
+    except KeyError:
+        raise SourceIdentityError(
+            f"Unsupported producer source manifest schema {schema_version!r}."
+        ) from None
+
+
+def registered_config_directories(schema_version: int) -> tuple[str, ...]:
+    """Configuration namespaces authenticated by one producer version."""
+
+    try:
+        return _CONFIG_DIRECTORIES_BY_VERSION[schema_version]
+    except KeyError:
+        raise SourceIdentityError(
+            f"Unsupported producer source manifest schema {schema_version!r}."
+        ) from None
+
+
+def _is_registered_config_path(
+    relative_path: str,
+    relative_directory: str,
+) -> bool:
+    path = PurePosixPath(relative_path)
+    parent = PurePosixPath(relative_directory)
+    if path.suffix not in {".json", ".yaml"}:
+        return False
+    if path.parent == parent:
+        return True
+    return (
+        relative_directory == "configs/policy_improvement_v2"
+        and path.parent == parent / "amendments"
+    )
+
+
 def inventory_schema_version(relative_paths: Iterable[str]) -> int:
     """Highest schema version whose required root sources the tree satisfies.
 
@@ -81,7 +142,11 @@ def inventory_schema_version(relative_paths: Iterable[str]) -> int:
     inventory = set(relative_paths)
     best = 0
     for version in sorted(_ROOT_SOURCES_BY_VERSION):
-        if set(required_root_sources(version)) <= inventory:
+        required = {
+            *required_root_sources(version),
+            *required_additional_sources(version),
+        }
+        if required <= inventory:
             best = version
     if not best:
         missing = sorted(set(required_root_sources(1)) - inventory)
@@ -121,7 +186,10 @@ def behavior_source_relative_paths_from_inventory(
             f"Producer manifest declares schema {schema_version!r} but its "
             f"tree satisfies schema {derived_version!r}."
         )
-    required = {*required_root_sources(derived_version), *_ADDITIONAL_SOURCES}
+    required = {
+        *required_root_sources(derived_version),
+        *required_additional_sources(derived_version),
+    }
     missing = required - inventory
     if missing:
         raise SourceIdentityError(
@@ -140,16 +208,14 @@ def behavior_source_relative_paths_from_inventory(
                 f"Producer repository is missing directory {relative_directory!r}."
             )
         selected.update(members)
-    for relative_directory in _CONFIG_DIRECTORIES:
-        parent = PurePosixPath(relative_directory)
+    for relative_directory in registered_config_directories(derived_version):
         members = {
             path
             for path in inventory
-            if PurePosixPath(path).parent == parent
-            and PurePosixPath(path).suffix in {".json", ".yaml"}
+            if _is_registered_config_path(path, relative_directory)
             and path != SOURCE_MANIFEST_RELATIVE_PATH
         }
-        if not any(PurePosixPath(path).parent == parent for path in inventory):
+        if not members:
             raise SourceIdentityError(
                 "Producer repository is missing registered configuration sources."
             )
@@ -178,7 +244,7 @@ def behavior_source_relative_paths(
                 f"Producer repository is missing source {relative_path!r}."
             )
         paths.add(relative_path)
-    for relative_path in _ADDITIONAL_SOURCES:
+    for relative_path in required_additional_sources(schema_version):
         if not (source_root / relative_path).is_file():
             raise SourceIdentityError(
                 f"Producer repository is missing source {relative_path!r}."
@@ -195,17 +261,24 @@ def behavior_source_relative_paths(
             for path in directory.rglob("*.py")
             if "__pycache__" not in path.parts
         )
-    for relative_directory in _CONFIG_DIRECTORIES:
+    for relative_directory in registered_config_directories(schema_version):
         config_directory = source_root / relative_directory
         if not config_directory.is_dir():
             raise SourceIdentityError(
                 "Producer repository is missing registered configuration sources."
             )
+        candidates = (
+            config_directory.rglob("*")
+            if relative_directory == "configs/policy_improvement_v2"
+            else config_directory.iterdir()
+        )
         paths.update(
             str(path.relative_to(source_root))
-            for path in config_directory.iterdir()
+            for path in candidates
             if path.is_file()
-            and path.suffix in {".json", ".yaml"}
+            and _is_registered_config_path(
+                str(path.relative_to(source_root)), relative_directory
+            )
             and str(path.relative_to(source_root)) != SOURCE_MANIFEST_RELATIVE_PATH
         )
     return sorted(paths)

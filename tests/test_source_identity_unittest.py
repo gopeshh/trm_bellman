@@ -16,16 +16,18 @@ from phase4_runtime_profile import (
     Phase4RuntimeProfileError,
 )
 from utils.source_identity import (
-    inventory_schema_version,
-    required_root_sources,
-    SOURCE_MANIFEST_SCHEMA_VERSION,
-    SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS,
-    SOURCE_MANIFEST_RELATIVE_PATH,
-    SourceIdentityError,
     assert_runtime_archive_sources_match_manifest,
     behavior_source_relative_paths,
     behavior_source_relative_paths_from_inventory,
     build_producer_source_manifest,
+    inventory_schema_version,
+    registered_config_directories,
+    required_additional_sources,
+    required_root_sources,
+    SOURCE_MANIFEST_RELATIVE_PATH,
+    SOURCE_MANIFEST_SCHEMA_VERSION,
+    SourceIdentityError,
+    SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS,
     validate_producer_source_manifest,
 )
 
@@ -41,6 +43,9 @@ def _write_source_tree(root: Path) -> None:
         "runtime_archive_preflight.py",
         "scripts/policy_improvement_registry.py",
         "scripts/policy_improvement_schema.py",
+        "scripts/policy_improvement_populations.py",
+        "scripts/policy_improvement_v2_registry.py",
+        "scripts/policy_improvement_v2_schema.py",
         "upi_trm_train.py",
     ):
         destination = root / relative_path
@@ -58,6 +63,15 @@ def _write_source_tree(root: Path) -> None:
     policy_config_dir.mkdir(parents=True)
     (policy_config_dir / "protocol.json").write_text("{}\n", encoding="ascii")
     (policy_config_dir / "method.yaml").write_text("gamma: 0.9\n", encoding="ascii")
+    policy_v2_config_dir = root / "configs" / "policy_improvement_v2"
+    policy_v2_config_dir.mkdir(parents=True)
+    (policy_v2_config_dir / "protocol.json").write_text("{}\n", encoding="ascii")
+    (policy_v2_config_dir / "method.yaml").write_text("gamma: 0.9\n", encoding="ascii")
+    policy_v2_amendments = policy_v2_config_dir / "amendments"
+    policy_v2_amendments.mkdir()
+    (policy_v2_amendments / "theory_bridge_v2.json").write_text(
+        "{}\n", encoding="ascii"
+    )
 
     phase4_config_dir = root / "configs" / "phase4_2x2_norm_ablation"
     phase4_config_dir.mkdir(parents=True)
@@ -347,16 +361,40 @@ class VersionedProducerInventoryTest(unittest.TestCase):
                 self.assertEqual(
                     tuple(sorted(launcher._ROOT_SOURCES_BY_VERSION[version])), expected
                 )
+                self.assertEqual(
+                    tuple(sorted(profile._producer_additional_sources(version))),
+                    tuple(sorted(required_additional_sources(version))),
+                )
+                self.assertEqual(
+                    tuple(sorted(profile._producer_config_directories(version))),
+                    tuple(sorted(registered_config_directories(version))),
+                )
 
-    def test_v2_requires_the_allowlist_and_v1_does_not(self) -> None:
+    def test_versioned_inventory_additions_are_exact(self) -> None:
         self.assertIn(
             "policy_improvement_checkpoint_allowlist.py", required_root_sources(2)
         )
         self.assertNotIn(
             "policy_improvement_checkpoint_allowlist.py", required_root_sources(1)
         )
+        self.assertIn(
+            "scripts/policy_improvement_v2_schema.py",
+            required_additional_sources(3),
+        )
+        self.assertNotIn(
+            "scripts/policy_improvement_v2_schema.py",
+            required_additional_sources(2),
+        )
+        self.assertIn(
+            "configs/policy_improvement_v2",
+            registered_config_directories(3),
+        )
+        self.assertNotIn(
+            "configs/policy_improvement_v2",
+            registered_config_directories(2),
+        )
         with self.assertRaises(SourceIdentityError):
-            required_root_sources(3)
+            required_root_sources(4)
 
     def test_historical_v1_checkout_still_enumerates(self) -> None:
         """A clean pre-allowlist producer checkout authenticates."""
@@ -374,6 +412,11 @@ class VersionedProducerInventoryTest(unittest.TestCase):
         _write_source_tree(self.root)
         paths = behavior_source_relative_paths(self.root)
         self.assertIn("policy_improvement_checkpoint_allowlist.py", paths)
+        self.assertIn("scripts/policy_improvement_v2_schema.py", paths)
+        self.assertIn(
+            "configs/policy_improvement_v2/amendments/theory_bridge_v2.json",
+            paths,
+        )
 
     def test_deleting_the_allowlist_from_head_fails_closed(self) -> None:
         _write_source_tree(self.root)
@@ -388,17 +431,37 @@ class VersionedProducerInventoryTest(unittest.TestCase):
             for path in self.root.rglob("*")
             if path.is_file()
         ]
-        self.assertEqual(inventory_schema_version(inventory), 2)
+        self.assertEqual(inventory_schema_version(inventory), 3)
         # A v1 manifest may not be presented for a tree that satisfies v2.
         with self.assertRaisesRegex(SourceIdentityError, "declares schema"):
             behavior_source_relative_paths_from_inventory(inventory, schema_version=1)
-        self.assertTrue(
+        with self.assertRaisesRegex(SourceIdentityError, "declares schema"):
             behavior_source_relative_paths_from_inventory(inventory, schema_version=2)
+        self.assertTrue(
+            behavior_source_relative_paths_from_inventory(inventory, schema_version=3)
         )
+
+        v2_inventory = [
+            item
+            for item in inventory
+            if item
+            not in set(required_additional_sources(3))
+            - set(required_additional_sources(2))
+        ]
+        self.assertEqual(inventory_schema_version(v2_inventory), 2)
+        self.assertTrue(
+            behavior_source_relative_paths_from_inventory(
+                v2_inventory, schema_version=2
+            )
+        )
+        with self.assertRaises(SourceIdentityError):
+            behavior_source_relative_paths_from_inventory(
+                v2_inventory, schema_version=3
+            )
 
         older = [
             item
-            for item in inventory
+            for item in v2_inventory
             if item != "policy_improvement_checkpoint_allowlist.py"
         ]
         self.assertEqual(inventory_schema_version(older), 1)
@@ -419,22 +482,44 @@ class VersionedProducerInventoryTest(unittest.TestCase):
 
     def test_phase4_authorizer_accepts_clean_current_v2_checkout(self) -> None:
         _write_source_tree(self.root)
+        for relative_path in set(required_additional_sources(3)) - set(
+            required_additional_sources(2)
+        ):
+            (self.root / relative_path).unlink()
+        for path in (self.root / "configs/policy_improvement_v2").rglob("*"):
+            if path.is_file():
+                path.unlink()
+        (self.root / "configs/policy_improvement_v2/amendments").rmdir()
+        (self.root / "configs/policy_improvement_v2").rmdir()
         _write_manifest(self.root, 2)
         commit = _commit_source_tree(self.root)
 
         authorized = authorize_phase4_training_source(self.root, commit)
         self.assertEqual(authorized.git_commit, commit)
 
-    def test_phase4_authorizer_rejects_v1_manifest_for_v2_checkout(self) -> None:
+    def test_phase4_authorizer_accepts_clean_current_v3_checkout(self) -> None:
         _write_source_tree(self.root)
-        _write_manifest(self.root, 1)
+        _write_manifest(self.root, 3)
         commit = _commit_source_tree(self.root)
 
-        with self.assertRaisesRegex(
-            Phase4RuntimeProfileError,
-            "declares schema 1.*satisfies schema 2",
-        ):
-            authorize_phase4_training_source(self.root, commit)
+        authorized = authorize_phase4_training_source(self.root, commit)
+        self.assertEqual(authorized.git_commit, commit)
+
+    def test_phase4_authorizer_rejects_downgraded_manifest_for_v3_checkout(
+        self,
+    ) -> None:
+        _write_source_tree(self.root)
+        for schema_version in (1, 2):
+            with self.subTest(schema_version=schema_version):
+                _write_manifest(self.root, schema_version)
+                commit = _commit_source_tree(self.root)
+                with self.assertRaisesRegex(
+                    Phase4RuntimeProfileError,
+                    f"declares schema {schema_version}.*satisfies schema 3",
+                ):
+                    authorize_phase4_training_source(self.root, commit)
+                if schema_version == 1:
+                    (self.root / SOURCE_MANIFEST_RELATIVE_PATH).unlink()
 
 
 if __name__ == "__main__":

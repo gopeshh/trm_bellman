@@ -61,6 +61,10 @@ from phase4_runtime_profile import (
     POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS,
     POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_FULL_PROFILE_PATHS,
+    POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS,
+    POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE,
 )
 from runtime_archive_preflight import (
     _validate_policy_runtime_authorization,
@@ -127,6 +131,22 @@ _POLICY_TRAINING_TEST_PATHS = (
     "models/source.py",
     "rl/source.py",
     "utils/source.py",
+)
+
+_POLICY_IMPROVEMENT_V2_RUNTIME_PATHS = frozenset(
+    {
+        "configs/policy_improvement_v2/amendments/theory_bridge_v2.json",
+        "configs/policy_improvement_v2/fixed_base_exact_episodic.yaml",
+        "configs/policy_improvement_v2/fixed_base_exact_persistent.yaml",
+        "configs/policy_improvement_v2/legacy_parameter_interpolation.yaml",
+        "configs/policy_improvement_v2/matched_ppo.yaml",
+        "configs/policy_improvement_v2/populations.json",
+        "configs/policy_improvement_v2/protocol.json",
+        "configs/policy_improvement_v2/registry.json",
+        "scripts/policy_improvement_populations.py",
+        "scripts/policy_improvement_v2_registry.py",
+        "scripts/policy_improvement_v2_schema.py",
+    }
 )
 
 
@@ -1553,6 +1573,16 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 _policy_consumer_paths(POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS),
                 "scripts/policy_improvement_analysis.py",
             ),
+            (
+                POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
+                _policy_consumer_paths(POLICY_IMPROVEMENT_FULL_PROFILE_PATHS),
+                "policy_improvement_full_entrypoint.py",
+            ),
+            (
+                POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE,
+                _policy_consumer_paths(POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS),
+                "scripts/policy_improvement_theory_bridge.py",
+            ),
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1567,11 +1597,36 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                     with ZipFile(valid, "w") as archive:
                         for relative_path, payload in sources.items():
                             archive.writestr(relative_path, payload)
-                    with ZipFile(valid) as archive:
-                        assert_phase4_archive_matches_profile(
-                            archive,
-                            authorized,
+                with ZipFile(valid) as archive:
+                    assert_phase4_archive_matches_profile(
+                        archive,
+                        authorized,
+                    )
+                for omitted_name in (
+                    "scripts/policy_improvement_v2_schema.py",
+                    "configs/policy_improvement_v2/protocol.json",
+                    "configs/policy_improvement_v2/amendments/theory_bridge_v2.json",
+                ):
+                    with self.subTest(
+                        profile=profile,
+                        case="omitted-v2",
+                        omitted_name=omitted_name,
+                    ):
+                        omitted = root / (
+                            f"{profile}-{omitted_name.replace('/', '_')}.par"
                         )
+                        with ZipFile(omitted, "w") as archive:
+                            for relative_path, payload in sources.items():
+                                if relative_path != omitted_name:
+                                    archive.writestr(relative_path, payload)
+                        with (
+                            ZipFile(omitted) as archive,
+                            self.assertRaises(Phase4RuntimeProfileError),
+                        ):
+                            assert_phase4_archive_matches_profile(
+                                archive,
+                                authorized,
+                            )
                 for case, extra_name in (
                     ("extra-source", "scripts/policy_improvement_unregistered.py"),
                     (
@@ -1615,6 +1670,31 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                             authorized,
                         )
 
+    def test_every_policy_runtime_profile_contains_the_v2_closure(self) -> None:
+        for profile, paths in (
+            (
+                POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
+                POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS,
+            ),
+            (
+                POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
+                POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS,
+            ),
+            (
+                POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
+                POLICY_IMPROVEMENT_FULL_PROFILE_PATHS,
+            ),
+            (
+                POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE,
+                POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS,
+            ),
+        ):
+            with self.subTest(profile=profile):
+                self.assertLessEqual(
+                    _POLICY_IMPROVEMENT_V2_RUNTIME_PATHS,
+                    set(paths),
+                )
+
     def test_policy_consumer_profiles_authorize_exact_clean_tree(self) -> None:
         for profile, paths in (
             (
@@ -1624,6 +1704,14 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
             (
                 POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
                 _policy_consumer_paths(POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS),
+            ),
+            (
+                POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
+                _policy_consumer_paths(POLICY_IMPROVEMENT_FULL_PROFILE_PATHS),
+            ),
+            (
+                POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE,
+                _policy_consumer_paths(POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS),
             ),
         ):
             with (

@@ -20,15 +20,13 @@ POLICY_DATASET_BUILDER_SOURCE_PROFILE = "policy-dataset-builder"
 POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE = "policy-improvement-audit"
 POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE = "policy-improvement-analysis"
 POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE = "policy-improvement-full"
-POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE = (
-    "policy-improvement-theory-bridge"
-)
+POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE = "policy-improvement-theory-bridge"
 PHASE4_SOURCE_MANIFEST_SCHEMA_VERSION = 1
 # Producer inventory versions, duplicated from utils.source_identity because
 # this module must stay standard-library only: it is imported before runtime
 # attestation, and :utils pulls Torch.  A consistency test pins the two
 # definitions together so they cannot drift.
-PRODUCER_SOURCE_MANIFEST_SCHEMA_VERSION = 2
+PRODUCER_SOURCE_MANIFEST_SCHEMA_VERSION = 3
 _PRODUCER_ROOT_SOURCES_BY_VERSION: dict[int, tuple[str, ...]] = {
     1: (
         "confirmatory_runtime_launcher.py",
@@ -49,6 +47,42 @@ _PRODUCER_ROOT_SOURCES_BY_VERSION: dict[int, tuple[str, ...]] = {
         "runtime_archive_preflight.py",
         "upi_trm_train.py",
     ),
+    3: (
+        "confirmatory_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_checkpoint_allowlist.py",
+        "policy_improvement_smoke_checkpoint.py",
+        "policy_improvement_smoke_runtime.py",
+        "puzzle_dataset.py",
+        "runtime_archive_preflight.py",
+        "upi_trm_train.py",
+    ),
+}
+_PRODUCER_ADDITIONAL_SOURCES_BY_VERSION: dict[int, tuple[str, ...]] = {
+    1: (
+        "scripts/policy_improvement_registry.py",
+        "scripts/policy_improvement_schema.py",
+    ),
+    2: (
+        "scripts/policy_improvement_registry.py",
+        "scripts/policy_improvement_schema.py",
+    ),
+    3: (
+        "scripts/policy_improvement_registry.py",
+        "scripts/policy_improvement_schema.py",
+        "scripts/policy_improvement_populations.py",
+        "scripts/policy_improvement_v2_registry.py",
+        "scripts/policy_improvement_v2_schema.py",
+    ),
+}
+_PRODUCER_CONFIG_DIRECTORIES_BY_VERSION: dict[int, tuple[str, ...]] = {
+    1: ("configs/iclr_confirmatory", "configs/policy_improvement_v1"),
+    2: ("configs/iclr_confirmatory", "configs/policy_improvement_v1"),
+    3: (
+        "configs/iclr_confirmatory",
+        "configs/policy_improvement_v1",
+        "configs/policy_improvement_v2",
+    ),
 }
 PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH = (
     "configs/iclr_confirmatory/producer_source_manifest.json"
@@ -68,19 +102,13 @@ PHASE4_SHARED_SOURCES = (
     "scripts/phase4_source.py",
 )
 PHASE4_PROFILE_ENTRYPOINTS = {
-    PHASE4_EVALUATOR_SOURCE_PROFILE: (
-        "scripts/eval_phase4_2x2_norm_ablation.py",
-    ),
-    PHASE4_AUDIT_SOURCE_PROFILE: (
-        "scripts/audit_phase4_paper_ready.py",
-    ),
+    PHASE4_EVALUATOR_SOURCE_PROFILE: ("scripts/eval_phase4_2x2_norm_ablation.py",),
+    PHASE4_AUDIT_SOURCE_PROFILE: ("scripts/audit_phase4_paper_ready.py",),
     PHASE4_FIGURE_SOURCE_PROFILE: (
         "scripts/phase4_figure_publication.py",
         "scripts/make_paper_figures_phase4.py",
     ),
-    POLICY_DATASET_BUILDER_SOURCE_PROFILE: (
-        "policy_dataset_builder_entrypoint.py",
-    ),
+    POLICY_DATASET_BUILDER_SOURCE_PROFILE: ("policy_dataset_builder_entrypoint.py",),
     POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE: (
         "policy_improvement_consumer_entrypoint.py",
         "scripts/policy_improvement_audit.py",
@@ -89,9 +117,7 @@ PHASE4_PROFILE_ENTRYPOINTS = {
         "policy_improvement_consumer_entrypoint.py",
         "scripts/policy_improvement_analysis.py",
     ),
-    POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE: (
-        "policy_improvement_full_entrypoint.py",
-    ),
+    POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE: ("policy_improvement_full_entrypoint.py",),
     POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE: (
         "policy_improvement_theory_bridge_entrypoint.py",
     ),
@@ -122,9 +148,23 @@ _POLICY_IMPROVEMENT_CONFIG_PATHS = (
     "configs/policy_improvement_v1/matched_ppo.yaml",
     "configs/policy_improvement_v1/protocol.json",
     "configs/policy_improvement_v1/registry.json",
+    "configs/policy_improvement_v2/amendments/theory_bridge_v2.json",
+    "configs/policy_improvement_v2/fixed_base_exact_episodic.yaml",
+    "configs/policy_improvement_v2/fixed_base_exact_persistent.yaml",
+    "configs/policy_improvement_v2/legacy_parameter_interpolation.yaml",
+    "configs/policy_improvement_v2/matched_ppo.yaml",
+    "configs/policy_improvement_v2/populations.json",
+    "configs/policy_improvement_v2/protocol.json",
+    "configs/policy_improvement_v2/registry.json",
+)
+_POLICY_IMPROVEMENT_V2_SOURCE_PATHS = (
+    "scripts/policy_improvement_populations.py",
+    "scripts/policy_improvement_v2_registry.py",
+    "scripts/policy_improvement_v2_schema.py",
 )
 POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_CONFIG_PATHS,
+    *_POLICY_IMPROVEMENT_V2_SOURCE_PATHS,
     "policy_improvement_checkpoint_validator.py",
     "policy_improvement_consumer_entrypoint.py",
     "policy_improvement_full_backend.py",
@@ -142,6 +182,7 @@ POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS = (
 )
 POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_CONFIG_PATHS,
+    *_POLICY_IMPROVEMENT_V2_SOURCE_PATHS,
     "policy_improvement_checkpoint_validator.py",
     "policy_improvement_consumer_entrypoint.py",
     "policy_improvement_full_backend.py",
@@ -160,6 +201,7 @@ POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS = (
 )
 _POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_CONFIG_PATHS,
+    *_POLICY_IMPROVEMENT_V2_SOURCE_PATHS,
     "policy_improvement_full_backend.py",
     "policy_improvement_non_smoke_checkpoint.py",
     "policy_improvement_sealed_evidence.py",
@@ -181,9 +223,7 @@ POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS = (
 )
 _EXACT_PROFILE_PATHS = {
     POLICY_DATASET_BUILDER_SOURCE_PROFILE: POLICY_DATASET_BUILDER_PROFILE_PATHS,
-    POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE: (
-        POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS
-    ),
+    POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE: (POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS),
     POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE: (
         POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS
     ),
@@ -217,14 +257,50 @@ def producer_root_sources(schema_version: int) -> tuple[str, ...]:
         ) from None
 
 
+def _producer_additional_sources(schema_version: int) -> tuple[str, ...]:
+    try:
+        return _PRODUCER_ADDITIONAL_SOURCES_BY_VERSION[schema_version]
+    except KeyError:
+        raise Phase4RuntimeProfileError(
+            f"Unsupported producer source manifest schema {schema_version!r}."
+        ) from None
+
+
+def _producer_config_directories(schema_version: int) -> tuple[str, ...]:
+    try:
+        return _PRODUCER_CONFIG_DIRECTORIES_BY_VERSION[schema_version]
+    except KeyError:
+        raise Phase4RuntimeProfileError(
+            f"Unsupported producer source manifest schema {schema_version!r}."
+        ) from None
+
+
+def _is_registered_producer_config(
+    relative_path: str,
+    relative_directory: str,
+) -> bool:
+    path = PurePosixPath(relative_path)
+    parent = PurePosixPath(relative_directory)
+    if path.suffix not in {".json", ".yaml"}:
+        return False
+    if path.parent == parent:
+        return True
+    return (
+        relative_directory == "configs/policy_improvement_v2"
+        and path.parent == parent / "amendments"
+    )
+
+
 def _producer_inventory_schema_version(root: Path) -> int:
     """Highest producer inventory version satisfied by one checkout tree."""
 
     best = 0
     for schema_version in sorted(_PRODUCER_ROOT_SOURCES_BY_VERSION):
-        if all(
-            (root / path).is_file() for path in producer_root_sources(schema_version)
-        ):
+        required = (
+            *producer_root_sources(schema_version),
+            *_producer_additional_sources(schema_version),
+        )
+        if all((root / path).is_file() for path in required):
             best = schema_version
     if not best:
         missing = sorted(
@@ -419,17 +495,13 @@ def _sha256_file(path: Path) -> str:
             for block in iter(lambda: handle.read(_READ_SIZE), b""):
                 digest.update(block)
     except OSError as exc:
-        raise Phase4RuntimeProfileError(
-            "Phase 4 source cannot be hashed."
-        ) from exc
+        raise Phase4RuntimeProfileError("Phase 4 source cannot be hashed.") from exc
     return digest.hexdigest()
 
 
 def _manifest_sha256(profile: str, sources: dict[str, str]) -> str:
     value = {
-        "source_manifest_schema_version": (
-            PHASE4_SOURCE_MANIFEST_SCHEMA_VERSION
-        ),
+        "source_manifest_schema_version": (PHASE4_SOURCE_MANIFEST_SCHEMA_VERSION),
         "profile": profile,
         "sources": sources,
     }
@@ -467,10 +539,7 @@ def _training_source_relative_paths(
     """
 
     root_sources = producer_root_sources(schema_version)
-    additional_sources = (
-        "scripts/policy_improvement_registry.py",
-        "scripts/policy_improvement_schema.py",
-    )
+    additional_sources = _producer_additional_sources(schema_version)
     directories = ("dataset", "evaluators", "models", "rl", "utils")
     paths = {*root_sources, *additional_sources}
     for directory_name in directories:
@@ -484,22 +553,25 @@ def _training_source_relative_paths(
             for path in directory.rglob("*.py")
             if "__pycache__" not in path.parts
         )
-    for config_relative in (
-        "configs/iclr_confirmatory",
-        "configs/policy_improvement_v1",
-    ):
+    for config_relative in _producer_config_directories(schema_version):
         config_directory = root / config_relative
         if not config_directory.is_dir():
             raise Phase4RuntimeProfileError(
                 "Producer registered configuration directory is missing."
             )
+        candidates = (
+            config_directory.rglob("*")
+            if config_relative == "configs/policy_improvement_v2"
+            else config_directory.iterdir()
+        )
         paths.update(
             str(path.relative_to(root))
-            for path in config_directory.iterdir()
+            for path in candidates
             if path.is_file()
-            and path.suffix in {".json", ".yaml"}
-            and str(path.relative_to(root))
-            != PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH
+            and _is_registered_producer_config(
+                str(path.relative_to(root)), config_relative
+            )
+            and str(path.relative_to(root)) != PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH
         )
     for relative_path in (*root_sources, *additional_sources):
         if not (root / relative_path).is_file():
@@ -527,12 +599,11 @@ def authorize_phase4_training_source(
     try:
         root = requested_root.resolve(strict=True)
     except OSError as exc:
-        raise Phase4RuntimeProfileError(
-            "Producer source root does not exist."
-        ) from exc
-    if not root.is_dir() or Path(
-        _run_git(root, "rev-parse", "--show-toplevel")
-    ).resolve() != root:
+        raise Phase4RuntimeProfileError("Producer source root does not exist.") from exc
+    if (
+        not root.is_dir()
+        or Path(_run_git(root, "rev-parse", "--show-toplevel")).resolve() != root
+    ):
         raise Phase4RuntimeProfileError(
             "Producer source root must be the Git repository top level."
         )
@@ -641,14 +712,10 @@ def authorize_phase4_training_source(
         or commit_after != commit_before
         or status_after
     ):
-        raise Phase4RuntimeProfileError(
-            "Producer source changed during authorization."
-        )
+        raise Phase4RuntimeProfileError("Producer source changed during authorization.")
     return AuthorizedTrainingSource(
         git_commit=expected_git_commit,
-        source_manifest_sha256=hashlib.sha256(
-            manifest_bytes_before
-        ).hexdigest(),
+        source_manifest_sha256=hashlib.sha256(manifest_bytes_before).hexdigest(),
         manifest_bytes=manifest_bytes_before,
     )
 
@@ -666,18 +733,15 @@ def authorize_phase4_source_profile(
         )
     requested_root = Path(project_root)
     if not requested_root.is_absolute():
-        raise Phase4RuntimeProfileError(
-            "Phase 4 source root must be an absolute path."
-        )
+        raise Phase4RuntimeProfileError("Phase 4 source root must be an absolute path.")
     try:
         root = requested_root.resolve(strict=True)
     except OSError as exc:
-        raise Phase4RuntimeProfileError(
-            "Phase 4 source root does not exist."
-        ) from exc
-    if not root.is_dir() or Path(
-        _run_git(root, "rev-parse", "--show-toplevel")
-    ).resolve() != root:
+        raise Phase4RuntimeProfileError("Phase 4 source root does not exist.") from exc
+    if (
+        not root.is_dir()
+        or Path(_run_git(root, "rev-parse", "--show-toplevel")).resolve() != root
+    ):
         raise Phase4RuntimeProfileError(
             "Phase 4 source root must be the Git repository top level."
         )
@@ -716,11 +780,7 @@ def authorize_phase4_source_profile(
         "--porcelain=v1",
         "--untracked-files=all",
     )
-    if (
-        sources_after != sources_before
-        or commit_after != commit_before
-        or status_after
-    ):
+    if sources_after != sources_before or commit_after != commit_before or status_after:
         raise Phase4RuntimeProfileError(
             "Phase 4 source checkout changed during authorization."
         )
@@ -795,10 +855,12 @@ def _is_policy_consumer_selected(relative_path: str) -> bool:
         and path.suffix == ".py"
     ):
         return True
-    if (
-        len(path.parts) == 3
-        and path.parts[:2] == ("configs", "policy_improvement_v1")
-        and path.suffix in {".json", ".yaml"}
+    if any(
+        _is_registered_producer_config(relative_path, directory)
+        for directory in (
+            "configs/policy_improvement_v1",
+            "configs/policy_improvement_v2",
+        )
     ):
         return True
     return relative_path in {
@@ -828,14 +890,11 @@ def _is_training_source_selected(relative_path: str) -> bool:
         and path.suffix == ".py"
     ):
         return True
-    if (
-        len(path.parts) == 3
-        and path.parts[:2]
-        in {
-            ("configs", "iclr_confirmatory"),
-            ("configs", "policy_improvement_v1"),
-        }
-        and path.suffix in {".json", ".yaml"}
+    if any(
+        _is_registered_producer_config(relative_path, directory)
+        for directory in _producer_config_directories(
+            PRODUCER_SOURCE_MANIFEST_SCHEMA_VERSION
+        )
     ):
         return relative_path != PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH
     return relative_path in {
@@ -849,6 +908,9 @@ def _is_training_source_selected(relative_path: str) -> bool:
         "runtime_archive_preflight.py",
         "scripts/policy_improvement_registry.py",
         "scripts/policy_improvement_schema.py",
+        "scripts/policy_improvement_populations.py",
+        "scripts/policy_improvement_v2_registry.py",
+        "scripts/policy_improvement_v2_schema.py",
         "upi_trm_train.py",
     }
 
@@ -880,9 +942,7 @@ def assert_phase4_archive_matches_profile(
         )
     expected = set(authorized.sources)
     if authorized.profile == POLICY_DATASET_BUILDER_SOURCE_PROFILE:
-        selected = {
-            name for name in names if _is_dataset_builder_selected(name)
-        }
+        selected = {name for name in names if _is_dataset_builder_selected(name)}
     elif authorized.profile in _PROFILES_WITH_TRAINING_SOURCE:
         selected = {
             name
@@ -893,9 +953,7 @@ def assert_phase4_archive_matches_profile(
         }
     else:
         selected = {
-            name
-            for name in names
-            if name in expected or _is_directory_source(name)
+            name for name in names if name in expected or _is_directory_source(name)
         }
     if selected != expected:
         raise Phase4RuntimeProfileError(
