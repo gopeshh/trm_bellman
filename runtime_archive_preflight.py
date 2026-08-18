@@ -102,23 +102,31 @@ def _validate_policy_runtime_authorization(
 ) -> None:
     """Validate semantic role binding before any behavior import."""
 
-    expected_fields = {
+    if not isinstance(value, dict):
+        raise RuntimeError("Policy-improvement runtime authorization is invalid.")
+    schema = (value.get("schema_name"), value.get("schema_version"))
+    common_fields = {
         "schema_name",
         "schema_version",
         "authorization_id",
         "created_at_utc",
-        "protocol_sha256",
         "producer_git_commit",
         "producer_source_manifest_sha256",
         "launcher_sha256",
         "roles",
     }
-    if not isinstance(value, dict) or set(value) != expected_fields:
+    expected_fields = common_fields | (
+        {"protocol_sha256", "protocol", "registry", "amendments"}
+        if schema == ("policy_improvement_runtime_authorization_v3", 3)
+        else {"protocol_sha256"}
+    )
+    if set(value) != expected_fields:
         raise RuntimeError("Policy-improvement runtime authorization is invalid.")
-    schema = (value["schema_name"], value["schema_version"])
     if schema == ("policy_improvement_runtime_authorization_v1", 1):
         role_names = _POLICY_RUNTIME_ROLES_V1
     elif schema == ("policy_improvement_runtime_authorization_v2", 2):
+        role_names = _POLICY_RUNTIME_ROLES_V2
+    elif schema == ("policy_improvement_runtime_authorization_v3", 3):
         role_names = _POLICY_RUNTIME_ROLES_V2
     else:
         raise RuntimeError("Policy-improvement runtime authorization is invalid.")
@@ -146,6 +154,38 @@ def _validate_policy_runtime_authorization(
         or _LOWER_SHA256.fullmatch(value["launcher_sha256"]) is None
     ):
         raise RuntimeError("Policy-improvement runtime authorization is invalid.")
+    if schema == ("policy_improvement_runtime_authorization_v3", 3):
+        protocol = value["protocol"]
+        registry = value["registry"]
+        amendments = value["amendments"]
+        if (
+            not isinstance(protocol, dict)
+            or protocol
+            != {
+                "schema_name": "policy_improvement_protocol_v2",
+                "schema_version": 2,
+                "protocol_id": "policy-improvement-v2-20260818",
+                "sha256": protocol_sha256,
+            }
+            or not isinstance(registry, dict)
+            or set(registry) != {"schema_name", "schema_version", "sha256"}
+            or registry.get("schema_name") != "policy_improvement_registry_v2"
+            or registry.get("schema_version") != 1
+            or not isinstance(registry.get("sha256"), str)
+            or _LOWER_SHA256.fullmatch(str(registry.get("sha256"))) is None
+            or not isinstance(amendments, list)
+            or len(amendments) != 1
+            or not isinstance(amendments[0], dict)
+            or set(amendments[0])
+            != {"schema_name", "schema_version", "amendment_id", "sha256"}
+            or amendments[0].get("schema_name")
+            != "policy_improvement_theory_bridge_amendment_v2"
+            or amendments[0].get("schema_version") != 1
+            or amendments[0].get("amendment_id") != "pre-stage1-theory-bridge-v2"
+            or not isinstance(amendments[0].get("sha256"), str)
+            or _LOWER_SHA256.fullmatch(str(amendments[0].get("sha256"))) is None
+        ):
+            raise RuntimeError("Policy-improvement runtime authorization is invalid.")
     roles = value["roles"]
     if not isinstance(roles, list) or len(roles) != len(role_names):
         raise RuntimeError("Policy-improvement runtime authorization is invalid.")
@@ -183,7 +223,7 @@ def _validate_policy_runtime_authorization(
         != value["producer_git_commit"]
     ):
         raise RuntimeError("Policy-improvement runtime authorization is invalid.")
-    if role_names == _POLICY_RUNTIME_ROLES_V2:
+    if schema == ("policy_improvement_runtime_authorization_v2", 2):
         for semantic_role, launcher_role in (
             ("policy-improvement-training", POLICY_FULL_ROLE),
             ("policy-improvement-evaluation", POLICY_THEORY_BRIDGE_ROLE),

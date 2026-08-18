@@ -28,7 +28,7 @@ from scripts.policy_improvement_schema import (
     load_strict_json_bytes,
     runtime_authorization_sha256,
     validate_runtime_authorization,
-    validate_result,
+    validated_result_payload,
 )
 
 
@@ -755,7 +755,9 @@ def _authenticate_historical_failed_attempts(
                 raise PolicyImprovementSchemaError(
                     "Historical failed-attempt generation is invalid."
                 )
-            raw_result = validate_result(_load_ascii_json(attempt / "result.json"))
+            _, raw_result = validated_result_payload(
+                _load_ascii_json(attempt / "result.json")
+            )
             for field in (
                 "protocol_id",
                 "run_id",
@@ -1175,6 +1177,8 @@ def authenticate_complete_generation(
     that precedes checkpoint sealing, instead of relying on call ordering.
     """
 
+    result_document, runtime_result = validated_result_payload(result)
+    result = runtime_result
     root = _private_owner_root(evidence_root)
     _sha256(amendment_history_sha256, path="amendment_history_sha256")
     if result["amendment_history_sha256"] != amendment_history_sha256:
@@ -1526,7 +1530,7 @@ def authenticate_complete_generation(
         )
 
     stored_result = _load_ascii_json(expected_result)
-    if canonical_json_bytes(stored_result) != canonical_json_bytes(result):
+    if canonical_json_bytes(stored_result) != canonical_json_bytes(result_document):
         raise PolicyImprovementSchemaError(
             "Supplied result differs from immutable result.json."
         )
@@ -1979,6 +1983,8 @@ def authenticate_failed_attempt(
 ) -> dict[str, object]:
     """Find and authenticate the one immutable failed attempt for a result."""
 
+    result_document, runtime_result = validated_result_payload(result)
+    result = runtime_result
     root = _private_owner_root(evidence_root)
     run_id = str(result["run_id"])
     run_root = root / "runs" / run_id
@@ -2063,14 +2069,16 @@ def authenticate_failed_attempt(
     for generation in attempt_directories:
         candidate = generation / "result.json"
         try:
-            loaded = validate_result(_load_ascii_json(candidate))
+            loaded_document, loaded = validated_result_payload(
+                _load_ascii_json(candidate)
+            )
         except PolicyImprovementSchemaError:
             raise PolicyImprovementSchemaError(
                 "Failed-attempt result is missing or invalid."
             )
-        matches_supplied_result = canonical_json_bytes(loaded) == canonical_json_bytes(
-            result
-        )
+        matches_supplied_result = canonical_json_bytes(
+            loaded_document
+        ) == canonical_json_bytes(result_document)
         if (
             loaded["status"] != "failed"
             or loaded["run_id"] != run_id

@@ -101,10 +101,15 @@ _POLICY_RUNTIME_ROLES_V2 = (
     POLICY_IMPROVEMENT_FULL_PURPOSE,
     POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
 )
-_POLICY_PROTOCOL_RELATIVE_PATH = "configs/policy_improvement_v1/protocol.json"
-_POLICY_REGISTRY_RELATIVE_PATH = "configs/policy_improvement_v1/registry.json"
-_POLICY_THEORY_AMENDMENT_RELATIVE_PATH = (
+_POLICY_V1_PROTOCOL_RELATIVE_PATH = "configs/policy_improvement_v1/protocol.json"
+_POLICY_V1_REGISTRY_RELATIVE_PATH = "configs/policy_improvement_v1/registry.json"
+_POLICY_V1_THEORY_AMENDMENT_RELATIVE_PATH = (
     "configs/policy_improvement_v1/amendments/theory_bridge_v1.json"
+)
+_POLICY_V2_PROTOCOL_RELATIVE_PATH = "configs/policy_improvement_v2/protocol.json"
+_POLICY_V2_REGISTRY_RELATIVE_PATH = "configs/policy_improvement_v2/registry.json"
+_POLICY_V2_THEORY_AMENDMENT_RELATIVE_PATH = (
+    "configs/policy_improvement_v2/amendments/theory_bridge_v2.json"
 )
 
 
@@ -113,6 +118,8 @@ def _policy_authorization_roles(value: Mapping[str, object]) -> tuple[str, ...]:
     if schema == ("policy_improvement_runtime_authorization_v1", 1):
         return _POLICY_RUNTIME_ROLES
     if schema == ("policy_improvement_runtime_authorization_v2", 2):
+        return _POLICY_RUNTIME_ROLES_V2
+    if schema == ("policy_improvement_runtime_authorization_v3", 3):
         return _POLICY_RUNTIME_ROLES_V2
     raise ConfirmatoryRuntimeError("Unsupported runtime authorization schema.")
 
@@ -145,8 +152,11 @@ def _canonical_json_bytes(value: object) -> bytes:
         ) from exc
 
 
-def _canonical_policy_protocol_sha256(project_root: str) -> str:
-    path = Path(project_root) / _POLICY_PROTOCOL_RELATIVE_PATH
+def _canonical_policy_document(
+    project_root: str,
+    relative_path: str,
+) -> tuple[dict[str, object], str]:
+    path = Path(project_root) / relative_path
     payload = _stable_regular_file(path)
     try:
         value = json.loads(
@@ -161,8 +171,112 @@ def _canonical_policy_protocol_sha256(project_root: str) -> str:
             "Policy protocol is not strict UTF-8 JSON."
         ) from exc
     if not isinstance(value, dict):
-        raise ConfirmatoryRuntimeError("Policy protocol must be one JSON object.")
-    return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
+        raise ConfirmatoryRuntimeError("Policy registration must be one JSON object.")
+    return value, hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
+
+
+def _canonical_policy_protocol_sha256(
+    project_root: str,
+    *,
+    v2: bool = False,
+) -> str:
+    _, digest = _canonical_policy_document(
+        project_root,
+        (
+            _POLICY_V2_PROTOCOL_RELATIVE_PATH
+            if v2
+            else _POLICY_V1_PROTOCOL_RELATIVE_PATH
+        ),
+    )
+    return digest
+
+
+def _runtime_authorization_uses_v2_protocol(path_value: str) -> bool:
+    payload = _stable_regular_file(Path(path_value))
+    try:
+        value = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_strict_json_object,
+            parse_constant=lambda constant: (_ for _ in ()).throw(
+                ConfirmatoryRuntimeError(
+                    f"Runtime authorization contains {constant!r}."
+                )
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization is not strict UTF-8 JSON."
+        ) from exc
+    if not isinstance(value, dict):
+        raise ConfirmatoryRuntimeError("Runtime authorization must be one object.")
+    schema = (value.get("schema_name"), value.get("schema_version"))
+    if schema in {
+        ("policy_improvement_runtime_authorization_v1", 1),
+        ("policy_improvement_runtime_authorization_v2", 2),
+    }:
+        return False
+    if schema == ("policy_improvement_runtime_authorization_v3", 3):
+        return True
+    raise ConfirmatoryRuntimeError("Unsupported runtime authorization schema.")
+
+
+def _validate_v3_policy_registration(
+    value: Mapping[str, object],
+    *,
+    project_root: str,
+    protocol_sha256: str,
+) -> None:
+    protocol, registered_protocol_sha256 = _canonical_policy_document(
+        project_root,
+        _POLICY_V2_PROTOCOL_RELATIVE_PATH,
+    )
+    registry, registry_sha256 = _canonical_policy_document(
+        project_root,
+        _POLICY_V2_REGISTRY_RELATIVE_PATH,
+    )
+    amendment, amendment_sha256 = _canonical_policy_document(
+        project_root,
+        _POLICY_V2_THEORY_AMENDMENT_RELATIVE_PATH,
+    )
+    protocol_identity = value.get("protocol")
+    registry_identity = value.get("registry")
+    amendments = value.get("amendments")
+    if (
+        registered_protocol_sha256 != protocol_sha256
+        or not isinstance(protocol_identity, dict)
+        or set(protocol_identity)
+        != {"schema_name", "schema_version", "protocol_id", "sha256"}
+        or protocol_identity
+        != {
+            "schema_name": protocol.get("schema_name"),
+            "schema_version": protocol.get("schema_version"),
+            "protocol_id": protocol.get("protocol_id"),
+            "sha256": registered_protocol_sha256,
+        }
+        or value.get("protocol_sha256") != registered_protocol_sha256
+        or not isinstance(registry_identity, dict)
+        or set(registry_identity) != {"schema_name", "schema_version", "sha256"}
+        or registry_identity
+        != {
+            "schema_name": registry.get("schema_name"),
+            "schema_version": registry.get("registry_schema_version"),
+            "sha256": registry_sha256,
+        }
+        or not isinstance(amendments, list)
+        or amendments
+        != [
+            {
+                "schema_name": amendment.get("schema_name"),
+                "schema_version": amendment.get("schema_version"),
+                "amendment_id": amendment.get("amendment_id"),
+                "sha256": amendment_sha256,
+            }
+        ]
+    ):
+        raise ConfirmatoryRuntimeError(
+            "Runtime authorization v3 does not bind the exact v2 protocol, "
+            "registry, and amendment."
+        )
 
 
 def _stable_regular_file(path: Path) -> bytes:
@@ -217,6 +331,7 @@ def _load_policy_runtime_authorization(
     source_manifest_sha256: str,
     launcher_sha256: str,
     protocol_sha256: str,
+    policy_project_root: str | None = None,
 ) -> tuple[str, str, str]:
     """Authenticate the external Stage 0 freeze before behavior imports."""
 
@@ -239,20 +354,40 @@ def _load_policy_runtime_authorization(
         raise ConfirmatoryRuntimeError(
             "Runtime authorization is not strict UTF-8 JSON."
         ) from exc
-    expected_fields = {
+    if not isinstance(value, dict):
+        raise ConfirmatoryRuntimeError("Runtime authorization must be one object.")
+    common_fields = {
         "schema_name",
         "schema_version",
         "authorization_id",
         "created_at_utc",
-        "protocol_sha256",
         "producer_git_commit",
         "producer_source_manifest_sha256",
         "launcher_sha256",
         "roles",
     }
-    if not isinstance(value, dict) or set(value) != expected_fields:
+    is_v3 = (value.get("schema_name"), value.get("schema_version")) == (
+        "policy_improvement_runtime_authorization_v3",
+        3,
+    )
+    expected_fields = common_fields | (
+        {"protocol_sha256", "protocol", "registry", "amendments"}
+        if is_v3
+        else {"protocol_sha256"}
+    )
+    if set(value) != expected_fields:
         raise ConfirmatoryRuntimeError("Runtime authorization field inventory differs.")
     role_names = _policy_authorization_roles(value)
+    if is_v3:
+        if policy_project_root is None:
+            raise ConfirmatoryRuntimeError(
+                "Runtime authorization v3 lacks its canonical project root."
+            )
+        _validate_v3_policy_registration(
+            value,
+            project_root=policy_project_root,
+            protocol_sha256=protocol_sha256,
+        )
     if (
         not isinstance(value["authorization_id"], str)
         or not value["authorization_id"]
@@ -305,7 +440,10 @@ def _load_policy_runtime_authorization(
             raise ConfirmatoryRuntimeError(
                 "Runtime authorization contains an invalid role."
             )
-    if role_names == _POLICY_RUNTIME_ROLES_V2:
+    if (value["schema_name"], value["schema_version"]) == (
+        "policy_improvement_runtime_authorization_v2",
+        2,
+    ):
         checked_roles = {
             role_name: roles[index] for index, role_name in enumerate(role_names)
         }
@@ -379,6 +517,7 @@ def _load_policy_consumer_runtime_authorization(
     producer_git_commit: str,
     producer_source_manifest_sha256: str,
     protocol_sha256: str,
+    policy_project_root: str | None = None,
 ) -> str:
     """Authenticate the externally frozen authorization for an evidence consumer."""
 
@@ -401,18 +540,28 @@ def _load_policy_consumer_runtime_authorization(
         raise ConfirmatoryRuntimeError(
             "Runtime authorization is not strict UTF-8 JSON."
         ) from exc
-    expected_fields = {
+    if not isinstance(value, dict):
+        raise ConfirmatoryRuntimeError("Runtime authorization must be one object.")
+    common_fields = {
         "schema_name",
         "schema_version",
         "authorization_id",
         "created_at_utc",
-        "protocol_sha256",
         "producer_git_commit",
         "producer_source_manifest_sha256",
         "launcher_sha256",
         "roles",
     }
-    if not isinstance(value, dict) or set(value) != expected_fields:
+    is_v3 = (value.get("schema_name"), value.get("schema_version")) == (
+        "policy_improvement_runtime_authorization_v3",
+        3,
+    )
+    expected_fields = common_fields | (
+        {"protocol_sha256", "protocol", "registry", "amendments"}
+        if is_v3
+        else {"protocol_sha256"}
+    )
+    if set(value) != expected_fields:
         raise ConfirmatoryRuntimeError("Runtime authorization field inventory differs.")
     role_names = _policy_authorization_roles(value)
     if (
@@ -424,7 +573,18 @@ def _load_policy_consumer_runtime_authorization(
         and role_names != _POLICY_RUNTIME_ROLES_V2
     ):
         raise ConfirmatoryRuntimeError(
-            "Full and theory-bridge execution require runtime authorization v2."
+            "Full and theory-bridge execution require runtime authorization v2 "
+            "or v3."
+        )
+    if is_v3:
+        if policy_project_root is None:
+            raise ConfirmatoryRuntimeError(
+                "Runtime authorization v3 lacks its canonical project root."
+            )
+        _validate_v3_policy_registration(
+            value,
+            project_root=policy_project_root,
+            protocol_sha256=protocol_sha256,
         )
     if (
         not isinstance(value["authorization_id"], str)
@@ -505,7 +665,10 @@ def _load_policy_consumer_runtime_authorization(
         raise ConfirmatoryRuntimeError(
             "Runtime authorization does not authorize this consumer artifact."
         )
-    if role_names == _POLICY_RUNTIME_ROLES_V2:
+    if (value["schema_name"], value["schema_version"]) == (
+        "policy_improvement_runtime_authorization_v2",
+        2,
+    ):
         for semantic_role, launcher_role in (
             ("policy-improvement-training", POLICY_IMPROVEMENT_FULL_PURPOSE),
             (
@@ -606,6 +769,7 @@ def _normalize_child_args(
     *,
     policy_project_root: str | None = None,
     runtime_authorization_sha256: str | None = None,
+    policy_protocol_v2: bool = False,
 ) -> list[str]:
     arguments = list(runtime_args)
     if arguments[:1] == ["--"]:
@@ -753,10 +917,29 @@ def _normalize_child_args(
         POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
     }:
         project_root = policy_project_root or source_project_root
-        protocol_path = str(Path(project_root) / _POLICY_PROTOCOL_RELATIVE_PATH)
-        registry_path = str(Path(project_root) / _POLICY_REGISTRY_RELATIVE_PATH)
+        protocol_path = str(
+            Path(project_root)
+            / (
+                _POLICY_V2_PROTOCOL_RELATIVE_PATH
+                if policy_protocol_v2
+                else _POLICY_V1_PROTOCOL_RELATIVE_PATH
+            )
+        )
+        registry_path = str(
+            Path(project_root)
+            / (
+                _POLICY_V2_REGISTRY_RELATIVE_PATH
+                if policy_protocol_v2
+                else _POLICY_V1_REGISTRY_RELATIVE_PATH
+            )
+        )
         theory_amendment_path = str(
-            Path(project_root) / _POLICY_THEORY_AMENDMENT_RELATIVE_PATH
+            Path(project_root)
+            / (
+                _POLICY_V2_THEORY_AMENDMENT_RELATIVE_PATH
+                if policy_protocol_v2
+                else _POLICY_V1_THEORY_AMENDMENT_RELATIVE_PATH
+            )
         )
         if purpose == POLICY_IMPROVEMENT_FULL_PURPOSE and (
             not isinstance(runtime_authorization_sha256, str)
@@ -1002,6 +1185,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "Policy-improvement smoke and evidence consumers require one "
                 "complete externally digested runtime authorization."
             )
+        policy_protocol_v2 = (
+            _runtime_authorization_uses_v2_protocol(arguments.runtime_authorization)
+            if requires_runtime_authorization
+            and arguments.runtime_authorization is not None
+            else False
+        )
         producer_source_root = (
             str(Path(arguments.producer_source_project_root).resolve(strict=True))
             if separate_producer_consumer
@@ -1023,6 +1212,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             runtime_authorization_sha256=(
                 arguments.expected_runtime_authorization_sha256
             ),
+            policy_protocol_v2=policy_protocol_v2,
         )
         producer_authorized = None
         if arguments.purpose in {"phase4-training", POLICY_SMOKE_PURPOSE}:
@@ -1060,9 +1250,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             role = profile
             archive_validator = _consumer_archive_validator(authorized)
+        policy_project_root = (
+            producer_source_root if separate_producer_consumer else source_root
+        )
         policy_protocol_sha256 = (
-            _canonical_policy_protocol_sha256(
-                producer_source_root if separate_producer_consumer else source_root
+            (
+                _canonical_policy_protocol_sha256(policy_project_root, v2=True)
+                if policy_protocol_v2
+                else _canonical_policy_protocol_sha256(policy_project_root)
             )
             if requires_runtime_authorization
             else None
@@ -1094,6 +1289,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 source_manifest_sha256=authorized.source_manifest_sha256,
                 launcher_sha256=launcher_sha256,
                 protocol_sha256=policy_protocol_sha256,
+                policy_project_root=source_root,
             )
             attestation_environment[POLICY_SMOKE_LAUNCHER_SHA256_ENV] = launcher_sha256
             attestation_environment[POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV] = (
@@ -1131,6 +1327,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     producer_authorized.source_manifest_sha256
                 ),
                 protocol_sha256=policy_protocol_sha256,
+                policy_project_root=(
+                    producer_source_root
+                    if producer_source_root is not None
+                    else source_root
+                ),
             )
             attestation_environment[POLICY_SMOKE_RUNTIME_AUTHORIZATION_ENV] = (
                 authorization_json
@@ -1179,6 +1380,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     producer_authorized.source_manifest_sha256
                 ),
                 protocol_sha256=policy_protocol_sha256,
+                policy_project_root=(
+                    producer_source_root
+                    if producer_source_root is not None
+                    else source_root
+                ),
             )
             attestation_environment[POLICY_CONSUMER_LAUNCHER_SHA256_ENV] = (
                 consumer_launcher_sha256

@@ -22,7 +22,11 @@ from scripts.policy_improvement_populations import (
 from scripts.policy_improvement_registry import (
     load_flat_registered_yaml as load_v1_flat_registered_yaml,
 )
-from scripts.policy_improvement_schema import validate_protocol
+from scripts.policy_improvement_schema import (
+    PolicyImprovementSchemaError,
+    validate_protocol,
+    validate_runtime_authorization,
+)
 from scripts.policy_improvement_v2_schema import bind_v2_result_to_row
 from scripts.policy_improvement_v2_registry import (
     EXPECTED_PHASE_COUNTS,
@@ -341,9 +345,7 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
         """Build the same validated Stage 0 envelope the test above checks."""
 
         row = next(
-            item
-            for item in self.registry["rows"]
-            if item["phase"] == "stage0_smoke"
+            item for item in self.registry["rows"] if item["phase"] == "stage0_smoke"
         )
         population = self.populations["populations"]["stage0_smoke"]
         return {
@@ -460,8 +462,14 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
 
         for field, value in (
             ("run_id", "s0-not-this-run"),
-            ("method_id", "matched_ppo"
-                if row["method_id"] != "matched_ppo" else "fixed_base_exact_episodic"),
+            (
+                "method_id",
+                (
+                    "matched_ppo"
+                    if row["method_id"] != "matched_ppo"
+                    else "fixed_base_exact_episodic"
+                ),
+            ),
             ("phase", "stage1_screen"),
         ):
             with self.subTest(field=field):
@@ -474,6 +482,73 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
         mixed_population["evaluation_population"] = "validation_select"
         with self.assertRaises(PolicyImprovementV2SchemaError):
             bind_v2_result_to_row(validated, mixed_population)
+
+    def test_runtime_authorization_v3_binds_six_distinct_roles(self) -> None:
+        amendment = load_strict_json(THEORY_AMENDMENT)
+        role_names = (
+            "policy-improvement-training",
+            "policy-improvement-evaluation",
+            "policy-improvement-audit",
+            "policy-improvement-analysis",
+            "policy-improvement-full",
+            "policy-improvement-theory-bridge",
+        )
+        authorization = {
+            "schema_name": "policy_improvement_runtime_authorization_v3",
+            "schema_version": 3,
+            "authorization_id": "policy-improvement-v2-current-head",
+            "created_at_utc": "2026-08-18T12:00:00Z",
+            "protocol_sha256": sha256_json(self.protocol),
+            "protocol": {
+                "schema_name": self.protocol["schema_name"],
+                "schema_version": self.protocol["schema_version"],
+                "protocol_id": self.protocol["protocol_id"],
+                "sha256": sha256_json(self.protocol),
+            },
+            "registry": {
+                "schema_name": self.registry["schema_name"],
+                "schema_version": self.registry["registry_schema_version"],
+                "sha256": sha256_json(self.registry),
+            },
+            "amendments": [
+                {
+                    "schema_name": amendment["schema_name"],
+                    "schema_version": amendment["schema_version"],
+                    "amendment_id": amendment["amendment_id"],
+                    "sha256": sha256_json(amendment),
+                }
+            ],
+            "producer_git_commit": "a" * 40,
+            "producer_source_manifest_sha256": "b" * 64,
+            "launcher_sha256": "c" * 64,
+            "roles": [
+                {
+                    "role": role,
+                    "source_git_commit": "a" * 40,
+                    "runtime_sha256": f"{index + 1:x}" * 64,
+                    "runtime_profile_sha256": f"{index + 7:x}" * 64,
+                    "selected_source_manifest_sha256": f"{index + 7:x}" * 64,
+                }
+                for index, role in enumerate(role_names)
+            ],
+        }
+        self.assertEqual(validate_runtime_authorization(authorization), authorization)
+        self.assertNotEqual(
+            authorization["roles"][0]["runtime_sha256"],
+            authorization["roles"][4]["runtime_sha256"],
+        )
+        self.assertNotEqual(
+            authorization["roles"][1]["runtime_sha256"],
+            authorization["roles"][5]["runtime_sha256"],
+        )
+
+        swapped = copy.deepcopy(authorization)
+        swapped["roles"][0], swapped["roles"][4] = (
+            swapped["roles"][4],
+            swapped["roles"][0],
+        )
+        with self.assertRaises(PolicyImprovementSchemaError):
+            validate_runtime_authorization(swapped)
 
     def test_population_score_is_namespace_bound(self) -> None:
         record = self.populations["populations"]["stage0_smoke"]["record_sha256s"][0]

@@ -342,8 +342,7 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
         )
     except SealedCheckpointError as exc:
         raise PolicyImprovementCheckpointValidationError(
-            "Checkpoint validation request lacks an authenticated sealed "
-            "descriptor."
+            "Checkpoint validation request lacks an authenticated sealed " "descriptor."
         ) from exc
     relative_parts = PurePosixPath(sealed_checkpoint.generation_relative_path).parts
     expected_parts_length = 2 if is_smoke else 3
@@ -735,17 +734,17 @@ def _validate_full_checkpoint(
     from scripts.policy_improvement_full_runtime import RegisteredFullRun
 
     source_identity = discover_clean_git_source(project_root)
-    training_role = _runtime_role(authorization, "policy-improvement-training")
+    full_role = _runtime_role(authorization, "policy-improvement-full")
     if source_identity != {
-        "git_commit": training_role["source_git_commit"],
+        "git_commit": full_role["source_git_commit"],
         "git_clean": True,
     }:
         raise PolicyImprovementCheckpointValidationError(
             "Full checkpoint source checkout differs from its training producer."
         )
     if (
-        training_role["runtime_profile_sha256"]
-        != training_role["selected_source_manifest_sha256"]
+        full_role["runtime_profile_sha256"]
+        != full_role["selected_source_manifest_sha256"]
     ):
         raise PolicyImprovementCheckpointValidationError(
             "Full checkpoint training source-profile identities differ."
@@ -758,14 +757,14 @@ def _validate_full_checkpoint(
     runtime = SealedRuntimeIdentity.from_mapping(
         {
             "role": "policy-improvement-full",
-            "runtime_sha256": training_role["runtime_sha256"],
-            "source_git_commit": training_role["source_git_commit"],
-            "source_manifest_sha256": training_role["runtime_profile_sha256"],
+            "runtime_sha256": full_role["runtime_sha256"],
+            "source_git_commit": full_role["source_git_commit"],
+            "source_manifest_sha256": full_role["runtime_profile_sha256"],
             "producer_source_manifest_sha256": authorization[
                 "producer_source_manifest_sha256"
             ],
-            "runtime_profile_sha256": training_role["runtime_profile_sha256"],
-            "selected_source_manifest_sha256": training_role[
+            "runtime_profile_sha256": full_role["runtime_profile_sha256"],
+            "selected_source_manifest_sha256": full_role[
                 "selected_source_manifest_sha256"
             ],
             "runtime_authorization_sha256": authorization_sha256,
@@ -780,8 +779,18 @@ def _validate_full_checkpoint(
     )
     registered_run = RegisteredFullRun(
         project_root=project_root,
-        protocol_path=project_root / "configs/policy_improvement_v1/protocol.json",
-        registry_path=project_root / "configs/policy_improvement_v1/registry.json",
+        protocol_path=project_root
+        / (
+            "configs/policy_improvement_v2/protocol.json"
+            if protocol.get("schema_name") == "policy_improvement_protocol_v2"
+            else "configs/policy_improvement_v1/protocol.json"
+        ),
+        registry_path=project_root
+        / (
+            "configs/policy_improvement_v2/registry.json"
+            if protocol.get("schema_name") == "policy_improvement_protocol_v2"
+            else "configs/policy_improvement_v1/registry.json"
+        ),
         evidence_root=evidence_root,
         protocol=protocol,
         registry={"rows": [row]},

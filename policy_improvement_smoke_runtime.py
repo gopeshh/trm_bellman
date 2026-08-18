@@ -62,6 +62,7 @@ from scripts.policy_improvement_schema import (
     validate_protocol,
     validate_result,
     validate_runtime_authorization,
+    validated_result_payload,
 )
 from utils.compute_accounting import (
     add_model_counters,
@@ -483,6 +484,42 @@ def _load_context(
     base_configs = load_registered_base_configs(protocol, source_root)
     registry = generate_registry(protocol, base_configs=base_configs)
     registry_sha256 = hashlib.sha256(canonical_json_bytes(registry)).hexdigest()
+    if (
+        authorization.get("schema_name")
+        == "policy_improvement_runtime_authorization_v3"
+    ):
+        theory_amendment = load_strict_json(
+            source_root
+            / "configs/policy_improvement_v2/amendments/theory_bridge_v2.json"
+        )
+        expected_authorization_bindings = {
+            "protocol": {
+                "schema_name": protocol["schema_name"],
+                "schema_version": protocol["schema_version"],
+                "protocol_id": protocol["protocol_id"],
+                "sha256": protocol_sha256,
+            },
+            "registry": {
+                "schema_name": registry["schema_name"],
+                "schema_version": registry["registry_schema_version"],
+                "sha256": registry_sha256,
+            },
+            "amendments": [
+                {
+                    "schema_name": theory_amendment["schema_name"],
+                    "schema_version": theory_amendment["schema_version"],
+                    "amendment_id": theory_amendment["amendment_id"],
+                    "sha256": hashlib.sha256(
+                        canonical_json_bytes(theory_amendment)
+                    ).hexdigest(),
+                }
+            ],
+        }
+        for field, expected in expected_authorization_bindings.items():
+            if authorization.get(field) != expected:
+                raise PolicyImprovementSmokeError(
+                    f"Stage 0 authorization {field} differs from canonical v2."
+                )
     rows = [
         row
         for row in registry["rows"]
@@ -527,9 +564,7 @@ def _load_context(
         dataset_root,
         owner_root=dataset_root.parent,
         expected_producer=registered_dataset_producer,
-        verify_content_splits=(
-            {"train"} if is_v2 else {"train", "validation"}
-        ),
+        verify_content_splits=({"train"} if is_v2 else {"train", "validation"}),
     )
     if verified_dataset.get("manifest_sha256") != registered_dataset_manifest:
         raise PolicyImprovementSmokeError(
@@ -2316,40 +2351,36 @@ def _evaluation_payload(
         if session.evaluation_population is not None and (
             isinstance(original_dataset_index, bool)
             or not isinstance(original_dataset_index, int)
-            or original_dataset_index
-            != session.evaluation_population["indices"][index]
+            or original_dataset_index != session.evaluation_population["indices"][index]
         ):
             raise PolicyImprovementSmokeError(
                 "Stage 0 evaluation record lost its registered train index."
             )
-        evidence_records.append(
-            {
-                "registered_index": index,
-                "population_position": index,
-                "original_dataset_index": (
-                    original_dataset_index
-                    if session.evaluation_population is not None
-                    else index
-                ),
-                "registered_record_sha256": registered_records[index],
-                "puzzle_id": (
-                    f"train-{original_dataset_index:06d}"
-                    if session.evaluation_population is not None
-                    else f"validation-{index:06d}"
-                ),
-                "puzzle_sha256": input_sha256(
-                    sample["inputs"]
-                ),
-                "solved": success,
-                "discounted_return": discounted_returns[index],
-                "terminal_reason": terminal_reason,
-                "edits_to_solve": (
-                    int(record["environment_interactions"]) if success else None
-                ),
-                "value_prediction": float(predictions[index]),
-                "realized_return": discounted_returns[index],
-            }
-        )
+        input_digest = input_sha256(sample["inputs"])
+        evidence_record = {
+            "registered_index": index,
+            "registered_record_sha256": registered_records[index],
+            "puzzle_id": f"validation-{index:06d}",
+            "puzzle_sha256": input_digest,
+            "solved": success,
+            "discounted_return": discounted_returns[index],
+            "terminal_reason": terminal_reason,
+            "edits_to_solve": (
+                int(record["environment_interactions"]) if success else None
+            ),
+            "value_prediction": float(predictions[index]),
+            "realized_return": discounted_returns[index],
+        }
+        if session.evaluation_population is not None:
+            evidence_record.update(
+                {
+                    "population_position": index,
+                    "original_dataset_index": original_dataset_index,
+                    "registered_input_sha256": input_digest,
+                    "puzzle_id": f"train-{original_dataset_index:06d}",
+                }
+            )
+        evidence_records.append(evidence_record)
     evidence = {
         "schema_name": (
             "policy_improvement_instances_v2"
@@ -2367,21 +2398,22 @@ def _evaluation_payload(
         "snapshot_kind": "interaction_matched",
         "evaluation_id": (f"{context.row['run_id']}.interaction_matched.{variant}"),
         "policy_variant": variant,
-        "evaluation_population_id": (
-            session.evaluation_population["population_id"]
-            if session.evaluation_population is not None
-            else None
-        ),
-        "evaluation_population_binding_sha256": (
-            session.evaluation_population["binding_sha256"]
-            if session.evaluation_population is not None
-            else None
-        ),
         "evaluation_pool_sha256": canonical_json_sha256(
             dataset_sample_sha256s(session.evaluation_dataset, count=count)
         ),
         "records": evidence_records,
     }
+    if session.evaluation_population is not None:
+        evidence.update(
+            {
+                "evaluation_population_id": session.evaluation_population[
+                    "population_id"
+                ],
+                "evaluation_population_binding_sha256": (
+                    session.evaluation_population["binding_sha256"]
+                ),
+            }
+        )
     proof_work = (
         exact_proof["model_work"] if exact_proof is not None else zero_model_counters()
     )
@@ -2417,6 +2449,70 @@ def _unavailable(
     reason: str = "not_collected_by_registered_protocol",
 ) -> dict[str, str]:
     return {"status": "unavailable", "reason": reason}
+
+
+def _registered_result_document(
+    context: SmokeContext,
+    session: SmokeSession,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Wrap one Stage 0 runtime payload in its exact protocol-v2 envelope."""
+
+    if context.protocol.get("schema_name") != "policy_improvement_protocol_v2":
+        validate_result(payload)
+        return payload
+    population = session.evaluation_population
+    if population is None:
+        raise PolicyImprovementSmokeError(
+            "Protocol v2 result lacks its registered evaluation population."
+        )
+    payload = dict(payload)
+    payload["schema_name"] = "policy_improvement_stage0_result_payload_v2"
+    payload["schema_version"] = 1
+    payload["evaluation_population_id"] = population["population_id"]
+    payload["evaluation_population_binding_sha256"] = population["binding_sha256"]
+    population_registration = context.protocol["population_registry"]
+    document = {
+        "schema_name": "policy_improvement_result_v2",
+        "schema_version": 1,
+        "protocol_id": context.protocol["protocol_id"],
+        "protocol_schema_name": context.protocol["schema_name"],
+        "protocol_schema_version": context.protocol["schema_version"],
+        "protocol_sha256": context.protocol_sha256,
+        "population_registry_schema_name": population_registration["schema_name"],
+        "population_registry_schema_version": population_registration["schema_version"],
+        "population_registry_sha256": population_registration["sha256"],
+        "registry_schema_name": context.registry["schema_name"],
+        "registry_schema_version": context.registry["registry_schema_version"],
+        "registry_sha256": context.registry_sha256,
+        "registry_row_schema_name": context.row["schema_name"],
+        "registry_row_schema_version": context.row["schema_version"],
+        "registry_row_sha256": context.registry_row_sha256,
+        "run_id": context.row["run_id"],
+        "phase": context.row["phase"],
+        "method_id": context.row["method_id"],
+        "status": payload["status"],
+        "evaluation_split": context.row["evaluation_split"],
+        "evaluation_population_id": population["population_id"],
+        "evaluation_population_binding_sha256": population["binding_sha256"],
+        "evaluation_population_ordered_record_sha256": population[
+            "ordered_record_sha256"
+        ],
+        "evaluation_population_ordered_input_sha256": population[
+            "ordered_input_sha256"
+        ],
+        "evaluation_record_count": population["count"],
+        "validation_data_opened": False,
+        "test_data_opened": False,
+        "scientific_selection": context.row["scientific_selection"],
+        "paper_evidence_eligible": context.row["paper_evidence_eligible"],
+        "payload": payload,
+    }
+    validate_result(document)
+    from scripts.policy_improvement_v2_schema import bind_v2_result_to_row
+
+    bind_v2_result_to_row(document, context.row)
+    return document
 
 
 def _model_state_identity(session: SmokeSession) -> tuple[str, dict[str, str]]:
@@ -2622,9 +2718,7 @@ def _build_final_result(
     evaluation_population_ordered_records_sha256 = (
         evaluation_ordered_records_sha256
         if session.evaluation_population is not None
-        else ordered_record_sha256(
-            dataset_sample_sha256s(session.evaluation_dataset)
-        )
+        else ordered_record_sha256(dataset_sample_sha256s(session.evaluation_dataset))
     )
     registered_train_order = _available_hex(
         context.protocol["dataset"]["splits"]["train"]["ordered_record_sha256"],
@@ -2639,9 +2733,9 @@ def _build_final_result(
         )
     else:
         registered_evaluation_order = _available_hex(
-            context.protocol["dataset"]["splits"][
-                str(context.row["evaluation_split"])
-            ]["ordered_record_sha256"],
+            context.protocol["dataset"]["splits"][str(context.row["evaluation_split"])][
+                "ordered_record_sha256"
+            ],
             name="registered evaluation ordered records",
             length=64,
         )
@@ -2903,7 +2997,7 @@ def _build_final_result(
             "run_manifest": _available(run_manifest_sha256),
         },
     }
-    validate_result(result)
+    result = _registered_result_document(context, session, result)
     _write_json(staging / "result.json", result)
     return result, run_manifest
 
@@ -2982,8 +3076,7 @@ def _revalidate_external_inputs(
         expected_producer=context.dataset_producer_source,
         verify_content_splits=(
             {"train"}
-            if context.protocol.get("schema_name")
-            == "policy_improvement_protocol_v2"
+            if context.protocol.get("schema_name") == "policy_improvement_protocol_v2"
             else {"train", "validation"}
         ),
     )
@@ -3405,8 +3498,7 @@ def _failed_result(
             "run_manifest": _unavailable(reason),
         },
     }
-    validate_result(result)
-    return result
+    return _registered_result_document(context, session, result)
 
 
 def _validate_failure_attempt(
@@ -3430,7 +3522,7 @@ def _validate_failure_attempt(
         raise PolicyImprovementSmokeError(
             "Failed Stage 0 attempt contains invalid JSON."
         ) from exc
-    validate_result(result)
+    _, result_payload = validated_result_payload(result)
     if (
         not isinstance(manifest, dict)
         or set(manifest)
@@ -3458,7 +3550,7 @@ def _validate_failure_attempt(
         != context.runtime_authorization_sha256
         or manifest["run_id"] != context.row["run_id"]
         or manifest["segment"] != context.segment_name
-        or manifest["failure_phase"] != result["failure"]["phase"]
+        or manifest["failure_phase"] != result_payload["failure"]["phase"]
         or manifest["result"]
         != {
             "path": "result.json",

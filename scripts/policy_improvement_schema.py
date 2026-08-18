@@ -780,14 +780,14 @@ def validate_runtime_authorization(value: object) -> dict[str, Any]:
     raw = _mapping(value, path="runtime_authorization")
     schema = (raw.get("schema_name"), raw.get("schema_version"))
     common_fields = {
-            "schema_name",
-            "schema_version",
-            "authorization_id",
-            "created_at_utc",
-            "producer_git_commit",
-            "producer_source_manifest_sha256",
-            "launcher_sha256",
-            "roles",
+        "schema_name",
+        "schema_version",
+        "authorization_id",
+        "created_at_utc",
+        "producer_git_commit",
+        "producer_source_manifest_sha256",
+        "launcher_sha256",
+        "roles",
     }
     v3_fields = {
         "protocol_sha256",
@@ -798,10 +798,15 @@ def validate_runtime_authorization(value: object) -> dict[str, Any]:
     authorization = _exact_fields(
         raw,
         common_fields
-        | ({"protocol_sha256"} if schema != (
-            "policy_improvement_runtime_authorization_v3",
-            RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V3,
-        ) else v3_fields),
+        | (
+            {"protocol_sha256"}
+            if schema
+            != (
+                "policy_improvement_runtime_authorization_v3",
+                RUNTIME_AUTHORIZATION_SCHEMA_VERSION_V3,
+            )
+            else v3_fields
+        ),
         path="runtime_authorization",
     )
     schema_name = authorization["schema_name"]
@@ -811,9 +816,7 @@ def validate_runtime_authorization(value: object) -> dict[str, Any]:
         or isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
     ):
-        raise PolicyImprovementSchemaError(
-            "Unsupported runtime authorization version."
-        )
+        raise PolicyImprovementSchemaError("Unsupported runtime authorization version.")
     schema = (schema_name, schema_version)
     role_schemas = {
         (
@@ -986,9 +989,10 @@ def validate_runtime_authorization(value: object) -> dict[str, Any]:
                 raise PolicyImprovementSchemaError(
                     f"The {label} roles must bind the same sealed artifact."
                 )
-        if checked_roles[4]["source_git_commit"] != authorization[
-            "producer_git_commit"
-        ]:
+        if (
+            checked_roles[4]["source_git_commit"]
+            != authorization["producer_git_commit"]
+        ):
             raise PolicyImprovementSchemaError(
                 "The full-runtime role source commit must equal the authorized "
                 "producer."
@@ -2986,3 +2990,37 @@ def validate_result(value: object) -> dict[str, Any]:
             )
     canonical_json_bytes(result)
     return dict(result)
+
+
+def validated_result_payload(
+    value: object,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return one validated result document and its runtime/audit payload."""
+
+    if not isinstance(value, Mapping):
+        raise PolicyImprovementSchemaError("Result must be an object.")
+    if value.get("schema_name") != "policy_improvement_result_v2":
+        document = dict(value)
+        return document, document
+    document = validate_result(value)
+    payload = _mapping(document["payload"], path="result.payload")
+    required_bindings = {
+        "protocol_id": document["protocol_id"],
+        "protocol_sha256": document["protocol_sha256"],
+        "run_id": document["run_id"],
+        "phase": document["phase"],
+        "method_id": document["method_id"],
+        "status": document["status"],
+        "evaluation_split": document["evaluation_split"],
+        "registry_row_sha256": document["registry_row_sha256"],
+        "evaluation_population_id": document["evaluation_population_id"],
+        "evaluation_population_binding_sha256": document[
+            "evaluation_population_binding_sha256"
+        ],
+    }
+    for field, expected in required_bindings.items():
+        if payload.get(field) != expected:
+            raise PolicyImprovementSchemaError(
+                f"Result payload {field} differs from its v2 envelope."
+            )
+    return document, dict(payload)

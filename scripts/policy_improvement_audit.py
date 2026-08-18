@@ -48,6 +48,7 @@ from scripts.policy_improvement_schema import (
     validate_protocol,
     validate_result,
     validate_runtime_authorization,
+    validated_result_payload,
 )
 from scripts.policy_improvement_test_open import authenticate_test_open
 from utils.source_identity import (
@@ -437,30 +438,55 @@ def _historical_failed_attempt_manifest_sha256s(
 def validate_per_instance_document(value: object) -> dict[str, Any]:
     """Validate ordered puzzle-level evidence used to recompute aggregates."""
 
+    if not isinstance(value, Mapping):
+        raise PolicyImprovementSchemaError("Per-instance document must be an object.")
+    is_v2 = value.get("schema_name") == "policy_improvement_instances_v2"
+    top_fields = {
+        "schema_name",
+        "schema_version",
+        "protocol_id",
+        "run_id",
+        "phase",
+        "tier",
+        "seed",
+        "evaluation_split",
+        "method_id",
+        "snapshot_kind",
+        "evaluation_id",
+        "policy_variant",
+        "evaluation_pool_sha256",
+        "records",
+    }
+    if is_v2:
+        top_fields.update(
+            {
+                "evaluation_population_id",
+                "evaluation_population_binding_sha256",
+            }
+        )
     document = _fields(
         value,
-        {
-            "schema_name",
-            "schema_version",
-            "protocol_id",
-            "run_id",
-            "phase",
-            "tier",
-            "seed",
-            "evaluation_split",
-            "method_id",
-            "snapshot_kind",
-            "evaluation_id",
-            "policy_variant",
-            "evaluation_pool_sha256",
-            "records",
-        },
+        top_fields,
         path="per_instance",
     )
-    if document["schema_name"] != "policy_improvement_instances_v1":
+    if document["schema_name"] not in {
+        "policy_improvement_instances_v1",
+        "policy_improvement_instances_v2",
+    }:
         raise PolicyImprovementSchemaError("Unexpected per-instance schema.")
-    if document["schema_version"] != PER_INSTANCE_SCHEMA_VERSION:
+    expected_schema_version = 1 if is_v2 else PER_INSTANCE_SCHEMA_VERSION
+    if document["schema_version"] != expected_schema_version:
         raise PolicyImprovementSchemaError("Unsupported per-instance schema version.")
+    if is_v2:
+        _ascii(
+            document["evaluation_population_id"],
+            path="per_instance.evaluation_population_id",
+        )
+        _hex(
+            document["evaluation_population_binding_sha256"],
+            path="per_instance.evaluation_population_binding_sha256",
+            length=64,
+        )
     for field in (
         "protocol_id",
         "run_id",
@@ -488,20 +514,29 @@ def validate_per_instance_document(value: object) -> dict[str, Any]:
     puzzle_ids: list[str] = []
     for index, raw in enumerate(raw_records):
         path = f"per_instance.records[{index}]"
+        record_fields = {
+            "registered_index",
+            "registered_record_sha256",
+            "puzzle_id",
+            "puzzle_sha256",
+            "solved",
+            "discounted_return",
+            "terminal_reason",
+            "edits_to_solve",
+            "value_prediction",
+            "realized_return",
+        }
+        if is_v2:
+            record_fields.update(
+                {
+                    "population_position",
+                    "original_dataset_index",
+                    "registered_input_sha256",
+                }
+            )
         record = _fields(
             raw,
-            {
-                "registered_index",
-                "registered_record_sha256",
-                "puzzle_id",
-                "puzzle_sha256",
-                "solved",
-                "discounted_return",
-                "terminal_reason",
-                "edits_to_solve",
-                "value_prediction",
-                "realized_return",
-            },
+            record_fields,
             path=path,
         )
         registered_index = _integer(
@@ -511,6 +546,22 @@ def validate_per_instance_document(value: object) -> dict[str, Any]:
             raise PolicyImprovementSchemaError(
                 f"{path}.registered_index differs from the frozen ordered population."
             )
+        if is_v2:
+            if (
+                _integer(
+                    record["population_position"],
+                    path=f"{path}.population_position",
+                )
+                != index
+            ):
+                raise PolicyImprovementSchemaError(
+                    f"{path}.population_position differs from its ordered position."
+                )
+            _integer(
+                record["original_dataset_index"],
+                path=f"{path}.original_dataset_index",
+                minimum=0,
+            )
         _hex(
             record["registered_record_sha256"],
             path=f"{path}.registered_record_sha256",
@@ -519,6 +570,14 @@ def validate_per_instance_document(value: object) -> dict[str, Any]:
         puzzle_id = _ascii(record["puzzle_id"], path=f"{path}.puzzle_id")
         puzzle_ids.append(puzzle_id)
         _hex(record["puzzle_sha256"], path=f"{path}.puzzle_sha256", length=64)
+        if is_v2:
+            registered_input = _hex(
+                record["registered_input_sha256"],
+                path=f"{path}.registered_input_sha256",
+                length=64,
+            )
+            if registered_input != record["puzzle_sha256"]:
+                raise PolicyImprovementSchemaError(f"{path} input identities differ.")
         if not isinstance(record["solved"], bool):
             raise PolicyImprovementSchemaError(f"{path}.solved must be boolean.")
         _number(record["discounted_return"], path=f"{path}.discounted_return")
@@ -1365,6 +1424,7 @@ def _audit_evaluation(
     registered_record_sha256s: Sequence[str],
     registered_input_sha256s: Sequence[str],
     registered_puzzle_ids: Sequence[str],
+    registered_original_indices: Sequence[int] | None = None,
 ) -> tuple[str, ...]:
     digest = str(
         _available_value(
@@ -1400,6 +1460,15 @@ def _audit_evaluation(
             raise PolicyImprovementSchemaError(
                 f"Per-instance {field} differs from its result."
             )
+    if document["schema_name"] == "policy_improvement_instances_v2":
+        if (
+            document["evaluation_population_id"] != result["evaluation_population_id"]
+            or document["evaluation_population_binding_sha256"]
+            != result["evaluation_population_binding_sha256"]
+        ):
+            raise PolicyImprovementSchemaError(
+                "Per-instance population identity differs from its result."
+            )
     records = document["records"]
     if len(records) != registered_population_count:
         raise PolicyImprovementSchemaError(
@@ -1420,6 +1489,14 @@ def _audit_evaluation(
             raise PolicyImprovementSchemaError(
                 "Per-instance record, input, or canonical puzzle identity differs "
                 "from the authenticated split manifest."
+            )
+        if registered_original_indices is not None and (
+            record["population_position"] != index
+            or record["original_dataset_index"] != registered_original_indices[index]
+            or record["registered_input_sha256"] != registered_input_sha256s[index]
+        ):
+            raise PolicyImprovementSchemaError(
+                "Per-instance v2 population position or source index differs."
             )
     ordered_puzzle_digest = _ordered_record_digest(
         [str(record["registered_record_sha256"]) for record in records]
@@ -1651,7 +1728,7 @@ def derive_registered_selection(
 ) -> dict[str, object]:
     """Derive one deterministic validation selection from audited result rows."""
 
-    checked = [validate_result(result) for result in results]
+    checked = [validated_result_payload(result)[1] for result in results]
     if phase == "stage1_screen":
         eligible = [
             result
@@ -1842,6 +1919,16 @@ def audit_result_set(
         if _dataset_bindings is None
         else _dataset_bindings
     )
+    registered_populations: Mapping[str, Any] | None = None
+    if protocol.get("schema_name") == "policy_improvement_protocol_v2":
+        from scripts.policy_improvement_populations import (
+            load_registered_populations,
+        )
+
+        registered_populations = load_registered_populations(
+            protocol,
+            project_root,
+        )["populations"]
 
     if _verify_amendment_evidence and len(history) > 1:
         evidence_amendments = (
@@ -1985,9 +2072,9 @@ def audit_result_set(
             dataset_root,
             verify_test_content=True,
         )
-    checked_results = [validate_result(result) for result in results]
-    by_run_id = {str(result["run_id"]): result for result in checked_results}
-    if len(by_run_id) != len(checked_results):
+    checked_result_documents = [validate_result(result) for result in results]
+    by_run_id = {str(result["run_id"]): result for result in checked_result_documents}
+    if len(by_run_id) != len(checked_result_documents):
         raise PolicyImprovementSchemaError("Result run IDs must be unique.")
     expected_ids = {str(row["run_id"]) for row in expected_rows}
     if set(by_run_id) != expected_ids:
@@ -2005,8 +2092,13 @@ def audit_result_set(
     generation_manifest_sha256s: list[str] = []
     historical_failed_attempt_manifest_sha256s: list[str] = []
     semantic_validation_sha256s: list[str] = []
-    for run_id, result in by_run_id.items():
+    for run_id, result_document in by_run_id.items():
         row = rows_by_id[run_id]
+        if result_document.get("schema_name") == "policy_improvement_result_v2":
+            from scripts.policy_improvement_v2_schema import bind_v2_result_to_row
+
+            bind_v2_result_to_row(result_document, row)
+        _, result = validated_result_payload(result_document)
         row_digest = hashlib.sha256(canonical_json_bytes(row)).hexdigest()
         exact_bindings = {
             "protocol_id": protocol["protocol_id"],
@@ -2120,7 +2212,7 @@ def audit_result_set(
         if result["status"] == "failed":
             failed_identity = authenticate_failed_attempt(
                 evidence_root=evidence_root,
-                result=result,
+                result=result_document,
                 protocol_sha256=protocol_digest,
                 registry_row_sha256=row_digest,
                 runtime_authorization_sha256=result_authorization_digest,
@@ -2141,7 +2233,7 @@ def audit_result_set(
                 / f"env_{expected_interactions:09d}"
                 / "result.json"
             ),
-            result=result,
+            result=result_document,
             protocol_sha256=protocol_digest,
             registry_sha256=registry_digest,
             registry_row_sha256=row_digest,
@@ -2204,9 +2296,7 @@ def audit_result_set(
             {
                 "evaluation_runtime_sha256": role["runtime_sha256"],
                 "evaluation_source_git_commit": role["source_git_commit"],
-                "evaluation_runtime_profile_sha256": role[
-                    "runtime_profile_sha256"
-                ],
+                "evaluation_runtime_profile_sha256": role["runtime_profile_sha256"],
                 "evaluation_selected_source_manifest_sha256": role[
                     "selected_source_manifest_sha256"
                 ],
@@ -2226,30 +2316,52 @@ def audit_result_set(
             raise PolicyImprovementSchemaError(
                 "Paired methods do not share the registered initialization identity."
             )
-        population_tier = (
-            "confirmatory" if tier in {"confirmatory", "ablation"} else tier
-        )
-        population = protocol["evaluation_populations"][population_tier]
-        split_name = str(population["split"])
-        split_bindings = dataset_bindings[split_name]
-        population_count = int(population["count"])
-        registered_records = split_bindings["record_sha256s"][:population_count]
-        registered_inputs = split_bindings["input_sha256s"][:population_count]
-        registered_puzzle_ids = split_bindings["puzzle_ids"][:population_count]
-        population_identity = population["ordered_record_sha256"]
-        if population_identity["status"] != "available":
-            raise PolicyImprovementSchemaError(
-                "Result audit requires a frozen exact evaluation population."
+        registered_original_indices: tuple[int, ...] | None = None
+        if registered_populations is not None:
+            population_id = str(row["evaluation_population"])
+            population = registered_populations.get(population_id)
+            if not isinstance(population, Mapping):
+                raise PolicyImprovementSchemaError(
+                    "Result row names an unregistered v2 evaluation population."
+                )
+            split_name = str(population["split"])
+            split_bindings = dataset_bindings[split_name]
+            indices = tuple(int(index) for index in population["indices"])
+            registered_original_indices = indices
+            registered_records = tuple(
+                split_bindings["record_sha256s"][index] for index in indices
             )
-        if str(population_identity["value"]) != _ordered_record_digest(
-            registered_records
-        ):
+            registered_inputs = tuple(
+                split_bindings["input_sha256s"][index] for index in indices
+            )
+            registered_puzzle_ids = tuple(
+                f"{split_name}-{index:06d}" for index in indices
+            )
+            population_identity_value = str(population["ordered_record_sha256"])
+        else:
+            population_tier = (
+                "confirmatory" if tier in {"confirmatory", "ablation"} else tier
+            )
+            population = protocol["evaluation_populations"][population_tier]
+            split_name = str(population["split"])
+            split_bindings = dataset_bindings[split_name]
+            population_count = int(population["count"])
+            registered_records = split_bindings["record_sha256s"][:population_count]
+            registered_inputs = split_bindings["input_sha256s"][:population_count]
+            registered_puzzle_ids = split_bindings["puzzle_ids"][:population_count]
+            population_identity = population["ordered_record_sha256"]
+            if population_identity["status"] != "available":
+                raise PolicyImprovementSchemaError(
+                    "Result audit requires a frozen exact evaluation population."
+                )
+            population_identity_value = str(population_identity["value"])
+        if population_identity_value != _ordered_record_digest(registered_records):
             raise PolicyImprovementSchemaError(
                 "Registered evaluation population differs from authenticated split bytes."
             )
         if (
             result["identities"]["evaluation_ordered_records_sha256"]
-            != population_identity["value"]
+            != population_identity_value
         ):
             raise PolicyImprovementSchemaError(
                 "Result evaluation population differs from the registered tier."
@@ -2402,11 +2514,12 @@ def audit_result_set(
                     snapshot,
                     evaluation,
                     per_instance_documents,
-                    registered_population_count=int(population["count"]),
-                    registered_ordered_record_sha256=str(population_identity["value"]),
+                    registered_population_count=len(registered_records),
+                    registered_ordered_record_sha256=population_identity_value,
                     registered_record_sha256s=registered_records,
                     registered_input_sha256s=registered_inputs,
                     registered_puzzle_ids=registered_puzzle_ids,
+                    registered_original_indices=registered_original_indices,
                 )
                 if evaluation["policy_variant"] == primary_variant:
                     key = (int(result["seed"]), str(snapshot["snapshot_kind"]))
@@ -2435,7 +2548,7 @@ def audit_result_set(
         "test_open_verified": uses_test,
         "test_open_sha256": test_open_sha256 if uses_test else None,
         "per_instance_artifact_count": len(per_instance_documents),
-        "result_set_sha256": _canonical_result_set_sha256(checked_results),
+        "result_set_sha256": _canonical_result_set_sha256(checked_result_documents),
         "per_instance_set_sha256": _canonical_per_instance_set_sha256(
             per_instance_documents
         ),
