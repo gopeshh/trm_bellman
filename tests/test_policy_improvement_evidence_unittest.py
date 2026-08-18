@@ -13,7 +13,6 @@ import unittest
 from pathlib import Path
 
 import torch
-
 from policy_improvement_checkpoint_allowlist import (
     load_data_only_checkpoint,
     UnsafeCheckpointPayloadError,
@@ -21,19 +20,15 @@ from policy_improvement_checkpoint_allowlist import (
 from policy_improvement_sealed_evidence import (
     authenticate_sealed_checkpoint_field,
     SEALED_CHECKPOINT_SCHEMA_NAME,
-    SealedCheckpointError,
 )
 from scripts.policy_improvement_evidence import authenticate_complete_generation
 from scripts.policy_improvement_schema import (
-    PolicyImprovementSchemaError,
     canonical_json_bytes,
+    PolicyImprovementSchemaError,
     runtime_authorization_sha256,
     validate_result,
 )
-from scripts.policy_improvement_test_open import (
-    _authenticate_record,
-    _publish_record,
-)
+from scripts.policy_improvement_test_open import _authenticate_record, _publish_record
 
 
 HEX64 = "a" * 64
@@ -427,6 +422,7 @@ class CompleteGenerationTest(unittest.TestCase):
         checkpoint_validator: object | None = None,
         authenticated_test_open_sha256: str | None = None,
         amendment_history_sha256: str | None = None,
+        retain_checkpoint_sha256: str | None = None,
     ) -> dict[str, object]:
         return authenticate_complete_generation(
             evidence_root=self.root,
@@ -454,6 +450,7 @@ class CompleteGenerationTest(unittest.TestCase):
             ),
             authenticated_test_open_sha256=authenticated_test_open_sha256,
             historical_runtime_authorizations=historical_runtime_authorizations,
+            retain_checkpoint_sha256=retain_checkpoint_sha256,
         )
 
     def _historical_runtime_authorization(self) -> tuple[dict[str, object], str]:
@@ -732,6 +729,26 @@ class CompleteGenerationTest(unittest.TestCase):
             self.result["artifacts"]["checkpoint"]["value"],
         )
         self.assertEqual(observed["historical_failed_attempts"], [])
+
+    def test_complete_generation_can_transfer_only_the_authenticated_resume(
+        self,
+    ) -> None:
+        before = len(os.listdir("/proc/self/fd"))
+        observed = self._authenticate(
+            retain_checkpoint_sha256=self.checkpoint_sha,
+        )
+        sealed = observed["sealed_checkpoint"]
+        self.assertEqual(sealed.sha256, self.checkpoint_sha)
+        self.assertEqual(len(os.listdir("/proc/self/fd")), before + 1)
+        sealed.close()
+        self.assertEqual(len(os.listdir("/proc/self/fd")), before)
+
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "does not resolve exactly",
+        ):
+            self._authenticate(retain_checkpoint_sha256="f" * 64)
+        self.assertEqual(len(os.listdir("/proc/self/fd")), before)
 
     def test_complete_generation_authenticates_retained_failed_attempt(self) -> None:
         attempt, authorization, authorization_digest = (

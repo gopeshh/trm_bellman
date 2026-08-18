@@ -217,9 +217,16 @@ POLICY_IMPROVEMENT_FULL_PROFILE_PATHS = (
 )
 POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS,
+    "policy_improvement_checkpoint_validator.py",
     "policy_improvement_theory_bridge_entrypoint.py",
+    "scripts/policy_improvement_evidence.py",
+    "scripts/policy_improvement_populations.py",
     "scripts/policy_improvement_theory_backend.py",
+    "scripts/policy_improvement_theory_backend_v2.py",
     "scripts/policy_improvement_theory_bridge.py",
+    "scripts/policy_improvement_theory_bridge_v2.py",
+    "scripts/policy_improvement_theory_schema_v2.py",
+    "scripts/policy_improvement_v2_schema.py",
 )
 _EXACT_PROFILE_PATHS = {
     POLICY_DATASET_BUILDER_SOURCE_PROFILE: POLICY_DATASET_BUILDER_PROFILE_PATHS,

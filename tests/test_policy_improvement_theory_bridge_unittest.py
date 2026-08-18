@@ -15,36 +15,36 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
+from scripts.policy_improvement_full_runtime import AuthenticatedFullCheckpoint
 from scripts.policy_improvement_registry import (
     generate_registry,
     registry_sha256,
     validate_registry_document,
 )
-from scripts.policy_improvement_full_runtime import AuthenticatedFullCheckpoint
 from scripts.policy_improvement_schema import (
     canonical_json_bytes,
     runtime_authorization_sha256,
     validate_amendment_history,
     validate_protocol,
 )
+from scripts.policy_improvement_theory_backend import (
+    _registered_checkpoint_snapshot_kind,
+    create_theory_bridge_backend,
+)
 from scripts.policy_improvement_theory_bridge import (
+    _state_identity,
+    evaluate_theory_bridge,
     ReadOnlySnapshot,
     TheoryBackendInputs,
     TheoryBridgeError,
     TheoryOutcome,
     TheoryRollout,
     TheoryState,
-    _state_identity,
-    evaluate_theory_bridge,
-)
-from scripts.policy_improvement_theory_backend import (
-    _registered_checkpoint_snapshot_kind,
-    create_theory_bridge_backend,
 )
 from scripts.policy_improvement_theory_schema import (
+    theory_document_sha256,
     THEORY_REQUEST_SCHEMA_NAME,
     THEORY_SCHEMA_VERSION,
-    theory_document_sha256,
     validate_request_against_amendment,
     validate_theory_amendment,
     validate_theory_result,
@@ -540,9 +540,9 @@ class TheoryBridgeEvaluationTest(unittest.TestCase):
             validate_request_against_amendment(wrong_final, self.amendment)
 
         wrong_scheduled = copy.deepcopy(scheduled_request)
-        wrong_scheduled["identity"]["checkpoint"][
-            "snapshot_kind"
-        ] = "interaction_matched"
+        wrong_scheduled["identity"]["checkpoint"]["snapshot_kind"] = (
+            "interaction_matched"
+        )
         with self.assertRaisesRegex(ValueError, "checkpoint progress"):
             validate_request_against_amendment(wrong_scheduled, self.amendment)
 
@@ -714,6 +714,8 @@ class TheoryBridgeEvaluationTest(unittest.TestCase):
         training_module = SimpleNamespace(_load_checkpoint_payload=checkpoint_loader)
 
         def resolved_checkpoint(*args: object, **kwargs: object) -> object:
+            descriptor = os.open(self.checkpoint, os.O_RDONLY)
+            calls["resolved_descriptor"] = descriptor
             return AuthenticatedFullCheckpoint(
                 path=self.checkpoint,
                 sha256=request["identity"]["checkpoint"]["sha256"],
@@ -726,7 +728,7 @@ class TheoryBridgeEvaluationTest(unittest.TestCase):
                 generation_manifest_sha256=_digest("generation-manifest"),
                 run_manifest_sha256=_digest("run-manifest"),
                 validation_sha256=_digest("validation"),
-                sealed_descriptor=os.open(self.checkpoint, os.O_RDONLY),
+                sealed_descriptor=descriptor,
             )
 
         def import_module(name: str) -> object:
@@ -746,20 +748,27 @@ class TheoryBridgeEvaluationTest(unittest.TestCase):
             row_id=str(request["run_id"]),
             runtime_authorization=runtime_authorization,
         )
-        with mock.patch(
-            "scripts.policy_improvement_theory_backend.load_registered_full_run",
-            side_effect=load_registered_run,
-        ), mock.patch(
-            "scripts.policy_improvement_theory_backend.load_registered_base_configs",
-            return_value={request["method_id"]: {"gamma": request["gamma"]}},
-        ), mock.patch(
-            "scripts.policy_improvement_theory_backend.resolve_authenticated_full_checkpoint",
-            side_effect=resolved_checkpoint,
-        ), mock.patch(
-            "scripts.policy_improvement_theory_backend.importlib.import_module",
-            side_effect=import_module,
+        with (
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.load_registered_full_run",
+                side_effect=load_registered_run,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.load_registered_base_configs",
+                return_value={request["method_id"]: {"gamma": request["gamma"]}},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.resolve_authenticated_full_checkpoint",
+                side_effect=resolved_checkpoint,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.importlib.import_module",
+                side_effect=import_module,
+            ),
+            mock.patch.object(os, "close", wraps=os.close) as close_descriptor,
         ):
             backend = create_theory_bridge_backend(request, self.checkpoint, inputs)
+        close_descriptor.assert_called_once_with(calls["resolved_descriptor"])
 
         self.assertEqual(len(backend.registered_states()), 64)
         self.assertEqual(backend.read_only_snapshot(), session.read_only_snapshot())
@@ -781,33 +790,41 @@ class TheoryBridgeEvaluationTest(unittest.TestCase):
 
         mixed_gamma = copy.deepcopy(request)
         mixed_gamma["gamma"] = 0.8
-        with mock.patch(
-            "scripts.policy_improvement_theory_backend.load_registered_full_run",
-            side_effect=load_registered_run,
-        ), mock.patch(
-            "scripts.policy_improvement_theory_backend.load_registered_base_configs",
-            return_value={request["method_id"]: {"gamma": request["gamma"]}},
-        ), mock.patch(
-            "scripts.policy_improvement_theory_backend.resolve_authenticated_full_checkpoint",
-            side_effect=resolved_checkpoint,
-        ), mock.patch(
-            "scripts.policy_improvement_theory_backend.importlib.import_module",
-            side_effect=import_module,
-        ), self.assertRaisesRegex(
-            TheoryBridgeError, "authenticated effective config"
+        with (
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.load_registered_full_run",
+                side_effect=load_registered_run,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.load_registered_base_configs",
+                return_value={request["method_id"]: {"gamma": request["gamma"]}},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.resolve_authenticated_full_checkpoint",
+                side_effect=resolved_checkpoint,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.importlib.import_module",
+                side_effect=import_module,
+            ),
+            mock.patch.object(os, "close", wraps=os.close) as close_descriptor,
+            self.assertRaisesRegex(TheoryBridgeError, "authenticated effective config"),
         ):
             create_theory_bridge_backend(mixed_gamma, self.checkpoint, inputs)
+        close_descriptor.assert_called_once_with(calls["resolved_descriptor"])
 
         mixed_kind = copy.deepcopy(request)
         mixed_kind["identity"]["checkpoint"]["snapshot_kind"] = "interaction_matched"
-        with mock.patch(
-            "scripts.policy_improvement_theory_backend.load_registered_full_run",
-            side_effect=load_registered_run,
-        ), mock.patch(
-            "scripts.policy_improvement_theory_backend.importlib.import_module",
-            side_effect=import_module,
-        ), self.assertRaisesRegex(
-            TheoryBridgeError, "registered run schedule"
+        with (
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.load_registered_full_run",
+                side_effect=load_registered_run,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.importlib.import_module",
+                side_effect=import_module,
+            ),
+            self.assertRaisesRegex(TheoryBridgeError, "registered run schedule"),
         ):
             create_theory_bridge_backend(mixed_kind, self.checkpoint, inputs)
 
@@ -834,23 +851,91 @@ class TheoryBridgeEvaluationTest(unittest.TestCase):
                 return training_module
             raise AssertionError(f"unexpected import {name}")
 
-        with mock.patch(
-            "scripts.policy_improvement_theory_backend.load_registered_full_run",
-            side_effect=load_registered_run,
-        ), mock.patch(
-            "scripts.policy_improvement_theory_backend.resolve_authenticated_full_checkpoint",
-            side_effect=resolved_checkpoint,
-        ), mock.patch(
-            "scripts.policy_improvement_theory_backend.importlib.import_module",
-            side_effect=import_without_training,
-        ), self.assertRaisesRegex(
-            TheoryBridgeError, "published evidence"
+        with (
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.load_registered_full_run",
+                side_effect=load_registered_run,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.resolve_authenticated_full_checkpoint",
+                side_effect=resolved_checkpoint,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.importlib.import_module",
+                side_effect=import_without_training,
+            ),
+            mock.patch.object(os, "close", wraps=os.close) as close_descriptor,
+            self.assertRaisesRegex(TheoryBridgeError, "published evidence"),
         ):
             create_theory_bridge_backend(external_request, external, inputs)
+        close_descriptor.assert_called_once_with(calls["resolved_descriptor"])
         self.assertFalse(imported_full_backend)
         self.assertFalse(imported_training)
         self.assertNotIn("open_request", calls)
         checkpoint_loader.assert_not_called()
+
+        def import_failure(name: str) -> object:
+            raise ImportError(f"synthetic import rejection for {name}")
+
+        with (
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.load_registered_full_run",
+                side_effect=load_registered_run,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.load_registered_base_configs",
+                return_value={request["method_id"]: {"gamma": request["gamma"]}},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.resolve_authenticated_full_checkpoint",
+                side_effect=resolved_checkpoint,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.importlib.import_module",
+                side_effect=import_failure,
+            ),
+            mock.patch.object(os, "close", wraps=os.close) as close_descriptor,
+            self.assertRaisesRegex(ImportError, "synthetic import rejection"),
+        ):
+            create_theory_bridge_backend(request, self.checkpoint, inputs)
+        close_descriptor.assert_called_once_with(calls["resolved_descriptor"])
+
+        def rejected_open_session(*args: object, **kwargs: object) -> object:
+            raise RuntimeError("synthetic open-session rejection")
+
+        rejected_full_module = SimpleNamespace(
+            open_theory_bridge_session=rejected_open_session
+        )
+
+        def import_rejected_session(name: str) -> object:
+            if name == "policy_improvement_full_backend":
+                return rejected_full_module
+            if name == "upi_trm_train":
+                return training_module
+            raise AssertionError(f"unexpected import {name}")
+
+        with (
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.load_registered_full_run",
+                side_effect=load_registered_run,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.load_registered_base_configs",
+                return_value={request["method_id"]: {"gamma": request["gamma"]}},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.resolve_authenticated_full_checkpoint",
+                side_effect=resolved_checkpoint,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend.importlib.import_module",
+                side_effect=import_rejected_session,
+            ),
+            mock.patch.object(os, "close", wraps=os.close) as close_descriptor,
+            self.assertRaisesRegex(RuntimeError, "synthetic open-session rejection"),
+        ):
+            create_theory_bridge_backend(request, self.checkpoint, inputs)
+        close_descriptor.assert_called_once_with(calls["resolved_descriptor"])
 
 
 if __name__ == "__main__":

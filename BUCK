@@ -189,6 +189,15 @@ python_library(
 )
 
 python_library(
+    name = "policy_improvement_theory_schema_v2",
+    srcs = ["scripts/policy_improvement_theory_schema_v2.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
     name = "policy_improvement_registry",
     srcs = ["scripts/policy_improvement_registry.py"],
     base_module = "",
@@ -306,6 +315,34 @@ python_library(
 )
 
 python_library(
+    name = "policy_improvement_theory_bridge_v2_lib",
+    srcs = ["scripts/policy_improvement_theory_bridge_v2.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_schema",
+        ":policy_improvement_theory_schema_v2",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_theory_backend_v2",
+    srcs = ["scripts/policy_improvement_theory_backend_v2.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_checkpoint_validator",
+        ":policy_improvement_evidence",
+        ":policy_improvement_populations",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
+        ":policy_improvement_smoke_runtime",
+        ":policy_improvement_theory_bridge_v2_lib",
+        ":policy_improvement_theory_schema_v2",
+        ":utils",
+    ],
+)
+
+python_library(
     name = "policy_improvement_theory_backend",
     srcs = ["scripts/policy_improvement_theory_backend.py"],
     base_module = "",
@@ -343,8 +380,11 @@ python_binary(
     deps = [
         ":policy_improvement_full_backend",
         ":policy_improvement_theory_backend",
+        ":policy_improvement_theory_backend_v2",
         ":policy_improvement_theory_bridge_lib",
+        ":policy_improvement_theory_bridge_v2_lib",
         ":policy_improvement_theory_schema",
+        ":policy_improvement_theory_schema_v2",
         ":runtime_archive_preflight",
     ],
 )
@@ -941,11 +981,11 @@ python_unittest(
         "configs/policy_improvement_v1/legacy_parameter_interpolation.yaml",
         "configs/policy_improvement_v1/matched_ppo.yaml",
         "configs/policy_improvement_v1/protocol.json",
+        "configs/policy_improvement_v2/amendments/theory_bridge_v2.json",
         "configs/policy_improvement_v2/fixed_base_exact_episodic.yaml",
         "configs/policy_improvement_v2/fixed_base_exact_persistent.yaml",
         "configs/policy_improvement_v2/legacy_parameter_interpolation.yaml",
         "configs/policy_improvement_v2/matched_ppo.yaml",
-        "configs/policy_improvement_v2/amendments/theory_bridge_v2.json",
         "configs/policy_improvement_v2/populations.json",
         "configs/policy_improvement_v2/protocol.json",
         "configs/policy_improvement_v2/registry.json",
@@ -1071,6 +1111,21 @@ python_unittest(
         ":policy_improvement_theory_backend",
         ":policy_improvement_theory_bridge_lib",
         ":policy_improvement_theory_schema",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_theory_bridge_v2",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_theory_bridge_v2_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        ":policy_improvement_sealed_evidence",
+        ":policy_improvement_theory_backend_v2",
+        ":policy_improvement_theory_bridge_v2_lib",
+        ":policy_improvement_theory_schema_v2",
     ],
 )
 

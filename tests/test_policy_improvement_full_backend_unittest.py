@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import fcntl
+import hashlib
 import math
 import os
 import tempfile
@@ -17,8 +17,8 @@ from typing import Any
 from unittest import mock
 
 import torch
-
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+from policy_improvement_checkpoint_validator import _validate_full_checkpoint
 from policy_improvement_full_backend import (
     _registered_theory_checkpoint_snapshot_kind,
     build_failed_result,
@@ -27,27 +27,29 @@ from policy_improvement_full_backend import (
     LearnedSession,
     load_authorized_dataset_splits,
     open_theory_bridge_session,
+    ReadOnlyTheoryBridgeSession,
     required_content_splits,
     SealedFullRunBackend,
     SealedRuntimeIdentity,
     TorchLearnedRunEngine,
 )
-from policy_improvement_checkpoint_validator import _validate_full_checkpoint
-from policy_improvement_sealed_evidence import seal_generation_checkpoint
 from policy_improvement_non_smoke_checkpoint import (
     evaluate_without_mutation,
     FullCheckpointError,
     session_model_state_identity,
     validate_full_checkpoint_identity,
 )
+from policy_improvement_sealed_evidence import seal_generation_checkpoint
 from policy_improvement_smoke_checkpoint import (
     build_ppo_smoke_checkpoint,
     publish_checkpoint,
 )
 from rl.algos.ppo import PPOConfig, PPOTrainer
+from rl.config import RLConfig
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.persistent_diagnostic_checkpoint import state_dict_sha256
 from rl.sudoku_checkers import dummy_checker
+from rl.upi_trm_trainer import UPITrmTrainer
 from scripts.policy_improvement_full_runtime import (
     BackendPackage,
     BackendRequest,
@@ -55,10 +57,7 @@ from scripts.policy_improvement_full_runtime import (
     RegisteredFullRun,
 )
 from scripts.policy_improvement_schema import validate_result
-from utils.dataset_provenance import (
-    dataset_sample_sha256s,
-    ordered_record_sha256,
-)
+from utils.dataset_provenance import dataset_sample_sha256s, ordered_record_sha256
 from utils.run_identity import canonical_json_sha256
 
 
@@ -1110,6 +1109,174 @@ class FullCheckpointGuardTest(unittest.TestCase):
 
         with self.assertRaisesRegex(FullBackendError, "training state"):
             adapter._guard(mutate_optimizer_then_raise)
+
+    def test_real_upi_theory_capabilities_match_frozen_trainer_semantics(self) -> None:
+        import upi_trm_train
+
+        run = _run(self.root)
+        base = _tiny_ppo_session(run)
+        config = RLConfig(
+            gamma=0.99,
+            K=1,
+            inner_unroll_n=2,
+            max_edits=2,
+            task_name="dummy",
+            episodic_latent=False,
+            stop_action_mode="terminal",
+            reward_shaping=True,
+            exact_k_step_targets=True,
+            exact_baseline_summation=True,
+            theory_exact_mixture=True,
+            training_protocol="fixed_base_exact",
+            value_target_clip=None,
+            advantage_clip=0.05,
+            enable_contraction=False,
+            batch_centered_advantage=False,
+            replay_capacity=32,
+            batch_size=1,
+            rollout_episodes_per_step=1,
+            num_train_steps=1,
+            use_tqdm=False,
+        )
+        environment = PlanEditEnv(
+            dataset=base.evaluation_dataset,
+            checker=dummy_checker,
+            config=base.env_config,
+        )
+        environment.set_stop_action_id(int(base.model.config.rl_num_actions) - 1)
+        trainer = UPITrmTrainer(
+            base.model,
+            environment,
+            config,
+            device=torch.device("cpu"),
+        )
+        trainer.set_checker_fn(dummy_checker)
+        session = replace(
+            base,
+            trainer=trainer,
+            rl_config=config,
+            env_config=base.env_config,
+        )
+        checkpoint = self.root / "real-upi-theory.pt"
+        checkpoint.write_bytes(b"sealed real UPI theory fixture")
+        checkpoint_sha256 = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+        with _sealed_checkpoint(checkpoint) as descriptor:
+            adapter = ReadOnlyTheoryBridgeSession(
+                request_identity={"fixture": "real-upi-v2"},
+                checkpoint_descriptor=os.dup(descriptor),
+                checkpoint_sha256=checkpoint_sha256,
+                snapshot_kind="smoke_resume",
+                environment_interactions=32,
+                session=session,
+                training_module=upi_trm_train,
+                evaluation_state_dicts={},
+                registered_state_indices=(0,),
+                reported_record_indices=(749,),
+            )
+        self.addCleanup(adapter.close)
+        adapter.begin_read_only_evaluation()
+
+        def end_transaction_if_active() -> None:
+            if adapter._read_only_transaction is not None:
+                adapter.end_read_only_evaluation()
+
+        self.addCleanup(end_transaction_if_active)
+
+        before = adapter.read_only_snapshot_v2()
+        (state,) = adapter.registered_states()
+        self.assertEqual(state.record_index, 749)
+        estimator = adapter.training_advantage_estimator(state.state_id)
+        q_values = [0.0] * len(state.action_mask)
+        for action_index, allowed in enumerate(state.action_mask):
+            if not allowed:
+                continue
+            for outcome in adapter.exact_action_outcomes(
+                state.state_id,
+                action_index,
+            ):
+                next_value = 0.0
+                if not outcome.terminal:
+                    assert outcome.next_state_id is not None
+                    next_value = adapter.endpoint_value(
+                        outcome.next_state_id,
+                        config.inner_unroll_n,
+                    )
+                q_values[action_index] += outcome.probability * (
+                    outcome.reward + config.gamma * next_value
+                )
+        baseline = sum(
+            probability * q_value
+            for probability, q_value, allowed in zip(
+                state.current_probabilities,
+                q_values,
+                state.action_mask,
+            )
+            if allowed
+        )
+        clipped = [
+            max(-0.05, min(0.05, q_value - baseline)) if allowed else 0.0
+            for q_value, allowed in zip(q_values, state.action_mask)
+        ]
+        clipped_mean = sum(
+            probability * advantage
+            for probability, advantage, allowed in zip(
+                state.current_probabilities,
+                clipped,
+                state.action_mask,
+            )
+            if allowed
+        )
+        expected = [
+            advantage - clipped_mean if allowed else 0.0
+            for advantage, allowed in zip(clipped, state.action_mask)
+        ]
+        self.assertEqual(estimator.action_mask, state.action_mask)
+        self.assertEqual(estimator.clipping_kind, "clip_then_exact_recenter")
+        self.assertEqual(estimator.clip_value, 0.05)
+        for observed, wanted in zip(estimator.advantages, expected):
+            self.assertAlmostEqual(observed, wanted, places=5)
+
+        deployed_witness = adapter.persistent_endpoint_witness(
+            state.state_id,
+            config.inner_unroll_n,
+        )
+        reference_witness = adapter.persistent_endpoint_witness(state.state_id, 8)
+        self.assertEqual(deployed_witness.deployed_transition_depth, 2)
+        self.assertEqual(reference_witness.deployed_transition_depth, 2)
+        for field in (
+            "carried_successor_latent_sha256",
+            "trajectory_sha256",
+            "action_probabilities_sha256",
+            "recurrent_transition_sha256",
+        ):
+            self.assertEqual(
+                getattr(deployed_witness, field),
+                getattr(reference_witness, field),
+            )
+
+        first_return = adapter.sample_current_policy_return(
+            state.state_id,
+            90210,
+            16,
+            config.gamma,
+        )
+        second_return = adapter.sample_current_policy_return(
+            state.state_id,
+            90210,
+            16,
+            config.gamma,
+        )
+        self.assertEqual(first_return, second_return)
+        self.assertTrue(first_return.terminal)
+        self.assertGreater(first_return.environment_steps, 0)
+        self.assertLessEqual(first_return.environment_steps, 16)
+        self.assertTrue(math.isfinite(first_return.discounted_return))
+        self.assertEqual(adapter.read_only_snapshot_v2(), before)
+        self.assertEqual(
+            hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+            checkpoint_sha256,
+        )
+        adapter.end_read_only_evaluation()
 
 
 if __name__ == "__main__":

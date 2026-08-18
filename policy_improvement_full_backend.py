@@ -16,19 +16,20 @@ import os
 import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import (
+    dataclass,
+    field,
+    fields as dataclass_fields,
+    is_dataclass,
+    replace as dataclass_replace,
+)
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Protocol
 
 import torch
 import yaml
-
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
-from policy_improvement_sealed_evidence import (
-    authenticate_sealed_descriptor,
-    SealedCheckpointError,
-)
 from policy_improvement_non_smoke_checkpoint import (
     evaluate_without_mutation,
     FullCheckpointArtifact,
@@ -36,15 +37,23 @@ from policy_improvement_non_smoke_checkpoint import (
     session_model_state_identity,
     validate_full_checkpoint_identity,
 )
+from policy_improvement_sealed_evidence import (
+    authenticate_sealed_descriptor,
+    SealedCheckpointError,
+)
 from policy_improvement_smoke_runtime import (
     _evaluation_payload as evaluate_registered_policy,
     _variant_specs as registered_variant_specs,
+    build_stage0_validation_session,
+    SmokeContext,
     SmokeSession,
+    stage0_model_state_identity,
+    validate_policy_improvement_smoke_identity,
 )
 from rl.batch_utils import prepare_batch_x, prepare_plan
 from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
 from rl.persistent_diagnostic_checkpoint import state_dict_sha256
-from rl.upi_trm_trainer import UPITrmTrainer
+from rl.upi_trm_trainer import _clip_and_recenter_advantages, UPITrmTrainer
 from scripts.policy_improvement_full_runtime import (
     BackendPackage,
     BackendRequest,
@@ -63,6 +72,14 @@ from scripts.policy_improvement_schema import (
     RESULT_SCHEMA_VERSION,
     SCHEMA_NAME,
 )
+from utils.compute_accounting import (
+    add_model_counters,
+    build_training_compute_accounting,
+    capture_model_compute_state,
+    restore_model_compute_state,
+    validate_compute_snapshot,
+    zero_model_counters,
+)
 from utils.dataset_provenance import (
     build_dataset_provenance,
     dataset_input_sha256s,
@@ -72,14 +89,7 @@ from utils.dataset_provenance import (
     dataset_source_build_metadata,
     ordered_record_sha256,
 )
-from utils.compute_accounting import (
-    add_model_counters,
-    build_training_compute_accounting,
-    capture_model_compute_state,
-    restore_model_compute_state,
-    validate_compute_snapshot,
-    zero_model_counters,
-)
+from utils.lipschitz import compute_exact_baseline_summation
 from utils.run_identity import (
     build_run_identity,
     canonical_json_sha256,
@@ -87,7 +97,9 @@ from utils.run_identity import (
 )
 
 
-_FULL_RUNTIME_ROLE: str = "policy-improvement-full"
+_THEORY_TRAINING_RUNTIME_ROLES: frozenset[str] = frozenset(
+    {"policy-improvement-full", "policy-improvement-smoke"}
+)
 _LOWER_HEX: frozenset[str] = frozenset("0123456789abcdef")
 
 
@@ -125,7 +137,7 @@ class SealedRuntimeIdentity:
         if set(value) != fields:
             raise FullBackendError("Sealed runtime identity field inventory differs.")
         role = value["role"]
-        if role != _FULL_RUNTIME_ROLE:
+        if role not in _THEORY_TRAINING_RUNTIME_ROLES:
             raise FullBackendError("Sealed runtime has the wrong launcher role.")
         for name in (
             "runtime_sha256",
@@ -1785,13 +1797,13 @@ class _BridgeStateRecord:
     environment_state: dict[str, Any]
     x: Mapping[str, object]
     plan: torch.Tensor
-    latent: torch.Tensor | None
+    latent: object | None
     terminal: bool
     action_mask: tuple[bool, ...] | None = None
     current_probabilities: tuple[float, ...] | None = None
     candidate_probabilities: tuple[float, ...] | None = None
     deployed_probabilities: tuple[float, ...] | None = None
-    deployed_next_latent: torch.Tensor | None = None
+    deployed_next_latent: object | None = None
 
 
 def _tensor_identity(value: torch.Tensor) -> dict[str, object]:
@@ -1806,6 +1818,18 @@ def _tensor_identity(value: torch.Tensor) -> dict[str, object]:
 def _tree_identity(value: object) -> object:
     if torch.is_tensor(value):
         return _tensor_identity(value)
+    if (
+        type(value).__module__.startswith("numpy")
+        and hasattr(value, "dtype")
+        and hasattr(value, "shape")
+        and callable(getattr(value, "tobytes", None))
+    ):
+        payload = value.tobytes(order="C")
+        return {
+            "dtype": str(value.dtype),
+            "shape": list(value.shape),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
     if isinstance(value, Mapping):
         return {
             str(name): _tree_identity(item)
@@ -1813,6 +1837,14 @@ def _tree_identity(value: object) -> object:
         }
     if isinstance(value, (list, tuple)):
         return [_tree_identity(item) for item in value]
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            "dataclass": f"{type(value).__module__}.{type(value).__qualname__}",
+            "fields": {
+                item.name: _tree_identity(getattr(value, item.name))
+                for item in dataclass_fields(value)
+            },
+        }
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     return repr(value)
@@ -1827,6 +1859,14 @@ def _clone_tree(value: object) -> object:
         return [_clone_tree(item) for item in value]
     if isinstance(value, tuple):
         return tuple(_clone_tree(item) for item in value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return dataclass_replace(
+            value,
+            **{
+                item.name: _clone_tree(getattr(value, item.name))
+                for item in dataclass_fields(value)
+            },
+        )
     return copy.deepcopy(value)
 
 
@@ -1845,6 +1885,7 @@ class ReadOnlyTheoryBridgeSession:
         training_module: Any,
         evaluation_state_dicts: Mapping[str, Mapping[str, object]],
         registered_state_indices: tuple[int, ...],
+        reported_record_indices: tuple[int, ...] | None = None,
     ) -> None:
         self._identity = copy.deepcopy(dict(request_identity))
         self._checkpoint_descriptor = checkpoint_descriptor
@@ -1855,9 +1896,19 @@ class ReadOnlyTheoryBridgeSession:
         self._training_module = training_module
         self._evaluation_state_dicts = evaluation_state_dicts
         self._registered_state_indices = registered_state_indices
+        self._reported_record_indices = (
+            registered_state_indices
+            if reported_record_indices is None
+            else reported_record_indices
+        )
+        if len(self._reported_record_indices) != len(registered_state_indices):
+            raise FullBackendError(
+                "Theory dataset and reported record-index inventories differ."
+            )
         self._states: dict[str, _BridgeStateRecord] = {}
         self._registered: tuple[TheoryBridgeState, ...] | None = None
         self._auxiliary_models: dict[str, Any] = {}
+        self._read_only_transaction: tuple[str, str] | None = None
         if evaluation_state_dicts:
             for role, state in evaluation_state_dicts.items():
                 model = copy.deepcopy(session.trainer.policy_model_old)
@@ -2002,6 +2053,21 @@ class ReadOnlyTheoryBridgeSession:
         )
 
     def _guard(self, callback: Callable[[], Any]) -> Any:
+        if self._read_only_transaction is not None:
+            role_models = {
+                **self._session.trainer._model_roles(),
+                **{
+                    f"theory_{name}": model
+                    for name, model in self._auxiliary_models.items()
+                },
+            }
+            compute_state = capture_model_compute_state(role_models)
+            rng_state = self._training_module._capture_rng_state()
+            try:
+                return callback()
+            finally:
+                restore_model_compute_state(role_models, compute_state)
+                self._training_module._restore_rng_state(rng_state)
         checkpoint_before, _ = _sealed_checkpoint_identity(self._checkpoint_descriptor)
         session_before = self._fingerprint()
         role_models = {
@@ -2041,6 +2107,28 @@ class ReadOnlyTheoryBridgeSession:
             raise callback_error
         return result
 
+    def begin_read_only_evaluation(self) -> None:
+        """Amortize mutation checks across one evaluator transaction."""
+
+        if self._read_only_transaction is not None:
+            raise FullBackendError("Theory read-only transaction is already active.")
+        checkpoint_sha256, _ = _sealed_checkpoint_identity(self._checkpoint_descriptor)
+        self._read_only_transaction = (checkpoint_sha256, self._fingerprint())
+
+    def end_read_only_evaluation(self) -> None:
+        """Close one transaction and reject any persistent state mutation."""
+
+        transaction = self._read_only_transaction
+        if transaction is None:
+            raise FullBackendError("Theory read-only transaction is not active.")
+        self._read_only_transaction = None
+        checkpoint_before, session_before = transaction
+        checkpoint_after, _ = _sealed_checkpoint_identity(self._checkpoint_descriptor)
+        if checkpoint_after != checkpoint_before:
+            raise FullBackendError("Theory bridge mutated its checkpoint.")
+        if self._fingerprint() != session_before:
+            raise FullBackendError("Theory bridge mutated restored training state.")
+
     def identity_bundle(self) -> dict[str, object]:
         return self._guard(lambda: copy.deepcopy(self._identity))
 
@@ -2053,6 +2141,77 @@ class ReadOnlyTheoryBridgeSession:
                 model_state_sha256=self._model_state_sha256,
                 training_state_sha256=self._training_state_sha256,
                 recurrent_transition_sha256=self._recurrent_transition_sha256,
+            )
+        )
+
+    def _mutable_state_sha256s(self) -> dict[str, str]:
+        """Hash every mutable trainer component required by the v2 bridge."""
+
+        trainer = self._session.trainer
+        optimizer_states: dict[str, object] = {}
+        scheduler_states: dict[str, object] = {}
+        for name, value in sorted(vars(trainer).items()):
+            state_dict = getattr(value, "state_dict", None)
+            if not callable(state_dict):
+                continue
+            if "scheduler" in name:
+                scheduler_states[name] = state_dict()
+            elif name.endswith("_opt") or "optimizer" in name:
+                optimizer_states[name] = state_dict()
+        replay = getattr(trainer, "replay", None)
+        replay_state = (
+            list(replay.storage)
+            if replay is not None and hasattr(replay, "storage")
+            else None
+        )
+        collector_state = (
+            trainer.collection_checkpoint_state()
+            if callable(getattr(trainer, "collection_checkpoint_state", None))
+            else None
+        )
+        environment = getattr(trainer, "env", None)
+        environment_state = (
+            environment.checkpoint_state()
+            if environment is not None
+            and callable(getattr(environment, "checkpoint_state", None))
+            else None
+        )
+        exact_centering_state = (
+            trainer.exact_centering_checkpoint_state()
+            if callable(getattr(trainer, "exact_centering_checkpoint_state", None))
+            else None
+        )
+        persistent_latent_state = None
+        if isinstance(collector_state, Mapping):
+            active_episode = collector_state.get("active_episode")
+            if isinstance(active_episode, Mapping):
+                persistent_latent_state = active_episode.get("latent")
+        values = {
+            "optimizer_states": optimizer_states,
+            "scheduler_states": scheduler_states,
+            "rng_states": self._training_module._capture_rng_state(),
+            "replay_state": replay_state,
+            "collector_state": collector_state,
+            "environment_state": environment_state,
+            "persistent_latent_state": persistent_latent_state,
+            "exact_centering_state": exact_centering_state,
+        }
+        return {
+            name: canonical_json_sha256(_tree_identity(value))
+            for name, value in values.items()
+        }
+
+    def read_only_snapshot_v2(self) -> SimpleNamespace:
+        """Return the expanded v2 mutation inventory without exposing objects."""
+
+        return self._guard(
+            lambda: SimpleNamespace(
+                checkpoint_sha256=self._checkpoint_sha256,
+                model_state_sha256=self._model_state_sha256,
+                mutable_state_sha256s=self._mutable_state_sha256s(),
+                recurrent_transition_sha256=self._recurrent_transition_sha256,
+                snapshot_kind=self._snapshot_kind,
+                environment_interactions=self._environment_interactions,
             )
         )
 
@@ -2120,7 +2279,12 @@ class ReadOnlyTheoryBridgeSession:
             }
         )
 
-    def _initial_record(self, index: int) -> _BridgeStateRecord:
+    def _initial_record(
+        self,
+        index: int,
+        *,
+        reported_record_index: int | None = None,
+    ) -> _BridgeStateRecord:
         environment = self._new_environment()
         x, plan = environment.reset(idx=index)
         if not isinstance(x, Mapping) or not torch.is_tensor(plan):
@@ -2133,8 +2297,9 @@ class ReadOnlyTheoryBridgeSession:
             )
             latent = self._deployed_model().init_latent(batched_x, batched_plan)
         environment_state = environment.checkpoint_state()
+        record_index = index if reported_record_index is None else reported_record_index
         state_id = self._state_id(
-            record_index=index,
+            record_index=record_index,
             x=x,
             plan=plan,
             latent=latent,
@@ -2142,14 +2307,14 @@ class ReadOnlyTheoryBridgeSession:
         )
         record = _BridgeStateRecord(
             state_id=state_id,
-            record_index=index,
+            record_index=record_index,
             dataset_record_sha256=dataset_sample_sha256s(
                 self._session.evaluation_dataset
             )[index],
             environment_state=environment_state,
             x=_clone_tree(x),
             plan=plan.detach().clone(),
-            latent=latent.detach().clone() if latent is not None else None,
+            latent=_clone_tree(latent) if latent is not None else None,
             terminal=False,
         )
         self._states[state_id] = record
@@ -2273,7 +2438,7 @@ class ReadOnlyTheoryBridgeSession:
                     float(value) for value in deployed_dist.probs.reshape(-1).tolist()
                 )
                 record.deployed_next_latent = (
-                    next_latent.detach().clone()
+                    _clone_tree(next_latent)
                     if next_latent is not None
                     and not bool(self._session.rl_config.episodic_latent)
                     else None
@@ -2317,12 +2482,163 @@ class ReadOnlyTheoryBridgeSession:
         def build() -> tuple[TheoryBridgeState, ...]:
             if self._registered is None:
                 self._registered = tuple(
-                    self._theory_state(self._initial_record(index))
-                    for index in self._registered_state_indices
+                    self._theory_state(
+                        self._initial_record(
+                            dataset_index,
+                            reported_record_index=record_index,
+                        )
+                    )
+                    for dataset_index, record_index in zip(
+                        self._registered_state_indices,
+                        self._reported_record_indices,
+                    )
                 )
             return self._registered
 
         return self._guard(build)
+
+    def training_advantage_estimator(self, state_id: str) -> SimpleNamespace:
+        """Reconstruct the exact frozen-checkpoint tensor used by training."""
+
+        def reconstruct() -> SimpleNamespace:
+            record = self._record(state_id)
+            self._populate_probabilities(record)
+            if (
+                record.action_mask is None
+                or record.current_probabilities is None
+                or record.terminal
+            ):
+                raise FullBackendError(
+                    "Theory trainer-estimator state is incomplete or terminal."
+                )
+            trainer = self._session.trainer
+            checker_fn = getattr(trainer, "_checker_fn", None)
+            if checker_fn is None:
+                raise FullBackendError(
+                    "Theory trainer-estimator reconstruction lacks its checker."
+                )
+            x_batch = prepare_batch_x(
+                record.x,
+                device=self._session.device,
+                batched=False,
+            )
+            plan = prepare_plan(
+                record.plan,
+                device=self._session.device,
+                batched=False,
+            )
+            mask = torch.tensor(
+                record.action_mask,
+                dtype=torch.bool,
+                device=self._session.device,
+            ).unsqueeze(0)
+            probabilities = torch.tensor(
+                record.current_probabilities,
+                dtype=torch.float32,
+                device=self._session.device,
+            ).unsqueeze(0)
+            environment = self._new_environment()
+            environment.load_checkpoint_state(record.environment_state)
+            baseline, q_values = compute_exact_baseline_summation(
+                model=trainer.model,
+                x_batch=x_batch,
+                y_batch=plan,
+                env=environment,
+                n=int(self._session.rl_config.inner_unroll_n),
+                gamma=float(self._session.rl_config.gamma),
+                checker_fn=checker_fn,
+                action_mask=mask,
+                policy_probs=probabilities,
+                successor_latent=(
+                    record.deployed_next_latent
+                    if not bool(self._session.rl_config.episodic_latent)
+                    else None
+                ),
+            )
+            advantages = torch.where(
+                mask,
+                q_values - baseline.unsqueeze(-1),
+                torch.zeros_like(q_values),
+            )
+            configured_clip = getattr(self._session.rl_config, "advantage_clip", None)
+            if configured_clip is not None and float(configured_clip) > 0.0:
+                clip_value: float | None = float(configured_clip)
+                clipping_kind = "clip_then_exact_recenter"
+                advantages = _clip_and_recenter_advantages(
+                    advantages,
+                    probabilities,
+                    mask,
+                    clip_value,
+                )
+            else:
+                clip_value = None
+                clipping_kind = "none"
+            return SimpleNamespace(
+                action_mask=record.action_mask,
+                current_probabilities=record.current_probabilities,
+                advantages=tuple(
+                    float(value) for value in advantages.reshape(-1).tolist()
+                ),
+                clipping_kind=clipping_kind,
+                clip_value=clip_value,
+            )
+
+        return self._guard(reconstruct)
+
+    def persistent_endpoint_witness(
+        self,
+        state_id: str,
+        endpoint_depth: int,
+    ) -> SimpleNamespace:
+        """Prove that endpoint depth cannot replace the deployed F_n carry."""
+
+        def witness() -> SimpleNamespace:
+            if (
+                isinstance(endpoint_depth, bool)
+                or not isinstance(endpoint_depth, int)
+                or endpoint_depth <= 0
+            ):
+                raise FullBackendError("Persistent endpoint depth must be positive.")
+            if bool(self._session.rl_config.episodic_latent):
+                raise FullBackendError(
+                    "Persistent endpoint witness is unavailable in episodic mode."
+                )
+            record = self._record(state_id)
+            self._populate_probabilities(record)
+            if (
+                record.action_mask is None
+                or record.current_probabilities is None
+                or record.candidate_probabilities is None
+                or record.deployed_probabilities is None
+                or record.deployed_next_latent is None
+            ):
+                raise FullBackendError("Persistent endpoint witness is incomplete.")
+            deployed_depth = int(self._session.rl_config.inner_unroll_n)
+            return SimpleNamespace(
+                requested_endpoint_depth=endpoint_depth,
+                deployed_transition_depth=deployed_depth,
+                carried_successor_latent_sha256=canonical_json_sha256(
+                    _tree_identity(record.deployed_next_latent)
+                ),
+                trajectory_sha256=canonical_json_sha256(
+                    {
+                        "state_id": record.state_id,
+                        "environment_state": _tree_identity(record.environment_state),
+                        "deployed_transition_depth": deployed_depth,
+                    }
+                ),
+                action_probabilities_sha256=canonical_json_sha256(
+                    {
+                        "action_mask": list(record.action_mask),
+                        "current": list(record.current_probabilities),
+                        "candidate": list(record.candidate_probabilities),
+                        "deployed": list(record.deployed_probabilities),
+                    }
+                ),
+                recurrent_transition_sha256=self._recurrent_transition_sha256,
+            )
+
+        return self._guard(witness)
 
     def _record(self, state_id: str) -> _BridgeStateRecord:
         if state_id not in self._states:
@@ -2410,9 +2726,7 @@ class ReadOnlyTheoryBridgeSession:
                 environment_state=environment_state,
                 x=_clone_tree(x_next),
                 plan=plan_next.detach().clone(),
-                latent=(
-                    next_latent.detach().clone() if next_latent is not None else None
-                ),
+                latent=(_clone_tree(next_latent) if next_latent is not None else None),
                 terminal=bool(terminal),
             )
         outcome = TheoryBridgeOutcome(
@@ -2493,6 +2807,90 @@ class ReadOnlyTheoryBridgeSession:
                         "steps": trace,
                         "terminal": terminal,
                         "bootstrap_state_id": current,
+                    }
+                ),
+            )
+
+        return self._guard(sample)
+
+    def sample_current_policy_return(
+        self,
+        state_id: str,
+        seed: int,
+        maximum_environment_steps: int,
+        gamma: float,
+    ) -> SimpleNamespace:
+        """Sample one independent finite return under the frozen current policy."""
+
+        def sample() -> SimpleNamespace:
+            if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+                raise FullBackendError("Theory return seed must be nonnegative.")
+            if (
+                isinstance(maximum_environment_steps, bool)
+                or not isinstance(maximum_environment_steps, int)
+                or maximum_environment_steps <= 0
+            ):
+                raise FullBackendError(
+                    "Theory return step limit must be a positive integer."
+                )
+            if (
+                isinstance(gamma, bool)
+                or not isinstance(gamma, (int, float))
+                or not 0.0 <= float(gamma) < 1.0
+            ):
+                raise FullBackendError("Theory return gamma is invalid.")
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(seed)
+            current: str | None = state_id
+            discounted_return = 0.0
+            discount = 1.0
+            trace: list[dict[str, object]] = []
+            terminal = False
+            for _ in range(maximum_environment_steps):
+                if current is None:
+                    terminal = True
+                    break
+                record = self._record(current)
+                if record.terminal:
+                    terminal = True
+                    break
+                self._populate_probabilities(record)
+                if record.current_probabilities is None:
+                    raise FullBackendError(
+                        "Theory current-policy return lacks action probabilities."
+                    )
+                probabilities = torch.tensor(
+                    record.current_probabilities,
+                    dtype=torch.float64,
+                )
+                action = int(
+                    torch.multinomial(
+                        probabilities,
+                        1,
+                        replacement=True,
+                        generator=generator,
+                    ).item()
+                )
+                outcome, step_trace = self._outcome(current, action)
+                discounted_return += discount * outcome.reward
+                discount *= float(gamma)
+                trace.append(step_trace)
+                terminal = outcome.terminal
+                current = None if terminal else outcome.next_state_id
+                if terminal:
+                    break
+            return SimpleNamespace(
+                discounted_return=discounted_return,
+                environment_steps=len(trace),
+                terminal=terminal,
+                trajectory_sha256=canonical_json_sha256(
+                    {
+                        "initial_state_id": state_id,
+                        "seed": seed,
+                        "maximum_environment_steps": maximum_environment_steps,
+                        "gamma": float(gamma),
+                        "steps": trace,
+                        "terminal": terminal,
                     }
                 ),
             )
@@ -2940,9 +3338,7 @@ def open_theory_bridge_session(
             checkpoint_descriptor=adapter_descriptor,
             checkpoint_sha256=expected,
             snapshot_kind=str(embedded_identity["snapshot_kind"]),
-            environment_interactions=int(
-                embedded_identity["environment_interactions"]
-            ),
+            environment_interactions=int(embedded_identity["environment_interactions"]),
             session=session,
             training_module=training_module,
             evaluation_state_dicts=evaluation_states,
@@ -2964,6 +3360,260 @@ def open_theory_bridge_session(
             training_module=training_module,
             registered_state_indices=tuple(indices),
         )
+    except BaseException:
+        adapter.close()
+        raise
+    return adapter
+
+
+def _stage0_learned_session(
+    context: SmokeContext,
+    session: SmokeSession,
+) -> LearnedSession:
+    population = session.evaluation_population
+    if not isinstance(population, Mapping):
+        raise FullBackendError(
+            "Stage 0 theory evaluation lacks its registered train population."
+        )
+    indices = population.get("indices")
+    if (
+        not isinstance(indices, list)
+        or not indices
+        or any(
+            isinstance(index, bool) or not isinstance(index, int) for index in indices
+        )
+    ):
+        raise FullBackendError("Stage 0 theory population indices are invalid.")
+    run = RegisteredFullRun(
+        project_root=context.source_root,
+        protocol_path=(
+            context.source_root / "configs/policy_improvement_v2/protocol.json"
+        ),
+        registry_path=(
+            context.source_root / "configs/policy_improvement_v2/registry.json"
+        ),
+        evidence_root=context.evidence_root,
+        protocol=copy.deepcopy(context.protocol),
+        registry=copy.deepcopy(context.registry),
+        amendment_history=(),
+        row=copy.deepcopy(context.row),
+        protocol_sha256=context.protocol_sha256,
+        registry_sha256=context.registry_sha256,
+        amendment_history_sha256=hashlib.sha256(canonical_json_bytes([])).hexdigest(),
+        registry_row_sha256=context.registry_row_sha256,
+        runtime_authorization_sha256=context.runtime_authorization_sha256,
+        interaction_checkpoints=(16, 32),
+        final_environment_interactions=32,
+        compute_target_recurrent_map_applications=0,
+        evaluation_records=len(indices),
+        test_open_sha256=None,
+        dataset_root=context.dataset_root,
+    )
+    train_order = context.protocol["dataset"]["splits"]["train"][
+        "ordered_record_sha256"
+    ]
+    if not isinstance(train_order, Mapping) or train_order.get("status") != "available":
+        raise FullBackendError("Stage 0 train-order identity is unavailable.")
+    population_order = population.get("ordered_record_sha256")
+    population_binding = population.get("binding_sha256")
+    for value, label in (
+        (population_order, "Stage 0 population record order"),
+        (population_binding, "Stage 0 population binding"),
+    ):
+        _require_digest(value, name=label)
+    return LearnedSession(
+        run=run,
+        model=session.model,
+        trainer=session.trainer,
+        rl_config=session.rl_config,
+        env_config=session.env_config,
+        train_dataset=session.train_dataset,
+        evaluation_dataset=session.evaluation_dataset,
+        checker=session.checker,
+        task_config=session.task_config,
+        dataset_provenance=copy.deepcopy(session.dataset_provenance),
+        effective_config=copy.deepcopy(session.effective_config),
+        effective_config_sha256=session.effective_config_sha256,
+        initialization_sha256=session.initialization_sha256,
+        device=session.device,
+        config_path=session.config_path,
+        method_config_sha256=session.method_config_sha256,
+        run_identity=copy.deepcopy(session.run_identity),
+        evidence_identity=copy.deepcopy(session.evidence_identity),
+        dataset_manifest_sha256=context.dataset_manifest_sha256,
+        train_ordered_records_sha256=str(train_order["value"]),
+        evaluation_ordered_records_sha256=str(population_order),
+        evaluation_pool_sha256=str(population_binding),
+        parent_environment_interactions=16,
+    )
+
+
+def open_stage0_theory_bridge_session_v2(
+    request: Mapping[str, object],
+    checkpoint_path: str | Path,
+    *,
+    context: SmokeContext,
+    expected_checkpoint_sha256: str,
+    sealed_checkpoint_descriptor: int,
+    parent_checkpoint_sha256: str,
+    authenticated_model_state_sha256: str,
+    authenticated_role_state_sha256s: Mapping[str, object],
+    runtime_identity: Mapping[str, object],
+    training_module: Any,
+) -> ReadOnlyTheoryBridgeSession:
+    """Restore one authenticated 16 -> 32 Stage 0 checkpoint read-only."""
+
+    if (
+        context.segment_name != "resume"
+        or context.segment_budget != 32
+        or context.row.get("phase") != "stage0_smoke"
+        or context.row.get("evaluation_split") != "train"
+        or context.row.get("evaluation_population") != "stage0_smoke"
+        or context.row.get("method_id")
+        not in {"fixed_base_exact_persistent", "fixed_base_exact_episodic"}
+    ):
+        raise FullBackendError(
+            "Stage 0 theory bridge requires one exact train-only resume row."
+        )
+    expected = _require_digest(
+        expected_checkpoint_sha256,
+        name="Stage 0 theory checkpoint SHA-256",
+    )
+    parent = _require_digest(
+        parent_checkpoint_sha256,
+        name="Stage 0 theory parent checkpoint SHA-256",
+    )
+    supplied_checkpoint = Path(checkpoint_path)
+    if not supplied_checkpoint.is_absolute() or ".." in supplied_checkpoint.parts:
+        raise FullBackendError("Stage 0 theory checkpoint path is not canonical.")
+    sealed_sha256, sealed_size_bytes = _sealed_checkpoint_identity(
+        sealed_checkpoint_descriptor
+    )
+    if sealed_sha256 != expected:
+        raise FullBackendError("Stage 0 sealed checkpoint digest differs.")
+    authenticated_model = _require_digest(
+        authenticated_model_state_sha256,
+        name="Stage 0 authenticated model-state SHA-256",
+    )
+    if not isinstance(authenticated_role_state_sha256s, Mapping):
+        raise FullBackendError("Stage 0 authenticated role inventory is invalid.")
+    authenticated_roles = {
+        str(role): _require_digest(
+            digest,
+            name=f"Stage 0 authenticated role {role!r}",
+        )
+        for role, digest in authenticated_role_state_sha256s.items()
+    }
+    if (
+        not authenticated_roles
+        or canonical_json_sha256(authenticated_roles) != authenticated_model
+    ):
+        raise FullBackendError("Stage 0 model and role identities differ.")
+    checkpoint_identity = _theory_mapping(
+        request.get("checkpoint"),
+        {"sha256", "size_bytes", "snapshot_kind", "environment_interactions"},
+        name="Stage 0 checkpoint",
+    )
+    if dict(checkpoint_identity) != {
+        "sha256": expected,
+        "size_bytes": sealed_size_bytes,
+        "snapshot_kind": "smoke_resume",
+        "environment_interactions": 32,
+    }:
+        raise FullBackendError("Stage 0 request checkpoint identity differs.")
+    runtime_mapping = dict(runtime_identity)
+    runtime_mapping.setdefault(
+        "producer_source_manifest_sha256",
+        context.producer_manifest_sha256,
+    )
+    runtime = SealedRuntimeIdentity.from_mapping(runtime_mapping)
+    if (
+        runtime.role != "policy-improvement-smoke"
+        or runtime.runtime_authorization_sha256 != context.runtime_authorization_sha256
+        or runtime.runtime_sha256 != context.runtime_sha256
+    ):
+        raise FullBackendError("Stage 0 theory runtime identity differs.")
+    existing_runtime = getattr(training_module, "_PREVERIFIED_RUNTIME_SHA256", None)
+    if existing_runtime not in {None, runtime.runtime_sha256}:
+        raise FullBackendError("Stage 0 training module names another runtime.")
+    training_module._PREVERIFIED_RUNTIME_SHA256 = runtime.runtime_sha256
+    smoke_session = build_stage0_validation_session(context, training_module)
+    loaded, observed = training_module._load_checkpoint_payload(
+        sealed_checkpoint_descriptor,
+        expected_sha256=expected,
+    )
+    if not isinstance(loaded, Mapping):
+        raise FullBackendError("Stage 0 theory checkpoint payload is invalid.")
+    validate_policy_improvement_smoke_identity(
+        loaded.get("policy_improvement_smoke_identity"),
+        context,
+        environment_interactions=32,
+        parent_checkpoint_sha256=parent,
+    )
+    if (
+        loaded.get("evidence_identity") != smoke_session.evidence_identity
+        or loaded.get("run_identity") != smoke_session.run_identity
+    ):
+        raise FullBackendError("Stage 0 checkpoint mixes registered identities.")
+    training_module.resume_from_checkpoint_for_theory_evaluation(
+        sealed_checkpoint_descriptor,
+        smoke_session.model,
+        smoke_session.trainer,
+        str(smoke_session.device),
+        expected_dataset_provenance=smoke_session.dataset_provenance,
+        expected_run_identity=smoke_session.run_identity,
+        expected_checkpoint_sha256=expected,
+    )
+    restored_sha256, restored_size_bytes = _sealed_checkpoint_identity(
+        sealed_checkpoint_descriptor
+    )
+    if (
+        observed != expected
+        or restored_sha256 != expected
+        or restored_size_bytes != sealed_size_bytes
+        or smoke_session.trainer.get_env_step_count() != 32
+    ):
+        raise FullBackendError("Stage 0 checkpoint restore is incomplete.")
+    restored_model, restored_roles = stage0_model_state_identity(smoke_session)
+    if restored_model != authenticated_model or restored_roles != authenticated_roles:
+        raise FullBackendError(
+            "Restored Stage 0 model differs from semantic checkpoint validation."
+        )
+    learned_session = _stage0_learned_session(context, smoke_session)
+    population = smoke_session.evaluation_population
+    assert isinstance(population, Mapping)
+    reported_indices = population["indices"]
+    assert isinstance(reported_indices, list)
+    try:
+        adapter_descriptor = os.dup(sealed_checkpoint_descriptor)
+    except OSError as exc:
+        raise FullBackendError("Stage 0 sealed checkpoint cannot be retained.") from exc
+    try:
+        adapter = ReadOnlyTheoryBridgeSession(
+            request_identity=request,
+            checkpoint_descriptor=adapter_descriptor,
+            checkpoint_sha256=expected,
+            snapshot_kind="smoke_resume",
+            environment_interactions=32,
+            session=learned_session,
+            training_module=training_module,
+            evaluation_state_dicts={},
+            registered_state_indices=tuple(range(len(reported_indices))),
+            reported_record_indices=tuple(int(index) for index in reported_indices),
+        )
+    except BaseException:
+        os.close(adapter_descriptor)
+        raise
+    try:
+        observed_model = adapter.observed_model_identity(training_module)
+        supplied_model = request.get("model")
+        if (
+            not isinstance(supplied_model, Mapping)
+            or dict(supplied_model) != observed_model
+        ):
+            raise FullBackendError(
+                "Stage 0 theory request model identity differs after restore."
+            )
     except BaseException:
         adapter.close()
         raise

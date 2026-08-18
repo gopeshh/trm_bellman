@@ -8,6 +8,7 @@ import importlib
 import json
 import os
 import re
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -118,12 +119,118 @@ _RUNTIME_BYTECODE_CACHE = tempfile.TemporaryDirectory(
 )
 sys.pycache_prefix = str(Path(_RUNTIME_BYTECODE_CACHE.name).resolve())
 
-_core = importlib.import_module("scripts.policy_improvement_theory_bridge")
-_backend_module = importlib.import_module("scripts.policy_improvement_theory_backend")
+
+def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise RuntimeError("Theory request contains a duplicate JSON key.")
+        result[key] = value
+    return result
+
+
+def _request_schema_name(arguments: list[str]) -> str:
+    request_values: list[str] = []
+    for index, argument in enumerate(arguments):
+        if argument == "--request" and index + 1 < len(arguments):
+            request_values.append(arguments[index + 1])
+        elif argument.startswith("--request="):
+            request_values.append(argument.partition("=")[2])
+    if len(request_values) != 1:
+        if "--help" in arguments:
+            return (
+                "policy_improvement_theory_bridge_request_v2"
+                if _authorization.get("schema_name")
+                == "policy_improvement_runtime_authorization_v3"
+                else "policy_improvement_theory_bridge_request_v1"
+            )
+        raise RuntimeError("Theory execution requires exactly one request path.")
+    path = Path(request_values[0])
+    if not path.is_absolute() or ".." in path.parts:
+        raise RuntimeError("Theory request path must be absolute and canonical.")
+    descriptor = -1
+    try:
+        resolved = path.resolve(strict=True)
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        before = os.fstat(descriptor)
+        chunks: list[bytes] = []
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+        after = os.fstat(descriptor)
+    except OSError as exc:
+        raise RuntimeError("Theory request cannot be read safely.") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if (
+        resolved != path
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+        or (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+    ):
+        raise RuntimeError("Theory request changed while it was read.")
+    try:
+        document = json.loads(
+            b"".join(chunks).decode("ascii"),
+            object_pairs_hook=_strict_object,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Theory request is invalid JSON.") from exc
+    if not isinstance(document, dict) or not isinstance(
+        document.get("schema_name"), str
+    ):
+        raise RuntimeError("Theory request has no schema identity.")
+    return document["schema_name"]
+
+
+_request_schema = _request_schema_name(list(sys.argv[1:]))
+_is_v2 = _authorization.get("schema_name") == (
+    "policy_improvement_runtime_authorization_v3"
+)
+_expected_request_schema = (
+    "policy_improvement_theory_bridge_request_v2"
+    if _is_v2
+    else "policy_improvement_theory_bridge_request_v1"
+)
+if _request_schema != _expected_request_schema:
+    raise RuntimeError("Theory request schema differs from runtime authorization.")
+_core = importlib.import_module(
+    "scripts.policy_improvement_theory_bridge_v2"
+    if _is_v2
+    else "scripts.policy_improvement_theory_bridge"
+)
+_backend_module = importlib.import_module(
+    "scripts.policy_improvement_theory_backend_v2"
+    if _is_v2
+    else "scripts.policy_improvement_theory_backend"
+)
 _main = cast(Callable[..., int], getattr(_core, "main"))
 _backend_factory = cast(
     Callable[..., object],
-    getattr(_backend_module, "create_theory_bridge_backend"),
+    getattr(
+        _backend_module,
+        (
+            "create_theory_bridge_backend_v2"
+            if _is_v2
+            else "create_theory_bridge_backend"
+        ),
+    ),
 )
 _ATTESTATION = {
     "source_git_commit": _ROLE["source_git_commit"],

@@ -15,17 +15,15 @@ import stat
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
-
 from policy_improvement_sealed_evidence import (
+    seal_generation_checkpoint,
     SealedCheckpoint,
     SealedCheckpointError,
-    seal_generation_checkpoint,
 )
 from scripts.policy_improvement_schema import (
-    PolicyImprovementSchemaError,
     canonical_json_bytes,
     load_strict_json_bytes,
+    PolicyImprovementSchemaError,
     runtime_authorization_sha256,
     validate_runtime_authorization,
     validated_result_payload,
@@ -405,16 +403,20 @@ def _sealed_semantic_checkpoint_validations(
     evidence_root: Path,
     runtime_authorization: Mapping[str, object],
     result: Mapping[str, object],
-) -> list[dict[str, object]]:
+    retained_checkpoint_sha256: str | None = None,
+    retained_checkpoint_environment_interactions: int | None = None,
+) -> tuple[list[dict[str, object]], SealedCheckpoint | None]:
     """Seal every authenticated checkpoint, then validate it semantically.
 
     Sealing happens strictly after evidence authentication and strictly before
     the first loader call, so the bytes a loader deserializes cannot differ from
-    the bytes this module hashed.  Descriptors are closed on both paths; the
-    caller never receives one.
+    the bytes this module hashed. Descriptors are closed on both paths. When a
+    retained digest is supplied, one duplicate descriptor transfers to the
+    caller only after every semantic validation succeeds.
     """
 
     sealed: list[SealedCheckpoint] = []
+    retained: SealedCheckpoint | None = None
     try:
         for item in pending:
             try:
@@ -430,7 +432,7 @@ def _sealed_semantic_checkpoint_validations(
                 raise PolicyImprovementSchemaError(
                     "Authenticated checkpoint bytes could not be sealed."
                 ) from exc
-        return [
+        validations = [
             _semantic_checkpoint_validation(
                 checkpoint_validator=checkpoint_validator,
                 sealed_checkpoint=descriptor,
@@ -451,9 +453,40 @@ def _sealed_semantic_checkpoint_validations(
             )
             for item, descriptor in zip(pending, sealed)
         ]
+        if retained_checkpoint_sha256 is not None:
+            matches = [
+                descriptor
+                for item, descriptor in zip(pending, sealed)
+                if item.checkpoint_sha256 == retained_checkpoint_sha256
+                and item.environment_interactions
+                == retained_checkpoint_environment_interactions
+            ]
+            if len(matches) != 1:
+                raise PolicyImprovementSchemaError(
+                    "Retained checkpoint does not resolve exactly in the complete "
+                    "generation."
+                )
+            selected = matches[0]
+            try:
+                retained_descriptor = os.dup(selected.descriptor)
+            except OSError as exc:
+                raise PolicyImprovementSchemaError(
+                    "Authenticated checkpoint descriptor cannot be retained."
+                ) from exc
+            retained = SealedCheckpoint(
+                descriptor=retained_descriptor,
+                sha256=selected.sha256,
+                size_bytes=selected.size_bytes,
+                generation_relative_path=selected.generation_relative_path,
+            )
+        result_pair = (validations, retained)
+        retained = None
+        return result_pair
     finally:
         for descriptor in sealed:
             descriptor.close()
+        if retained is not None:
+            retained.close()
 
 
 def _canonical_relative(value: object, *, path: str) -> str:
@@ -1168,6 +1201,7 @@ def authenticate_complete_generation(
     amendment_history_sha256: str,
     authenticated_test_open_sha256: str | None,
     historical_runtime_authorizations: Mapping[str, Mapping[str, object]] | None = None,
+    retain_checkpoint_sha256: str | None = None,
 ) -> dict[str, object]:
     """Reopen one complete immutable generation and bind every reported artifact.
 
@@ -1180,6 +1214,8 @@ def authenticate_complete_generation(
     result_document, runtime_result = validated_result_payload(result)
     result = runtime_result
     root = _private_owner_root(evidence_root)
+    if retain_checkpoint_sha256 is not None:
+        _sha256(retain_checkpoint_sha256, path="retain_checkpoint_sha256")
     _sha256(amendment_history_sha256, path="amendment_history_sha256")
     if result["amendment_history_sha256"] != amendment_history_sha256:
         raise PolicyImprovementSchemaError(
@@ -1808,7 +1844,7 @@ def authenticate_complete_generation(
             variant = str(evaluation["policy_variant"])
             relative_candidates = (
                 f"evaluations/{variant}.json",
-                (f"evaluations/{snapshot['snapshot_kind']}/" f"{variant}.json"),
+                (f"evaluations/{snapshot['snapshot_kind']}/{variant}.json"),
             )
             aggregate_paths = [
                 generation / name
@@ -1882,7 +1918,7 @@ def authenticate_complete_generation(
         raise PolicyImprovementSchemaError(
             "Result generation changed before checkpoint sealing."
         )
-    semantic_validations = _sealed_semantic_checkpoint_validations(
+    semantic_validations, retained_checkpoint = _sealed_semantic_checkpoint_validations(
         pending_validations,
         checkpoint_validator=checkpoint_validator,
         protocol=protocol,
@@ -1895,81 +1931,96 @@ def authenticate_complete_generation(
         evidence_root=root,
         runtime_authorization=runtime_authorization,
         result=result,
+        retained_checkpoint_sha256=retain_checkpoint_sha256,
+        retained_checkpoint_environment_interactions=(
+            expected_environment_interactions
+            if retain_checkpoint_sha256 is not None
+            else None
+        ),
     )
-    final_files, final_directories = _inventory(generation)
-    manifest_file_identity = final_files.pop("MANIFEST.json", None)
-    if (
-        manifest_file_identity is None
-        or final_files != canonical_files
-        or final_directories != expected_directories
-    ):
-        raise PolicyImprovementSchemaError(
-            "Result generation changed during semantic checkpoint validation."
-        )
-    if parent_identity is not None:
-        parent_after = _authenticate_smoke_parent_segment(
-            root=root,
-            run_id=run_id,
-            result=result,
-            protocol_sha256=protocol_sha256,
-            registry_sha256=registry_sha256,
-            registry_row_sha256=registry_row_sha256,
-            expected_checkpoint_sha256=str(parent_identity["checkpoint_sha256"]),
-        )
+    try:
+        final_files, final_directories = _inventory(generation)
+        manifest_file_identity = final_files.pop("MANIFEST.json", None)
         if (
-            parent_after["generation_manifest_sha256"]
-            != parent_identity["generation_manifest_sha256"]
-            or parent_after["checkpoint_generation"]
-            != parent_identity["checkpoint_generation"]
-            or parent_after["checkpoint_relative_path"]
-            != parent_identity["checkpoint_relative_path"]
-            or parent_after["checkpoint_bytes"] != parent_identity["checkpoint_bytes"]
-            or canonical_json_bytes(parent_after["checkpoint_validation"])
-            != canonical_json_bytes(parent_identity["checkpoint_validation"])
-            or canonical_json_bytes(parent_after["prior_failed_attempts"])
-            != canonical_json_bytes(parent_identity["prior_failed_attempts"])
+            manifest_file_identity is None
+            or final_files != canonical_files
+            or final_directories != expected_directories
         ):
             raise PolicyImprovementSchemaError(
-                "Smoke prepare segment changed during semantic validation."
+                "Result generation changed during semantic checkpoint validation."
             )
-    _require_exact_directory_entries(
-        run_root,
-        {"segments", "attempts"} if has_historical_attempts else {"segments"},
-        label="Complete run root",
-    )
-    historical_attempts_after = (
-        _authenticate_historical_failed_attempts(
-            root=root,
-            run_root=run_root,
-            complete_result=result,
-            protocol_sha256=protocol_sha256,
-            registry_row_sha256=registry_row_sha256,
-            expected_environment_interactions=expected_environment_interactions,
-            runtime_authorizations=runtime_authorizations,
+        if parent_identity is not None:
+            parent_after = _authenticate_smoke_parent_segment(
+                root=root,
+                run_id=run_id,
+                result=result,
+                protocol_sha256=protocol_sha256,
+                registry_sha256=registry_sha256,
+                registry_row_sha256=registry_row_sha256,
+                expected_checkpoint_sha256=str(parent_identity["checkpoint_sha256"]),
+            )
+            if (
+                parent_after["generation_manifest_sha256"]
+                != parent_identity["generation_manifest_sha256"]
+                or parent_after["checkpoint_generation"]
+                != parent_identity["checkpoint_generation"]
+                or parent_after["checkpoint_relative_path"]
+                != parent_identity["checkpoint_relative_path"]
+                or parent_after["checkpoint_bytes"]
+                != parent_identity["checkpoint_bytes"]
+                or canonical_json_bytes(parent_after["checkpoint_validation"])
+                != canonical_json_bytes(parent_identity["checkpoint_validation"])
+                or canonical_json_bytes(parent_after["prior_failed_attempts"])
+                != canonical_json_bytes(parent_identity["prior_failed_attempts"])
+            ):
+                raise PolicyImprovementSchemaError(
+                    "Smoke prepare segment changed during semantic validation."
+                )
+        _require_exact_directory_entries(
+            run_root,
+            {"segments", "attempts"} if has_historical_attempts else {"segments"},
+            label="Complete run root",
         )
-        if has_historical_attempts
-        else []
-    )
-    if canonical_json_bytes(historical_attempts_after) != canonical_json_bytes(
-        historical_attempts
-    ):
-        raise PolicyImprovementSchemaError(
-            "Historical failed-attempt inventory changed during validation."
+        historical_attempts_after = (
+            _authenticate_historical_failed_attempts(
+                root=root,
+                run_root=run_root,
+                complete_result=result,
+                protocol_sha256=protocol_sha256,
+                registry_row_sha256=registry_row_sha256,
+                expected_environment_interactions=expected_environment_interactions,
+                runtime_authorizations=runtime_authorizations,
+            )
+            if has_historical_attempts
+            else []
         )
-    return {
-        "generation_path": str(generation),
-        "generation_manifest_sha256": manifest_file_identity["sha256"],
-        "checkpoint_sha256": checkpoint_sha256,
-        "run_manifest_sha256": run_manifest_identity["sha256"],
-        "model_state_inventory_sha256": model_inventory_sha256,
-        "semantic_validations": semantic_validations,
-        "parent_generation_manifest_sha256": (
-            None
-            if parent_identity is None
-            else parent_identity["generation_manifest_sha256"]
-        ),
-        "historical_failed_attempts": historical_attempts,
-    }
+        if canonical_json_bytes(historical_attempts_after) != canonical_json_bytes(
+            historical_attempts
+        ):
+            raise PolicyImprovementSchemaError(
+                "Historical failed-attempt inventory changed during validation."
+            )
+        authenticated = {
+            "generation_path": str(generation),
+            "generation_manifest_sha256": manifest_file_identity["sha256"],
+            "checkpoint_sha256": checkpoint_sha256,
+            "run_manifest_sha256": run_manifest_identity["sha256"],
+            "model_state_inventory_sha256": model_inventory_sha256,
+            "semantic_validations": semantic_validations,
+            "parent_generation_manifest_sha256": (
+                None
+                if parent_identity is None
+                else parent_identity["generation_manifest_sha256"]
+            ),
+            "historical_failed_attempts": historical_attempts,
+        }
+        if retained_checkpoint is not None:
+            authenticated["sealed_checkpoint"] = retained_checkpoint
+            retained_checkpoint = None
+        return authenticated
+    finally:
+        if retained_checkpoint is not None:
+            retained_checkpoint.close()
 
 
 def authenticate_failed_attempt(
