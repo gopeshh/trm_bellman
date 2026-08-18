@@ -113,6 +113,7 @@ def _profile_sources() -> dict[str, bytes]:
 _POLICY_TRAINING_TEST_PATHS = (
     "confirmatory_runtime_launcher.py",
     "phase4_runtime_profile.py",
+    "policy_improvement_checkpoint_allowlist.py",
     "policy_improvement_smoke_checkpoint.py",
     "policy_improvement_smoke_runtime.py",
     "puzzle_dataset.py",

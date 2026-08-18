@@ -255,7 +255,14 @@ def _authenticate_authorization_producer_source(
     )
     try:
         tree_paths = [item.decode("utf-8") for item in tree_output.split(b"\0") if item]
-        expected_sources = behavior_source_relative_paths_from_inventory(tree_paths)
+        # The manifest's own schema version selects the inventory this
+        # producer commit must satisfy, and the selector rejects a version
+        # lower than the tree actually satisfies, so a historical manifest
+        # cannot be replayed against a newer tree to drop sources.
+        expected_sources = behavior_source_relative_paths_from_inventory(
+            tree_paths,
+            schema_version=int(manifest["source_manifest_schema_version"]),
+        )
     except (UnicodeDecodeError, SourceIdentityError) as exc:
         raise PolicyImprovementSchemaError(
             "Historical producer tree inventory is invalid."
@@ -2113,6 +2120,10 @@ def audit_result_set(
             project_root=project_root,
             dataset_root=dataset_root,
             runtime_authorization=result_authorization,
+            amendment_history_sha256=history_digest,
+            authenticated_test_open_sha256=(
+                test_open_sha256 if row["evaluation_split"] == "test" else None
+            ),
             historical_runtime_authorizations=runtime_authorizations,
         )
         generation_manifest_sha256s.append(

@@ -29,7 +29,10 @@ from zipfile import BadZipFile, ZipFile
 SOURCE_MANIFEST_RELATIVE_PATH = (
     "configs/iclr_confirmatory/producer_source_manifest.json"
 )
-SOURCE_MANIFEST_SCHEMA_VERSION = 1
+# Accept every producer inventory version, because the launcher may verify a
+# historical producer runtime whose manifest predates a later root source.
+SOURCE_MANIFEST_SCHEMA_VERSION = 2
+SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS = (1, 2)
 VERIFIED_RUNTIME_PATH_ENV = "UPI_TRM_VERIFIED_RUNTIME_PATH"
 VERIFIED_RUNTIME_SHA256_ENV = "UPI_TRM_VERIFIED_RUNTIME_SHA256"
 VERIFIED_RUNTIME_FD_ENV = "UPI_TRM_VERIFIED_RUNTIME_FD"
@@ -37,9 +40,31 @@ PRIVATE_UNPACK_BASE_ENV = "UPI_TRM_PRIVATE_UNPACK_BASE"
 PRIVATE_UNPACK_FD_ENV = "UPI_TRM_PRIVATE_UNPACK_FD"
 PAR_FILENAME_ENV = "FB_PAR_FILENAME"
 
+_ROOT_SOURCES_BY_VERSION: dict[int, tuple[str, ...]] = {
+    1: (
+        "confirmatory_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_smoke_checkpoint.py",
+        "policy_improvement_smoke_runtime.py",
+        "puzzle_dataset.py",
+        "runtime_archive_preflight.py",
+        "upi_trm_train.py",
+    ),
+    2: (
+        "confirmatory_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_checkpoint_allowlist.py",
+        "policy_improvement_smoke_checkpoint.py",
+        "policy_improvement_smoke_runtime.py",
+        "puzzle_dataset.py",
+        "runtime_archive_preflight.py",
+        "upi_trm_train.py",
+    ),
+}
 _ROOT_SOURCES = (
     "confirmatory_runtime_launcher.py",
     "phase4_runtime_profile.py",
+    "policy_improvement_checkpoint_allowlist.py",
     "policy_improvement_smoke_checkpoint.py",
     "policy_improvement_smoke_runtime.py",
     "puzzle_dataset.py",
@@ -207,7 +232,7 @@ def _validate_manifest(value: object) -> dict[str, str]:
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version != SOURCE_MANIFEST_SCHEMA_VERSION
+        or schema_version not in SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS
     ):
         raise ConfirmatoryRuntimeError(
             "Runtime source manifest has an unsupported schema version."
@@ -232,7 +257,9 @@ def _validate_manifest(value: object) -> dict[str, str]:
             )
         sources[relative_path] = digest
 
-    missing_roots = set((*_ROOT_SOURCES, *_ADDITIONAL_SOURCES)).difference(sources)
+    # The manifest's own version selects the root sources its producer had.
+    required_roots = _ROOT_SOURCES_BY_VERSION.get(schema_version, _ROOT_SOURCES)
+    missing_roots = set((*required_roots, *_ADDITIONAL_SOURCES)).difference(sources)
     missing_directories = {
         directory
         for directory in _SOURCE_DIRECTORIES

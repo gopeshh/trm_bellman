@@ -10,13 +10,18 @@ import random
 import stat
 from collections.abc import Mapping
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
 import numpy as np
 import torch
 
 from dataset.build_policy_improvement_4x4 import verify_dataset
+from policy_improvement_sealed_evidence import (
+    authenticate_sealed_checkpoint_field,
+    SealedCheckpoint,
+    SealedCheckpointError,
+)
 from policy_improvement_smoke_checkpoint import (
     load_stable_checkpoint,
     validate_ppo_smoke_checkpoint,
@@ -49,7 +54,7 @@ from utils.run_identity import (
 _REQUEST_FIELDS = {
     "schema_name",
     "schema_version",
-    "checkpoint_path",
+    "checkpoint",
     "checkpoint_sha256",
     "protocol",
     "protocol_sha256",
@@ -189,7 +194,7 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
     Path,
     Path,
     Path,
-    Path,
+    SealedCheckpoint,
 ]:
     request_fields = set(value)
     if request_fields != _REQUEST_FIELDS and request_fields != _FULL_REQUEST_FIELDS:
@@ -197,8 +202,8 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
             "Checkpoint validation request field inventory differs."
         )
     if (
-        value["schema_name"] != "policy_improvement_checkpoint_validation_request_v1"
-        or value["schema_version"] != 1
+        value["schema_name"] != "policy_improvement_checkpoint_validation_request_v2"
+        or value["schema_version"] != 2
     ):
         raise PolicyImprovementCheckpointValidationError(
             "Checkpoint validation request schema is unsupported."
@@ -320,47 +325,31 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
     evidence_root = _absolute_path(
         value["evidence_root"], name="evidence_root", kind="directory"
     )
-    checkpoint_path = _absolute_path(
-        value["checkpoint_path"], name="checkpoint_path", kind="file"
-    )
+    # The caller authenticated these bytes against an immutable generation
+    # manifest and sealed them.  This validator therefore never resolves a
+    # pathname: it consumes only the write-sealed descriptor, so the bytes it
+    # deserializes cannot be swapped after they were hashed.
     try:
-        checkpoint_path.relative_to(evidence_root)
-    except ValueError as exc:
+        sealed_checkpoint = authenticate_sealed_checkpoint_field(
+            value["checkpoint"],
+            expected_sha256=str(value["checkpoint_sha256"]),
+            name="checkpoint",
+        )
+    except SealedCheckpointError as exc:
         raise PolicyImprovementCheckpointValidationError(
-            "Checkpoint path escaped the evidence root."
+            "Checkpoint validation request lacks an authenticated sealed "
+            "descriptor."
         ) from exc
-    if is_smoke:
-        expected_checkpoint_parent = (
-            evidence_root
-            / "runs"
-            / str(run_id)
-            / "segments"
-            / f"env_{environment_interactions:09d}"
-            / "checkpoints"
+    relative_parts = PurePosixPath(sealed_checkpoint.generation_relative_path).parts
+    expected_parts_length = 2 if is_smoke else 3
+    if (
+        len(relative_parts) != expected_parts_length
+        or relative_parts[0] != "checkpoints"
+        or (not is_smoke and relative_parts[1] != str(value["snapshot_kind"]))
+    ):
+        raise PolicyImprovementCheckpointValidationError(
+            "Sealed checkpoint is not at its immutable generation location."
         )
-        if checkpoint_path.parent != expected_checkpoint_parent:
-            raise PolicyImprovementCheckpointValidationError(
-                "Checkpoint path differs from its immutable Stage-0 generation."
-            )
-    else:
-        tier = str(row["tier"])
-        budget_tier = "confirmatory" if tier in {"confirmatory", "ablation"} else tier
-        final_interactions = int(
-            protocol["budgets"][budget_tier]["environment_interactions"]
-        )
-        expected_checkpoint_parent = (
-            evidence_root
-            / "runs"
-            / str(run_id)
-            / "segments"
-            / f"env_{final_interactions:09d}"
-            / "checkpoints"
-            / str(value["snapshot_kind"])
-        )
-        if checkpoint_path.parent != expected_checkpoint_parent:
-            raise PolicyImprovementCheckpointValidationError(
-                "Full checkpoint path differs from its immutable snapshot."
-            )
     expected_dataset = project_root / str(protocol["dataset"]["root"])
     try:
         resolved_expected_dataset = expected_dataset.resolve(strict=True)
@@ -379,7 +368,7 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
         project_root,
         dataset_root,
         evidence_root,
-        checkpoint_path,
+        sealed_checkpoint,
     )
 
 
@@ -582,12 +571,12 @@ def _forbid_training_and_optimizer_steps(trainer: Any) -> Iterator[dict[str, int
 
 def _validate_ppo(
     request: Mapping[str, object],
-    checkpoint_path: Path,
+    sealed_checkpoint: SealedCheckpoint,
     session: Any,
 ) -> tuple[str, str | None, int, str, dict[str, str]]:
     expected_sha256 = str(request["checkpoint_sha256"])
     payload, observed_sha256 = load_stable_checkpoint(
-        checkpoint_path,
+        sealed_checkpoint.descriptor,
         expected_sha256=expected_sha256,
     )
     if not isinstance(payload, Mapping):
@@ -621,14 +610,14 @@ def _validate_ppo(
 
 def _validate_upi(
     request: Mapping[str, object],
-    checkpoint_path: Path,
+    sealed_checkpoint: SealedCheckpoint,
     context: SmokeContext,
     session: Any,
     module: Any,
 ) -> tuple[str, str | None, int, str, dict[str, str]]:
     expected_sha256 = str(request["checkpoint_sha256"])
     raw, observed_sha256 = module._load_checkpoint_payload(
-        str(checkpoint_path),
+        sealed_checkpoint.descriptor,
         expected_sha256=expected_sha256,
     )
     if not isinstance(raw, Mapping):
@@ -656,7 +645,7 @@ def _validate_upi(
             "UPI checkpoint invocation differs from the registered row."
         )
     module.validate_checkpoint_state_for_audit(
-        str(checkpoint_path),
+        sealed_checkpoint.descriptor,
         session.model,
         session.trainer,
         str(session.device),
@@ -722,7 +711,7 @@ def _validate_full_checkpoint(
     project_root: Path,
     dataset_root: Path,
     evidence_root: Path,
-    checkpoint_path: Path,
+    sealed_checkpoint: SealedCheckpoint,
 ) -> dict[str, object]:
     """Reconstruct and validate one registered non-smoke checkpoint."""
 
@@ -827,7 +816,7 @@ def _validate_full_checkpoint(
     ]:
         if type(session.trainer).__name__ == "PPOTrainer":
             payload, observed_sha256 = load_stable_checkpoint(
-                checkpoint_path,
+                sealed_checkpoint.descriptor,
                 expected_sha256=expected_sha256,
             )
             if not isinstance(payload, Mapping):
@@ -853,7 +842,7 @@ def _validate_full_checkpoint(
             )
 
         raw, observed_sha256 = training_module._load_checkpoint_payload(
-            str(checkpoint_path),
+            sealed_checkpoint.descriptor,
             expected_sha256=expected_sha256,
         )
         if not isinstance(raw, Mapping):
@@ -870,7 +859,7 @@ def _validate_full_checkpoint(
                 "Full UPI checkpoint identity digest differs."
             )
         training_module.validate_checkpoint_state_for_audit(
-            str(checkpoint_path),
+            sealed_checkpoint.descriptor,
             session.model,
             session.trainer,
             str(session.device),
@@ -989,7 +978,7 @@ def validate_checkpoint(request: Mapping[str, object]) -> dict[str, object]:
             project_root,
             dataset_root,
             evidence_root,
-            checkpoint_path,
+            sealed_checkpoint,
         ) = _validate_request(request)
         if row["phase"] != "stage0_smoke":
             python_rng = random.getstate()
@@ -1007,7 +996,7 @@ def validate_checkpoint(request: Mapping[str, object]) -> dict[str, object]:
                     project_root,
                     dataset_root,
                     evidence_root,
-                    checkpoint_path,
+                    sealed_checkpoint,
                 )
             finally:
                 random.setstate(python_rng)
@@ -1046,11 +1035,11 @@ def validate_checkpoint(request: Mapping[str, object]) -> dict[str, object]:
                 )
             with _forbid_training_and_optimizer_steps(session.trainer) as calls:
                 if request["method_id"] == "matched_ppo":
-                    semantic = _validate_ppo(request, checkpoint_path, session)
+                    semantic = _validate_ppo(request, sealed_checkpoint, session)
                 else:
                     semantic = _validate_upi(
                         request,
-                        checkpoint_path,
+                        sealed_checkpoint,
                         context,
                         session,
                         training_module,

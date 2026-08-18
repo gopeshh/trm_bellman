@@ -10,11 +10,9 @@ the runtime therefore still has no backend.
 from __future__ import annotations
 
 import copy
-import fcntl
 import hashlib
 import math
 import os
-import stat
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -27,6 +25,10 @@ import torch
 import yaml
 
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
+from policy_improvement_sealed_evidence import (
+    authenticate_sealed_descriptor,
+    SealedCheckpointError,
+)
 from policy_improvement_non_smoke_checkpoint import (
     evaluate_without_mutation,
     FullCheckpointArtifact,
@@ -2611,71 +2613,16 @@ def _registered_theory_checkpoint_snapshot_kind(
 
 
 def _sealed_checkpoint_identity(descriptor: int) -> tuple[str, int]:
-    if (
-        isinstance(descriptor, bool)
-        or not isinstance(descriptor, int)
-        or descriptor < 0
-    ):
-        raise FullBackendError("Theory checkpoint descriptor is invalid.")
-    required_constants = (
-        "F_GET_SEALS",
-        "F_SEAL_GROW",
-        "F_SEAL_SEAL",
-        "F_SEAL_SHRINK",
-        "F_SEAL_WRITE",
-    )
-    if any(not hasattr(fcntl, name) for name in required_constants):
-        raise FullBackendError("Theory checkpoint sealing is unavailable.")
+    """Hash one stable write-sealed theory checkpoint descriptor.
+
+    The seal-verification primitive is shared with the evidence-audit boundary
+    so both trust boundaries cannot drift apart.
+    """
+
     try:
-        info = os.fstat(descriptor)
-        required_seals = (
-            fcntl.F_SEAL_GROW
-            | fcntl.F_SEAL_SEAL
-            | fcntl.F_SEAL_SHRINK
-            | fcntl.F_SEAL_WRITE
-        )
-        observed_seals = fcntl.fcntl(descriptor, fcntl.F_GET_SEALS)
-        digest = hashlib.sha256()
-        offset = 0
-        while offset < info.st_size:
-            block = os.pread(
-                descriptor,
-                min(1024 * 1024, info.st_size - offset),
-                offset,
-            )
-            if not block:
-                raise FullBackendError(
-                    "Theory checkpoint descriptor ended before its registered size."
-                )
-            digest.update(block)
-            offset += len(block)
-        after = os.fstat(descriptor)
-    except OSError as exc:
-        raise FullBackendError(
-            "Theory checkpoint descriptor cannot be authenticated."
-        ) from exc
-    if (
-        not stat.S_ISREG(info.st_mode)
-        or observed_seals & required_seals != required_seals
-        or (
-            info.st_dev,
-            info.st_ino,
-            info.st_size,
-            info.st_mtime_ns,
-            info.st_ctime_ns,
-        )
-        != (
-            after.st_dev,
-            after.st_ino,
-            after.st_size,
-            after.st_mtime_ns,
-            after.st_ctime_ns,
-        )
-    ):
-        raise FullBackendError(
-            "Theory checkpoint descriptor is not one stable write-sealed file."
-        )
-    return digest.hexdigest(), info.st_size
+        return authenticate_sealed_descriptor(descriptor)
+    except SealedCheckpointError as exc:
+        raise FullBackendError(str(exc)) from exc
 
 
 def open_theory_bridge_session(

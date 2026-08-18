@@ -5,13 +5,16 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import itertools
+import json
 import math
 import os
 import shutil
 import struct
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -20,6 +23,10 @@ try:
     import numpy as np
 except ImportError:  # The owned Buck test supplies NumPy; host fbpython may not.
     np = None
+import scripts.policy_improvement_audit as audit_module
+from policy_improvement_sealed_evidence import (
+    authenticate_sealed_checkpoint_field,
+)
 from scripts.policy_improvement_analysis import (
     _contrast_estimates,
     analyze_stage2_confirmatory as _analyze_stage2_confirmatory,
@@ -793,14 +800,24 @@ def _validator_execution_identity(
     }
 
 
+_SEALED_FIXTURE_REQUESTS: list[dict[str, object]] = []
+
+
 def _fixture_checkpoint_validator(
     request: dict[str, object],
 ) -> dict[str, object]:
     """Test-only semantic validator for synthetic non-Torch fixture bytes."""
 
-    checkpoint = Path(str(request["checkpoint_path"]))
-    generation = checkpoint.parents[1]
-    candidates = sorted(generation.rglob("checkpoint_validation.json"))
+    # Requests name checkpoint bytes only by a write-sealed descriptor.
+    # Authenticate it exactly as the real validator does, then resolve the
+    # matching receipt from the evidence tree by digest.
+    sealed = authenticate_sealed_checkpoint_field(
+        request["checkpoint"],
+        expected_sha256=str(request["checkpoint_sha256"]),
+    )
+    _SEALED_FIXTURE_REQUESTS.append(dict(sealed.as_request_field()))
+    evidence_root = Path(str(request["evidence_root"]))
+    candidates = sorted(evidence_root.rglob("checkpoint_validation.json"))
     receipt = None
     for candidate in candidates:
         value = load_strict_json(candidate)
@@ -2290,6 +2307,81 @@ class ResultAuditTest(unittest.TestCase):
             report["execution_source_git_commit"],
             self.authorization["roles"][2]["source_git_commit"],
         )
+
+    def test_audit_stdout_is_exactly_one_canonical_json_document(self) -> None:
+        """Adversarial test 8: sealing must not add a second stdout writer."""
+
+        root = self.evidence_root.parent
+        protocol_path = root / "protocol.json"
+        registry_path = root / "registry.json"
+        _write_json_fixture(protocol_path, self.protocol)
+        _write_json_fixture(registry_path, self.registry)
+        audit_role = self.authorization["roles"][2]
+        arguments = [
+            "--protocol",
+            str(protocol_path),
+            "--registry",
+            str(registry_path),
+            "--project-root",
+            str(REPOSITORY_ROOT),
+            "--dataset-root",
+            str(self.dataset_root),
+            "--evidence-root",
+            str(self.evidence_root),
+            "--audit-runtime-sha256",
+            str(audit_role["runtime_sha256"]),
+            "--audit-runtime-profile-sha256",
+            str(audit_role["runtime_profile_sha256"]),
+            "--audit-source-git-commit",
+            str(audit_role["source_git_commit"]),
+            "--launcher-sha256",
+            str(self.authorization["launcher_sha256"]),
+            "--producer-git-commit",
+            str(self.authorization["producer_git_commit"]),
+            "--producer-source-manifest-sha256",
+            str(self.authorization["producer_source_manifest_sha256"]),
+            "--runtime-authorization-json",
+            canonical_json_bytes(self.authorization).decode("ascii"),
+            "--runtime-authorization-sha256",
+            runtime_authorization_sha256(self.authorization),
+            "--phase",
+            "stage0_smoke",
+        ]
+        for result in self.results:
+            path = root / f"result_{result['run_id']}.json"
+            _write_json_fixture(path, result)
+            arguments.extend(["--result", str(path)])
+        for index, document in enumerate(self.documents.values()):
+            path = root / f"per_instance_{index}.json"
+            _write_json_fixture(path, document)
+            arguments.extend(["--per-instance", str(path)])
+
+        stream = io.StringIO()
+        with (
+            mock.patch.object(
+                audit_module,
+                "_authenticate_authorization_producer_source",
+                lambda *args, **kwargs: None,
+            ),
+            redirect_stdout(stream),
+        ):
+            status = audit_module.main(
+                arguments,
+                checkpoint_validator=_fixture_checkpoint_validator,
+            )
+        self.assertEqual(status, 0)
+        captured = stream.getvalue()
+        self.assertTrue(captured.endswith("\n"))
+        lines = captured.splitlines()
+        self.assertEqual(len(lines), 1, captured[:4000])
+        report = json.loads(lines[0])
+        self.assertEqual(
+            canonical_json_bytes(report).decode("ascii"),
+            lines[0],
+        )
+        self.assertEqual(report["schema_name"], "policy_improvement_audit_v5")
+        self.assertEqual(report["complete_rows"], 4)
+        self.assertFalse(report["test_open_verified"])
 
     def test_stage0_audit_never_opens_held_out_test_content(self) -> None:
         test_root = self.dataset_root / "test"

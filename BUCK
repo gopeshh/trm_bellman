@@ -140,6 +140,22 @@ python_library(
 )
 
 python_library(
+    name = "policy_improvement_checkpoint_allowlist",
+    srcs = ["policy_improvement_checkpoint_allowlist.py"],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        ":rl",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_sealed_evidence",
+    srcs = ["policy_improvement_sealed_evidence.py"],
+    base_module = "",
+)
+
+python_library(
     name = "policy_improvement_schema",
     srcs = ["scripts/policy_improvement_schema.py"],
     base_module = "",
@@ -169,6 +185,7 @@ python_library(
     base_module = "",
     deps = [
         ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
     ],
 )
 
@@ -179,6 +196,7 @@ python_library(
     deps = [
         ":policy_improvement_registry",
         ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
         ":policy_improvement_theory_schema",
     ],
 )
@@ -206,6 +224,7 @@ python_library(
         ":policy_improvement_full_runtime",
         ":policy_improvement_non_smoke_checkpoint",
         ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
         ":policy_improvement_smoke_runtime",
         ":rl",
         ":upi_trm_train_lib",
@@ -342,6 +361,7 @@ python_library(
         ":policy_improvement_non_smoke_checkpoint",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
         ":policy_improvement_smoke_checkpoint",
         ":policy_improvement_smoke_runtime",
         ":upi_trm_train_lib",
@@ -378,6 +398,7 @@ python_binary(
         ":policy_improvement_evidence",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
         ":policy_improvement_test_open",
         ":policy_improvement_test_open_cli",
         ":runtime_archive_preflight",
@@ -425,6 +446,7 @@ python_binary(
         ":policy_improvement_audit_lib",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
         ":policy_improvement_statistics",
         ":runtime_archive_preflight",
     ],
@@ -485,6 +507,7 @@ python_library(
     deps = [
         "fbsource//third-party/pypi/numpy:numpy",
         "fbsource//third-party/pypi/torch:torch",
+        ":policy_improvement_checkpoint_allowlist",
         ":utils",
     ],
 )
@@ -551,6 +574,7 @@ python_library(
         ":dataset",
         ":evaluators",
         ":models",
+        ":policy_improvement_checkpoint_allowlist",
         ":policy_improvement_smoke_runtime",
         ":puzzle_dataset_lib",
         ":rl",
@@ -585,6 +609,7 @@ python_binary(
         ":dataset",
         ":evaluators",
         ":models",
+        ":policy_improvement_checkpoint_allowlist",
         ":policy_improvement_smoke_runtime",
         ":puzzle_dataset_lib",
         ":rl",
@@ -841,6 +866,7 @@ python_unittest(
         ":policy_improvement_audit_lib",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
         ":policy_improvement_smoke_plan_lib",
         ":policy_improvement_statistics",
         ":policy_improvement_test_open",
@@ -863,6 +889,37 @@ python_unittest(
 )
 
 python_unittest(
+    name = "test_policy_improvement_checkpoint_allowlist",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_checkpoint_allowlist_unittest.py",
+    ],
+    base_module = "",
+    deps = [
+        "fbsource//third-party/pypi/numpy:numpy",
+        "fbsource//third-party/pypi/torch:torch",
+        ":policy_improvement_checkpoint_allowlist",
+        ":rl",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_sealed_evidence",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_sealed_evidence_unittest.py",
+    ],
+    base_module = "",
+    resources = ["policy_improvement_consumer_entrypoint.py"],
+    deps = [
+        ":policy_improvement_audit_lib",
+        ":policy_improvement_evidence",
+        ":policy_improvement_full_runtime",
+        ":policy_improvement_sealed_evidence",
+    ],
+)
+
+python_unittest(
     name = "test_policy_improvement_evidence",
     srcs = [
         "tests/__init__.py",
@@ -870,8 +927,11 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        ":policy_improvement_checkpoint_allowlist",
         ":policy_improvement_evidence",
         ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
         ":policy_improvement_test_open",
     ],
 )
@@ -905,6 +965,7 @@ python_unittest(
         ":policy_improvement_full_runtime",
         ":policy_improvement_non_smoke_checkpoint",
         ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
         ":policy_improvement_smoke_checkpoint",
         ":rl",
         ":utils",
@@ -993,6 +1054,8 @@ python_unittest(
         ":policy_improvement_checkpoint_validator",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
+        ":policy_improvement_sealed_evidence",
+        ":policy_improvement_smoke_checkpoint",
         ":policy_improvement_smoke_runtime",
         ":utils",
     ],
@@ -1011,6 +1074,7 @@ python_unittest(
     base_module = "",
     deps = [
         ":confirmatory_runtime_launcher_lib",
+        ":phase4_runtime_profile",
         ":utils",
     ],
 )

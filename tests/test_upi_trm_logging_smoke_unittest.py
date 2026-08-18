@@ -625,6 +625,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             for relative_path in (
                 "confirmatory_runtime_launcher.py",
                 "phase4_runtime_profile.py",
+                "policy_improvement_checkpoint_allowlist.py",
                 "policy_improvement_smoke_checkpoint.py",
                 "policy_improvement_smoke_runtime.py",
                 "puzzle_dataset.py",
@@ -692,6 +693,7 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
             for relative_path in (
                 "confirmatory_runtime_launcher.py",
                 "phase4_runtime_profile.py",
+                "policy_improvement_checkpoint_allowlist.py",
                 "policy_improvement_smoke_checkpoint.py",
                 "policy_improvement_smoke_runtime.py",
                 "puzzle_dataset.py",
@@ -3200,7 +3202,9 @@ class TestUPITrmLoggingSmoke(unittest.TestCase):
                 )
 
             self.assertEqual(checkpoint_load.call_args.kwargs["map_location"], "cpu")
-            self.assertFalse(checkpoint_load.call_args.kwargs["weights_only"])
+            # Resume is data-only: the restricted unpickler must be in force so
+            # a hostile checkpoint cannot execute during a strict restore.
+            self.assertTrue(checkpoint_load.call_args.kwargs["weights_only"])
             self.assertEqual(random.random(), expected_random)
             self.assertEqual(float(np.random.rand()), expected_numpy)
             torch.testing.assert_close(torch.rand(3), expected_torch)

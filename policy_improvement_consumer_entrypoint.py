@@ -113,12 +113,16 @@ else:
     _module_name, _identity_prefix = _ROLE_MODULES[_PREFLIGHT.phase4_role]
 _module = importlib.import_module(_module_name)
 _main = cast(Callable[..., int], getattr(_module, "main"))
-_checkpoint_validator_module = importlib.import_module(
-    "policy_improvement_checkpoint_validator"
-)
+# The validator imports Torch, the training module, and every checkpoint
+# loader.  Bind it lazily so evidence authentication and checkpoint sealing
+# complete under the standard library alone; the first sealed validation
+# request is what pulls Torch in.  The factory itself lives in the stdlib-only
+# sealing module, which is imported only after runtime attestation and after
+# the private bytecode cache is in force.
+_sealed_evidence = importlib.import_module("policy_improvement_sealed_evidence")
 _checkpoint_validator = cast(
     Callable[[dict[str, object]], dict[str, object]],
-    getattr(_checkpoint_validator_module, "validate_checkpoint"),
+    getattr(_sealed_evidence, "load_sealed_checkpoint_validator")(),
 )
 
 

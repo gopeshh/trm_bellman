@@ -31,6 +31,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
+from policy_improvement_sealed_evidence import (
+    SealedCheckpointError,
+    seal_authenticated_checkpoint,
+)
 from scripts.policy_improvement_registry import (
     generate_registry,
     load_registered_base_configs,
@@ -802,98 +806,20 @@ def _seal_authenticated_checkpoint(
     expected_sha256: str,
     expected_size_bytes: int,
 ) -> int:
-    """Copy exact checkpoint bytes into a write-sealed anonymous file."""
+    """Copy exact checkpoint bytes into a write-sealed anonymous file.
 
-    required_os = ("memfd_create", "MFD_ALLOW_SEALING")
-    required_fcntl = (
-        "F_ADD_SEALS",
-        "F_GET_SEALS",
-        "F_SEAL_GROW",
-        "F_SEAL_SEAL",
-        "F_SEAL_SHRINK",
-        "F_SEAL_WRITE",
-    )
-    if any(not hasattr(os, name) for name in required_os) or any(
-        not hasattr(fcntl, name) for name in required_fcntl
-    ):
-        raise FullRuntimeError("Sealed checkpoint descriptors are unavailable.")
-    source_descriptor = -1
-    sealed_descriptor = -1
+    The sealing primitive is shared with the evidence-audit boundary so both
+    trust boundaries cannot drift apart.
+    """
+
     try:
-        before_path = path.lstat()
-        source_descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        before = os.fstat(source_descriptor)
-        if (
-            stat.S_ISLNK(before_path.st_mode)
-            or not stat.S_ISREG(before_path.st_mode)
-            or not stat.S_ISREG(before.st_mode)
-            or before_path.st_nlink != 1
-            or before.st_nlink != 1
-            or (before_path.st_dev, before_path.st_ino)
-            != (before.st_dev, before.st_ino)
-        ):
-            raise FullRuntimeError("Checkpoint snapshot source is unsafe.")
-        sealed_descriptor = os.memfd_create(
-            "upi-trm-authenticated-checkpoint",
-            os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING,
+        return seal_authenticated_checkpoint(
+            path,
+            expected_sha256=expected_sha256,
+            expected_size_bytes=expected_size_bytes,
         )
-        digest = hashlib.sha256()
-        offset = 0
-        while True:
-            block = os.pread(source_descriptor, 1024 * 1024, offset)
-            if not block:
-                break
-            digest.update(block)
-            remaining = memoryview(block)
-            while remaining:
-                written = os.write(sealed_descriptor, remaining)
-                if written <= 0:
-                    raise FullRuntimeError(
-                        "Sealed checkpoint snapshot made no write progress."
-                    )
-                remaining = remaining[written:]
-            offset += len(block)
-        after = os.fstat(source_descriptor)
-        after_path = path.lstat()
-        source_identity = lambda item: (
-            item.st_dev,
-            item.st_ino,
-            item.st_mode,
-            item.st_nlink,
-            item.st_size,
-            item.st_mtime_ns,
-            item.st_ctime_ns,
-        )
-        if (
-            source_identity(before) != source_identity(after)
-            or source_identity(after) != source_identity(after_path)
-            or offset != expected_size_bytes
-            or digest.hexdigest() != expected_sha256
-        ):
-            raise FullRuntimeError(
-                "Checkpoint changed while its sealed snapshot was created."
-            )
-        os.fchmod(sealed_descriptor, 0o400)
-        seals = (
-            fcntl.F_SEAL_GROW
-            | fcntl.F_SEAL_SEAL
-            | fcntl.F_SEAL_SHRINK
-            | fcntl.F_SEAL_WRITE
-        )
-        fcntl.fcntl(sealed_descriptor, fcntl.F_ADD_SEALS, seals)
-        if fcntl.fcntl(sealed_descriptor, fcntl.F_GET_SEALS) & seals != seals:
-            raise FullRuntimeError("Checkpoint snapshot could not be write-sealed.")
-        os.lseek(sealed_descriptor, 0, os.SEEK_SET)
-        result = sealed_descriptor
-        sealed_descriptor = -1
-        return result
-    except OSError as exc:
-        raise FullRuntimeError("Checkpoint snapshot could not be sealed.") from exc
-    finally:
-        if source_descriptor >= 0:
-            os.close(source_descriptor)
-        if sealed_descriptor >= 0:
-            os.close(sealed_descriptor)
+    except SealedCheckpointError as exc:
+        raise FullRuntimeError(str(exc)) from exc
 
 
 def resolve_authenticated_full_checkpoint(

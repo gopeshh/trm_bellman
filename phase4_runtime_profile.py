@@ -24,6 +24,32 @@ POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE = (
     "policy-improvement-theory-bridge"
 )
 PHASE4_SOURCE_MANIFEST_SCHEMA_VERSION = 1
+# Producer inventory versions, duplicated from utils.source_identity because
+# this module must stay standard-library only: it is imported before runtime
+# attestation, and :utils pulls Torch.  A consistency test pins the two
+# definitions together so they cannot drift.
+PRODUCER_SOURCE_MANIFEST_SCHEMA_VERSION = 2
+_PRODUCER_ROOT_SOURCES_BY_VERSION: dict[int, tuple[str, ...]] = {
+    1: (
+        "confirmatory_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_smoke_checkpoint.py",
+        "policy_improvement_smoke_runtime.py",
+        "puzzle_dataset.py",
+        "runtime_archive_preflight.py",
+        "upi_trm_train.py",
+    ),
+    2: (
+        "confirmatory_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_checkpoint_allowlist.py",
+        "policy_improvement_smoke_checkpoint.py",
+        "policy_improvement_smoke_runtime.py",
+        "puzzle_dataset.py",
+        "runtime_archive_preflight.py",
+        "upi_trm_train.py",
+    ),
+}
 PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH = (
     "configs/iclr_confirmatory/producer_source_manifest.json"
 )
@@ -103,6 +129,7 @@ POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS = (
     "policy_improvement_consumer_entrypoint.py",
     "policy_improvement_full_backend.py",
     "policy_improvement_non_smoke_checkpoint.py",
+    "policy_improvement_sealed_evidence.py",
     "runtime_archive_preflight.py",
     "scripts/policy_improvement_audit.py",
     "scripts/policy_improvement_evidence.py",
@@ -119,6 +146,7 @@ POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS = (
     "policy_improvement_consumer_entrypoint.py",
     "policy_improvement_full_backend.py",
     "policy_improvement_non_smoke_checkpoint.py",
+    "policy_improvement_sealed_evidence.py",
     "runtime_archive_preflight.py",
     "scripts/policy_improvement_analysis.py",
     "scripts/policy_improvement_audit.py",
@@ -134,6 +162,7 @@ _POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_CONFIG_PATHS,
     "policy_improvement_full_backend.py",
     "policy_improvement_non_smoke_checkpoint.py",
+    "policy_improvement_sealed_evidence.py",
     "runtime_archive_preflight.py",
     "scripts/policy_improvement_full_runtime.py",
     "scripts/policy_improvement_registry.py",
@@ -175,6 +204,36 @@ _READ_SIZE = 1024 * 1024
 
 class Phase4RuntimeProfileError(RuntimeError):
     """Raised when a Phase 4 source profile cannot be authenticated."""
+
+
+def producer_root_sources(schema_version: int) -> tuple[str, ...]:
+    """Root sources a producer of the given manifest schema version must have."""
+
+    try:
+        return _PRODUCER_ROOT_SOURCES_BY_VERSION[schema_version]
+    except KeyError:
+        raise Phase4RuntimeProfileError(
+            f"Unsupported producer source manifest schema {schema_version!r}."
+        ) from None
+
+
+def _producer_inventory_schema_version(root: Path) -> int:
+    """Highest producer inventory version satisfied by one checkout tree."""
+
+    best = 0
+    for schema_version in sorted(_PRODUCER_ROOT_SOURCES_BY_VERSION):
+        if all(
+            (root / path).is_file() for path in producer_root_sources(schema_version)
+        ):
+            best = schema_version
+    if not best:
+        missing = sorted(
+            path for path in producer_root_sources(1) if not (root / path).is_file()
+        )
+        raise Phase4RuntimeProfileError(
+            f"Producer repository is missing sources {missing!r}."
+        )
+    return best
 
 
 @dataclass(frozen=True)
@@ -395,16 +454,19 @@ def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _training_source_relative_paths(root: Path) -> list[str]:
-    root_sources = (
-        "confirmatory_runtime_launcher.py",
-        "phase4_runtime_profile.py",
-        "policy_improvement_smoke_checkpoint.py",
-        "policy_improvement_smoke_runtime.py",
-        "puzzle_dataset.py",
-        "runtime_archive_preflight.py",
-        "upi_trm_train.py",
-    )
+def _training_source_relative_paths(
+    root: Path,
+    *,
+    schema_version: int = PRODUCER_SOURCE_MANIFEST_SCHEMA_VERSION,
+) -> list[str]:
+    """Training sources for one producer inventory version.
+
+    Defaults to the current version so an executing runtime must carry every
+    current source.  A historical producer checkout is enumerated by passing
+    its authenticated manifest's version.
+    """
+
+    root_sources = producer_root_sources(schema_version)
     additional_sources = (
         "scripts/policy_improvement_registry.py",
         "scripts/policy_improvement_schema.py",
@@ -497,16 +559,38 @@ def authorize_phase4_training_source(
         raise Phase4RuntimeProfileError(
             "Producer source manifest is not strict ASCII JSON."
         ) from exc
-    if (
-        not isinstance(manifest, dict)
-        or set(manifest) != {"source_manifest_schema_version", "sources"}
-        or manifest["source_manifest_schema_version"] != 1
-        or not isinstance(manifest["sources"], dict)
-    ):
+    if not isinstance(manifest, dict) or set(manifest) != {
+        "source_manifest_schema_version",
+        "sources",
+    }:
         raise Phase4RuntimeProfileError(
             "Producer source manifest has an invalid inventory."
         )
-    expected_paths = _training_source_relative_paths(root)
+    schema_version = manifest["source_manifest_schema_version"]
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise Phase4RuntimeProfileError(
+            "Producer source manifest has an invalid schema version."
+        )
+    try:
+        producer_root_sources(schema_version)
+    except Phase4RuntimeProfileError as exc:
+        raise Phase4RuntimeProfileError(
+            "Producer source manifest has an unsupported schema version."
+        ) from exc
+    derived_schema_version = _producer_inventory_schema_version(root)
+    if schema_version != derived_schema_version:
+        raise Phase4RuntimeProfileError(
+            f"Producer source manifest declares schema {schema_version!r} but "
+            f"its checkout satisfies schema {derived_schema_version!r}."
+        )
+    if not isinstance(manifest["sources"], dict):
+        raise Phase4RuntimeProfileError(
+            "Producer source manifest has an invalid inventory."
+        )
+    expected_paths = _training_source_relative_paths(
+        root,
+        schema_version=schema_version,
+    )
     sources = manifest["sources"]
     if set(sources) != set(expected_paths):
         raise Phase4RuntimeProfileError(
@@ -723,8 +807,10 @@ def _is_policy_consumer_selected(relative_path: str) -> bool:
         "policy_improvement_checkpoint_validator.py",
         "policy_improvement_consumer_entrypoint.py",
         "policy_improvement_full_backend.py",
+        "policy_improvement_checkpoint_allowlist.py",
         "policy_improvement_full_entrypoint.py",
         "policy_improvement_non_smoke_checkpoint.py",
+        "policy_improvement_sealed_evidence.py",
         "policy_improvement_smoke_checkpoint.py",
         "policy_improvement_smoke_runtime.py",
         "policy_improvement_theory_bridge_entrypoint.py",
@@ -755,6 +841,7 @@ def _is_training_source_selected(relative_path: str) -> bool:
     return relative_path in {
         "confirmatory_runtime_launcher.py",
         "phase4_runtime_profile.py",
+        "policy_improvement_checkpoint_allowlist.py",
         "policy_improvement_checkpoint_validator.py",
         "policy_improvement_smoke_checkpoint.py",
         "policy_improvement_smoke_runtime.py",

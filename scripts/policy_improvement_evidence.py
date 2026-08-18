@@ -12,10 +12,16 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from policy_improvement_sealed_evidence import (
+    SealedCheckpoint,
+    SealedCheckpointError,
+    seal_generation_checkpoint,
+)
 from scripts.policy_improvement_schema import (
     PolicyImprovementSchemaError,
     canonical_json_bytes,
@@ -88,6 +94,24 @@ def _available(value: object, *, path: str) -> object:
     if availability["status"] != "available":
         raise PolicyImprovementSchemaError(f"{path} must be available.")
     return availability["value"]
+
+
+@dataclass(frozen=True)
+class _PendingCheckpointValidation:
+    """One authenticated checkpoint awaiting sealing and semantic validation.
+
+    Nothing here is deserialized.  The record only carries the identity this
+    module proved against an immutable generation manifest, so that sealing and
+    the semantic validator can run strictly after every authentication step.
+    """
+
+    generation: Path
+    generation_relative_path: str
+    checkpoint_sha256: str
+    size_bytes: int
+    validation: Mapping[str, object]
+    environment_interactions: int
+    parent_checkpoint_sha256: str | None
 
 
 def _validate_checkpoint_validator_identity(
@@ -165,7 +189,7 @@ def _validate_checkpoint_validator_identity(
 def _semantic_checkpoint_validation(
     *,
     checkpoint_validator: Callable[[Mapping[str, object]], Mapping[str, object]],
-    checkpoint_path: str,
+    sealed_checkpoint: SealedCheckpoint,
     checkpoint_sha256: str,
     validation: Mapping[str, object],
     protocol: Mapping[str, object],
@@ -181,12 +205,21 @@ def _semantic_checkpoint_validation(
     environment_interactions: int,
     parent_checkpoint_sha256: str | None,
 ) -> dict[str, object]:
-    """Run the sealed validator and compare computed semantics with claims."""
+    """Run the sealed validator and compare computed semantics with claims.
 
+    The validator receives a write-sealed descriptor, never a pathname.  It
+    therefore cannot deserialize any bytes other than the ones this module
+    authenticated against the immutable generation manifest.
+    """
+
+    if sealed_checkpoint.sha256 != checkpoint_sha256:
+        raise PolicyImprovementSchemaError(
+            "Sealed checkpoint descriptor names another authenticated checkpoint."
+        )
     request = {
-        "schema_name": "policy_improvement_checkpoint_validation_request_v1",
-        "schema_version": 1,
-        "checkpoint_path": checkpoint_path,
+        "schema_name": "policy_improvement_checkpoint_validation_request_v2",
+        "schema_version": 2,
+        "checkpoint": sealed_checkpoint.as_request_field(),
         "checkpoint_sha256": checkpoint_sha256,
         "protocol": dict(protocol),
         "protocol_sha256": protocol_sha256,
@@ -314,6 +347,113 @@ def _semantic_checkpoint_validation(
             "Sealed semantic checkpoint validation differs from frozen evidence."
         )
     return dict(computed)
+
+
+def _authenticate_test_split_state(
+    result: Mapping[str, object],
+    *,
+    authenticated_test_open_sha256: str | None,
+) -> None:
+    """Require the result's split and TEST_OPEN state to agree, fail-closed."""
+
+    identities = _object(result["identities"], path="result.identities")
+    declared = _object(
+        identities["test_open_sha256"],
+        path="result.identities.test_open_sha256",
+    )
+    split = result["evaluation_split"]
+    if split == "test":
+        if authenticated_test_open_sha256 is None:
+            raise PolicyImprovementSchemaError(
+                "Test-split evidence requires an independently authenticated "
+                "TEST_OPEN digest."
+            )
+        expected = _sha256(
+            authenticated_test_open_sha256,
+            path="authenticated_test_open_sha256",
+        )
+        if _available(declared, path="result.identities.test_open_sha256") != expected:
+            raise PolicyImprovementSchemaError(
+                "Test-split result does not bind the authenticated test opening."
+            )
+        return
+    if split != "validation":
+        raise PolicyImprovementSchemaError(
+            "Complete evidence must be a validation or test evaluation."
+        )
+    if authenticated_test_open_sha256 is not None:
+        raise PolicyImprovementSchemaError(
+            "Validation-split evidence cannot carry an authenticated TEST_OPEN."
+        )
+    if declared.get("status") != "unavailable":
+        raise PolicyImprovementSchemaError(
+            "Validation-split evidence cannot claim an opened test population."
+        )
+
+
+def _sealed_semantic_checkpoint_validations(
+    pending: Sequence[_PendingCheckpointValidation],
+    *,
+    checkpoint_validator: Callable[[Mapping[str, object]], Mapping[str, object]],
+    protocol: Mapping[str, object],
+    protocol_sha256: str,
+    registry_sha256: str,
+    registry_row: Mapping[str, object],
+    registry_row_sha256: str,
+    project_root: str | Path,
+    dataset_root: str | Path,
+    evidence_root: Path,
+    runtime_authorization: Mapping[str, object],
+    result: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Seal every authenticated checkpoint, then validate it semantically.
+
+    Sealing happens strictly after evidence authentication and strictly before
+    the first loader call, so the bytes a loader deserializes cannot differ from
+    the bytes this module hashed.  Descriptors are closed on both paths; the
+    caller never receives one.
+    """
+
+    sealed: list[SealedCheckpoint] = []
+    try:
+        for item in pending:
+            try:
+                sealed.append(
+                    seal_generation_checkpoint(
+                        item.generation,
+                        item.generation_relative_path,
+                        expected_sha256=item.checkpoint_sha256,
+                        expected_size_bytes=item.size_bytes,
+                    )
+                )
+            except SealedCheckpointError as exc:
+                raise PolicyImprovementSchemaError(
+                    "Authenticated checkpoint bytes could not be sealed."
+                ) from exc
+        return [
+            _semantic_checkpoint_validation(
+                checkpoint_validator=checkpoint_validator,
+                sealed_checkpoint=descriptor,
+                checkpoint_sha256=item.checkpoint_sha256,
+                validation=item.validation,
+                protocol=protocol,
+                protocol_sha256=protocol_sha256,
+                registry_sha256=registry_sha256,
+                registry_row=registry_row,
+                registry_row_sha256=registry_row_sha256,
+                project_root=project_root,
+                dataset_root=dataset_root,
+                evidence_root=evidence_root,
+                runtime_authorization=runtime_authorization,
+                result=result,
+                environment_interactions=item.environment_interactions,
+                parent_checkpoint_sha256=item.parent_checkpoint_sha256,
+            )
+            for item, descriptor in zip(pending, sealed)
+        ]
+    finally:
+        for descriptor in sealed:
+            descriptor.close()
 
 
 def _canonical_relative(value: object, *, path: str) -> str:
@@ -999,7 +1139,9 @@ def _authenticate_smoke_parent_segment(
     return {
         "generation_manifest_sha256": manifest_identity["sha256"],
         "checkpoint_sha256": expected_checkpoint_sha256,
-        "checkpoint_path": str(parent / checkpoint_name),
+        "checkpoint_generation": parent,
+        "checkpoint_relative_path": checkpoint_name,
+        "checkpoint_bytes": int(canonical_files[checkpoint_name]["bytes"]),
         "checkpoint_validation": dict(parent_validation),
         "prior_failed_attempts": parent_prior_failed_attempts,
     }
@@ -1021,11 +1163,28 @@ def authenticate_complete_generation(
     project_root: str | Path,
     dataset_root: str | Path,
     runtime_authorization: Mapping[str, object],
+    amendment_history_sha256: str,
+    authenticated_test_open_sha256: str | None,
     historical_runtime_authorizations: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
-    """Reopen one complete immutable generation and bind every reported artifact."""
+    """Reopen one complete immutable generation and bind every reported artifact.
+
+    ``amendment_history_sha256`` and ``authenticated_test_open_sha256`` are the
+    digests the caller authenticated independently.  Requiring them here makes
+    amendment history and test-split state part of the same fail-closed gate
+    that precedes checkpoint sealing, instead of relying on call ordering.
+    """
 
     root = _private_owner_root(evidence_root)
+    _sha256(amendment_history_sha256, path="amendment_history_sha256")
+    if result["amendment_history_sha256"] != amendment_history_sha256:
+        raise PolicyImprovementSchemaError(
+            "Complete result names another authenticated amendment history."
+        )
+    _authenticate_test_split_state(
+        result,
+        authenticated_test_open_sha256=authenticated_test_open_sha256,
+    )
     current_authorization = validate_runtime_authorization(runtime_authorization)
     current_authorization_digest = runtime_authorization_sha256(current_authorization)
     result_identities = _object(result["identities"], path="result.identities")
@@ -1341,7 +1500,7 @@ def authenticate_complete_generation(
         for name, identity in canonical_files.items()
         if name.startswith("checkpoints/")
     }
-    snapshot_checkpoint_paths: dict[str, str] = {}
+    snapshot_checkpoint_files: dict[str, tuple[str, int]] = {}
     for snapshot in result["evaluation_snapshots"]:
         if snapshot["status"] != "available":
             continue
@@ -1361,8 +1520,9 @@ def authenticate_complete_generation(
             raise PolicyImprovementSchemaError(
                 "Every available snapshot must bind one immutable checkpoint file."
             )
-        snapshot_checkpoint_paths[str(snapshot["snapshot_kind"])] = str(
-            generation / matching_files[0]
+        snapshot_checkpoint_files[str(snapshot["snapshot_kind"])] = (
+            matching_files[0],
+            int(checkpoint_files[matching_files[0]]["bytes"]),
         )
 
     stored_result = _load_ascii_json(expected_result)
@@ -1481,28 +1641,23 @@ def authenticate_complete_generation(
             "Model-state bindings differ from available evaluation snapshots."
         )
     validation_digests: set[str] = set()
-    semantic_validations: list[dict[str, object]] = []
+    pending_validations: list[_PendingCheckpointValidation] = []
     if parent_identity is not None:
         parent_validation = _object(
             parent_identity["checkpoint_validation"],
             path="parent.checkpoint_validation",
         )
-        semantic_validations.append(
-            _semantic_checkpoint_validation(
-                checkpoint_validator=checkpoint_validator,
-                checkpoint_path=str(parent_identity["checkpoint_path"]),
+        parent_generation = parent_identity["checkpoint_generation"]
+        assert isinstance(parent_generation, Path)
+        pending_validations.append(
+            _PendingCheckpointValidation(
+                generation=parent_generation,
+                generation_relative_path=str(
+                    parent_identity["checkpoint_relative_path"]
+                ),
                 checkpoint_sha256=str(parent_identity["checkpoint_sha256"]),
+                size_bytes=int(parent_identity["checkpoint_bytes"]),
                 validation=parent_validation,
-                protocol=protocol,
-                protocol_sha256=protocol_sha256,
-                registry_sha256=registry_sha256,
-                registry_row=registry_row,
-                registry_row_sha256=registry_row_sha256,
-                project_root=project_root,
-                dataset_root=dataset_root,
-                evidence_root=root,
-                runtime_authorization=runtime_authorization,
-                result=result,
                 environment_interactions=16,
                 parent_checkpoint_sha256=None,
             )
@@ -1612,22 +1767,14 @@ def authenticate_complete_generation(
             result=result,
             path=f"checkpoint_validation.{kind}.validator_execution_identity",
         )
-        semantic_validations.append(
-            _semantic_checkpoint_validation(
-                checkpoint_validator=checkpoint_validator,
-                checkpoint_path=snapshot_checkpoint_paths[kind],
+        snapshot_relative_path, snapshot_size_bytes = snapshot_checkpoint_files[kind]
+        pending_validations.append(
+            _PendingCheckpointValidation(
+                generation=generation,
+                generation_relative_path=snapshot_relative_path,
                 checkpoint_sha256=snapshot_checkpoint_sha256,
+                size_bytes=snapshot_size_bytes,
                 validation=validation,
-                protocol=protocol,
-                protocol_sha256=protocol_sha256,
-                registry_sha256=registry_sha256,
-                registry_row=registry_row,
-                registry_row_sha256=registry_row_sha256,
-                project_root=project_root,
-                dataset_root=dataset_root,
-                evidence_root=root,
-                runtime_authorization=runtime_authorization,
-                result=result,
                 environment_interactions=int(observed_interactions),
                 parent_checkpoint_sha256=(
                     str(validation["parent_checkpoint_sha256"])
@@ -1716,6 +1863,35 @@ def authenticate_complete_generation(
                 raise PolicyImprovementSchemaError(
                     "Per-instance artifact differs from its immutable generation."
                 )
+    # Every identity a checkpoint could be judged against is now authenticated:
+    # runtime authorization and producer identity, protocol/registry/amendment
+    # digests, the complete immutable generation and its outer manifest, the
+    # result and RUN_MANIFEST, the model-state inventory and per-snapshot
+    # checkpoint validations, snapshot kind/progress/lineage, and test-split
+    # state.  Only now may checkpoint bytes be sealed and deserialized.
+    presealed_files, presealed_directories = _inventory(generation)
+    if (
+        presealed_files.pop("MANIFEST.json", None) is None
+        or presealed_files != canonical_files
+        or presealed_directories != expected_directories
+    ):
+        raise PolicyImprovementSchemaError(
+            "Result generation changed before checkpoint sealing."
+        )
+    semantic_validations = _sealed_semantic_checkpoint_validations(
+        pending_validations,
+        checkpoint_validator=checkpoint_validator,
+        protocol=protocol,
+        protocol_sha256=protocol_sha256,
+        registry_sha256=registry_sha256,
+        registry_row=registry_row,
+        registry_row_sha256=registry_row_sha256,
+        project_root=project_root,
+        dataset_root=dataset_root,
+        evidence_root=root,
+        runtime_authorization=runtime_authorization,
+        result=result,
+    )
     final_files, final_directories = _inventory(generation)
     manifest_file_identity = final_files.pop("MANIFEST.json", None)
     if (
@@ -1739,7 +1915,11 @@ def authenticate_complete_generation(
         if (
             parent_after["generation_manifest_sha256"]
             != parent_identity["generation_manifest_sha256"]
-            or parent_after["checkpoint_path"] != parent_identity["checkpoint_path"]
+            or parent_after["checkpoint_generation"]
+            != parent_identity["checkpoint_generation"]
+            or parent_after["checkpoint_relative_path"]
+            != parent_identity["checkpoint_relative_path"]
+            or parent_after["checkpoint_bytes"] != parent_identity["checkpoint_bytes"]
             or canonical_json_bytes(parent_after["checkpoint_validation"])
             != canonical_json_bytes(parent_identity["checkpoint_validation"])
             or canonical_json_bytes(parent_after["prior_failed_attempts"])

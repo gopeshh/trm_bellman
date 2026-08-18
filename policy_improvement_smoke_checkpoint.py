@@ -23,6 +23,10 @@ from typing import Any
 import numpy as np
 import torch
 
+from policy_improvement_checkpoint_allowlist import (
+    load_data_only_checkpoint,
+    UnsafeCheckpointPayloadError,
+)
 from utils.compute_accounting import (
     add_model_counters,
     current_cuda_memory_peaks,
@@ -724,7 +728,12 @@ def load_stable_checkpoint(
                 "PPO smoke checkpoint digest differs from its parent manifest."
             )
         with os.fdopen(os.dup(descriptor), "rb") as handle:
-            value = torch.load(handle, map_location="cpu", weights_only=False)
+            # Data-only: the restricted unpickler refuses any global outside
+            # the authenticated allowlist, so hostile bytes cannot execute.
+            try:
+                value = load_data_only_checkpoint(handle, map_location="cpu")
+            except UnsafeCheckpointPayloadError as exc:
+                raise PolicyImprovementSmokeCheckpointError(str(exc)) from exc
         after = os.fstat(descriptor)
         path_changed = False
         if source is not None:

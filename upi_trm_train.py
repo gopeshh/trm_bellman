@@ -169,6 +169,7 @@ from rl.upi_trm_trainer import (
     UPITrmTrainer,
     fixed_base_recurrent_map_state_dicts_equal,
 )
+from policy_improvement_checkpoint_allowlist import load_data_only_checkpoint
 from rl.replay import (
     ReplayBuffer,
     ReplayIntegrityError,
@@ -565,7 +566,12 @@ def load_checkpoint(
         if loaded_sha256 != expected_sha256:
             raise RuntimeError("Initialization checkpoint SHA-256 mismatch.")
     else:
-        state_dict = torch.load(checkpoint_path, map_location=device)
+        # Data-only: this branch consumes a pure state dict, and an
+        # unannotated torch.load resolves to weights_only=False under fbcode,
+        # so name the restricted loader explicitly rather than inherit an
+        # unrestricted default.
+        with open(checkpoint_path, "rb") as handle:
+            state_dict = load_data_only_checkpoint(handle, map_location=str(device))
     
     # Handle torch.compile wrapper naming
     # Pretrained models may have "_orig_mod." prefix from torch.compile
@@ -2113,11 +2119,9 @@ def _load_checkpoint_payload(
                     "Resume checkpoint SHA-256 does not match its registered parent link."
                 )
             handle.seek(0)
-            checkpoint = torch.load(
-                handle,
-                map_location="cpu",
-                weights_only=False,
-            )
+            # Data-only: the restricted unpickler refuses any global outside
+            # the authenticated allowlist, so hostile bytes cannot execute.
+            checkpoint = load_data_only_checkpoint(handle, map_location="cpu")
             handle.seek(0)
             digest_after = hashlib.sha256()
             for block in iter(lambda: handle.read(1024 * 1024), b""):
@@ -2720,8 +2724,9 @@ def _resume_from_checkpoint_impl(
         raise RuntimeError("Cannot resume while a trainer step is active.")
     if emit_progress:
         print(f"[Checkpoint] Resuming from {checkpoint_path}")
-    # Resume checkpoints contain replay Transition dataclasses, so this is a
-    # trusted local artifact rather than a weights-only file.
+    # Resume checkpoints contain replay Transition dataclasses, which the
+    # data-only loader permits explicitly. The payload is still read under the
+    # restricted unpickler, so a hostile checkpoint cannot execute here.
     checkpoint, loaded_checkpoint_sha256 = _load_checkpoint_payload(
         checkpoint_path,
         expected_sha256=expected_checkpoint_sha256,
@@ -3626,7 +3631,7 @@ def resume_from_checkpoint_for_theory_evaluation(
 
 
 def validate_checkpoint_state_for_audit(
-    checkpoint_path: str,
+    checkpoint_path: str | int,
     model: nn.Module,
     trainer: "UPITrmTrainer",
     device: str,
@@ -3636,7 +3641,12 @@ def validate_checkpoint_state_for_audit(
     expected_checkpoint_sha256: str,
     authorized_originating_runtime_sha256: str,
 ) -> int:
-    """Strictly restore a disposable audit session for an authorized producer."""
+    """Strictly restore a disposable audit session for an authorized producer.
+
+    ``checkpoint_path`` accepts a write-sealed descriptor so an evidence audit
+    can restore exactly the bytes it authenticated, with no second pathname
+    resolution between hashing and deserialization.
+    """
 
     originating_runtime = _validate_expected_sha256(
         authorized_originating_runtime_sha256,

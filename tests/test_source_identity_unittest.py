@@ -1,14 +1,25 @@
 """Tests for the source manifest embedded in confirmatory binaries."""
 
 import copy
+import hashlib
+import json
 import struct
+import subprocess
 import tempfile
 import unittest
 import zlib
 from pathlib import Path
 from zipfile import ZipFile, ZipInfo
 
+from phase4_runtime_profile import (
+    authorize_phase4_training_source,
+    Phase4RuntimeProfileError,
+)
 from utils.source_identity import (
+    inventory_schema_version,
+    required_root_sources,
+    SOURCE_MANIFEST_SCHEMA_VERSION,
+    SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS,
     SOURCE_MANIFEST_RELATIVE_PATH,
     SourceIdentityError,
     assert_runtime_archive_sources_match_manifest,
@@ -17,6 +28,89 @@ from utils.source_identity import (
     build_producer_source_manifest,
     validate_producer_source_manifest,
 )
+
+
+def _write_source_tree(root: Path) -> None:
+    for relative_path in (
+        "confirmatory_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_checkpoint_allowlist.py",
+        "policy_improvement_smoke_checkpoint.py",
+        "policy_improvement_smoke_runtime.py",
+        "puzzle_dataset.py",
+        "runtime_archive_preflight.py",
+        "scripts/policy_improvement_registry.py",
+        "scripts/policy_improvement_schema.py",
+        "upi_trm_train.py",
+    ):
+        destination = root / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(f"# {relative_path}\n", encoding="ascii")
+    for directory in ("dataset", "evaluators", "models", "rl", "utils"):
+        destination = root / directory / "module.py"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(f"# {directory}\n", encoding="ascii")
+    config_dir = root / "configs" / "iclr_confirmatory"
+    config_dir.mkdir(parents=True)
+    (config_dir / "cell.yaml").write_text("gamma: 0.9\n", encoding="ascii")
+    (config_dir / "registry.json").write_text("{}\n", encoding="ascii")
+    policy_config_dir = root / "configs" / "policy_improvement_v1"
+    policy_config_dir.mkdir(parents=True)
+    (policy_config_dir / "protocol.json").write_text("{}\n", encoding="ascii")
+    (policy_config_dir / "method.yaml").write_text("gamma: 0.9\n", encoding="ascii")
+
+    phase4_config_dir = root / "configs" / "phase4_2x2_norm_ablation"
+    phase4_config_dir.mkdir(parents=True)
+    for condition in ("nc_nv", "nc_yv", "yc_nv", "yc_yv"):
+        (phase4_config_dir / f"{condition}.yaml").write_text(
+            "gamma: 0.9\n",
+            encoding="ascii",
+        )
+
+
+def _write_manifest(root: Path, schema_version: int) -> None:
+    sources = {
+        relative_path: hashlib.sha256((root / relative_path).read_bytes()).hexdigest()
+        for relative_path in behavior_source_relative_paths(
+            root,
+            schema_version=schema_version,
+        )
+    }
+    manifest_path = root / SOURCE_MANIFEST_RELATIVE_PATH
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "source_manifest_schema_version": schema_version,
+                "sources": sources,
+            },
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="ascii",
+    )
+
+
+def _commit_source_tree(root: Path) -> str:
+    commands = (
+        ("init", "-q"),
+        ("config", "user.email", "source-identity-test@example.com"),
+        ("config", "user.name", "Source Identity Test"),
+        ("add", "."),
+        ("commit", "-qm", "source identity fixture"),
+    )
+    for arguments in commands:
+        subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    return subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
 
 
 class TestSourceIdentity(unittest.TestCase):
@@ -38,32 +132,7 @@ class TestSourceIdentity(unittest.TestCase):
         return info
 
     def _source_tree(self, root: Path) -> None:
-        for relative_path in (
-            "confirmatory_runtime_launcher.py",
-            "phase4_runtime_profile.py",
-            "policy_improvement_smoke_checkpoint.py",
-            "policy_improvement_smoke_runtime.py",
-            "puzzle_dataset.py",
-            "runtime_archive_preflight.py",
-            "scripts/policy_improvement_registry.py",
-            "scripts/policy_improvement_schema.py",
-            "upi_trm_train.py",
-        ):
-            destination = root / relative_path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(f"# {relative_path}\n", encoding="ascii")
-        for directory in ("dataset", "evaluators", "models", "rl", "utils"):
-            destination = root / directory / "module.py"
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(f"# {directory}\n", encoding="ascii")
-        config_dir = root / "configs" / "iclr_confirmatory"
-        config_dir.mkdir(parents=True)
-        (config_dir / "cell.yaml").write_text("gamma: 0.9\n", encoding="ascii")
-        (config_dir / "registry.json").write_text("{}\n", encoding="ascii")
-        policy_config_dir = root / "configs" / "policy_improvement_v1"
-        policy_config_dir.mkdir(parents=True)
-        (policy_config_dir / "protocol.json").write_text("{}\n", encoding="ascii")
-        (policy_config_dir / "method.yaml").write_text("gamma: 0.9\n", encoding="ascii")
+        _write_source_tree(root)
 
     def _runtime_archive(
         self,
@@ -243,6 +312,129 @@ class TestSourceIdentity(unittest.TestCase):
                         archive,
                         manifest,
                     )
+
+
+class VersionedProducerInventoryTest(unittest.TestCase):
+    """Historical producers must stay authenticatable; HEAD must not regress."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_versions_are_declared_consistently_across_modules(self) -> None:
+        """phase4_runtime_profile duplicates the map; pin them together."""
+
+        import confirmatory_runtime_launcher as launcher
+        import phase4_runtime_profile as profile
+
+        self.assertEqual(
+            profile.PRODUCER_SOURCE_MANIFEST_SCHEMA_VERSION,
+            SOURCE_MANIFEST_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            launcher.SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS,
+            SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS,
+        )
+        for version in SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS:
+            with self.subTest(version=version):
+                expected = tuple(sorted(required_root_sources(version)))
+                self.assertEqual(
+                    tuple(sorted(profile.producer_root_sources(version))), expected
+                )
+                self.assertEqual(
+                    tuple(sorted(launcher._ROOT_SOURCES_BY_VERSION[version])), expected
+                )
+
+    def test_v2_requires_the_allowlist_and_v1_does_not(self) -> None:
+        self.assertIn(
+            "policy_improvement_checkpoint_allowlist.py", required_root_sources(2)
+        )
+        self.assertNotIn(
+            "policy_improvement_checkpoint_allowlist.py", required_root_sources(1)
+        )
+        with self.assertRaises(SourceIdentityError):
+            required_root_sources(3)
+
+    def test_historical_v1_checkout_still_enumerates(self) -> None:
+        """A clean pre-allowlist producer checkout authenticates."""
+
+        _write_source_tree(self.root)
+        (self.root / "policy_improvement_checkpoint_allowlist.py").unlink()
+        paths = behavior_source_relative_paths(self.root, schema_version=1)
+        self.assertNotIn("policy_improvement_checkpoint_allowlist.py", paths)
+        self.assertIn("upi_trm_train.py", paths)
+        # Requesting the current version of that same tree fails closed.
+        with self.assertRaises(SourceIdentityError):
+            behavior_source_relative_paths(self.root, schema_version=2)
+
+    def test_head_requires_every_current_source(self) -> None:
+        _write_source_tree(self.root)
+        paths = behavior_source_relative_paths(self.root)
+        self.assertIn("policy_improvement_checkpoint_allowlist.py", paths)
+
+    def test_deleting_the_allowlist_from_head_fails_closed(self) -> None:
+        _write_source_tree(self.root)
+        (self.root / "policy_improvement_checkpoint_allowlist.py").unlink()
+        with self.assertRaisesRegex(SourceIdentityError, "missing source"):
+            behavior_source_relative_paths(self.root)
+
+    def test_inventory_version_is_derived_and_downgrade_is_rejected(self) -> None:
+        _write_source_tree(self.root)
+        inventory = [
+            str(path.relative_to(self.root))
+            for path in self.root.rglob("*")
+            if path.is_file()
+        ]
+        self.assertEqual(inventory_schema_version(inventory), 2)
+        # A v1 manifest may not be presented for a tree that satisfies v2.
+        with self.assertRaisesRegex(SourceIdentityError, "declares schema"):
+            behavior_source_relative_paths_from_inventory(inventory, schema_version=1)
+        self.assertTrue(
+            behavior_source_relative_paths_from_inventory(inventory, schema_version=2)
+        )
+
+        older = [
+            item
+            for item in inventory
+            if item != "policy_improvement_checkpoint_allowlist.py"
+        ]
+        self.assertEqual(inventory_schema_version(older), 1)
+        self.assertTrue(
+            behavior_source_relative_paths_from_inventory(older, schema_version=1)
+        )
+        with self.assertRaises(SourceIdentityError):
+            behavior_source_relative_paths_from_inventory(older, schema_version=2)
+
+    def test_phase4_authorizer_accepts_clean_historical_v1_checkout(self) -> None:
+        _write_source_tree(self.root)
+        (self.root / "policy_improvement_checkpoint_allowlist.py").unlink()
+        _write_manifest(self.root, 1)
+        commit = _commit_source_tree(self.root)
+
+        authorized = authorize_phase4_training_source(self.root, commit)
+        self.assertEqual(authorized.git_commit, commit)
+
+    def test_phase4_authorizer_accepts_clean_current_v2_checkout(self) -> None:
+        _write_source_tree(self.root)
+        _write_manifest(self.root, 2)
+        commit = _commit_source_tree(self.root)
+
+        authorized = authorize_phase4_training_source(self.root, commit)
+        self.assertEqual(authorized.git_commit, commit)
+
+    def test_phase4_authorizer_rejects_v1_manifest_for_v2_checkout(self) -> None:
+        _write_source_tree(self.root)
+        _write_manifest(self.root, 1)
+        commit = _commit_source_tree(self.root)
+
+        with self.assertRaisesRegex(
+            Phase4RuntimeProfileError,
+            "declares schema 1.*satisfies schema 2",
+        ):
+            authorize_phase4_training_source(self.root, commit)
 
 
 if __name__ == "__main__":

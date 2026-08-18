@@ -50,6 +50,7 @@ class TestConfirmatoryRuntimeLauncher(unittest.TestCase):
         sources = {
             "confirmatory_runtime_launcher.py": b"# launcher\n",
             "phase4_runtime_profile.py": b"# profile\n",
+            "policy_improvement_checkpoint_allowlist.py": b"# allowlist\n",
             "policy_improvement_smoke_checkpoint.py": b"# checkpoint\n",
             "policy_improvement_smoke_runtime.py": b"# smoke runtime\n",
             "puzzle_dataset.py": b"# puzzle\n",

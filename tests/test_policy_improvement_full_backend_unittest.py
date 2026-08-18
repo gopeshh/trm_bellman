@@ -33,6 +33,7 @@ from policy_improvement_full_backend import (
     TorchLearnedRunEngine,
 )
 from policy_improvement_checkpoint_validator import _validate_full_checkpoint
+from policy_improvement_sealed_evidence import seal_generation_checkpoint
 from policy_improvement_non_smoke_checkpoint import (
     evaluate_without_mutation,
     FullCheckpointError,
@@ -771,9 +772,8 @@ class FullCheckpointGuardTest(unittest.TestCase):
             checkpoint,
         )
         full_validation_request = {
-            "schema_name": "policy_improvement_checkpoint_validation_request_v1",
-            "schema_version": 1,
-            "checkpoint_path": str(checkpoint),
+            "schema_name": "policy_improvement_checkpoint_validation_request_v2",
+            "schema_version": 2,
             "checkpoint_sha256": checkpoint_sha256,
             "protocol": protocol,
             "protocol_sha256": run.protocol_sha256,
@@ -811,16 +811,25 @@ class FullCheckpointGuardTest(unittest.TestCase):
                 return_value=session,
             ),
         ):
-            semantic = _validate_full_checkpoint(
-                full_validation_request,
-                protocol,
-                row,
-                authorization,
-                run.project_root,
-                run.dataset_root,
-                run.evidence_root,
-                checkpoint,
+            sealed_full_checkpoint = seal_generation_checkpoint(
+                checkpoint.parent,
+                checkpoint.name,
+                expected_sha256=checkpoint_sha256,
+                expected_size_bytes=checkpoint.stat().st_size,
             )
+            try:
+                semantic = _validate_full_checkpoint(
+                    full_validation_request,
+                    protocol,
+                    row,
+                    authorization,
+                    run.project_root,
+                    run.dataset_root,
+                    run.evidence_root,
+                    sealed_full_checkpoint,
+                )
+            finally:
+                sealed_full_checkpoint.close()
         self.assertEqual(semantic["checkpoint_sha256"], checkpoint_sha256)
         self.assertEqual(semantic["training_call_delta"], 0)
         self.assertEqual(semantic["optimizer_step_delta"], 0)

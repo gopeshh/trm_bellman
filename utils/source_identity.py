@@ -9,11 +9,19 @@ from typing import Any, Iterable, Mapping
 from zipfile import BadZipFile, ZipFile
 
 
-SOURCE_MANIFEST_SCHEMA_VERSION = 1
+# The producer inventory is versioned because published evidence is immutable.
+# Historical Stage 0 evidence was produced by commits whose trees predate later
+# root sources, and those commits carry an authenticated manifest naming their
+# own inventory.  Requiring today's inventory of a historical commit would make
+# that evidence permanently unauthenticatable, so each schema version pins the
+# exact root-source set that version's producers had.
+SOURCE_MANIFEST_SCHEMA_VERSION = 2
+SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS = (1, 2)
 SOURCE_MANIFEST_RELATIVE_PATH = (
     "configs/iclr_confirmatory/producer_source_manifest.json"
 )
-_ROOT_SOURCES = (
+# v1: producers up to and including the Stage 0 smoke evidence commits.
+_ROOT_SOURCES_V1 = (
     "confirmatory_runtime_launcher.py",
     "phase4_runtime_profile.py",
     "policy_improvement_smoke_checkpoint.py",
@@ -22,6 +30,19 @@ _ROOT_SOURCES = (
     "runtime_archive_preflight.py",
     "upi_trm_train.py",
 )
+# v2: adds the data-only checkpoint allowlist, which the trainer now imports.
+_ROOT_SOURCES_V2 = (
+    "confirmatory_runtime_launcher.py",
+    "phase4_runtime_profile.py",
+    "policy_improvement_checkpoint_allowlist.py",
+    "policy_improvement_smoke_checkpoint.py",
+    "policy_improvement_smoke_runtime.py",
+    "puzzle_dataset.py",
+    "runtime_archive_preflight.py",
+    "upi_trm_train.py",
+)
+_ROOT_SOURCES_BY_VERSION = {1: _ROOT_SOURCES_V1, 2: _ROOT_SOURCES_V2}
+_ROOT_SOURCES = _ROOT_SOURCES_V2
 _ADDITIONAL_SOURCES = (
     "scripts/policy_improvement_registry.py",
     "scripts/policy_improvement_schema.py",
@@ -38,10 +59,49 @@ class SourceIdentityError(RuntimeError):
     """Raised when producer source bytes cannot be bound to the runtime."""
 
 
+def required_root_sources(schema_version: int) -> tuple[str, ...]:
+    """Root sources a producer of the given manifest schema version must have."""
+
+    try:
+        return _ROOT_SOURCES_BY_VERSION[schema_version]
+    except KeyError:
+        raise SourceIdentityError(
+            f"Unsupported producer source manifest schema {schema_version!r}."
+        ) from None
+
+
+def inventory_schema_version(relative_paths: Iterable[str]) -> int:
+    """Highest schema version whose required root sources the tree satisfies.
+
+    Used to reject a downgraded manifest: a tree that contains the v2 sources
+    must not be described by a v1 manifest, which would silently drop those
+    sources from producer identity.
+    """
+
+    inventory = set(relative_paths)
+    best = 0
+    for version in sorted(_ROOT_SOURCES_BY_VERSION):
+        if set(required_root_sources(version)) <= inventory:
+            best = version
+    if not best:
+        missing = sorted(set(required_root_sources(1)) - inventory)
+        raise SourceIdentityError(
+            f"Producer repository is missing sources {missing!r}."
+        )
+    return best
+
+
 def behavior_source_relative_paths_from_inventory(
     relative_paths: Iterable[str],
+    *,
+    schema_version: int | None = None,
 ) -> list[str]:
-    """Select the complete producer inventory from canonical repository paths."""
+    """Select the complete producer inventory from canonical repository paths.
+
+    ``schema_version`` is the version declared by the authenticated manifest.
+    It must equal the highest version the tree actually satisfies, so a v1
+    manifest cannot be presented for a tree that contains the v2 sources.
+    """
 
     inventory: set[str] = set()
     for relative_path in relative_paths:
@@ -55,7 +115,13 @@ def behavior_source_relative_paths_from_inventory(
         ):
             raise SourceIdentityError("Repository source inventory is not canonical.")
         inventory.add(relative_path)
-    required = {*_ROOT_SOURCES, *_ADDITIONAL_SOURCES}
+    derived_version = inventory_schema_version(inventory)
+    if schema_version is not None and schema_version != derived_version:
+        raise SourceIdentityError(
+            f"Producer manifest declares schema {schema_version!r} but its "
+            f"tree satisfies schema {derived_version!r}."
+        )
+    required = {*required_root_sources(derived_version), *_ADDITIONAL_SOURCES}
     missing = required - inventory
     if missing:
         raise SourceIdentityError(
@@ -91,10 +157,22 @@ def behavior_source_relative_paths_from_inventory(
     return sorted(selected)
 
 
-def behavior_source_relative_paths(root: str | Path) -> list[str]:
+def behavior_source_relative_paths(
+    root: str | Path,
+    *,
+    schema_version: int = SOURCE_MANIFEST_SCHEMA_VERSION,
+) -> list[str]:
+    """Enumerate a producer checkout's inventory for one schema version.
+
+    Defaults to the current version, so generating or verifying a manifest at
+    HEAD requires every current root source; deleting one fails closed.  A
+    historical producer checkout is enumerated by passing its authenticated
+    manifest's version.
+    """
+
     source_root = Path(root).expanduser().resolve()
     paths: set[str] = set()
-    for relative_path in _ROOT_SOURCES:
+    for relative_path in required_root_sources(schema_version):
         if not (source_root / relative_path).is_file():
             raise SourceIdentityError(
                 f"Producer repository is missing source {relative_path!r}."
@@ -165,7 +243,7 @@ def validate_producer_source_manifest(value: object) -> dict[str, Any]:
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version != SOURCE_MANIFEST_SCHEMA_VERSION
+        or schema_version not in SUPPORTED_SOURCE_MANIFEST_SCHEMA_VERSIONS
     ):
         raise SourceIdentityError("Unsupported producer source manifest schema.")
     raw_sources = value["sources"]
@@ -183,7 +261,7 @@ def validate_producer_source_manifest(value: object) -> dict[str, Any]:
             raise SourceIdentityError("Producer source manifest entry is invalid.")
         sources[relative_path] = digest
     return {
-        "source_manifest_schema_version": SOURCE_MANIFEST_SCHEMA_VERSION,
+        "source_manifest_schema_version": schema_version,
         "sources": {name: sources[name] for name in sorted(sources)},
     }
 

@@ -787,6 +787,57 @@ class FullRuntimePublicationTest(unittest.TestCase):
                 result_validator=lambda value: value,
             )
 
+    def test_scheduled_and_snapshot_checkpoints_cannot_be_substituted(self) -> None:
+        """Adversarial test 3: kinds are not interchangeable, even byte-for-byte."""
+
+        final = execute_registered_run(
+            self.run,
+            backend=_ResolverBackend(self.runtime_authorization),
+            result_validator=lambda value: value,
+        )
+        generation = final / "segments/env_000000080"
+        scheduled = (
+            generation
+            / "checkpoints/scheduled/env_000000010/rl_checkpoint_step_10.pt"
+        )
+        interaction = next(
+            (generation / "checkpoints/interaction_matched").rglob("*.pt")
+        )
+        compute = next((generation / "checkpoints/compute_matched").rglob("*.pt"))
+        self.assertNotEqual(scheduled.read_bytes(), interaction.read_bytes())
+        self.assertNotEqual(compute.read_bytes(), interaction.read_bytes())
+
+        for source, destination in (
+            (interaction, scheduled),
+            (compute, interaction),
+            (scheduled, compute),
+        ):
+            with self.subTest(source=source.parent.name, target=destination.parent.name):
+                original = destination.read_bytes()
+                destination.write_bytes(source.read_bytes())
+                try:
+                    for interactions in (10, 80):
+                        with self.assertRaises(FullRuntimeError):
+                            resolve_authenticated_full_checkpoint(
+                                self.run,
+                                checkpoint_environment_interactions=interactions,
+                                runtime_authorization=self.runtime_authorization,
+                                result_validator=lambda value: value,
+                            )
+                finally:
+                    destination.write_bytes(original)
+
+        # Restoring the exact published bytes makes resolution succeed again,
+        # so the rejections above are not an artifact of the fixture.
+        resolved = resolve_authenticated_full_checkpoint(
+            self.run,
+            checkpoint_environment_interactions=10,
+            runtime_authorization=self.runtime_authorization,
+            result_validator=lambda value: value,
+        )
+        self.addCleanup(os.close, resolved.sealed_descriptor)
+        self.assertEqual(resolved.snapshot_kind, "scheduled")
+
     def test_theory_checkpoint_tamper_is_rejected_before_restore(self) -> None:
         final = execute_registered_run(
             self.run,
