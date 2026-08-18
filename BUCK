@@ -162,6 +162,21 @@ python_library(
 )
 
 python_library(
+    name = "policy_improvement_populations",
+    srcs = ["scripts/policy_improvement_populations.py"],
+    base_module = "",
+)
+
+python_library(
+    name = "policy_improvement_v2_schema",
+    srcs = ["scripts/policy_improvement_v2_schema.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_populations",
+    ],
+)
+
+python_library(
     name = "policy_improvement_theory_schema",
     srcs = ["scripts/policy_improvement_theory_schema.py"],
     base_module = "",
@@ -176,6 +191,16 @@ python_library(
     base_module = "",
     deps = [
         ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_v2_registry",
+    srcs = ["scripts/policy_improvement_v2_registry.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_populations",
+        ":policy_improvement_v2_schema",
     ],
 )
 
@@ -872,6 +897,37 @@ python_unittest(
         ":policy_improvement_test_open",
         ":policy_improvement_test_open_cli",
         ":rl",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_v2",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_v2_unittest.py",
+    ],
+    base_module = "",
+    resources = [
+        "configs/policy_improvement_v1/fixed_base_exact_episodic.yaml",
+        "configs/policy_improvement_v1/fixed_base_exact_persistent.yaml",
+        "configs/policy_improvement_v1/legacy_parameter_interpolation.yaml",
+        "configs/policy_improvement_v1/matched_ppo.yaml",
+        "configs/policy_improvement_v1/protocol.json",
+        "configs/policy_improvement_v2/fixed_base_exact_episodic.yaml",
+        "configs/policy_improvement_v2/fixed_base_exact_persistent.yaml",
+        "configs/policy_improvement_v2/legacy_parameter_interpolation.yaml",
+        "configs/policy_improvement_v2/matched_ppo.yaml",
+        "configs/policy_improvement_v2/amendments/theory_bridge_v2.json",
+        "configs/policy_improvement_v2/populations.json",
+        "configs/policy_improvement_v2/protocol.json",
+        "configs/policy_improvement_v2/registry.json",
+    ],
+    deps = [
+        ":policy_improvement_populations",
+        ":policy_improvement_registry",
+        ":policy_improvement_schema",
+        ":policy_improvement_v2_registry",
+        ":policy_improvement_v2_schema",
     ],
 )
 
