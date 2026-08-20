@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import copy
 import hashlib
+import io
 import json
 import os
 import re
@@ -532,7 +534,7 @@ def _launcher_member_bytes(archive: ZipFile, name: str) -> bytes:
         ) from exc
 
 
-def _validate_launcher_archive_prefix(archive: ZipFile) -> None:
+def _validate_launcher_archive_prefix(archive: ZipFile) -> bytes:
     handle = archive.fp
     if handle is None:
         raise RuntimeAuthorizationGenerationError(
@@ -557,6 +559,45 @@ def _validate_launcher_archive_prefix(archive: ZipFile) -> None:
     ):
         raise RuntimeAuthorizationGenerationError(
             "Launcher PAR executable prefix differs from the pinned Buck bootstrap."
+        )
+    return prefix
+
+
+def _validate_launcher_buildstamp(archive: ZipFile, prefix: bytes) -> None:
+    raw_stamp = _launcher_member_bytes(archive, "BUILDSTAMP")
+    try:
+        stamp = raw_stamp.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR BUILDSTAMP is not ASCII."
+        ) from exc
+    if re.fullmatch(r"[0-9a-f]{32}", stamp) is None:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR BUILDSTAMP has an invalid identity."
+        )
+
+    # Buck defines BUILDSTAMP as the MD5 of the complete executable PAR before
+    # appending the BUILDSTAMP member. Reconstruct that exact pre-stamp archive
+    # so a caller cannot redirect extraction by editing the cache key alone.
+    unstamped = io.BytesIO()
+    unstamped.write(prefix)
+    try:
+        with ZipFile(unstamped, "a", allowZip64=True) as rebuilt:
+            for info in archive.infolist():
+                if info.filename == "BUILDSTAMP":
+                    continue
+                rebuilt.writestr(
+                    copy.copy(info),
+                    _launcher_member_bytes(archive, info.filename),
+                )
+    except (BadZipFile, OSError, RuntimeError, zlib.error) as exc:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR pre-BUILDSTAMP bytes cannot be reconstructed."
+        ) from exc
+    derived = hashlib.md5(unstamped.getvalue()).hexdigest()
+    if stamp != derived:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR BUILDSTAMP differs from its archive content."
         )
 
 
@@ -804,7 +845,8 @@ def _launcher_archive_validator(
             raise RuntimeAuthorizationGenerationError(
                 "Launcher PAR source profile differs from the clean checkout."
             ) from exc
-        _validate_launcher_archive_prefix(archive)
+        prefix = _validate_launcher_archive_prefix(archive)
+        _validate_launcher_buildstamp(archive, prefix)
         _validate_launcher_native_support(archive)
         _validate_launcher_executable_closure(archive, authorized)
 

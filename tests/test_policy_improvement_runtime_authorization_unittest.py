@@ -496,6 +496,7 @@ class RuntimeAuthorizationGeneratorTest(unittest.TestCase):
                 support_overrides: Mapping[str, bytes] | None = None,
                 native_overrides: Mapping[str, bytes] | None = None,
                 duplicate_member: str | None = None,
+                buildstamp_override: bytes | None = None,
             ) -> Path:
                 path = root / name
                 fbmake = {
@@ -584,6 +585,13 @@ class RuntimeAuthorizationGeneratorTest(unittest.TestCase):
                                 duplicate_member,
                                 selected_support[duplicate_member],
                             )
+                buildstamp = (
+                    buildstamp_override
+                    if buildstamp_override is not None
+                    else hashlib.md5(path.read_bytes()).hexdigest().encode("ascii")
+                )
+                with ZipFile(path, "a") as archive:
+                    archive.writestr("BUILDSTAMP", buildstamp)
                 return path
 
             with (
@@ -640,6 +648,13 @@ class RuntimeAuthorizationGeneratorTest(unittest.TestCase):
 
                 for name, path in (
                     ("modified executable prefix", prefixed),
+                    (
+                        "modified BUILDSTAMP",
+                        write_launcher(
+                            "modified-buildstamp.par",
+                            buildstamp_override=b"0" * 32,
+                        ),
+                    ),
                     (
                         "stale phase4 launcher",
                         write_launcher("stale-phase4.par", phase4_source=b"old\n"),
