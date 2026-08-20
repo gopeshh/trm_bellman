@@ -543,6 +543,7 @@ class PolicyImprovementCheckpointValidatorTest(unittest.TestCase):
             self.assertEqual(result["evaluation_call_delta"], 0)
             self.assertEqual(result["optimizer_step_delta"], 0)
             self.assertEqual(result["initialization_sha256"], "2" * 64)
+            self.assertIsNone(result["theory_model_identity"])
 
     def test_private_checkpoint_rewrite_binds_legacy_parent_in_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

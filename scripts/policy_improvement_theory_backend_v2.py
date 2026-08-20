@@ -46,6 +46,7 @@ from scripts.policy_improvement_theory_bridge_v2 import (
     TrainingAdvantageEstimatorV2,
 )
 from scripts.policy_improvement_theory_schema_v2 import (
+    build_stage0_theory_request,
     theory_document_sha256,
     validate_theory_request,
 )
@@ -765,9 +766,27 @@ def _resolve_stage0_checkpoint(
             )
         role_states = resume[0].get("role_state_sha256s")
         model_state = resume[0].get("model_state_sha256")
-        if not isinstance(role_states, Mapping) or not isinstance(model_state, str):
+        theory_model_identity = resume[0].get("theory_model_identity")
+        request_identity = request.get("identity")
+        requested_model_identity = (
+            request_identity.get("model")
+            if isinstance(request_identity, Mapping)
+            else None
+        )
+        if (
+            not isinstance(role_states, Mapping)
+            or not isinstance(model_state, str)
+            or not isinstance(theory_model_identity, Mapping)
+            or not isinstance(requested_model_identity, Mapping)
+        ):
             raise TheoryBridgeV2Error(
                 "Stage 0 resume model-state validation is incomplete."
+            )
+        if canonical_json_bytes(theory_model_identity) != canonical_json_bytes(
+            requested_model_identity
+        ):
+            raise TheoryBridgeV2Error(
+                "Stage 0 theory request model differs from sealed semantic validation."
             )
         retained = _AuthenticatedStage0Checkpoint(
             path=resolved_path,
@@ -904,6 +923,31 @@ def create_theory_bridge_backend_v2(
     ):
         raise TheoryBridgeV2Error(
             "Stage 0 theory request contains missing or mixed identities."
+        )
+    theory_amendment = _load_stable_json(
+        inputs.amendment_paths[0],
+        label="theory amendment",
+    )
+    base_configs = load_registered_base_configs(context.protocol, context.source_root)
+    base_config = base_configs.get(str(context.row["base_method_id"]))
+    if not isinstance(base_config, Mapping):
+        raise TheoryBridgeV2Error(
+            "Stage 0 theory request lacks its registered base configuration."
+        )
+    try:
+        canonical_request = build_stage0_theory_request(
+            amendment_value=theory_amendment,
+            row=context.row,
+            identity=expected_identity,
+            effective_config={**base_config, **context.row["config_override"]},
+        )
+    except (TypeError, PolicyImprovementSchemaError, ValueError) as exc:
+        raise TheoryBridgeV2Error(
+            "Stage 0 theory request cannot be reconstructed from registration."
+        ) from exc
+    if canonical_json_bytes(request) != canonical_json_bytes(canonical_request):
+        raise TheoryBridgeV2Error(
+            "Stage 0 theory request differs from the audited canonical request."
         )
     resolved = _resolve_stage0_checkpoint(
         request=request,

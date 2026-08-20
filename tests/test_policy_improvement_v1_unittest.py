@@ -847,6 +847,7 @@ def _fixture_checkpoint_validator(
         "initialization_sha256": request["initialization_sha256"],
         "model_state_sha256": receipt["model_state_sha256"],
         "role_state_sha256s": receipt["role_state_sha256s"],
+        "theory_model_identity": None,
         "method_config_sha256": method["config_sha256"],
         "registered_effective_config_sha256": row["expected_effective_config_sha256"],
         "effective_config_sha256": hashlib.sha256(

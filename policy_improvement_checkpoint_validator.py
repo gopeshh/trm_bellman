@@ -30,6 +30,7 @@ from policy_improvement_smoke_runtime import (
     PolicyImprovementSmokeError,
     SmokeContext,
     stage0_model_state_identity,
+    stage0_theory_model_identity,
     validate_policy_improvement_smoke_identity,
 )
 from rl.persistent_diagnostic_checkpoint import state_dict_sha256
@@ -89,6 +90,7 @@ _RESULT_FIELDS = {
     "initialization_sha256",
     "model_state_sha256",
     "role_state_sha256s",
+    "theory_model_identity",
     "method_config_sha256",
     "registered_effective_config_sha256",
     "effective_config_sha256",
@@ -104,6 +106,27 @@ _LOWER_HEX = frozenset("0123456789abcdef")
 
 class PolicyImprovementCheckpointValidationError(RuntimeError):
     """Raised when checkpoint bytes do not implement their registered row."""
+
+
+def _stage0_theory_identity(
+    session: Any,
+    row: Mapping[str, object],
+) -> dict[str, str] | None:
+    if row.get("method_id") not in {
+        "fixed_base_exact_persistent",
+        "fixed_base_exact_episodic",
+    }:
+        return None
+    try:
+        return stage0_theory_model_identity(
+            session,
+            method_id=str(row["method_id"]),
+            alpha=float(row["alpha"]),
+        )
+    except (KeyError, TypeError, ValueError, PolicyImprovementSmokeError) as exc:
+        raise PolicyImprovementCheckpointValidationError(
+            "Stage 0 theory model identity cannot be reconstructed."
+        ) from exc
 
 
 def _object(value: object, *, name: str) -> Mapping[str, object]:
@@ -964,6 +987,7 @@ def _validate_full_checkpoint(
         "initialization_sha256": initialization_sha256,
         "model_state_sha256": model_sha256,
         "role_state_sha256s": role_hashes,
+        "theory_model_identity": None,
         "method_config_sha256": session.method_config_sha256,
         "registered_effective_config_sha256": row["expected_effective_config_sha256"],
         "effective_config_sha256": session.effective_config_sha256,
@@ -1089,6 +1113,11 @@ def validate_checkpoint(request: Mapping[str, object]) -> dict[str, object]:
                 "initialization_sha256": session.initialization_sha256,
                 "model_state_sha256": model_sha256,
                 "role_state_sha256s": role_hashes,
+                "theory_model_identity": (
+                    _stage0_theory_identity(session, row)
+                    if protocol.get("schema_name") == "policy_improvement_protocol_v2"
+                    else None
+                ),
                 "method_config_sha256": session.method_config_sha256,
                 "registered_effective_config_sha256": row[
                     "expected_effective_config_sha256"

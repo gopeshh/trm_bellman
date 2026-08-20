@@ -38,6 +38,7 @@ from scripts.policy_improvement_theory_bridge_v2 import (
     TrainingAdvantageEstimatorV2,
 )
 from scripts.policy_improvement_theory_schema_v2 import (
+    build_stage0_theory_request,
     PROTOCOL_ID,
     THEORY_AMENDMENT_SCHEMA_NAME,
     theory_document_sha256,
@@ -515,6 +516,39 @@ class TheoryBridgeV2Test(unittest.TestCase):
         self.identity = _identity(self.amendment, self.checkpoint)
         self.request = _request(self.amendment, self.identity)
 
+    def test_stage0_request_builder_uses_only_registered_identity(self) -> None:
+        row = {
+            "run_id": "stage0-run",
+            "phase": "stage0_smoke",
+            "method_id": "fixed_base_exact_persistent",
+            "evaluation_split": "train",
+            "evaluation_population": "stage0_smoke",
+            "n": 2,
+            "K": 1,
+            "alpha": 0.1,
+        }
+        built = build_stage0_theory_request(
+            amendment_value=self.amendment,
+            row=row,
+            identity=self.identity,
+            effective_config={"gamma": 0.9, "advantage_clip": None},
+        )
+        self.assertEqual(built["identity"], self.identity)
+        self.assertEqual(built["evaluation_population"], "stage0_smoke")
+        self.assertEqual(
+            built["advantage_clipping"], {"kind": "none", "clip_value": None}
+        )
+        clipped = build_stage0_theory_request(
+            amendment_value=self.amendment,
+            row=row,
+            identity=self.identity,
+            effective_config={"gamma": 0.9, "advantage_clip": 10.0},
+        )
+        self.assertEqual(
+            clipped["advantage_clipping"],
+            {"kind": "clip_then_exact_recenter", "clip_value": 10.0},
+        )
+
     def test_exact_bridge_separates_roundoff_from_trainer_parity(self) -> None:
         backend = _Backend(self.identity)
         result = evaluate_theory_bridge_v2(
@@ -818,6 +852,14 @@ class TheoryBridgeV2Test(unittest.TestCase):
         parent_sha256 = _digest("prepare-checkpoint")
         model_sha256 = _digest("model-state")
         roles = {"model": _digest("model-role")}
+        theory_model_identity = {
+            "model_sha256": model_sha256,
+            "model_config_sha256": _digest("model-config"),
+            "current_policy_sha256": _digest("current-policy"),
+            "candidate_policy_sha256": _digest("candidate-policy"),
+            "deployed_policy_sha256": _digest("deployed-policy"),
+            "recurrent_transition_sha256": _digest("recurrent-transition"),
+        }
 
         def fixture() -> tuple[
             tempfile.TemporaryDirectory[str],
@@ -868,7 +910,8 @@ class TheoryBridgeV2Test(unittest.TestCase):
                         "size_bytes": checkpoint.stat().st_size,
                         "snapshot_kind": "smoke_resume",
                         "environment_interactions": 32,
-                    }
+                    },
+                    "model": copy.deepcopy(theory_model_identity),
                 }
             }
             inputs = TheoryBackendInputsV2(
@@ -897,6 +940,9 @@ class TheoryBridgeV2Test(unittest.TestCase):
                         "parent_checkpoint_sha256": parent_sha256,
                         "model_state_sha256": model_sha256,
                         "role_state_sha256s": roles,
+                        "theory_model_identity": copy.deepcopy(
+                            theory_model_identity
+                        ),
                     },
                 ],
             }
@@ -929,6 +975,13 @@ class TheoryBridgeV2Test(unittest.TestCase):
                 mock.patch(
                     "scripts.policy_improvement_theory_backend_v2.validated_result_payload",
                     return_value=(result_document, runtime_result),
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.load_registered_populations",
+                    return_value={},
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.bind_v2_result_to_registration"
                 ),
                 mock.patch(
                     "scripts.policy_improvement_theory_backend_v2._per_instance_documents",
@@ -980,6 +1033,13 @@ class TheoryBridgeV2Test(unittest.TestCase):
                     ),
                 ),
                 mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.load_registered_populations",
+                    return_value={},
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.bind_v2_result_to_registration"
+                ),
+                mock.patch(
                     "scripts.policy_improvement_theory_backend_v2._per_instance_documents",
                     return_value={},
                 ),
@@ -992,6 +1052,66 @@ class TheoryBridgeV2Test(unittest.TestCase):
                 _resolve_stage0_checkpoint(
                     request=request,
                     checkpoint_path=checkpoint.with_name("wrong.pt"),
+                    inputs=inputs,
+                    authorization={},
+                    context=context,
+                )
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+        finally:
+            temporary.cleanup()
+
+        temporary, checkpoint, context, request, inputs, authenticated = fixture()
+        try:
+            descriptor = authenticated["sealed_checkpoint"].descriptor
+            request["identity"]["model"]["deployed_policy_sha256"] = _digest(
+                "mixed-model"
+            )
+            result_document = {
+                "schema_name": "policy_improvement_result_v2",
+                "payload": {"document_marker": "current-envelope"},
+            }
+            with (
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2._load_stable_json",
+                    return_value={"ignored": True},
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.validated_result_payload",
+                    return_value=(
+                        result_document,
+                        {
+                            **context.row,
+                            "status": "complete",
+                            "amendment_history_sha256": hashlib.sha256(
+                                b"[]"
+                            ).hexdigest(),
+                        },
+                    ),
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.load_registered_populations",
+                    return_value={},
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.bind_v2_result_to_registration"
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2._per_instance_documents",
+                    return_value={},
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.authenticate_complete_generation",
+                    return_value=authenticated,
+                ),
+                self.assertRaisesRegex(
+                    TheoryBridgeV2Error,
+                    "differs from sealed semantic validation",
+                ),
+            ):
+                _resolve_stage0_checkpoint(
+                    request=request,
+                    checkpoint_path=checkpoint,
                     inputs=inputs,
                     authorization={},
                     context=context,
@@ -1049,11 +1169,31 @@ class TheoryBridgeV2Test(unittest.TestCase):
             ),
             mock.patch(
                 "scripts.policy_improvement_theory_backend_v2._stage0_context",
-                return_value=(SimpleNamespace(), {}, {}),
+                return_value=(
+                    SimpleNamespace(
+                        protocol={},
+                        source_root=root,
+                        row={"base_method_id": "base", "config_override": {}},
+                    ),
+                    {},
+                    {},
+                ),
             ),
             mock.patch(
                 "scripts.policy_improvement_theory_backend_v2._expected_stage0_identity",
                 return_value={},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2._load_stable_json",
+                return_value={},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.load_registered_base_configs",
+                return_value={"base": {}},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.build_stage0_theory_request",
+                return_value=request,
             ),
             mock.patch(
                 "scripts.policy_improvement_theory_backend_v2._resolve_stage0_checkpoint",
@@ -1068,6 +1208,71 @@ class TheoryBridgeV2Test(unittest.TestCase):
             create_theory_bridge_backend_v2(request, checkpoint, inputs)
         with self.assertRaises(OSError):
             os.fstat(descriptor)
+
+    def test_stage0_factory_rejects_noncanonical_gamma_before_checkpoint_resolution(
+        self,
+    ) -> None:
+        root = Path(self.temporary.name)
+        request = {
+            "evaluation_population": "stage0_smoke",
+            "gamma": 0.5,
+            "identity": {},
+        }
+        canonical_request = {**request, "gamma": 0.99}
+        inputs = TheoryBackendInputsV2(
+            project_root=root,
+            protocol_path=root / "protocol.json",
+            registry_path=root / "registry.json",
+            amendment_paths=(root / "theory.json",),
+            evidence_root=root,
+            dataset_root=root,
+            row_id="run",
+            runtime_authorization={},
+        )
+        context = SimpleNamespace(
+            protocol={},
+            source_root=root,
+            row={"base_method_id": "base", "config_override": {}},
+        )
+        with (
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.validate_theory_request",
+                return_value=request,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.validate_runtime_authorization",
+                return_value={},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2._stage0_context",
+                return_value=(context, {}, {}),
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2._expected_stage0_identity",
+                return_value={},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2._load_stable_json",
+                return_value={},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.load_registered_base_configs",
+                return_value={"base": {}},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.build_stage0_theory_request",
+                return_value=canonical_request,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2._resolve_stage0_checkpoint"
+            ) as resolve,
+            self.assertRaisesRegex(
+                TheoryBridgeV2Error,
+                "differs from the audited canonical request",
+            ),
+        ):
+            create_theory_bridge_backend_v2(request, root / "checkpoint.pt", inputs)
+        resolve.assert_not_called()
 
 
 if __name__ == "__main__":

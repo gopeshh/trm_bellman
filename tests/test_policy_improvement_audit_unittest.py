@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import os
 import subprocess
 import tempfile
@@ -13,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from scripts.policy_improvement_audit import (
+    _audited_stage0_theory_request,
     _authenticate_authorization_producer_source,
     _git_object_bytes,
     _historical_failed_attempt_manifest_sha256s,
@@ -107,6 +109,118 @@ class HistoricalAuthorizationLoadingTest(unittest.TestCase):
         self.assertEqual(
             _producer_role_name(authorization, {"tier": "smoke"}),
             "policy-improvement-training",
+        )
+
+    def test_green_audit_builds_an_executable_stage0_theory_request(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        config_root = root / "configs/policy_improvement_v2"
+        protocol = json.loads((config_root / "protocol.json").read_text())
+        registry = json.loads((config_root / "registry.json").read_text())
+        populations = json.loads((config_root / "populations.json").read_text())
+        amendment = json.loads(
+            (config_root / "amendments/theory_bridge_v2.json").read_text()
+        )
+        row = next(
+            item
+            for item in registry["rows"]
+            if item["phase"] == "stage0_smoke"
+            and item["method_id"] == "fixed_base_exact_persistent"
+        )
+        digest = lambda value: hashlib.sha256(value.encode("ascii")).hexdigest()
+        roles = []
+        for index, role in enumerate(
+            (
+                "policy-improvement-training",
+                "policy-improvement-evaluation",
+                "policy-improvement-audit",
+                "policy-improvement-analysis",
+                "policy-improvement-full",
+                "policy-improvement-theory-bridge",
+            ),
+            start=1,
+        ):
+            roles.append(
+                {
+                    "role": role,
+                    "source_git_commit": "a" * 40,
+                    "runtime_sha256": f"{index:x}" * 64,
+                    "runtime_profile_sha256": f"{index + 6:x}" * 64,
+                    "selected_source_manifest_sha256": f"{index + 6:x}" * 64,
+                }
+            )
+        authorization = {
+            "schema_name": "policy_improvement_runtime_authorization_v3",
+            "schema_version": 3,
+            "authorization_id": "stage0-theory-request-test",
+            "created_at_utc": "2026-08-20T00:00:00Z",
+            "protocol_sha256": hashlib.sha256(
+                canonical_json_bytes(protocol)
+            ).hexdigest(),
+            "protocol": {
+                "schema_name": protocol["schema_name"],
+                "schema_version": protocol["schema_version"],
+                "protocol_id": protocol["protocol_id"],
+                "sha256": hashlib.sha256(
+                    canonical_json_bytes(protocol)
+                ).hexdigest(),
+            },
+            "registry": {
+                "schema_name": registry["schema_name"],
+                "schema_version": registry["registry_schema_version"],
+                "sha256": hashlib.sha256(
+                    canonical_json_bytes(registry)
+                ).hexdigest(),
+            },
+            "amendments": [
+                {
+                    "schema_name": amendment["schema_name"],
+                    "schema_version": amendment["schema_version"],
+                    "amendment_id": amendment["amendment_id"],
+                    "sha256": hashlib.sha256(
+                        canonical_json_bytes(amendment)
+                    ).hexdigest(),
+                }
+            ],
+            "producer_git_commit": "a" * 40,
+            "producer_source_manifest_sha256": "e" * 64,
+            "launcher_sha256": "f" * 64,
+            "roles": roles,
+        }
+        model_identity = {
+            "model_sha256": digest("model"),
+            "model_config_sha256": digest("model-config"),
+            "current_policy_sha256": digest("current"),
+            "candidate_policy_sha256": digest("candidate"),
+            "deployed_policy_sha256": digest("deployed"),
+            "recurrent_transition_sha256": digest("recurrent"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "checkpoint.pt"
+            checkpoint.write_bytes(b"authenticated checkpoint")
+            built = _audited_stage0_theory_request(
+                protocol=protocol,
+                registry=registry,
+                row=row,
+                population=populations["populations"]["stage0_smoke"],
+                result_authorization=authorization,
+                evaluator_authorization=authorization,
+                theory_amendment=amendment,
+                semantic_validation={
+                    "checkpoint_sha256": hashlib.sha256(
+                        checkpoint.read_bytes()
+                    ).hexdigest(),
+                    "theory_model_identity": model_identity,
+                },
+                checkpoint_path=checkpoint,
+                checkpoint_size_bytes=checkpoint.stat().st_size,
+                base_config={"gamma": 0.99, "advantage_clip": 10.0},
+            )
+        request = built["request"]
+        self.assertEqual(request["identity"]["model"], model_identity)
+        self.assertEqual(request["identity"]["checkpoint"]["size_bytes"], 24)
+        self.assertEqual(
+            built["request_sha256"],
+            hashlib.sha256(canonical_json_bytes(request)).hexdigest(),
         )
 
     def test_audit_rejects_both_result_namespace_crossings(self) -> None:

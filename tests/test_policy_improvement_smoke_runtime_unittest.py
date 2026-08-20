@@ -127,6 +127,56 @@ class PolicyImprovementSmokeRuntimeTest(unittest.TestCase):
             ordered_record_sha256=mock.Mock(return_value="e" * 64),
         )
 
+    def test_stage0_theory_model_identity_is_derived_from_frozen_roles(self) -> None:
+        current = torch.nn.Linear(2, 2)
+        candidate = torch.nn.Linear(2, 2)
+        target = torch.nn.Linear(2, 2)
+        model = torch.nn.Linear(2, 2)
+        session = SimpleNamespace(
+            model=model,
+            trainer=SimpleNamespace(
+                policy_model_old=current,
+                policy_model_candidate=candidate,
+                target_model=target,
+                preinterpolation_policy_base=None,
+                preinterpolation_policy_candidate=None,
+            ),
+            effective_config={"model_config": {"hidden_size": 2}},
+        )
+        identity = smoke.stage0_theory_model_identity(
+            session,
+            method_id="fixed_base_exact_persistent",
+            alpha=0.1,
+        )
+        current_sha256 = smoke.state_dict_sha256(current.state_dict())
+        candidate_sha256 = smoke.state_dict_sha256(candidate.state_dict())
+        recurrent_sha256 = smoke.state_dict_sha256(current.state_dict())
+        self.assertEqual(identity["current_policy_sha256"], current_sha256)
+        self.assertEqual(identity["candidate_policy_sha256"], candidate_sha256)
+        self.assertEqual(identity["recurrent_transition_sha256"], recurrent_sha256)
+        self.assertEqual(
+            identity["model_config_sha256"],
+            smoke.canonical_json_sha256({"hidden_size": 2}),
+        )
+        self.assertEqual(
+            identity["deployed_policy_sha256"],
+            smoke.canonical_json_sha256(
+                {
+                    "kind": "exact_probability_mixture",
+                    "current_policy_sha256": current_sha256,
+                    "candidate_policy_sha256": candidate_sha256,
+                    "alpha": 0.1,
+                    "recurrent_transition_sha256": recurrent_sha256,
+                }
+            ),
+        )
+        with self.assertRaises(smoke.PolicyImprovementSmokeError):
+            smoke.stage0_theory_model_identity(
+                session,
+                method_id="matched_ppo",
+                alpha=0.1,
+            )
+
     def test_context_and_revalidation_pass_strict_dataset_owner_root(self) -> None:
         """Exercise both real call boundaries against the keyword-only verifier."""
 

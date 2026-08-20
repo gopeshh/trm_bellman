@@ -48,6 +48,7 @@ from policy_improvement_smoke_runtime import (
     SmokeContext,
     SmokeSession,
     stage0_model_state_identity,
+    stage0_theory_model_identity,
     validate_policy_improvement_smoke_identity,
 )
 from rl.batch_utils import prepare_batch_x, prepare_plan
@@ -4053,9 +4054,15 @@ def open_stage0_theory_bridge_session_v2(
         raise
     try:
         observed_model = adapter.observed_model_identity(training_module)
+        independently_reconstructed_model = stage0_theory_model_identity(
+            smoke_session,
+            method_id=str(context.row["method_id"]),
+            alpha=float(context.row["alpha"]),
+        )
         supplied_model = request.get("model")
         if (
-            not isinstance(supplied_model, Mapping)
+            observed_model != independently_reconstructed_model
+            or not isinstance(supplied_model, Mapping)
             or dict(supplied_model) != observed_model
         ):
             raise FullBackendError(

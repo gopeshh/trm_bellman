@@ -464,6 +464,7 @@ python_library(
         ":policy_improvement_registry",
         ":policy_improvement_schema",
         ":policy_improvement_test_open",
+        ":policy_improvement_theory_schema_v2",
         ":utils",
     ],
 )
@@ -524,6 +525,7 @@ python_binary(
         ":policy_improvement_sealed_evidence",
         ":policy_improvement_test_open",
         ":policy_improvement_test_open_cli",
+        ":policy_improvement_theory_schema_v2",
         ":runtime_archive_preflight",
         ":utils",
     ],
@@ -1074,6 +1076,10 @@ python_unittest(
         "tests/test_policy_improvement_audit_unittest.py",
     ],
     base_module = "",
+    resources = glob([
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/amendments/*.json",
+    ]),
     deps = [
         ":policy_improvement_audit_lib",
         ":policy_improvement_schema",

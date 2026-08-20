@@ -734,6 +734,7 @@ class CompleteGenerationTest(unittest.TestCase):
             "initialization_sha256": request["initialization_sha256"],
             "model_state_sha256": receipt["model_state_sha256"],
             "role_state_sha256s": receipt["role_state_sha256s"],
+            "theory_model_identity": None,
             "method_config_sha256": "4" * 64,
             "registered_effective_config_sha256": "5" * 64,
             "effective_config_sha256": "a" * 64,

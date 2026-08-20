@@ -2624,6 +2624,69 @@ def stage0_model_state_identity(
     return _model_state_identity(session)
 
 
+def stage0_theory_model_identity(
+    session: SmokeSession,
+    *,
+    method_id: str,
+    alpha: float,
+) -> dict[str, str]:
+    """Return the exact model identity consumed by the Stage 0 theory bridge."""
+
+    if method_id not in {
+        "fixed_base_exact_persistent",
+        "fixed_base_exact_episodic",
+    }:
+        raise PolicyImprovementSmokeError(
+            "Stage 0 theory identity is defined only for exact methods."
+        )
+    trainer = session.trainer
+    current = getattr(trainer, "policy_model_old", None)
+    candidate = getattr(trainer, "policy_model_candidate", None)
+    if current is None or candidate is None:
+        raise PolicyImprovementSmokeError(
+            "Exact Stage 0 trainer lacks its fixed current/candidate policies."
+        )
+    model_sha256, role_sha256s = _model_state_identity(session)
+    current_sha256 = state_dict_sha256(current.state_dict())
+    candidate_sha256 = state_dict_sha256(candidate.state_dict())
+    if (
+        role_sha256s.get("policy_model_old") != current_sha256
+        or role_sha256s.get("policy_model_candidate") != candidate_sha256
+    ):
+        raise PolicyImprovementSmokeError(
+            "Stage 0 theory policy identities differ from the model inventory."
+        )
+    recurrent_state = {
+        name: value
+        for name, value in current.state_dict().items()
+        if not name.startswith("edit_policy.")
+        and not name.startswith("value_head.")
+    }
+    recurrent_sha256 = state_dict_sha256(recurrent_state)
+    model_config = session.effective_config.get("model_config")
+    if not isinstance(model_config, Mapping):
+        raise PolicyImprovementSmokeError(
+            "Stage 0 effective configuration lacks its model configuration."
+        )
+    deployed_sha256 = canonical_json_sha256(
+        {
+            "kind": "exact_probability_mixture",
+            "current_policy_sha256": current_sha256,
+            "candidate_policy_sha256": candidate_sha256,
+            "alpha": float(alpha),
+            "recurrent_transition_sha256": recurrent_sha256,
+        }
+    )
+    return {
+        "model_sha256": model_sha256,
+        "model_config_sha256": canonical_json_sha256(dict(model_config)),
+        "current_policy_sha256": current_sha256,
+        "candidate_policy_sha256": candidate_sha256,
+        "deployed_policy_sha256": deployed_sha256,
+        "recurrent_transition_sha256": recurrent_sha256,
+    }
+
+
 def _build_final_result(
     context: SmokeContext,
     session: SmokeSession,

@@ -180,6 +180,7 @@ POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS = (
     "scripts/policy_improvement_test_open.py",
     "scripts/policy_improvement_test_open_cli.py",
     "scripts/policy_improvement_theory_schema.py",
+    "scripts/policy_improvement_theory_schema_v2.py",
 )
 POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_CONFIG_PATHS,
@@ -200,6 +201,7 @@ POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS = (
     "scripts/policy_improvement_statistics.py",
     "scripts/policy_improvement_test_open.py",
     "scripts/policy_improvement_theory_schema.py",
+    "scripts/policy_improvement_theory_schema_v2.py",
 )
 _POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_CONFIG_PATHS,

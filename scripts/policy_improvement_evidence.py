@@ -47,6 +47,7 @@ _SEMANTIC_VALIDATION_FIELDS = {
     "initialization_sha256",
     "model_state_sha256",
     "role_state_sha256s",
+    "theory_model_identity",
     "method_config_sha256",
     "registered_effective_config_sha256",
     "effective_config_sha256",
@@ -341,6 +342,47 @@ def _semantic_checkpoint_validation(
     ):
         raise PolicyImprovementSchemaError(
             "Semantic checkpoint role-state inventory is invalid."
+        )
+    theory_model_identity = computed["theory_model_identity"]
+    exact_stage0 = (
+        protocol.get("schema_name") == "policy_improvement_protocol_v2"
+        and result.get("tier") == "smoke"
+        and result.get("method_id")
+        in {
+            "fixed_base_exact_persistent",
+            "fixed_base_exact_episodic",
+        }
+    )
+    if exact_stage0:
+        identity = _fields(
+            theory_model_identity,
+            {
+                "model_sha256",
+                "model_config_sha256",
+                "current_policy_sha256",
+                "candidate_policy_sha256",
+                "deployed_policy_sha256",
+                "recurrent_transition_sha256",
+            },
+            path="checkpoint_semantic_validation.theory_model_identity",
+        )
+        for field, digest in identity.items():
+            _sha256(
+                digest,
+                path=f"checkpoint_semantic_validation.theory_model_identity.{field}",
+            )
+        if (
+            identity["model_sha256"] != computed["model_state_sha256"]
+            or identity["current_policy_sha256"] != role_hashes.get("policy_model_old")
+            or identity["candidate_policy_sha256"]
+            != role_hashes.get("policy_model_candidate")
+        ):
+            raise PolicyImprovementSchemaError(
+                "Theory model identity differs from semantic checkpoint roles."
+            )
+    elif theory_model_identity is not None:
+        raise PolicyImprovementSchemaError(
+            "Only exact Stage 0 checkpoints may expose a theory model identity."
         )
     if (
         computed["schema_name"]
@@ -2067,6 +2109,8 @@ def authenticate_complete_generation(
             "generation_path": str(generation),
             "generation_manifest_sha256": manifest_file_identity["sha256"],
             "checkpoint_sha256": checkpoint_sha256,
+            "checkpoint_relative_path": checkpoint_name,
+            "checkpoint_size_bytes": int(canonical_files[checkpoint_name]["bytes"]),
             "run_manifest_sha256": run_manifest_identity["sha256"],
             "model_state_inventory_sha256": model_inventory_sha256,
             "semantic_validations": semantic_validations,

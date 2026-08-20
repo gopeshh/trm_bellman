@@ -8,6 +8,7 @@ algebraic centering roundoff from parity with the estimator used by training.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import math
 import re
@@ -1069,6 +1070,86 @@ def validate_request_against_amendment(
             "m=16 is restricted to the final registered checkpoint."
         )
     return request, amendment
+
+
+def build_stage0_theory_request(
+    *,
+    amendment_value: object,
+    row: Mapping[str, object],
+    identity: Mapping[str, object],
+    effective_config: Mapping[str, object],
+) -> dict[str, Any]:
+    """Build the one canonical request for an audited exact Stage 0 row."""
+
+    amendment = validate_theory_amendment(amendment_value)
+    method_id = row.get("method_id")
+    alpha = row.get("alpha")
+    if (
+        row.get("phase") != "stage0_smoke"
+        or row.get("evaluation_split") != "train"
+        or row.get("evaluation_population") != "stage0_smoke"
+        or method_id not in EXACT_METHOD_IDS
+        or row.get("n") != 2
+        or row.get("K") != 1
+        or isinstance(alpha, bool)
+        or not isinstance(alpha, (int, float))
+        or float(alpha) != 0.1
+    ):
+        raise TheoryBridgeV2SchemaError(
+            "Stage 0 theory request requires the exact registered smoke row."
+        )
+    gamma = effective_config.get("gamma")
+    if isinstance(gamma, bool) or not isinstance(gamma, (int, float)):
+        raise TheoryBridgeV2SchemaError("Stage 0 effective configuration lacks gamma.")
+    raw_clip = effective_config.get("advantage_clip")
+    if raw_clip is None:
+        clipping: dict[str, object] = {"kind": "none", "clip_value": None}
+    elif isinstance(raw_clip, bool) or not isinstance(raw_clip, (int, float)):
+        raise TheoryBridgeV2SchemaError(
+            "Stage 0 effective configuration has an invalid advantage clip."
+        )
+    else:
+        clipping = {
+            "kind": "clip_then_exact_recenter",
+            "clip_value": float(raw_clip),
+        }
+    request = {
+        "schema_name": THEORY_REQUEST_SCHEMA_NAME,
+        "schema_version": THEORY_SCHEMA_VERSION,
+        "protocol_id": PROTOCOL_ID,
+        "evaluation_id": (f"{row['run_id']}.stage0-theory-smoke.m8.k1"),
+        "evaluation_population": "stage0_smoke",
+        "run_id": row["run_id"],
+        "method_id": method_id,
+        "latent_mode": (
+            "episodic" if method_id == "fixed_base_exact_episodic" else "persistent"
+        ),
+        "checkpoint_environment_interactions": 32,
+        "n": 2,
+        "reference_depth_m": int(amendment["reference_depths"]["primary_m"]),
+        "reference_role": "primary",
+        "bellman_horizon": 1,
+        "gamma": float(gamma),
+        "alpha": float(alpha),
+        "bellman_estimator": copy.deepcopy(amendment["bellman_estimators"]["K1"]),
+        "return_estimator": copy.deepcopy(amendment["predictive_return_estimator"]),
+        "advantage_clipping": clipping,
+        "constructed_centering_tolerance": amendment["centering_contract"][
+            "constructed_centering_roundoff_absolute_tolerance"
+        ],
+        "centering_parity_tolerance": amendment["centering_contract"][
+            "training_estimator_parity_absolute_tolerance"
+        ],
+        "deployment_identity_tolerance": amendment["deployment_contract"][
+            "exact_mixture_identity_tv_absolute_tolerance"
+        ],
+        "scientific_selection": False,
+        "paper_evidence_eligible": False,
+        "identity": copy.deepcopy(dict(identity)),
+        "test_data_opened": False,
+    }
+    checked, _ = validate_request_against_amendment(request, amendment)
+    return checked
 
 
 def validate_theory_result(value: object, *, request: object) -> dict[str, Any]:
