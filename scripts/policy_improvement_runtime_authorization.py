@@ -605,7 +605,7 @@ def _validate_launcher_native_support(archive: ZipFile) -> None:
     runtime_members = {
         info.filename
         for info in archive.infolist()
-        if not info.is_dir() and info.filename.startswith("runtime/")
+        if info.filename.startswith("runtime/")
     }
     if runtime_members != set(_LAUNCHER_NATIVE_SUPPORT_MEMBERS):
         raise RuntimeAuthorizationGenerationError(

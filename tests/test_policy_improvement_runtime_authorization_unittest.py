@@ -698,6 +698,15 @@ class RuntimeAuthorizationGeneratorTest(unittest.TestCase):
                         ),
                     ),
                     (
+                        "versioned shared-library directory",
+                        write_launcher(
+                            "versioned-libpython-directory.par",
+                            extra_members={
+                                "runtime/lib/libpython3.12.so.1.0/": b""
+                            },
+                        ),
+                    ),
+                    (
                         "modified sitecustomize",
                         write_launcher(
                             "sitecustomize.par",
