@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 import hashlib
 import json
 import os
@@ -22,6 +23,8 @@ from phase4_runtime_profile import (
     POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_LAUNCHER_PROFILE_PATHS,
+    POLICY_IMPROVEMENT_LAUNCHER_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE,
     AuthorizedPhase4Profile,
     AuthorizedTrainingSource,
@@ -39,6 +42,7 @@ COMMIT = "a" * 40
 
 def _source_authorization() -> authorization.SourceAuthorization:
     profile_names = (
+        POLICY_IMPROVEMENT_LAUNCHER_SOURCE_PROFILE,
         POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
         POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
         POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
@@ -364,6 +368,184 @@ class RuntimeAuthorizationGeneratorTest(unittest.TestCase):
                 identity.sha256,
                 hashlib.sha256(path.read_bytes()).hexdigest(),
             )
+
+    def test_artifact_authentication_rejects_a_non_par_launcher(self) -> None:
+        sources = _source_authorization()
+        runtime_identities = iter(
+            _artifact(name, marker)
+            for marker, name in enumerate(authorization._RUNTIME_NAMES, start=8)
+        )
+        authenticate_artifact = authorization._authenticate_artifact
+
+        with tempfile.TemporaryDirectory() as directory:
+            launcher = Path(directory).resolve() / "launcher"
+            launcher.write_bytes(b"#!/bin/sh\nexec /bin/true\n")
+
+            def authenticate(
+                path: str,
+                *,
+                label: str,
+                archive_validator: Callable[[ZipFile], None] | None = None,
+            ) -> authorization.ArtifactIdentity:
+                if label == "Launcher":
+                    return authenticate_artifact(
+                        path,
+                        label=label,
+                        archive_validator=archive_validator,
+                    )
+                return next(runtime_identities)
+
+            with (
+                mock.patch.object(
+                    authorization,
+                    "_authenticate_artifact",
+                    side_effect=authenticate,
+                ),
+                self.assertRaisesRegex(
+                    authorization.RuntimeAuthorizationGenerationError,
+                    "Launcher is not a valid ZIP-based PAR",
+                ),
+            ):
+                authorization._authenticate_artifacts(
+                    launcher_path=str(launcher),
+                    runtime_paths={
+                        name: f"/{name}.par" for name in authorization._RUNTIME_NAMES
+                    },
+                    sources=sources,
+                )
+
+    def test_launcher_archive_binds_current_source_profile_and_entrypoint(
+        self,
+    ) -> None:
+        launcher_source = b"def main():\n    return 0\n"
+        phase4_launcher_source = b"def main():\n    return 0\n"
+        runtime_profile_source = b"PROFILES = {}\n"
+        producer_manifest = b'{"source_manifest_schema_version":3,"sources":{}}\n'
+        authorized = AuthorizedPhase4Profile(
+            git_commit=COMMIT,
+            source_manifest_sha256=hashlib.sha256(b"launcher profile").hexdigest(),
+            profile=POLICY_IMPROVEMENT_LAUNCHER_SOURCE_PROFILE,
+            sources={
+                "confirmatory_runtime_launcher.py": hashlib.sha256(
+                    launcher_source
+                ).hexdigest(),
+                "phase4_runtime_launcher.py": hashlib.sha256(
+                    phase4_launcher_source
+                ).hexdigest(),
+                "phase4_runtime_profile.py": hashlib.sha256(
+                    runtime_profile_source
+                ).hexdigest(),
+                "configs/iclr_confirmatory/producer_source_manifest.json": (
+                    hashlib.sha256(producer_manifest).hexdigest()
+                ),
+            },
+        )
+        executable_manifest = canonical_json_bytes(
+            {
+                "fbmake": {
+                    "build_rule_type": "python_binary",
+                    "main_function": None,
+                    "main_module": "phase4_runtime_launcher",
+                    "rule_type_is_unit_test": 0,
+                }
+            }
+        )
+        self.assertEqual(
+            set(authorized.sources),
+            set(POLICY_IMPROVEMENT_LAUNCHER_PROFILE_PATHS),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+
+            def write_launcher(
+                name: str,
+                *,
+                confirmatory_source: bytes = launcher_source,
+                phase4_source: bytes = phase4_launcher_source,
+                manifest: bytes = producer_manifest,
+                main_module: str = "phase4_runtime_launcher",
+            ) -> Path:
+                path = root / name
+                selected_manifest = (
+                    executable_manifest
+                    if main_module == "phase4_runtime_launcher"
+                    else canonical_json_bytes(
+                        {
+                            "fbmake": {
+                                "build_rule_type": "python_binary",
+                                "main_function": None,
+                                "main_module": main_module,
+                                "rule_type_is_unit_test": 0,
+                            }
+                        }
+                    )
+                )
+                with ZipFile(path, "w") as archive:
+                    archive.writestr(
+                        "confirmatory_runtime_launcher.py",
+                        confirmatory_source,
+                    )
+                    archive.writestr(
+                        "phase4_runtime_launcher.py",
+                        phase4_source,
+                    )
+                    archive.writestr(
+                        "phase4_runtime_profile.py",
+                        runtime_profile_source,
+                    )
+                    archive.writestr(
+                        "configs/iclr_confirmatory/producer_source_manifest.json",
+                        manifest,
+                    )
+                    archive.writestr("__manifest__.json", selected_manifest)
+                return path
+
+            valid = write_launcher("valid.par")
+            identity = authorization._authenticate_artifact(
+                str(valid),
+                label="Launcher",
+                archive_validator=authorization._launcher_archive_validator(
+                    authorized
+                ),
+            )
+            self.assertEqual(
+                identity.sha256,
+                hashlib.sha256(valid.read_bytes()).hexdigest(),
+            )
+
+            for name, path in (
+                (
+                    "stale phase4 launcher",
+                    write_launcher("stale-phase4.par", phase4_source=b"old\n"),
+                ),
+                (
+                    "stale confirmatory launcher",
+                    write_launcher(
+                        "stale-confirmatory.par",
+                        confirmatory_source=b"old\n",
+                    ),
+                ),
+                (
+                    "stale producer manifest",
+                    write_launcher("stale-manifest.par", manifest=b"{}\n"),
+                ),
+                (
+                    "different entrypoint",
+                    write_launcher("wrong-main.par", main_module="attacker"),
+                ),
+            ):
+                with (
+                    self.subTest(case=name),
+                    self.assertRaises(authorization.RuntimeAuthorizationGenerationError),
+                ):
+                    authorization._authenticate_artifact(
+                        str(path),
+                        label="Launcher",
+                        archive_validator=authorization._launcher_archive_validator(
+                            authorized
+                        ),
+                    )
 
     def test_private_publication_rejects_repo_output_and_wrong_directory_mode(
         self,

@@ -11,7 +11,7 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import stat
 import sys
 from typing import Any, Protocol
@@ -193,6 +193,34 @@ def _canonical_registered_path(
     return resolved
 
 
+def _canonical_registered_directory(
+    project_root: Path,
+    supplied: str | Path,
+    relative: object,
+    *,
+    name: str,
+) -> Path:
+    if not isinstance(relative, str):
+        raise ThroughputCalibrationError(f"{name} registration is invalid.")
+    registered = PurePosixPath(relative)
+    if (
+        not registered.parts
+        or registered.is_absolute()
+        or relative != registered.as_posix()
+        or "\\" in relative
+        or "." in registered.parts
+        or ".." in registered.parts
+    ):
+        raise ThroughputCalibrationError(f"{name} registration is invalid.")
+    expected = project_root / Path(*registered.parts)
+    candidate = Path(supplied)
+    if candidate != expected:
+        raise ThroughputCalibrationError(
+            f"{name} is not the protocol-v2 dataset."
+        )
+    return _regular_directory(candidate, name=name)
+
+
 def _validate_engineering_seed() -> None:
     digest = hashlib.sha256(ENGINEERING_SEED_NAMESPACE.encode("ascii")).digest()
     if (
@@ -265,13 +293,26 @@ def load_throughput_registration(
             "Throughput calibration must contain the four registered methods."
         )
 
-    dataset = _regular_directory(dataset_root, name="dataset root")
+    dataset = _canonical_registered_directory(
+        project,
+        dataset_root,
+        protocol["dataset"]["root"],
+        name="dataset root",
+    )
+    manifest_directory = _regular_directory(
+        dataset / "manifests",
+        name="dataset manifest directory",
+    )
+    _regular_directory(
+        dataset / "train",
+        name="train split directory",
+    )
     dataset_manifest = _stable_regular_file_bytes(
         dataset / "MANIFEST.json",
         name="dataset manifest",
     )
     train_manifest = _stable_regular_file_bytes(
-        dataset / "manifests" / "train.json",
+        manifest_directory / "train.json",
         name="train manifest",
     )
     dataset_manifest_sha256 = hashlib.sha256(dataset_manifest).hexdigest()

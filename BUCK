@@ -2509,7 +2509,11 @@ python_binary(
     name = "phase4_runtime_launcher",
     srcs = ["phase4_runtime_launcher.py"],
     base_module = "",
+    compile = False,
     main_module = "phase4_runtime_launcher",
+    resources = [
+        "configs/iclr_confirmatory/producer_source_manifest.json",
+    ],
     deps = [
         ":confirmatory_runtime_launcher_lib",
         ":phase4_runtime_profile",

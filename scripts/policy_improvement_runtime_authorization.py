@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -20,6 +21,7 @@ from typing import Any, BinaryIO
 from zipfile import BadZipFile, ZipFile
 
 from confirmatory_runtime_launcher import (
+    ConfirmatoryRuntimeError,
     SOURCE_MANIFEST_RELATIVE_PATH,
     validate_archive_layout,
     validate_confirmatory_archive_sources,
@@ -28,9 +30,11 @@ from phase4_runtime_profile import (
     POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_LAUNCHER_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE,
     AuthorizedPhase4Profile,
     AuthorizedTrainingSource,
+    Phase4RuntimeProfileError,
     assert_phase4_archive_matches_profile,
     authorize_phase4_source_profile,
     authorize_phase4_training_source,
@@ -60,6 +64,7 @@ _THEORY_AMENDMENT_RELATIVE_PATH = (
     "configs/policy_improvement_v2/amendments/theory_bridge_v2.json"
 )
 _PROFILE_NAMES = (
+    POLICY_IMPROVEMENT_LAUNCHER_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE,
     POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
@@ -426,6 +431,69 @@ def _profile_archive_validator(
     return validate
 
 
+def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise RuntimeAuthorizationGenerationError(
+                "Launcher PAR manifest contains a duplicate JSON key."
+            )
+        value[key] = item
+    return value
+
+
+def _launcher_archive_validator(
+    authorized: AuthorizedPhase4Profile,
+) -> Callable[[ZipFile], None]:
+    validate_profile = _profile_archive_validator(authorized)
+
+    def validate(archive: ZipFile) -> None:
+        try:
+            validate_profile(archive)
+        except (ConfirmatoryRuntimeError, Phase4RuntimeProfileError) as exc:
+            raise RuntimeAuthorizationGenerationError(
+                "Launcher PAR source profile differs from the clean checkout."
+            ) from exc
+        try:
+            raw_manifest = archive.read("__manifest__.json")
+            manifest = json.loads(
+                raw_manifest.decode("utf-8"),
+                object_pairs_hook=_strict_json_object,
+            )
+        except (
+            BadZipFile,
+            KeyError,
+            OSError,
+            RuntimeError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
+            if isinstance(exc, RuntimeAuthorizationGenerationError):
+                raise
+            raise RuntimeAuthorizationGenerationError(
+                "Launcher PAR lacks a valid executable manifest."
+            ) from exc
+        if not isinstance(manifest, dict):
+            raise RuntimeAuthorizationGenerationError(
+                "Launcher PAR executable manifest must be one JSON object."
+            )
+        fbmake = manifest.get("fbmake")
+        if (
+            not isinstance(fbmake, dict)
+            or fbmake.get("main_module") != "phase4_runtime_launcher"
+            or "main_function" not in fbmake
+            or fbmake["main_function"] is not None
+            or fbmake.get("build_rule_type") != "python_binary"
+            or type(fbmake.get("rule_type_is_unit_test")) is not int
+            or fbmake["rule_type_is_unit_test"] != 0
+        ):
+            raise RuntimeAuthorizationGenerationError(
+                "Launcher PAR does not execute the authenticated launcher module."
+            )
+
+    return validate
+
+
 def _authenticate_artifacts(
     *,
     launcher_path: str,
@@ -436,7 +504,13 @@ def _authenticate_artifacts(
         raise RuntimeAuthorizationGenerationError(
             "Exactly five named runtime PAR paths are required."
         )
-    launcher = _authenticate_artifact(launcher_path, label="Launcher")
+    launcher = _authenticate_artifact(
+        launcher_path,
+        label="Launcher",
+        archive_validator=_launcher_archive_validator(
+            sources.profiles[POLICY_IMPROVEMENT_LAUNCHER_SOURCE_PROFILE]
+        ),
+    )
     validators = {
         "training": _training_archive_validator(sources.training.manifest_bytes),
         "full": _profile_archive_validator(

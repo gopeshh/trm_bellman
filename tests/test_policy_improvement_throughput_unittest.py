@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import io
 from pathlib import Path
+import tempfile
 import unittest
 from unittest import mock
 
+from scripts import policy_improvement_throughput as throughput
 from scripts.policy_improvement_throughput import (
     AUTOMATIC_CAPS,
     ENGINEERING_SEED,
@@ -15,6 +18,7 @@ from scripts.policy_improvement_throughput import (
     OPTIONAL_CAP,
     execute_calibration,
     fit_engineering_model,
+    load_throughput_registration,
     load_training_only_dataset,
     main,
     THROUGHPUT_SAMPLE_SCHEMA_NAME,
@@ -273,6 +277,205 @@ class ThroughputCalibrationTest(unittest.TestCase):
             "train-only",
         )
         self.assertEqual(calls, [(Path("/dataset"), "train", 1024)])
+
+    def test_registration_rejects_unregistered_dataset_before_opening_it(self) -> None:
+        dataset_manifest = b"dataset"
+        train_manifest = b"train manifest"
+        protocol = {
+            "budgets": {
+                "throughput_calibration": {
+                    "automatic_caps": list(AUTOMATIC_CAPS),
+                    "environment_interaction_caps": [
+                        *AUTOMATIC_CAPS,
+                        OPTIONAL_CAP,
+                    ],
+                    "evaluation_rollouts": False,
+                    "split": "train",
+                    "user_authorization_required_for": OPTIONAL_CAP,
+                }
+            },
+            "dataset": {
+                "root": "registered/dataset",
+                "manifest_sha256": {
+                    "status": "available",
+                    "value": hashlib.sha256(dataset_manifest).hexdigest(),
+                },
+                "splits": {
+                    "train": {
+                        "count": 1024,
+                        "manifest_sha256": {
+                            "status": "available",
+                            "value": hashlib.sha256(train_manifest).hexdigest(),
+                        },
+                        "ordered_record_sha256": {
+                            "status": "available",
+                            "value": _digest("train order"),
+                        },
+                    }
+                },
+            },
+            "population_registry": {"sha256": _digest("populations")},
+            "test_isolation": {
+                "throughput_split": "train",
+                "test_open_status": "not_created",
+            },
+        }
+        method_configs = {method_id: {} for method_id in METHOD_IDS}
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            config = root / "configs/policy_improvement_v2"
+            config.mkdir(parents=True)
+            protocol_path = config / "protocol.json"
+            registry_path = config / "registry.json"
+            protocol_path.write_text("{}\n", encoding="ascii")
+            registry_path.write_text("{}\n", encoding="ascii")
+            attacker_dataset = root / "attacker-dataset"
+            (attacker_dataset / "manifests").mkdir(parents=True)
+            (attacker_dataset / "train").mkdir()
+            (attacker_dataset / "MANIFEST.json").write_bytes(dataset_manifest)
+            (attacker_dataset / "manifests/train.json").write_bytes(train_manifest)
+
+            stable_reader = throughput._stable_regular_file_bytes
+            with (
+                mock.patch(
+                    "scripts.policy_improvement_throughput.validate_v2_protocol",
+                    return_value=protocol,
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_throughput.load_registered_populations",
+                    return_value={},
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_throughput.load_v2_base_configs",
+                    return_value=method_configs,
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_throughput.validate_v2_registry_document",
+                    return_value={},
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_throughput._stable_regular_file_bytes",
+                    wraps=stable_reader,
+                ) as read_file,
+            ):
+                with mock.patch.object(
+                    throughput,
+                    "_canonical_registered_directory",
+                    side_effect=lambda _project, supplied, _relative, name: (
+                        throughput._regular_directory(supplied, name=name)
+                    ),
+                ):
+                    accepted = load_throughput_registration(
+                        project_root=root,
+                        protocol_path=protocol_path,
+                        registry_path=registry_path,
+                        dataset_root=attacker_dataset,
+                        runtime_authorization_sha256=_digest("authorization"),
+                    )
+                self.assertEqual(accepted.dataset_root, attacker_dataset)
+                self.assertIn(
+                    mock.call(
+                        attacker_dataset / "MANIFEST.json",
+                        name="dataset manifest",
+                    ),
+                    read_file.call_args_list,
+                )
+
+                read_file.reset_mock()
+                with self.assertRaisesRegex(
+                    ThroughputCalibrationError,
+                    "dataset root is not the protocol-v2 dataset",
+                ):
+                    load_throughput_registration(
+                        project_root=root,
+                        protocol_path=protocol_path,
+                        registry_path=registry_path,
+                        dataset_root=attacker_dataset,
+                        runtime_authorization_sha256=_digest("authorization"),
+                    )
+                self.assertNotIn(
+                    mock.call(
+                        attacker_dataset / "MANIFEST.json",
+                        name="dataset manifest",
+                    ),
+                    read_file.call_args_list,
+                )
+
+                registered_dataset = root / "registered/dataset"
+                (registered_dataset / "manifests").mkdir(parents=True)
+                (registered_dataset / "train").mkdir()
+                (registered_dataset / "MANIFEST.json").write_bytes(
+                    dataset_manifest
+                )
+                (registered_dataset / "manifests/train.json").write_bytes(
+                    train_manifest
+                )
+                accepted = load_throughput_registration(
+                    project_root=root,
+                    protocol_path=protocol_path,
+                    registry_path=registry_path,
+                    dataset_root=registered_dataset,
+                    runtime_authorization_sha256=_digest("authorization"),
+                )
+                self.assertEqual(accepted.dataset_root, registered_dataset)
+
+                def register_then_load(loader: mock.Mock) -> object:
+                    registration = load_throughput_registration(
+                        project_root=root,
+                        protocol_path=protocol_path,
+                        registry_path=registry_path,
+                        dataset_root=registered_dataset,
+                        runtime_authorization_sha256=_digest("authorization"),
+                    )
+                    return load_training_only_dataset(registration, loader)
+
+                train_directory = registered_dataset / "train"
+                train_directory.rmdir()
+                train_directory.symlink_to(attacker_dataset, target_is_directory=True)
+                split_loader = mock.Mock(return_value="must not load")
+                read_file.reset_mock()
+                with self.assertRaisesRegex(
+                    ThroughputCalibrationError,
+                    "train split directory must be a canonical non-symlink directory",
+                ):
+                    register_then_load(split_loader)
+                split_loader.assert_not_called()
+                self.assertNotIn(
+                    mock.call(
+                        registered_dataset / "MANIFEST.json",
+                        name="dataset manifest",
+                    ),
+                    read_file.call_args_list,
+                )
+
+                train_directory.unlink()
+                train_directory.mkdir()
+                manifest_directory = registered_dataset / "manifests"
+                (manifest_directory / "train.json").unlink()
+                manifest_directory.rmdir()
+                external_manifests = root / "external-manifests"
+                external_manifests.mkdir()
+                (external_manifests / "train.json").write_bytes(train_manifest)
+                manifest_directory.symlink_to(
+                    external_manifests,
+                    target_is_directory=True,
+                )
+                split_loader.reset_mock()
+                read_file.reset_mock()
+                with self.assertRaisesRegex(
+                    ThroughputCalibrationError,
+                    "dataset manifest directory must be a canonical non-symlink",
+                ):
+                    register_then_load(split_loader)
+                split_loader.assert_not_called()
+                self.assertNotIn(
+                    mock.call(
+                        registered_dataset / "MANIFEST.json",
+                        name="dataset manifest",
+                    ),
+                    read_file.call_args_list,
+                )
 
     def test_sample_rejects_test_validation_or_evaluation_claims(self) -> None:
         registration = _registration()

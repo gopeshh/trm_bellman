@@ -17,6 +17,7 @@ PHASE4_EVALUATOR_SOURCE_PROFILE = "evaluator"
 PHASE4_AUDIT_SOURCE_PROFILE = "audit"
 PHASE4_FIGURE_SOURCE_PROFILE = "figure"
 POLICY_DATASET_BUILDER_SOURCE_PROFILE = "policy-dataset-builder"
+POLICY_IMPROVEMENT_LAUNCHER_SOURCE_PROFILE = "policy-improvement-launcher"
 POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE = "policy-improvement-audit"
 POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE = "policy-improvement-analysis"
 POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE = "policy-improvement-full"
@@ -109,6 +110,9 @@ PHASE4_PROFILE_ENTRYPOINTS = {
         "scripts/make_paper_figures_phase4.py",
     ),
     POLICY_DATASET_BUILDER_SOURCE_PROFILE: ("policy_dataset_builder_entrypoint.py",),
+    POLICY_IMPROVEMENT_LAUNCHER_SOURCE_PROFILE: (
+        "phase4_runtime_launcher.py",
+    ),
     POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE: (
         "policy_improvement_consumer_entrypoint.py",
         "scripts/policy_improvement_audit.py",
@@ -139,6 +143,12 @@ POLICY_DATASET_BUILDER_PROFILE_PATHS = (
     "utils/__init__.py",
     "utils/dataset_provenance.py",
     "utils/run_identity.py",
+)
+POLICY_IMPROVEMENT_LAUNCHER_PROFILE_PATHS = (
+    PRODUCER_SOURCE_MANIFEST_RELATIVE_PATH,
+    "confirmatory_runtime_launcher.py",
+    "phase4_runtime_launcher.py",
+    "phase4_runtime_profile.py",
 )
 _POLICY_IMPROVEMENT_CONFIG_PATHS = (
     "configs/policy_improvement_v1/amendments/theory_bridge_v1.json",
@@ -235,6 +245,9 @@ POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS = (
 )
 _EXACT_PROFILE_PATHS = {
     POLICY_DATASET_BUILDER_SOURCE_PROFILE: POLICY_DATASET_BUILDER_PROFILE_PATHS,
+    POLICY_IMPROVEMENT_LAUNCHER_SOURCE_PROFILE: (
+        POLICY_IMPROVEMENT_LAUNCHER_PROFILE_PATHS
+    ),
     POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE: (POLICY_IMPROVEMENT_AUDIT_PROFILE_PATHS),
     POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE: (
         POLICY_IMPROVEMENT_ANALYSIS_PROFILE_PATHS
