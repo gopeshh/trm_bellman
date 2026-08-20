@@ -181,6 +181,7 @@ from utils.compute_accounting import (
     aggregate_model_compute,
     capture_model_compute_state,
     current_cuda_memory_peaks,
+    execution_device_identity,
     process_peak_rss_bytes,
     restore_model_compute_state,
     subtract_model_counters,
@@ -2801,7 +2802,8 @@ class UPITrmTrainer:
             )
         self._record_memory_peaks()
         return {
-            "schema_version": 1,
+            "schema_version": 2,
+            "execution_device_identity": execution_device_identity(self.device),
             "model_compute_state": capture_model_compute_state(
                 self._model_roles()
             ),
@@ -2821,7 +2823,7 @@ class UPITrmTrainer:
     def restore_compute_accounting_checkpoint_state(
         self, state: object, *, validate_only: bool = False
     ) -> None:
-        expected = {
+        common_fields = {
             "schema_version",
             "model_compute_state",
             "training_model_work",
@@ -2832,15 +2834,26 @@ class UPITrmTrainer:
             "peak_cuda_allocated_bytes",
             "peak_cuda_reserved_bytes",
         }
-        if not isinstance(state, dict) or set(state) != expected:
+        if not isinstance(state, dict):
             raise ValueError("compute accounting checkpoint state has an invalid inventory")
-        schema_version = state["schema_version"]
+        schema_version = state.get("schema_version")
         if (
             isinstance(schema_version, bool)
             or not isinstance(schema_version, int)
-            or schema_version != 1
+            or schema_version not in {1, 2}
         ):
             raise ValueError("unsupported compute accounting checkpoint schema")
+        expected = common_fields | (
+            {"execution_device_identity"} if schema_version == 2 else set()
+        )
+        if set(state) != expected:
+            raise ValueError("compute accounting checkpoint state has an invalid inventory")
+        if schema_version == 2 and state["execution_device_identity"] != (
+            execution_device_identity(self.device)
+        ):
+            raise ValueError(
+                "compute accounting checkpoint names another execution device"
+            )
         training = validate_model_counters(
             state["training_model_work"], name="training_model_work"
         )

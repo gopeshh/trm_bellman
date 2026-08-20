@@ -11,15 +11,44 @@ old, candidate, or target models counts each model's work.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 import math
+import platform
 import resource
 import sys
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import torch
 
 
 COMPUTE_SNAPSHOT_SCHEMA_VERSION = 2
+AUTHENTICATED_COMPUTE_ACCOUNTING_SCHEMA_NAME = (
+    "policy_improvement_compute_accounting_v2"
+)
+AUTHENTICATED_COMPUTE_ACCOUNTING_SCHEMA_VERSION = 1
+
+AUTHENTICATED_COMPUTE_FIELDS = (
+    "environment_interactions",
+    "recurrent_latent_state_updates",
+    "action_logit_evaluations",
+    "action_value_evaluations",
+    "value_head_calls",
+    "optimizer_steps_by_type",
+    "wall_clock_training_seconds",
+    "evaluation_seconds",
+    "checkpoint_seconds",
+    "audit_seconds",
+    "cuda_utilization_samples",
+    "peak_allocated_device_bytes",
+    "peak_reserved_device_bytes",
+    "process_peak_rss_bytes",
+    "execution_device_identity",
+)
+
+_TRAINING_UNAVAILABLE_AUDIT_REASON = "owned_by_authenticated_audit_role"
+_AUDIT_UNAVAILABLE_TRAINING_REASON = "not_owned_by_authenticated_audit_role"
+_NON_CUDA_REASON = "not_applicable_for_non_cuda_execution"
 
 MODEL_COUNTER_FIELDS = (
     "latent_initialization_calls",
@@ -85,7 +114,9 @@ def validate_model_counters(value: object, *, name: str) -> dict[str, int]:
     if set(value) != set(MODEL_COUNTER_FIELDS):
         missing = sorted(set(MODEL_COUNTER_FIELDS) - set(value))
         extra = sorted(set(value) - set(MODEL_COUNTER_FIELDS))
-        raise ValueError(f"{name} counter inventory mismatch: missing={missing}, extra={extra}")
+        raise ValueError(
+            f"{name} counter inventory mismatch: missing={missing}, extra={extra}"
+        )
     result: dict[str, int] = {}
     for field in MODEL_COUNTER_FIELDS:
         item = value[field]
@@ -213,9 +244,7 @@ def validate_model_compute_state(
         )
     canonical: list[dict[str, object]] = []
     for roles in sorted(expected_by_roles):
-        canonical.append(
-            {"roles": list(roles), "counters": supplied[roles]}
-        )
+        canonical.append({"roles": list(roles), "counters": supplied[roles]})
     return canonical
 
 
@@ -235,7 +264,9 @@ def restore_model_compute_state(
         model = expected_by_roles[roles]
         restore_fn = getattr(model, "restore_compute_counters", None)
         if not callable(restore_fn):
-            raise ValueError(f"model roles {roles} do not support compute counter restore")
+            raise ValueError(
+                f"model roles {roles} do not support compute counter restore"
+            )
         restore_fn(item["counters"])
 
 
@@ -271,6 +302,415 @@ def current_cuda_memory_peaks(device: torch.device) -> tuple[int | None, int | N
         int(torch.cuda.max_memory_allocated(device)),
         int(torch.cuda.max_memory_reserved(device)),
     )
+
+
+def execution_device_identity(device: torch.device | str) -> dict[str, object]:
+    """Return the physical execution-device identity bound into v2 evidence."""
+
+    resolved = torch.device(device)
+    if resolved.type == "cpu":
+        return {
+            "canonical": "cpu",
+            "device_type": "cpu",
+            "device_index": None,
+            "hardware_name": platform.processor() or platform.machine(),
+            "cuda_capability": None,
+        }
+    if resolved.type != "cuda":
+        raise ValueError(f"Unsupported execution device type {resolved.type!r}")
+    if not torch.cuda.is_available():
+        raise ValueError("CUDA execution identity requires an available CUDA runtime")
+    index = resolved.index
+    if index is None:
+        index = int(torch.cuda.current_device())
+    if not 0 <= index < torch.cuda.device_count():
+        raise ValueError("CUDA execution device index is unavailable")
+    capability = torch.cuda.get_device_capability(index)
+    return {
+        "canonical": f"cuda:{index}",
+        "device_type": "cuda",
+        "device_index": index,
+        "hardware_name": str(torch.cuda.get_device_name(index)),
+        "cuda_capability": [int(capability[0]), int(capability[1])],
+    }
+
+
+def _canonical_json_sha256(value: object) -> str:
+    payload = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _available(value: object) -> dict[str, object]:
+    return {"status": "available", "value": value}
+
+
+def _unavailable(reason: str) -> dict[str, str]:
+    return {"status": "unavailable", "reason": reason}
+
+
+def _validate_device_identity(value: object, *, name: str) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != {
+        "canonical",
+        "device_type",
+        "device_index",
+        "hardware_name",
+        "cuda_capability",
+    }:
+        raise ValueError(f"{name} has an invalid inventory")
+    device_type = value["device_type"]
+    if device_type not in {"cpu", "cuda"}:
+        raise ValueError(f"{name}.device_type is unsupported")
+    canonical = value["canonical"]
+    hardware_name = value["hardware_name"]
+    if not isinstance(hardware_name, str) or not hardware_name:
+        raise ValueError(f"{name}.hardware_name must be a nonempty string")
+    if device_type == "cpu":
+        if (
+            canonical != "cpu"
+            or value["device_index"] is not None
+            or value["cuda_capability"] is not None
+        ):
+            raise ValueError(f"{name} is not a canonical CPU identity")
+    else:
+        index = value["device_index"]
+        capability = value["cuda_capability"]
+        if (
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or index < 0
+            or canonical != f"cuda:{index}"
+            or not isinstance(capability, list)
+            or len(capability) != 2
+            or any(
+                isinstance(item, bool) or not isinstance(item, int) or item < 0
+                for item in capability
+            )
+        ):
+            raise ValueError(f"{name} is not a canonical CUDA identity")
+    return dict(value)
+
+
+def _validate_availability(
+    value: object,
+    *,
+    name: str,
+    validator: Callable[..., object],
+) -> dict[str, object]:
+    if not isinstance(value, dict) or value.get("status") not in {
+        "available",
+        "unavailable",
+    }:
+        raise ValueError(f"{name} must be an availability object")
+    if value["status"] == "unavailable":
+        if set(value) != {"status", "reason"}:
+            raise ValueError(f"{name} unavailable inventory is invalid")
+        reason = value["reason"]
+        if not isinstance(reason, str) or not reason:
+            raise ValueError(f"{name}.reason must be a nonempty string")
+        return {"status": "unavailable", "reason": reason}
+    if set(value) != {"status", "value"}:
+        raise ValueError(f"{name} available inventory is invalid")
+    return {"status": "available", "value": validator(value["value"], name=name)}
+
+
+def _availability_value(value: Mapping[str, object], *, name: str) -> object:
+    if value.get("status") != "available":
+        raise ValueError(f"{name} must be available")
+    return value["value"]
+
+
+def _validate_optimizer_steps(value: object, *, name: str) -> dict[str, int]:
+    if not isinstance(value, dict) or set(value) != set(OPTIMIZER_STEP_FIELDS):
+        raise ValueError(f"{name} has an invalid optimizer inventory")
+    return {
+        field: _nonnegative_int(value[field], name=f"{name}.{field}")
+        for field in OPTIMIZER_STEP_FIELDS
+    }
+
+
+def _validate_cuda_samples(value: object, *, name: str) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != {
+        "sampling_interval_seconds",
+        "samples",
+    }:
+        raise ValueError(f"{name} has an invalid inventory")
+    interval = _nonnegative_finite_float(
+        value["sampling_interval_seconds"],
+        name=f"{name}.sampling_interval_seconds",
+    )
+    samples = value["samples"]
+    if interval <= 0.0 or not isinstance(samples, list) or len(samples) < 2:
+        raise ValueError(f"{name} requires an interval and at least two samples")
+    checked_samples = [
+        _nonnegative_finite_float(sample, name=f"{name}.samples[{index}]")
+        for index, sample in enumerate(samples)
+    ]
+    if any(sample > 1.0 for sample in checked_samples):
+        raise ValueError(f"{name} samples must lie in [0, 1]")
+    return {
+        "sampling_interval_seconds": interval,
+        "samples": checked_samples,
+    }
+
+
+def _validate_nonnegative_int_value(value: object, *, name: str) -> int:
+    return _nonnegative_int(value, name=name)
+
+
+def _validate_nonnegative_float_value(value: object, *, name: str) -> float:
+    return _nonnegative_finite_float(value, name=name)
+
+
+def build_training_compute_accounting(
+    compute_snapshot: object,
+    *,
+    device: torch.device | str,
+    checkpoint_seconds: float,
+    cuda_utilization: Mapping[str, object],
+) -> dict[str, object]:
+    """Bind a raw trainer snapshot to the protocol-v2 compute contract.
+
+    Audit time is deliberately unavailable here.  The training runtime cannot
+    measure work performed later by the independently authenticated audit PAR.
+    """
+
+    snapshot = validate_compute_snapshot(compute_snapshot)
+    identity = execution_device_identity(device)
+    training = snapshot["model_work"]["training"]
+    progress = snapshot["progress"]
+    memory = snapshot["peak_memory_bytes"]
+    wall = snapshot["wall_time_seconds"]
+    if not isinstance(cuda_utilization, Mapping) or set(cuda_utilization) != {
+        "device_type",
+        "sampling_interval_seconds",
+        "samples",
+    }:
+        raise ValueError("cuda_utilization has an invalid inventory")
+    if cuda_utilization["device_type"] != identity["device_type"]:
+        raise ValueError("CUDA utilization names another execution device type")
+    if identity["device_type"] == "cuda":
+        utilization = _available(
+            _validate_cuda_samples(
+                {
+                    "sampling_interval_seconds": cuda_utilization[
+                        "sampling_interval_seconds"
+                    ],
+                    "samples": cuda_utilization["samples"],
+                },
+                name="cuda_utilization_samples",
+            )
+        )
+        allocated = _available(memory["cuda_allocated"])
+        reserved = _available(memory["cuda_reserved"])
+    else:
+        if (
+            cuda_utilization["sampling_interval_seconds"] is not None
+            or cuda_utilization["samples"] != []
+            or memory["cuda_allocated"] is not None
+            or memory["cuda_reserved"] is not None
+        ):
+            raise ValueError("CPU compute accounting cannot claim CUDA measurements")
+        utilization = _unavailable(_NON_CUDA_REASON)
+        allocated = _unavailable(_NON_CUDA_REASON)
+        reserved = _unavailable(_NON_CUDA_REASON)
+    result = {
+        "schema_name": AUTHENTICATED_COMPUTE_ACCOUNTING_SCHEMA_NAME,
+        "schema_version": AUTHENTICATED_COMPUTE_ACCOUNTING_SCHEMA_VERSION,
+        "owner_role": "training",
+        "source_compute_snapshot_sha256": _canonical_json_sha256(snapshot),
+        "environment_interactions": _available(progress["environment_interactions"]),
+        "recurrent_latent_state_updates": _available(
+            training["recurrent_latent_state_updates"]
+        ),
+        "action_logit_evaluations": _available(training["action_logits_evaluated"]),
+        "action_value_evaluations": _available(training["action_values_evaluated"]),
+        "value_head_calls": _available(training["value_api_calls"]),
+        "optimizer_steps_by_type": _available(progress["optimizer_steps_by_kind"]),
+        "wall_clock_training_seconds": _available(wall["training"]),
+        "evaluation_seconds": _available(wall["evaluation"]),
+        "checkpoint_seconds": _available(float(checkpoint_seconds)),
+        "audit_seconds": _unavailable(_TRAINING_UNAVAILABLE_AUDIT_REASON),
+        "cuda_utilization_samples": utilization,
+        "peak_allocated_device_bytes": allocated,
+        "peak_reserved_device_bytes": reserved,
+        "process_peak_rss_bytes": _available(memory["process_rss"]),
+        "execution_device_identity": _available(identity),
+    }
+    return validate_authenticated_compute_accounting(
+        result,
+        source_compute_snapshot=snapshot,
+    )
+
+
+def build_audit_compute_accounting(
+    *,
+    audit_seconds: float,
+    process_rss_bytes: int,
+    device: torch.device | str = "cpu",
+) -> dict[str, object]:
+    """Record only the measurements owned by the authenticated audit role."""
+
+    unavailable = _unavailable(_AUDIT_UNAVAILABLE_TRAINING_REASON)
+    result = {
+        "schema_name": AUTHENTICATED_COMPUTE_ACCOUNTING_SCHEMA_NAME,
+        "schema_version": AUTHENTICATED_COMPUTE_ACCOUNTING_SCHEMA_VERSION,
+        "owner_role": "audit",
+        "source_compute_snapshot_sha256": None,
+        **{field: dict(unavailable) for field in AUTHENTICATED_COMPUTE_FIELDS},
+    }
+    result["audit_seconds"] = _available(float(audit_seconds))
+    result["process_peak_rss_bytes"] = _available(process_rss_bytes)
+    result["execution_device_identity"] = _available(execution_device_identity(device))
+    return validate_authenticated_compute_accounting(result)
+
+
+def validate_authenticated_compute_accounting(
+    value: object,
+    *,
+    source_compute_snapshot: object | None = None,
+) -> dict[str, object]:
+    """Validate the exact protocol-v2 compute record and optional source binding."""
+
+    expected = {
+        "schema_name",
+        "schema_version",
+        "owner_role",
+        "source_compute_snapshot_sha256",
+        *AUTHENTICATED_COMPUTE_FIELDS,
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("authenticated compute accounting has an invalid inventory")
+    if (
+        value["schema_name"] != AUTHENTICATED_COMPUTE_ACCOUNTING_SCHEMA_NAME
+        or value["schema_version"] != AUTHENTICATED_COMPUTE_ACCOUNTING_SCHEMA_VERSION
+    ):
+        raise ValueError("unsupported authenticated compute accounting schema")
+    role = value["owner_role"]
+    if role not in {"training", "audit"}:
+        raise ValueError("authenticated compute owner role is unsupported")
+    validators = {
+        "environment_interactions": _validate_nonnegative_int_value,
+        "recurrent_latent_state_updates": _validate_nonnegative_int_value,
+        "action_logit_evaluations": _validate_nonnegative_int_value,
+        "action_value_evaluations": _validate_nonnegative_int_value,
+        "value_head_calls": _validate_nonnegative_int_value,
+        "optimizer_steps_by_type": _validate_optimizer_steps,
+        "wall_clock_training_seconds": _validate_nonnegative_float_value,
+        "evaluation_seconds": _validate_nonnegative_float_value,
+        "checkpoint_seconds": _validate_nonnegative_float_value,
+        "audit_seconds": _validate_nonnegative_float_value,
+        "cuda_utilization_samples": _validate_cuda_samples,
+        "peak_allocated_device_bytes": _validate_nonnegative_int_value,
+        "peak_reserved_device_bytes": _validate_nonnegative_int_value,
+        "process_peak_rss_bytes": _validate_nonnegative_int_value,
+        "execution_device_identity": _validate_device_identity,
+    }
+    checked = {
+        field: _validate_availability(
+            value[field],
+            name=field,
+            validator=validators[field],
+        )
+        for field in AUTHENTICATED_COMPUTE_FIELDS
+    }
+    if role == "audit":
+        if value["source_compute_snapshot_sha256"] is not None:
+            raise ValueError("audit compute accounting cannot bind a trainer snapshot")
+        for field in AUTHENTICATED_COMPUTE_FIELDS:
+            item = checked[field]
+            if field in {
+                "audit_seconds",
+                "process_peak_rss_bytes",
+                "execution_device_identity",
+            }:
+                if item["status"] != "available":
+                    raise ValueError(f"audit compute accounting requires {field}")
+            elif item != _unavailable(_AUDIT_UNAVAILABLE_TRAINING_REASON):
+                raise ValueError(f"audit role cannot claim {field}")
+        identity = _availability_value(
+            checked["execution_device_identity"],
+            name="execution_device_identity",
+        )
+        if not isinstance(identity, dict) or identity["device_type"] != "cpu":
+            raise ValueError("audit compute accounting must name its CPU role device")
+    else:
+        digest = value["source_compute_snapshot_sha256"]
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ValueError("training compute accounting source digest is invalid")
+        required = set(AUTHENTICATED_COMPUTE_FIELDS) - {"audit_seconds"}
+        identity_value = _availability_value(
+            checked["execution_device_identity"],
+            name="execution_device_identity",
+        )
+        if not isinstance(identity_value, dict):
+            raise ValueError("execution device identity is invalid")
+        device_type = identity_value["device_type"]
+        if device_type == "cpu":
+            required -= {
+                "cuda_utilization_samples",
+                "peak_allocated_device_bytes",
+                "peak_reserved_device_bytes",
+            }
+            for field in (
+                "cuda_utilization_samples",
+                "peak_allocated_device_bytes",
+                "peak_reserved_device_bytes",
+            ):
+                if checked[field] != _unavailable(_NON_CUDA_REASON):
+                    raise ValueError(f"CPU training cannot claim {field}")
+        for field in required:
+            if checked[field]["status"] != "available":
+                raise ValueError(f"training compute accounting requires {field}")
+        if checked["audit_seconds"] != _unavailable(_TRAINING_UNAVAILABLE_AUDIT_REASON):
+            raise ValueError("training runtime cannot claim audit_seconds")
+        if source_compute_snapshot is not None:
+            source = validate_compute_snapshot(source_compute_snapshot)
+            if _canonical_json_sha256(source) != digest:
+                raise ValueError("training compute source snapshot digest differs")
+            training = source["model_work"]["training"]
+            progress = source["progress"]
+            wall = source["wall_time_seconds"]
+            memory = source["peak_memory_bytes"]
+            expected_values = {
+                "environment_interactions": progress["environment_interactions"],
+                "recurrent_latent_state_updates": training[
+                    "recurrent_latent_state_updates"
+                ],
+                "action_logit_evaluations": training["action_logits_evaluated"],
+                "action_value_evaluations": training["action_values_evaluated"],
+                "value_head_calls": training["value_api_calls"],
+                "optimizer_steps_by_type": progress["optimizer_steps_by_kind"],
+                "wall_clock_training_seconds": wall["training"],
+                "evaluation_seconds": wall["evaluation"],
+                "process_peak_rss_bytes": memory["process_rss"],
+            }
+            if device_type == "cuda":
+                expected_values.update(
+                    {
+                        "peak_allocated_device_bytes": memory["cuda_allocated"],
+                        "peak_reserved_device_bytes": memory["cuda_reserved"],
+                    }
+                )
+            for field, expected_value in expected_values.items():
+                if _availability_value(checked[field], name=field) != expected_value:
+                    raise ValueError(f"{field} differs from source compute snapshot")
+    return {
+        "schema_name": value["schema_name"],
+        "schema_version": value["schema_version"],
+        "owner_role": role,
+        "source_compute_snapshot_sha256": value["source_compute_snapshot_sha256"],
+        **checked,
+    }
 
 
 def _nonnegative_int(value: object, *, name: str) -> int:

@@ -423,11 +423,29 @@ class FullBackendIdentityTest(unittest.TestCase):
                 "environment_interactions",
                 "recurrent_map_applications",
                 "elapsed_seconds",
+                "compute_snapshot",
+                "compute_accounting",
                 "scientific_selection",
                 "test_data_opened",
             },
         )
+        self.assertEqual(
+            result["schema_name"],
+            "policy_improvement_training_throughput_smoke_v2",
+        )
         self.assertEqual(result["environment_interactions"], 16)
+        self.assertEqual(
+            result["compute_accounting"]["environment_interactions"]["value"],
+            16,
+        )
+        self.assertEqual(
+            result["compute_accounting"]["checkpoint_seconds"]["value"],
+            0.0,
+        )
+        self.assertEqual(
+            result["compute_accounting"]["audit_seconds"]["status"],
+            "unavailable",
+        )
         self.assertFalse(result["scientific_selection"])
         self.assertFalse(result["test_data_opened"])
 
@@ -948,9 +966,7 @@ class FullCheckpointGuardTest(unittest.TestCase):
                         sealed_checkpoint_descriptor=descriptor,
                         authenticated_model_state_sha256=model_sha256,
                         authenticated_role_state_sha256s=role_state_sha256s,
-                        authenticated_validation_sha256=(
-                            checkpoint_validation_sha256
-                        ),
+                        authenticated_validation_sha256=(checkpoint_validation_sha256),
                         runtime_identity=runtime,
                         training_module=upi_trm_train,
                     )
@@ -963,9 +979,7 @@ class FullCheckpointGuardTest(unittest.TestCase):
                         sealed_checkpoint_descriptor=descriptor,
                         authenticated_model_state_sha256=model_sha256,
                         authenticated_role_state_sha256s=role_state_sha256s,
-                        authenticated_validation_sha256=(
-                            checkpoint_validation_sha256
-                        ),
+                        authenticated_validation_sha256=(checkpoint_validation_sha256),
                         runtime_identity=runtime,
                         training_module=upi_trm_train,
                     )
@@ -987,9 +1001,7 @@ class FullCheckpointGuardTest(unittest.TestCase):
                             canonical_json_sha256(mismatched_roles)
                         ),
                         authenticated_role_state_sha256s=mismatched_roles,
-                        authenticated_validation_sha256=(
-                            checkpoint_validation_sha256
-                        ),
+                        authenticated_validation_sha256=(checkpoint_validation_sha256),
                         runtime_identity=runtime,
                         training_module=upi_trm_train,
                     )

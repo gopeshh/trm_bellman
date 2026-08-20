@@ -73,8 +73,12 @@ from utils.dataset_provenance import (
     ordered_record_sha256,
 )
 from utils.compute_accounting import (
+    add_model_counters,
+    build_training_compute_accounting,
     capture_model_compute_state,
     restore_model_compute_state,
+    validate_compute_snapshot,
+    zero_model_counters,
 )
 from utils.run_identity import (
     build_run_identity,
@@ -188,6 +192,11 @@ class LearnedSession:
     evaluation_state_dicts: dict[str, dict[str, object]] = field(default_factory=dict)
     parent_environment_interactions: int | None = None
     evaluation_started: bool = False
+    checkpoint_wall_time_seconds: float = 0.0
+    external_evaluation_wall_time_seconds: float = 0.0
+    external_evaluation_model_work: dict[str, int] = field(
+        default_factory=zero_model_counters
+    )
 
 
 @dataclass(frozen=True)
@@ -206,6 +215,13 @@ class _Snapshot:
     accelerator_seconds: float
     policy_evaluations: list[dict[str, object]]
     lineage_sha256: str
+
+
+@dataclass(frozen=True)
+class _EvaluationOutcome:
+    policy_evaluations: list[dict[str, object]]
+    model_work: dict[str, int]
+    wall_time_seconds: float
 
 
 def _require_digest(value: object, *, name: str) -> str:
@@ -286,23 +302,43 @@ def calibrate_training_split_throughput(
     if session.run.row.get("evaluation_split") == "test" or session.evaluation_started:
         raise FullBackendError("Throughput calibration cannot open evaluation results.")
     before_interactions = int(session.trainer.get_env_step_count())
+    if before_interactions != 0:
+        raise FullBackendError("Throughput calibration requires a fresh session.")
     before_recurrent = TorchLearnedRunEngine._recurrent_work(session)
+    sampler = _GpuTrainingSampler(session.device)
+    sampler.start()
     started = time.perf_counter()
-    TorchLearnedRunEngine._train_step(session, environment_interactions)
-    elapsed = time.perf_counter() - started
+    try:
+        TorchLearnedRunEngine._train_step(session, environment_interactions)
+    finally:
+        elapsed = time.perf_counter() - started
+        utilization = sampler.stop()
     after_interactions = int(session.trainer.get_env_step_count())
     after_recurrent = TorchLearnedRunEngine._recurrent_work(session)
     interaction_delta = after_interactions - before_interactions
     recurrent_delta = after_recurrent - before_recurrent
     if interaction_delta != environment_interactions or recurrent_delta < 0:
         raise FullBackendError("Calibration trainer violated its mechanics-only cap.")
+    compute_snapshot = TorchLearnedRunEngine._training_compute(session)
+    compute_accounting = build_training_compute_accounting(
+        compute_snapshot,
+        device=session.device,
+        checkpoint_seconds=0.0,
+        cuda_utilization={
+            "device_type": utilization.device_type,
+            "sampling_interval_seconds": utilization.sampling_interval_seconds,
+            "samples": list(utilization.samples),
+        },
+    )
     return {
-        "schema_name": "policy_improvement_training_throughput_smoke_v1",
-        "schema_version": 1,
+        "schema_name": "policy_improvement_training_throughput_smoke_v2",
+        "schema_version": 2,
         "source": "synthetic_or_training_split_only",
         "environment_interactions": interaction_delta,
         "recurrent_map_applications": recurrent_delta,
         "elapsed_seconds": elapsed,
+        "compute_snapshot": compute_snapshot,
+        "compute_accounting": compute_accounting,
         "scientific_selection": False,
         "test_data_opened": False,
     }
@@ -800,8 +836,25 @@ class TorchLearnedRunEngine:
 
     @staticmethod
     def _training_compute(session: LearnedSession) -> dict[str, Any]:
-        snapshot = session.trainer.compute_accounting_snapshot()
-        return dict(snapshot)
+        raw = session.trainer.compute_accounting_snapshot()
+        snapshot = dict(raw)
+        model_work = dict(snapshot["model_work"])
+        training_work = dict(model_work["training"])
+        live_evaluation_work = dict(model_work["evaluation"])
+        evaluation_work = add_model_counters(
+            live_evaluation_work,
+            session.external_evaluation_model_work,
+        )
+        model_work["training"] = training_work
+        model_work["evaluation"] = evaluation_work
+        model_work["total"] = add_model_counters(training_work, evaluation_work)
+        snapshot["model_work"] = model_work
+        wall = dict(snapshot["wall_time_seconds"])
+        wall["evaluation"] = float(wall["evaluation"]) + float(
+            session.external_evaluation_wall_time_seconds
+        )
+        snapshot["wall_time_seconds"] = wall
+        return validate_compute_snapshot(snapshot)
 
     @staticmethod
     def _recurrent_work(session: LearnedSession) -> int:
@@ -859,25 +912,31 @@ class TorchLearnedRunEngine:
             kind=kind,
             parent_checkpoint_sha256=parent_checkpoint_sha256,
         )
-        return publish_and_validate_full_checkpoint(
-            training_module=self._module,
-            session=session,
-            fresh_session_factory=lambda: self._build_session(request.run, runtime),
-            checkpoint_directory=directory,
-            identity=identity,
-            validator_execution_identity={
-                "role": "policy-improvement-training",
-                "source_git_commit": runtime.source_git_commit,
-                "runtime_sha256": runtime.runtime_sha256,
-                "runtime_profile_sha256": runtime.runtime_profile_sha256,
-                "selected_source_manifest_sha256": (
-                    runtime.selected_source_manifest_sha256
-                ),
-                "runtime_authorization_sha256": (runtime.runtime_authorization_sha256),
-                "launcher_sha256": runtime.launcher_sha256,
-            },
-            evaluation_state_dicts=session.evaluation_state_dicts,
-        )
+        started = time.perf_counter()
+        try:
+            return publish_and_validate_full_checkpoint(
+                training_module=self._module,
+                session=session,
+                fresh_session_factory=lambda: self._build_session(request.run, runtime),
+                checkpoint_directory=directory,
+                identity=identity,
+                validator_execution_identity={
+                    "role": "policy-improvement-training",
+                    "source_git_commit": runtime.source_git_commit,
+                    "runtime_sha256": runtime.runtime_sha256,
+                    "runtime_profile_sha256": runtime.runtime_profile_sha256,
+                    "selected_source_manifest_sha256": (
+                        runtime.selected_source_manifest_sha256
+                    ),
+                    "runtime_authorization_sha256": (
+                        runtime.runtime_authorization_sha256
+                    ),
+                    "launcher_sha256": runtime.launcher_sha256,
+                },
+                evaluation_state_dicts=session.evaluation_state_dicts,
+            )
+        finally:
+            session.checkpoint_wall_time_seconds += time.perf_counter() - started
 
     @staticmethod
     def _live_fingerprint(session: LearnedSession) -> str:
@@ -924,8 +983,8 @@ class TorchLearnedRunEngine:
         checkpoint: FullCheckpointArtifact,
         *,
         kind: str,
-    ) -> list[dict[str, object]]:
-        def evaluate() -> list[dict[str, object]]:
+    ) -> _EvaluationOutcome:
+        def evaluate() -> _EvaluationOutcome:
             restored = self._build_session(request.run, runtime)
             loaded, observed = self._module._load_checkpoint_payload(
                 str(checkpoint.path), expected_sha256=checkpoint.sha256
@@ -1069,15 +1128,33 @@ class TorchLearnedRunEngine:
             expected = policy_variants_for_method(str(request.run.row["method_id"]))
             if tuple(item["policy_variant"] for item in evaluations) != expected:
                 raise FullBackendError("Evaluation policy inventory differs.")
-            return evaluations
+            compute = restored.trainer.compute_accounting_snapshot()
+            evaluation_work = compute["model_work"]["evaluation"]
+            evaluation_wall_time = compute["wall_time_seconds"]["evaluation"]
+            if not isinstance(evaluation_work, dict) or isinstance(
+                evaluation_wall_time, bool
+            ):
+                raise FullBackendError("Evaluation compute accounting is invalid.")
+            return _EvaluationOutcome(
+                policy_evaluations=evaluations,
+                model_work={
+                    name: int(value) for name, value in evaluation_work.items()
+                },
+                wall_time_seconds=float(evaluation_wall_time),
+            )
 
         rng_state = self._module._capture_rng_state()
         try:
-            return evaluate_without_mutation(
+            outcome = evaluate_without_mutation(
                 checkpoint_path=checkpoint.path,
                 live_state_fingerprint=lambda: self._live_fingerprint(live_session),
                 evaluator=evaluate,
             )
+            if not isinstance(outcome, _EvaluationOutcome):
+                raise FullBackendError(
+                    "Checkpoint evaluator returned invalid accounting."
+                )
+            return outcome
         finally:
             self._module._restore_rng_state(rng_state)
 
@@ -1107,13 +1184,18 @@ class TorchLearnedRunEngine:
             / "checkpoint_validation.json"
         )
         _write_json(validation_path, checkpoint.validation)
-        evaluations = self._evaluate_checkpoint(
+        evaluation = self._evaluate_checkpoint(
             request,
             runtime,
             session,
             checkpoint,
             kind=kind,
         )
+        session.external_evaluation_model_work = add_model_counters(
+            session.external_evaluation_model_work,
+            evaluation.model_work,
+        )
+        session.external_evaluation_wall_time_seconds += evaluation.wall_time_seconds
         compute = self._training_compute(session)
         interactions = session.trainer.get_env_step_count()
         recurrent = int(
@@ -1136,7 +1218,7 @@ class TorchLearnedRunEngine:
             environment_interactions=interactions,
             recurrent_map_applications=recurrent,
             accelerator_seconds=float(compute["wall_time_seconds"]["training"]),
-            policy_evaluations=evaluations,
+            policy_evaluations=evaluation.policy_evaluations,
             lineage_sha256=lineage,
         )
 
@@ -1198,6 +1280,28 @@ class TorchLearnedRunEngine:
             request.staging_generation / "model_state_inventory.json",
             state_inventory,
         )
+        training_compute = self._training_compute(session)
+        compute_snapshot_sha256: str | None = None
+        compute_accounting_sha256: str | None = None
+        if request.run.protocol.get("schema_name") == "policy_improvement_protocol_v2":
+            compute_snapshot_sha256 = _write_json(
+                request.staging_generation / "compute_snapshot.json",
+                training_compute,
+            )
+            compute_accounting = build_training_compute_accounting(
+                training_compute,
+                device=session.device,
+                checkpoint_seconds=session.checkpoint_wall_time_seconds,
+                cuda_utilization={
+                    "device_type": utilization.device_type,
+                    "sampling_interval_seconds": utilization.sampling_interval_seconds,
+                    "samples": list(utilization.samples),
+                },
+            )
+            compute_accounting_sha256 = _write_json(
+                request.staging_generation / "compute_accounting.json",
+                compute_accounting,
+            )
         run_manifest = {
             "schema_name": "policy_improvement_full_run_manifest_v1",
             "schema_version": 1,
@@ -1230,10 +1334,15 @@ class TorchLearnedRunEngine:
                 for snapshot in (interaction, compute)
             ],
         }
+        if (
+            compute_snapshot_sha256 is not None
+            and compute_accounting_sha256 is not None
+        ):
+            run_manifest["compute_snapshot_sha256"] = compute_snapshot_sha256
+            run_manifest["compute_accounting_sha256"] = compute_accounting_sha256
         run_manifest_sha256 = _write_json(
             request.staging_generation / "RUN_MANIFEST.json", run_manifest
         )
-        training_compute = self._training_compute(session)
         training_work = training_compute["model_work"]["training"]
         memory = training_compute["peak_memory_bytes"]
         device = self._module._canonical_device(session.device)
@@ -1432,9 +1541,7 @@ class TorchLearnedRunEngine:
                     "recurrent_map_applications": _available(
                         training_work["recurrent_latent_state_updates"]
                     ),
-                    "value_head_calls": _available(
-                        training_work["action_values_evaluated"]
-                    ),
+                    "value_head_calls": _available(training_work["value_api_calls"]),
                 },
                 "diagnostics": diagnostics,
             },

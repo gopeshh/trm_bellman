@@ -67,6 +67,7 @@ from scripts.policy_improvement_schema import (
 from utils.compute_accounting import (
     add_model_counters,
     aggregate_model_compute,
+    build_training_compute_accounting,
     subtract_model_counters,
     zero_model_counters,
 )
@@ -1396,6 +1397,51 @@ def _parent_gpu_utilization_summary(
     )
 
 
+def _checkpoint_timing_document(seconds: float) -> dict[str, object]:
+    if not math.isfinite(seconds) or seconds < 0.0:
+        raise PolicyImprovementSmokeError(
+            "Checkpoint wall time must be a nonnegative finite number."
+        )
+    return {
+        "schema_name": "policy_improvement_checkpoint_timing_v2",
+        "schema_version": 1,
+        "checkpoint_seconds": seconds,
+    }
+
+
+def _parent_checkpoint_seconds(context: SmokeContext) -> float:
+    path = context.run_root / "segments/env_000000016"
+    _validate_segment_generation(context, path, expected_budget=16)
+    payload, _ = _stable_regular_file(path / "checkpoint_timing.json")
+    try:
+        value = json.loads(
+            payload.decode("ascii"), object_pairs_hook=_strict_json_object
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PolicyImprovementSmokeError(
+            "Parent checkpoint timing evidence is invalid."
+        ) from exc
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema_name",
+        "schema_version",
+        "checkpoint_seconds",
+    }:
+        raise PolicyImprovementSmokeError("Parent checkpoint timing inventory differs.")
+    seconds = value["checkpoint_seconds"]
+    if (
+        value["schema_name"] != "policy_improvement_checkpoint_timing_v2"
+        or value["schema_version"] != 1
+        or isinstance(seconds, bool)
+        or not isinstance(seconds, (int, float))
+        or not math.isfinite(float(seconds))
+        or float(seconds) < 0.0
+    ):
+        raise PolicyImprovementSmokeError(
+            "Parent checkpoint timing evidence is invalid."
+        )
+    return float(seconds)
+
+
 def _assert_restored_state(
     module: Any, raw: Mapping[str, object], field: str, *, label: str
 ) -> None:
@@ -2589,6 +2635,7 @@ def _build_final_result(
     parent_checkpoint_sha256: str,
     latest_metrics: Mapping[str, float],
     gpu_utilization: GpuUtilizationSummary,
+    checkpoint_seconds: float,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     training_compute = session.trainer.compute_accounting_snapshot()
     evaluations_dir = staging / "evaluations"
@@ -2690,6 +2737,18 @@ def _build_final_result(
     compute = session.trainer.compute_accounting_snapshot()
     compute_path = staging / "compute_snapshot.json"
     compute_sha256 = _write_json(compute_path, compute)
+    compute_accounting_sha256: str | None = None
+    if context.protocol.get("schema_name") == "policy_improvement_protocol_v2":
+        compute_accounting = build_training_compute_accounting(
+            compute,
+            device=session.device,
+            checkpoint_seconds=checkpoint_seconds,
+            cuda_utilization=_gpu_utilization_document(gpu_utilization),
+        )
+        compute_accounting_sha256 = _write_json(
+            staging / "compute_accounting.json",
+            compute_accounting,
+        )
     training_work = training_compute["model_work"]["training"]
     evaluation_work = compute["model_work"]["evaluation"]
     if (
@@ -2867,6 +2926,8 @@ def _build_final_result(
             "gpu_utilization": _gpu_utilization_document(checked_gpu),
         },
     }
+    if compute_accounting_sha256 is not None:
+        run_manifest["compute_accounting_sha256"] = compute_accounting_sha256
     run_manifest_path = staging / "RUN_MANIFEST.json"
     run_manifest_sha256 = _write_json(run_manifest_path, run_manifest)
     result = {
@@ -3240,6 +3301,7 @@ def _publish_segment(
             _gpu_utilization_document(gpu_utilization),
         )
         try:
+            checkpoint_started = time.perf_counter()
             checkpoint_path, checkpoint_sha, checkpoint_validation = _checkpoint_output(
                 context, session, module, staging, parent_sha256
             )
@@ -3247,8 +3309,17 @@ def _publish_segment(
                 staging / "checkpoint_validation.json",
                 checkpoint_validation,
             )
+            segment_checkpoint_seconds = time.perf_counter() - checkpoint_started
         except Exception as exc:
             raise _SmokeExecutionError("checkpoint", exc) from exc
+        checkpoint_seconds = segment_checkpoint_seconds
+        if context.protocol.get("schema_name") == "policy_improvement_protocol_v2":
+            _write_json(
+                staging / "checkpoint_timing.json",
+                _checkpoint_timing_document(segment_checkpoint_seconds),
+            )
+            if context.segment_name == "resume":
+                checkpoint_seconds += _parent_checkpoint_seconds(context)
         result = None
         if context.segment_budget == 32:
             if parent_sha256 is None:
@@ -3267,6 +3338,7 @@ def _publish_segment(
                     parent_sha256,
                     latest_metrics,
                     gpu_utilization,
+                    checkpoint_seconds,
                 )
             except Exception as exc:
                 raise _SmokeExecutionError("evaluation", exc) from exc

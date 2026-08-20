@@ -18,6 +18,7 @@ import os
 import stat
 import struct
 import subprocess
+import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from fractions import Fraction
 from functools import lru_cache
@@ -710,6 +711,46 @@ def _stable_regular_file(
 
 def _regular_file_sha256(path: Path) -> str:
     return str(_stable_regular_file(path)[1]["sha256"])
+
+
+def _validate_v2_compute_accounting_generation(generation: Path) -> str:
+    """Authenticate the producer-owned v2 compute record after generation auth."""
+
+    from utils.compute_accounting import validate_authenticated_compute_accounting
+
+    snapshot_bytes, snapshot_identity = _stable_regular_file(
+        generation / "compute_snapshot.json"
+    )
+    accounting_bytes, accounting_identity = _stable_regular_file(
+        generation / "compute_accounting.json"
+    )
+    manifest_bytes, _ = _stable_regular_file(generation / "RUN_MANIFEST.json")
+    snapshot = _strict_json_payload(snapshot_bytes, path="compute_snapshot.json")
+    accounting = _strict_json_payload(
+        accounting_bytes,
+        path="compute_accounting.json",
+    )
+    manifest = _object(
+        _strict_json_payload(manifest_bytes, path="RUN_MANIFEST.json"),
+        path="run_manifest",
+    )
+    if (
+        manifest.get("compute_snapshot_sha256") != snapshot_identity["sha256"]
+        or manifest.get("compute_accounting_sha256") != accounting_identity["sha256"]
+    ):
+        raise PolicyImprovementSchemaError(
+            "Run manifest compute-accounting identities differ from immutable bytes."
+        )
+    try:
+        validate_authenticated_compute_accounting(
+            accounting,
+            source_compute_snapshot=snapshot,
+        )
+    except ValueError as exc:
+        raise PolicyImprovementSchemaError(
+            "Authenticated v2 compute accounting is invalid."
+        ) from exc
+    return str(accounting_identity["sha256"])
 
 
 def _strict_json_payload(payload: bytes, *, path: str) -> object:
@@ -1826,6 +1867,7 @@ def audit_result_set(
 ) -> dict[str, Any]:
     """Audit an exact phase inventory, including failures and paired records."""
 
+    audit_started = time.perf_counter()
     protocol = validate_protocol(protocol_value)
     history = validate_amendment_history(amendment_history, protocol=protocol)
     authorization = validate_runtime_authorization(runtime_authorization)
@@ -2107,6 +2149,7 @@ def audit_result_set(
     historical_failed_attempt_manifest_sha256s: list[str] = []
     semantic_validation_sha256s: list[str] = []
     consumed_per_instance_sha256s: set[str] = set()
+    compute_accounting_sha256s: list[str] = []
     for run_id, result_document in by_run_id.items():
         row = rows_by_id[run_id]
         if result_document.get("schema_name") == "policy_improvement_result_v2":
@@ -2281,6 +2324,12 @@ def audit_result_set(
         generation_manifest_sha256s.append(
             str(generation_identity["generation_manifest_sha256"])
         )
+        if protocol.get("schema_name") == "policy_improvement_protocol_v2":
+            compute_accounting_sha256s.append(
+                _validate_v2_compute_accounting_generation(
+                    Path(str(generation_identity["generation_path"]))
+                )
+            )
         semantic_validations = generation_identity["semantic_validations"]
         if not isinstance(semantic_validations, list) or not semantic_validations:
             raise PolicyImprovementSchemaError(
@@ -2611,6 +2660,11 @@ def audit_result_set(
         ).hexdigest(),
     }
     if is_v2_report:
+        from utils.compute_accounting import (
+            build_audit_compute_accounting,
+            process_peak_rss_bytes,
+        )
+
         assert registered_population_document is not None
         population_ids = sorted(
             {str(row["evaluation_population"]) for row in expected_rows}
@@ -2654,6 +2708,14 @@ def audit_result_set(
                     for row in expected_rows
                 ),
                 "test_data_opened": uses_test,
+                "compute_accounting_artifact_count": len(compute_accounting_sha256s),
+                "compute_accounting_artifact_set_sha256": hashlib.sha256(
+                    canonical_json_bytes(sorted(compute_accounting_sha256s))
+                ).hexdigest(),
+                "audit_compute_accounting": build_audit_compute_accounting(
+                    audit_seconds=time.perf_counter() - audit_started,
+                    process_rss_bytes=process_peak_rss_bytes(),
+                ),
             }
         )
     canonical_json_bytes(report)

@@ -30,6 +30,7 @@ from policy_improvement_checkpoint_allowlist import (
 from utils.compute_accounting import (
     add_model_counters,
     current_cuda_memory_peaks,
+    execution_device_identity,
     process_peak_rss_bytes,
     restore_model_compute_state,
     validate_model_compute_state,
@@ -311,7 +312,7 @@ def _capture_compute_state(trainer: Any) -> dict[str, Any]:
 
 
 def _restore_compute_state(trainer: Any, value: object, *, validate_only: bool) -> None:
-    expected = {
+    common_fields = {
         "schema_version",
         "model_compute_state",
         "training_model_work",
@@ -322,13 +323,27 @@ def _restore_compute_state(trainer: Any, value: object, *, validate_only: bool) 
         "peak_cuda_allocated_bytes",
         "peak_cuda_reserved_bytes",
     }
-    if (
-        not isinstance(value, dict)
-        or set(value) != expected
-        or value["schema_version"] != 1
-    ):
+    if not isinstance(value, dict):
         raise PolicyImprovementSmokeCheckpointError(
             "PPO smoke compute state has an invalid inventory."
+        )
+    schema_version = value.get("schema_version")
+    if isinstance(schema_version, bool) or schema_version not in {1, 2}:
+        raise PolicyImprovementSmokeCheckpointError(
+            "PPO smoke compute state has an invalid inventory."
+        )
+    expected = common_fields | (
+        {"execution_device_identity"} if schema_version == 2 else set()
+    )
+    if set(value) != expected:
+        raise PolicyImprovementSmokeCheckpointError(
+            "PPO smoke compute state has an invalid inventory."
+        )
+    if schema_version == 2 and value["execution_device_identity"] != (
+        execution_device_identity(trainer.device)
+    ):
+        raise PolicyImprovementSmokeCheckpointError(
+            "PPO smoke compute state names another execution device."
         )
     training = validate_model_counters(
         value["training_model_work"], name="training_model_work"

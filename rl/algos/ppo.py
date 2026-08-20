@@ -28,6 +28,7 @@ from utils.compute_accounting import (
     aggregate_model_compute,
     capture_model_compute_state,
     current_cuda_memory_peaks,
+    execution_device_identity,
     process_peak_rss_bytes,
     subtract_model_counters,
     validate_compute_snapshot,
@@ -678,7 +679,8 @@ class PPOTrainer:
             )
         self._record_memory_peaks()
         return {
-            "schema_version": 1,
+            "schema_version": 2,
+            "execution_device_identity": execution_device_identity(self.device),
             "model_compute_state": capture_model_compute_state(
                 self._model_roles()
             ),

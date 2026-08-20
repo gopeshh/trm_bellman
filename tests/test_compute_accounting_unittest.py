@@ -4,13 +4,18 @@ import copy
 import unittest
 
 from utils.compute_accounting import (
+    AUTHENTICATED_COMPUTE_ACCOUNTING_SCHEMA_NAME,
     COMPUTE_SNAPSHOT_SCHEMA_VERSION,
     MODEL_COUNTER_DEFINITIONS,
     OPTIMIZER_STEP_FIELDS,
     ModelComputeCounters,
     aggregate_model_compute,
+    build_audit_compute_accounting,
+    build_training_compute_accounting,
     capture_model_compute_state,
+    execution_device_identity,
     restore_model_compute_state,
+    validate_authenticated_compute_accounting,
     validate_compute_snapshot,
     zero_model_counters,
 )
@@ -124,6 +129,126 @@ class TestComputeAccounting(unittest.TestCase):
                 snapshot["compute_schema_version"] = invalid
                 with self.assertRaisesRegex(ValueError, "snapshot schema"):
                     validate_compute_snapshot(snapshot)
+
+    def test_training_compute_contract_binds_every_registered_cpu_measurement(self):
+        snapshot = self._snapshot()
+        snapshot["model_work"]["training"].update(
+            {
+                "recurrent_latent_state_updates": 48,
+                "action_logits_evaluated": 96,
+                "action_values_evaluated": 12,
+                "value_api_calls": 7,
+            }
+        )
+        snapshot["model_work"]["total"] = dict(snapshot["model_work"]["training"])
+        snapshot["progress"].update(
+            {
+                "environment_interactions": 32,
+                "outer_updates": 2,
+                "optimizer_steps_total": 4,
+            }
+        )
+        snapshot["progress"]["optimizer_steps_by_kind"]["value"] = 2
+        snapshot["progress"]["optimizer_steps_by_kind"]["policy"] = 2
+        snapshot["wall_time_seconds"] = {"training": 1.25, "evaluation": 0.5}
+        snapshot["peak_memory_bytes"]["process_rss"] = 4096
+
+        accounting = build_training_compute_accounting(
+            snapshot,
+            device="cpu",
+            checkpoint_seconds=0.25,
+            cuda_utilization={
+                "device_type": "cpu",
+                "sampling_interval_seconds": None,
+                "samples": [],
+            },
+        )
+
+        self.assertEqual(
+            accounting["schema_name"],
+            AUTHENTICATED_COMPUTE_ACCOUNTING_SCHEMA_NAME,
+        )
+        self.assertEqual(accounting["environment_interactions"]["value"], 32)
+        self.assertEqual(accounting["recurrent_latent_state_updates"]["value"], 48)
+        self.assertEqual(accounting["action_logit_evaluations"]["value"], 96)
+        self.assertEqual(accounting["action_value_evaluations"]["value"], 12)
+        self.assertEqual(accounting["value_head_calls"]["value"], 7)
+        self.assertEqual(accounting["checkpoint_seconds"]["value"], 0.25)
+        self.assertEqual(
+            accounting["audit_seconds"],
+            {
+                "status": "unavailable",
+                "reason": "owned_by_authenticated_audit_role",
+            },
+        )
+        self.assertEqual(
+            accounting["cuda_utilization_samples"]["status"], "unavailable"
+        )
+        self.assertEqual(
+            accounting["execution_device_identity"]["value"]["canonical"],
+            "cpu",
+        )
+
+    def test_source_snapshot_substitution_is_rejected(self):
+        snapshot = self._snapshot()
+        accounting = build_training_compute_accounting(
+            snapshot,
+            device="cpu",
+            checkpoint_seconds=0.0,
+            cuda_utilization={
+                "device_type": "cpu",
+                "sampling_interval_seconds": None,
+                "samples": [],
+            },
+        )
+        substituted = copy.deepcopy(snapshot)
+        substituted["progress"]["environment_interactions"] = 1
+        with self.assertRaisesRegex(ValueError, "source snapshot digest differs"):
+            validate_authenticated_compute_accounting(
+                accounting,
+                source_compute_snapshot=substituted,
+            )
+
+    def test_training_role_cannot_claim_audit_time(self):
+        snapshot = self._snapshot()
+        accounting = build_training_compute_accounting(
+            snapshot,
+            device="cpu",
+            checkpoint_seconds=0.0,
+            cuda_utilization={
+                "device_type": "cpu",
+                "sampling_interval_seconds": None,
+                "samples": [],
+            },
+        )
+        accounting["audit_seconds"] = {"status": "available", "value": 1.0}
+        with self.assertRaisesRegex(ValueError, "cannot claim audit_seconds"):
+            validate_authenticated_compute_accounting(
+                accounting,
+                source_compute_snapshot=snapshot,
+            )
+
+    def test_audit_contract_owns_only_audit_time_and_process_memory(self):
+        accounting = build_audit_compute_accounting(
+            audit_seconds=2.5,
+            process_rss_bytes=8192,
+        )
+        self.assertEqual(accounting["owner_role"], "audit")
+        self.assertEqual(accounting["audit_seconds"]["value"], 2.5)
+        self.assertEqual(accounting["process_peak_rss_bytes"]["value"], 8192)
+        self.assertEqual(
+            accounting["wall_clock_training_seconds"],
+            {
+                "status": "unavailable",
+                "reason": "not_owned_by_authenticated_audit_role",
+            },
+        )
+
+    def test_cpu_execution_identity_is_canonical(self):
+        identity = execution_device_identity("cpu")
+        self.assertEqual(identity["canonical"], "cpu")
+        self.assertEqual(identity["device_type"], "cpu")
+        self.assertIsNone(identity["device_index"])
 
 
 if __name__ == "__main__":
