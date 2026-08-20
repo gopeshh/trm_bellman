@@ -577,6 +577,40 @@ def load_registered_full_run(
             raise FullRuntimeError(
                 "Dataset root must be an absolute canonical directory."
             )
+    if is_v2:
+        dataset_registration = protocol.get("dataset")
+        registered_relative_root = (
+            dataset_registration.get("root")
+            if isinstance(dataset_registration, Mapping)
+            else None
+        )
+        if (
+            not isinstance(registered_relative_root, str)
+            or not registered_relative_root
+            or Path(registered_relative_root).is_absolute()
+            or ".." in Path(registered_relative_root).parts
+        ):
+            raise FullRuntimeError("Protocol v2 dataset root registration is invalid.")
+        registered_dataset = project / registered_relative_root
+        try:
+            resolved_registered_dataset = registered_dataset.resolve(strict=True)
+            registered_status = registered_dataset.lstat()
+        except OSError as exc:
+            raise FullRuntimeError(
+                "Protocol v2 registered dataset root is unavailable."
+            ) from exc
+        if (
+            resolved_registered_dataset != registered_dataset
+            or stat.S_ISLNK(registered_status.st_mode)
+            or not stat.S_ISDIR(registered_status.st_mode)
+        ):
+            raise FullRuntimeError(
+                "Protocol v2 registered dataset root must be canonical."
+            )
+        if materialized_dataset != registered_dataset:
+            raise FullRuntimeError(
+                "Protocol v2 dataset root differs from its registration."
+            )
     test_open_digest = (
         _load_test_open(
             evidence_root=owner,

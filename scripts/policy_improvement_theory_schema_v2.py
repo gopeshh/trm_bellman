@@ -1401,12 +1401,18 @@ def validate_theory_result(value: object, *, request: object) -> dict[str, Any]:
             path=(f"result.states[{offset}]." "paired_current_to_exact_mixture_return"),
         )
         if checked_request["method_id"] in EXACT_METHOD_IDS:
-            _number(
+            checked_exact_tv = _number(
                 exact_tv,
                 path=f"result.states[{offset}].exact_mixture_deployment_identity_tv",
                 minimum=0.0,
                 maximum=1.0,
             )
+            if float(checked_exact_tv) > float(
+                checked_request["deployment_identity_tolerance"]
+            ):
+                raise TheoryBridgeV2SchemaError(
+                    "Exact-mixture deployment identity exceeds request tolerance."
+                )
             if realized_tv is not None:
                 raise TheoryBridgeV2SchemaError(
                     "Exact method cannot report realized-policy discrepancy."
@@ -1568,17 +1574,31 @@ def validate_theory_result(value: object, *, request: object) -> dict[str, Any]:
                 raise TheoryBridgeV2SchemaError(
                     "Paired-return current-policy or CRN identity changed by alpha."
                 )
+        if float(row["constructed_centering_tolerance"]) != float(
+            checked_request["constructed_centering_tolerance"]
+        ) or float(row["training_estimator_parity_tolerance"]) != float(
+            checked_request["centering_parity_tolerance"]
+        ):
+            raise TheoryBridgeV2SchemaError(
+                "Theory result changes a request-bound centering tolerance."
+            )
         if float(row["training_estimator_parity_max_abs_error"]) > float(
-            row["training_estimator_parity_tolerance"]
+            checked_request["centering_parity_tolerance"]
         ):
             raise TheoryBridgeV2SchemaError(
                 "Trainer/bridge advantage parity exceeds tolerance."
             )
         if float(row["constructed_centering_roundoff"]) > float(
-            row["constructed_centering_tolerance"]
+            checked_request["constructed_centering_tolerance"]
         ):
             raise TheoryBridgeV2SchemaError(
                 "Constructed centering roundoff exceeds tolerance."
+            )
+        if float(row["training_estimator_centering_defect"]) > float(
+            checked_request["centering_parity_tolerance"]
+        ):
+            raise TheoryBridgeV2SchemaError(
+                "Trainer advantage centering defect exceeds request tolerance."
             )
         gamma = float(checked_request["gamma"])
         horizon = int(checked_request["bellman_horizon"])

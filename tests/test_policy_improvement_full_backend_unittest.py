@@ -203,6 +203,8 @@ def _run(root: Path) -> RegisteredFullRun:
 
 def _v2_run(root: Path) -> RegisteredFullRun:
     run = _run(root)
+    registered_dataset = run.project_root / "data/registered-v2"
+    registered_dataset.mkdir(parents=True)
     population = {
         "population_id": "validation_select",
         "split": "validation",
@@ -221,6 +223,10 @@ def _v2_run(root: Path) -> RegisteredFullRun:
         "schema_name": "policy_improvement_protocol_v2",
         "schema_version": 2,
         "protocol_id": "policy-improvement-v2-20260818",
+        "dataset": {
+            **run.protocol["dataset"],
+            "root": "data/registered-v2",
+        },
         "population_registry": {
             "path": "configs/policy_improvement_v2/populations.json",
             "schema_name": "policy_improvement_populations_v2",
@@ -251,6 +257,7 @@ def _v2_run(root: Path) -> RegisteredFullRun:
         registry_sha256=canonical_json_sha256(registry),
         registry_row_sha256=canonical_json_sha256(row),
         population_document=population_document,
+        dataset_root=registered_dataset,
     )
 
 
@@ -523,6 +530,8 @@ class FullBackendIdentityTest(unittest.TestCase):
         manifest = run.dataset_root / "manifests/validation.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_bytes(b"validation manifest\n")
+        validation_content = run.dataset_root / "validation"
+        validation_content.mkdir()
         protocol = copy.deepcopy(run.protocol)
         protocol["dataset"]["splits"]["validation"].update(
             {
@@ -567,6 +576,22 @@ class FullBackendIdentityTest(unittest.TestCase):
             opened_splits.append(split)
             return full_validation, 4, 5, 6
 
+        wrong_root = self.root / "wrong-dataset-root"
+        wrong_root.mkdir()
+        with self.assertRaisesRegex(
+            FullBackendError,
+            "differs from protocol registration",
+        ):
+            _validation_bridge_session_v2(
+                checkpoint_session=checkpoint_session,
+                run=replace(run, dataset_root=wrong_root),
+                population=bridge,
+                training_module=SimpleNamespace(
+                    build_dataset_from_paths=load_split,
+                ),
+            )
+        self.assertEqual(opened_splits, [])
+
         with (
             mock.patch.object(
                 upi_trm_train,
@@ -605,6 +630,35 @@ class FullBackendIdentityTest(unittest.TestCase):
             bridge_indices,
         )
         self.assertEqual(opened_splits, ["validation"])
+
+        external_manifest = self.root / "external-validation.json"
+        external_manifest.write_bytes(manifest.read_bytes())
+        manifest.unlink()
+        manifest.symlink_to(external_manifest)
+        opened_splits.clear()
+        with self.assertRaisesRegex(FullBackendError, "canonical regular file"):
+            _validation_bridge_session_v2(
+                checkpoint_session=checkpoint_session,
+                run=run,
+                population=bridge,
+                training_module=upi_trm_train,
+            )
+        self.assertEqual(opened_splits, [])
+
+        manifest.unlink()
+        manifest.write_bytes(external_manifest.read_bytes())
+        external_content = self.root / "external-validation"
+        external_content.mkdir()
+        validation_content.rmdir()
+        validation_content.symlink_to(external_content, target_is_directory=True)
+        with self.assertRaisesRegex(FullBackendError, "canonical directory"):
+            _validation_bridge_session_v2(
+                checkpoint_session=checkpoint_session,
+                run=run,
+                population=bridge,
+                training_module=upi_trm_train,
+            )
+        self.assertEqual(opened_splits, [])
 
     def test_test_loader_fails_before_open_without_test_open(self) -> None:
         row = dict(self.run.row)

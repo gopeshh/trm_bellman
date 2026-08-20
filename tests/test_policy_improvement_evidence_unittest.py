@@ -20,9 +20,11 @@ from policy_improvement_checkpoint_allowlist import (
 from policy_improvement_sealed_evidence import (
     authenticate_sealed_checkpoint_field,
     SEALED_CHECKPOINT_SCHEMA_NAME,
+    SealedCheckpoint,
 )
 from scripts.policy_improvement_evidence import (
     _producer_runtime_role_name,
+    _semantic_checkpoint_validation,
     authenticate_complete_generation,
 )
 from scripts.policy_improvement_schema import (
@@ -55,6 +57,140 @@ def _write_json(path: Path, value: object) -> str:
 def _identity(path: Path) -> dict[str, object]:
     payload = path.read_bytes()
     return {"bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+
+
+class SemanticCheckpointValidationTest(unittest.TestCase):
+    def _validate(
+        self,
+        *,
+        tier: str,
+        method_id: str,
+        theory_model_identity: object,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        def digest(label: str) -> str:
+            return hashlib.sha256(label.encode("ascii")).hexdigest()
+
+        checkpoint_sha256 = digest("checkpoint")
+        role_hashes = {"model": digest("model role")}
+        model_sha256 = hashlib.sha256(canonical_json_bytes(role_hashes)).hexdigest()
+        validation = {
+            "snapshot_kind": "interaction_matched",
+            "model_state_sha256": model_sha256,
+            "role_state_sha256s": role_hashes,
+            "theory_model_identity": theory_model_identity,
+        }
+        result = {
+            "run_id": "run",
+            "method_id": method_id,
+            "seed": 7,
+            "tier": tier,
+            "amendment_history_sha256": digest("history"),
+            "identities": {
+                "initialization_sha256": digest("initialization"),
+                "method_config_sha256": digest("method config"),
+                "effective_config_sha256": digest("effective config"),
+                "dataset_manifest_sha256": digest("dataset"),
+                "runtime_authorization_sha256": digest("authorization"),
+                "test_open_sha256": {
+                    "status": "unavailable",
+                    "reason": "test_data_not_opened",
+                },
+            },
+            "evaluation_snapshots": [
+                {
+                    "snapshot_kind": "interaction_matched",
+                    "observed_recurrent_map_applications": _available(123),
+                },
+                {
+                    "snapshot_kind": "compute_matched",
+                    "target": {"registered_quantity": _available(456)},
+                },
+            ],
+        }
+        captured: dict[str, object] = {}
+
+        def validator(request: dict[str, object]) -> dict[str, object]:
+            captured.update(request)
+            return {
+                "schema_name": ("policy_improvement_checkpoint_semantic_validation_v1"),
+                "schema_version": 1,
+                "run_id": result["run_id"],
+                "method_id": method_id,
+                "seed": result["seed"],
+                "snapshot_kind": validation["snapshot_kind"],
+                "environment_interactions": 10000,
+                "parent_checkpoint_sha256": None,
+                "checkpoint_sha256": checkpoint_sha256,
+                "initialization_sha256": result["identities"]["initialization_sha256"],
+                "model_state_sha256": model_sha256,
+                "role_state_sha256s": role_hashes,
+                "theory_model_identity": theory_model_identity,
+                "method_config_sha256": result["identities"]["method_config_sha256"],
+                "registered_effective_config_sha256": result["identities"][
+                    "effective_config_sha256"
+                ],
+                "effective_config_sha256": digest("observed effective config"),
+                "dataset_manifest_sha256": result["identities"][
+                    "dataset_manifest_sha256"
+                ],
+                "dataset_provenance_sha256": digest("dataset provenance"),
+                "run_identity_sha256": None,
+                "training_call_delta": 0,
+                "evaluation_call_delta": 0,
+                "optimizer_step_delta": 0,
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sealed = SealedCheckpoint(
+                descriptor=-1,
+                sha256=checkpoint_sha256,
+                size_bytes=1,
+                generation_relative_path="checkpoints/checkpoint.pt",
+            )
+            observed = _semantic_checkpoint_validation(
+                checkpoint_validator=validator,
+                sealed_checkpoint=sealed,
+                checkpoint_sha256=checkpoint_sha256,
+                validation=validation,
+                protocol={"schema_name": "policy_improvement_protocol_v2"},
+                protocol_sha256=digest("protocol"),
+                registry_sha256=digest("registry"),
+                registry_row={"run_id": "run"},
+                registry_row_sha256=digest("row"),
+                project_root=root,
+                dataset_root=root,
+                evidence_root=root,
+                runtime_authorization={},
+                result=result,
+                environment_interactions=10000,
+                parent_checkpoint_sha256=None,
+            )
+        return captured, observed
+
+    def test_v2_full_request_binds_actual_generation_endpoint(self) -> None:
+        request, _ = self._validate(
+            tier="pilot",
+            method_id="matched_ppo",
+            theory_model_identity=None,
+        )
+        self.assertEqual(request["generation_environment_interactions"], 10000)
+
+    def test_stage0_legacy_allows_absent_theory_identity(self) -> None:
+        _, observed = self._validate(
+            tier="smoke",
+            method_id="legacy_parameter_interpolation",
+            theory_model_identity=None,
+        )
+        self.assertIsNone(observed["theory_model_identity"])
+
+    def test_stage0_exact_requires_theory_identity(self) -> None:
+        with self.assertRaises(PolicyImprovementSchemaError):
+            self._validate(
+                tier="smoke",
+                method_id="fixed_base_exact_persistent",
+                theory_model_identity=None,
+            )
 
 
 class CompleteGenerationTest(unittest.TestCase):
@@ -131,9 +267,7 @@ class CompleteGenerationTest(unittest.TestCase):
         self.materialize_generation()
 
     def test_v3_role_selection_separates_stage0_from_full_runs(self) -> None:
-        authorization = {
-            "schema_name": "policy_improvement_runtime_authorization_v3"
-        }
+        authorization = {"schema_name": "policy_improvement_runtime_authorization_v3"}
         self.assertEqual(
             _producer_runtime_role_name(authorization, {"tier": "smoke"}),
             "policy-improvement-training",

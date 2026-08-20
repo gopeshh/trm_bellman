@@ -721,6 +721,127 @@ def _per_instance_documents(generation: Path) -> dict[str, object]:
     return documents
 
 
+def _independently_audit_stage0(
+    *,
+    request: Mapping[str, object],
+    checkpoint_path: Path,
+    inputs: TheoryBackendInputsV2,
+    authorization: Mapping[str, object],
+    context: SmokeContext,
+) -> None:
+    """Re-run the canonical four-row Stage 0 audit before theory restore."""
+
+    from scripts.policy_improvement_audit import audit_result_set
+
+    stage0_rows = [
+        row for row in context.registry["rows"] if row.get("phase") == "stage0_smoke"
+    ]
+    expected_run_ids = {str(row["run_id"]) for row in stage0_rows}
+    if len(stage0_rows) != 4 or len(expected_run_ids) != 4:
+        raise TheoryBridgeV2Error(
+            "Stage 0 theory requires the canonical four-row registry."
+        )
+    publication_root = context.run_root.parents[1]
+    runs_root = publication_root / "runs"
+    try:
+        run_directories = list(runs_root.iterdir())
+    except OSError as exc:
+        raise TheoryBridgeV2Error("Stage 0 run inventory is unavailable.") from exc
+    if (
+        len(run_directories) != 4
+        or {path.name for path in run_directories} != expected_run_ids
+        or any(
+            path.resolve(strict=True) != path
+            or stat.S_ISLNK(path.lstat().st_mode)
+            or not stat.S_ISDIR(path.lstat().st_mode)
+            for path in run_directories
+        )
+    ):
+        raise TheoryBridgeV2Error(
+            "Stage 0 evidence root differs from the canonical four-row inventory."
+        )
+
+    results: list[object] = []
+    per_instance: dict[str, object] = {}
+    for run_id in sorted(expected_run_ids):
+        generation = runs_root / run_id / "segments/env_000000032"
+        results.append(
+            _load_stable_json(generation / "result.json", label="Stage 0 result")
+        )
+        for digest, document in _per_instance_documents(generation).items():
+            if digest in per_instance:
+                raise TheoryBridgeV2Error(
+                    "Stage 0 per-instance document digest is duplicated."
+                )
+            per_instance[digest] = document
+
+    theory_role = _runtime_role(authorization, "policy-improvement-theory-bridge")
+    execution_identity = {
+        "runtime_sha256": theory_role["runtime_sha256"],
+        "runtime_profile_sha256": theory_role["runtime_profile_sha256"],
+        "source_git_commit": theory_role["source_git_commit"],
+        "launcher_sha256": authorization["launcher_sha256"],
+        "producer_git_commit": authorization["producer_git_commit"],
+        "producer_source_manifest_sha256": authorization[
+            "producer_source_manifest_sha256"
+        ],
+    }
+    try:
+        report = audit_result_set(
+            context.protocol,
+            context.registry,
+            results,
+            per_instance,
+            phases=("stage0_smoke",),
+            amendment_history=(),
+            base_configs=load_registered_base_configs(
+                context.protocol, context.source_root
+            ),
+            project_root=context.source_root,
+            dataset_root=context.dataset_root,
+            evidence_root=publication_root,
+            runtime_authorization=authorization,
+            audit_execution_identity=execution_identity,
+            checkpoint_validator=load_sealed_checkpoint_validator(),
+            execution_role_name="policy-improvement-theory-bridge",
+        )
+    except (PolicyImprovementSchemaError, ValueError) as exc:
+        raise TheoryBridgeV2Error(
+            "Stage 0 canonical four-row re-audit failed."
+        ) from exc
+    if (
+        report.get("expected_rows") != 4
+        or report.get("complete_rows") != 4
+        or report.get("failed_rows") != 0
+        or report.get("historical_failed_attempt_count") != 0
+        or report.get("per_instance_artifact_count") != 10
+        or report.get("semantic_checkpoint_validation_count") != 8
+        or report.get("compute_accounting_artifact_count") != 4
+        or report.get("validation_data_opened") is not False
+        or report.get("test_data_opened") is not False
+        or report.get("test_open_verified") is not False
+    ):
+        raise TheoryBridgeV2Error("Stage 0 canonical four-row re-audit is incomplete.")
+    requests = report.get("stage0_theory_requests")
+    if not isinstance(requests, list) or len(requests) != 2:
+        raise TheoryBridgeV2Error("Stage 0 canonical re-audit omitted theory requests.")
+    matches = [
+        item
+        for item in requests
+        if isinstance(item, Mapping) and item.get("run_id") == context.row["run_id"]
+    ]
+    if (
+        len(matches) != 1
+        or canonical_json_bytes(matches[0].get("request"))
+        != canonical_json_bytes(request)
+        or Path(str(matches[0].get("checkpoint_path"))).resolve(strict=True)
+        != checkpoint_path
+    ):
+        raise TheoryBridgeV2Error(
+            "Stage 0 theory request differs from the independent four-row audit."
+        )
+
+
 def _resolve_stage0_checkpoint(
     *,
     request: Mapping[str, object],
@@ -1348,11 +1469,10 @@ def create_theory_bridge_backend_v2(
             "Theory request or runtime authorization is invalid."
         ) from exc
     if request["evaluation_population"] == "validation_bridge":
-        return _create_validation_theory_backend_v2(
-            request=request,
-            checkpoint_path=checkpoint_path,
-            inputs=inputs,
-            authorization=authorization,
+        raise TheoryBridgeV2Error(
+            "Validation-bridge execution remains blocked until the canonical "
+            "30-request schedule and its independently re-audited V_select "
+            "selection provenance are implemented."
         )
     context, population, training_role = _stage0_context(
         request=request,
@@ -1400,6 +1520,13 @@ def create_theory_bridge_backend_v2(
         raise TheoryBridgeV2Error(
             "Stage 0 theory request differs from the audited canonical request."
         )
+    _independently_audit_stage0(
+        request=request,
+        checkpoint_path=checkpoint_path,
+        inputs=inputs,
+        authorization=authorization,
+        context=context,
+    )
     resolved = _resolve_stage0_checkpoint(
         request=request,
         checkpoint_path=checkpoint_path,

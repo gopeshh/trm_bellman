@@ -371,6 +371,7 @@ python_library(
     srcs = ["scripts/policy_improvement_theory_backend_v2.py"],
     base_module = "",
     deps = [
+        ":policy_improvement_audit_lib",
         ":policy_improvement_checkpoint_validator",
         ":policy_improvement_evidence",
         ":policy_improvement_full_runtime",

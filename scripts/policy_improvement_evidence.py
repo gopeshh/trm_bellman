@@ -329,11 +329,7 @@ def _semantic_checkpoint_validation(
                 ),
                 "test_open_sha256": test_open_sha256,
                 **(
-                    {
-                        "generation_environment_interactions": (
-                            expected_environment_interactions
-                        )
-                    }
+                    {"generation_environment_interactions": environment_interactions}
                     if protocol.get("schema_name") == "policy_improvement_protocol_v2"
                     else {}
                 ),
@@ -372,14 +368,23 @@ def _semantic_checkpoint_validation(
             "Semantic checkpoint role-state inventory is invalid."
         )
     theory_model_identity = computed["theory_model_identity"]
-    theory_capable_v2 = protocol.get(
-        "schema_name"
-    ) == "policy_improvement_protocol_v2" and result.get("method_id") in {
+    is_v2 = protocol.get("schema_name") == "policy_improvement_protocol_v2"
+    is_smoke = result.get("tier") == "smoke"
+    exact_method = result.get("method_id") in {
         "fixed_base_exact_persistent",
         "fixed_base_exact_episodic",
-        "legacy_parameter_interpolation",
-        "fixed_base_distilled_realization",
     }
+    theory_capable_v2 = is_v2 and (
+        exact_method
+        or (
+            not is_smoke
+            and result.get("method_id")
+            in {
+                "legacy_parameter_interpolation",
+                "fixed_base_distilled_realization",
+            }
+        )
+    )
     if theory_capable_v2:
         identity = _theory_model_identity(
             theory_model_identity,

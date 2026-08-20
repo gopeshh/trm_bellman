@@ -599,6 +599,8 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
         ):
             _write_json(path, {"fixture": path.stem})
         authorization_sha256 = _digest("runtime authorization")
+        registered_dataset = self.project / "data/registered-v2"
+        registered_dataset.mkdir(parents=True)
         population_document = {
             "populations": {
                 "validation_select": {
@@ -631,6 +633,7 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                 "status": "available",
                 "stage1_execution_allowed": True,
             },
+            "dataset": {"root": "data/registered-v2"},
             "output_root": {"relative_path": "policy_improvement_v2"},
             "population_registry": {"sha256": _digest("populations")},
             "budgets": {
@@ -768,6 +771,7 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                     registry_path=registry_path,
                     amendment_paths=[theory_path, base_policy_path, compute_path],
                     evidence_root=self.evidence,
+                    dataset_root=registered_dataset,
                     row_id=str(row["run_id"]),
                     runtime_authorization_sha256=authorization_sha256,
                     environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
@@ -782,6 +786,7 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                     registry_path=registry_path,
                     amendment_paths=[theory_path, base_policy_path, compute_path],
                     evidence_root=self.evidence,
+                    dataset_root=registered_dataset,
                     row_id=str(row["run_id"]),
                     runtime_authorization_sha256=authorization_sha256,
                     environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
@@ -798,6 +803,7 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                     selection_path,
                 ],
                 evidence_root=self.evidence,
+                dataset_root=registered_dataset,
                 row_id=str(row["run_id"]),
                 runtime_authorization_sha256=authorization_sha256,
                 environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
@@ -824,6 +830,36 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                         selection_path,
                     ],
                     evidence_root=self.evidence,
+                    dataset_root=registered_dataset,
+                    row_id=str(row["run_id"]),
+                    runtime_authorization_sha256=authorization_sha256,
+                    environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
+                    require_stage1_selection=True,
+                )
+            validate_history.side_effect = lambda history, **_: [
+                theory,
+                base_policy,
+                compute,
+                selection,
+            ]
+            alternate_dataset = self.project / "data/alternate-v2"
+            alternate_dataset.mkdir()
+            with self.assertRaisesRegex(
+                FullRuntimeError,
+                "differs from its registration",
+            ):
+                load_registered_full_run(
+                    project_root=self.project,
+                    protocol_path=protocol_path,
+                    registry_path=registry_path,
+                    amendment_paths=[
+                        theory_path,
+                        base_policy_path,
+                        compute_path,
+                        selection_path,
+                    ],
+                    evidence_root=self.evidence,
+                    dataset_root=alternate_dataset,
                     row_id=str(row["run_id"]),
                     runtime_authorization_sha256=authorization_sha256,
                     environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},

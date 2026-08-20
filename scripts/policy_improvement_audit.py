@@ -2377,6 +2377,7 @@ def audit_result_set(
     if execution_role_name not in {
         "policy-improvement-audit",
         "policy-improvement-analysis",
+        "policy-improvement-theory-bridge",
     }:
         raise PolicyImprovementSchemaError("Unsupported evidence-audit execution role.")
     registered_population_document: Mapping[str, Any] | None = None

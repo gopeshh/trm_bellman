@@ -18,6 +18,7 @@ from policy_improvement_sealed_evidence import seal_generation_checkpoint
 from scripts.policy_improvement_schema import canonical_json_bytes
 from scripts.policy_improvement_theory_backend_v2 import (
     _AuthenticatedStage0Checkpoint,
+    _independently_audit_stage0,
     _resolve_stage0_checkpoint,
     create_theory_bridge_backend_v2,
     SealedTheoryBackendV2,
@@ -668,6 +669,42 @@ class TheoryBridgeV2Test(unittest.TestCase):
         self.assertTrue(result["persistent_semantics"]["endpoint_depth_only"])
         self.assertEqual(len(backend.return_calls), 8 * 4)
         self.assertTrue(all(row["E_n"] >= 0.0 for row in result["states"]))
+
+    def test_result_cannot_relax_request_bound_tolerances(self) -> None:
+        result = evaluate_theory_bridge_v2(
+            request_document=self.request,
+            amendment_document=self.amendment,
+            checkpoint_path=self.checkpoint,
+            backend=_Backend(self.identity),
+        )
+        cases = (
+            (
+                "constructed_centering_tolerance",
+                self.request["constructed_centering_tolerance"] * 10.0,
+                "request-bound centering tolerance",
+            ),
+            (
+                "training_estimator_parity_tolerance",
+                self.request["centering_parity_tolerance"] * 10.0,
+                "request-bound centering tolerance",
+            ),
+            (
+                "training_estimator_centering_defect",
+                self.request["centering_parity_tolerance"] * 2.0,
+                "centering defect exceeds request tolerance",
+            ),
+            (
+                "exact_mixture_deployment_identity_tv",
+                self.request["deployment_identity_tolerance"] * 2.0,
+                "deployment identity exceeds request tolerance",
+            ),
+        )
+        for field, value, message in cases:
+            with self.subTest(field=field):
+                corrupted = copy.deepcopy(result)
+                corrupted["states"][0][field] = value
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_theory_result(corrupted, request=self.request)
 
     def test_crn_seed_ignores_alpha_dependent_deployment_identity(self) -> None:
         state = self._state_for_seed()
@@ -1324,6 +1361,120 @@ class TheoryBridgeV2Test(unittest.TestCase):
         finally:
             temporary.cleanup()
 
+    def test_stage0_theory_requires_independent_four_row_reaudit(self) -> None:
+        root = Path(self.temporary.name)
+        publication = root / "publication"
+        runs = publication / "runs"
+        run_ids = [f"stage0-{index}" for index in range(4)]
+        for run_id in run_ids:
+            generation = runs / run_id / "segments/env_000000032"
+            generation.mkdir(parents=True)
+            (generation / "result.json").write_text("{}", encoding="ascii")
+        checkpoint = runs / run_ids[0] / "segments/env_000000032/checkpoint.pt"
+        checkpoint.write_bytes(b"checkpoint")
+        request = {"canonical": True}
+        context = SimpleNamespace(
+            registry={
+                "rows": [
+                    {"run_id": run_id, "phase": "stage0_smoke"} for run_id in run_ids
+                ]
+            },
+            protocol={},
+            source_root=root,
+            dataset_root=root,
+            run_root=runs / run_ids[0],
+            row={"run_id": run_ids[0]},
+        )
+        authorization = {
+            "launcher_sha256": _digest("launcher"),
+            "producer_git_commit": "1" * 40,
+            "producer_source_manifest_sha256": _digest("producer"),
+        }
+        theory_role = {
+            "runtime_sha256": _digest("theory runtime"),
+            "runtime_profile_sha256": _digest("theory profile"),
+            "source_git_commit": "2" * 40,
+        }
+        report = {
+            "expected_rows": 4,
+            "complete_rows": 4,
+            "failed_rows": 0,
+            "historical_failed_attempt_count": 0,
+            "per_instance_artifact_count": 10,
+            "semantic_checkpoint_validation_count": 8,
+            "compute_accounting_artifact_count": 4,
+            "validation_data_opened": False,
+            "test_data_opened": False,
+            "test_open_verified": False,
+            "stage0_theory_requests": [
+                {
+                    "run_id": run_ids[0],
+                    "checkpoint_path": str(checkpoint),
+                    "request": request,
+                },
+                {
+                    "run_id": run_ids[1],
+                    "checkpoint_path": str(checkpoint),
+                    "request": {"other": True},
+                },
+            ],
+        }
+        document_sets = [
+            {
+                _digest(f"per-instance-{index}-{offset}"): {"index": offset}
+                for offset in range(count)
+            }
+            for index, count in enumerate((3, 3, 3, 1))
+        ]
+        with (
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2._load_stable_json",
+                side_effect=[{"run_id": run_id} for run_id in sorted(run_ids)],
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2._per_instance_documents",
+                side_effect=document_sets,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2._runtime_role",
+                return_value=theory_role,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.load_registered_base_configs",
+                return_value={},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.load_sealed_checkpoint_validator",
+                return_value=object(),
+            ),
+            mock.patch(
+                "scripts.policy_improvement_audit.audit_result_set",
+                return_value=report,
+            ) as audit,
+        ):
+            _independently_audit_stage0(
+                request=request,
+                checkpoint_path=checkpoint,
+                inputs=TheoryBackendInputsV2(
+                    project_root=root,
+                    protocol_path=root / "protocol.json",
+                    registry_path=root / "registry.json",
+                    amendment_paths=(),
+                    evidence_root=root,
+                    dataset_root=root,
+                    row_id=run_ids[0],
+                    runtime_authorization=authorization,
+                ),
+                authorization=authorization,
+                context=context,
+            )
+        self.assertEqual(len(audit.call_args.args[2]), 4)
+        self.assertEqual(len(audit.call_args.args[3]), 10)
+        self.assertEqual(
+            audit.call_args.kwargs["execution_role_name"],
+            "policy-improvement-theory-bridge",
+        )
+
     def test_stage0_factory_closes_resolved_descriptor_when_session_open_fails(
         self,
     ) -> None:
@@ -1399,6 +1550,9 @@ class TheoryBridgeV2Test(unittest.TestCase):
                 return_value=request,
             ),
             mock.patch(
+                "scripts.policy_improvement_theory_backend_v2._independently_audit_stage0"
+            ) as reaudit,
+            mock.patch(
                 "scripts.policy_improvement_theory_backend_v2._resolve_stage0_checkpoint",
                 return_value=resolved,
             ),
@@ -1409,6 +1563,7 @@ class TheoryBridgeV2Test(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "import rejected"),
         ):
             create_theory_bridge_backend_v2(request, checkpoint, inputs)
+        reaudit.assert_called_once()
         with self.assertRaises(OSError):
             os.fstat(descriptor)
 
@@ -1477,9 +1632,7 @@ class TheoryBridgeV2Test(unittest.TestCase):
             create_theory_bridge_backend_v2(request, root / "checkpoint.pt", inputs)
         resolve.assert_not_called()
 
-    def test_validation_factory_uses_authenticated_full_checkpoint_and_closes_fd(
-        self,
-    ) -> None:
+    def test_validation_factory_remains_fail_closed(self) -> None:
         root = Path(self.temporary.name)
         protocol_path = root / "configs/policy_improvement_v2/protocol.json"
         registry_path = root / "configs/policy_improvement_v2/registry.json"
@@ -1562,28 +1715,6 @@ class TheoryBridgeV2Test(unittest.TestCase):
                 "training_runtime": {},
             },
         }
-        descriptor = os.memfd_create("validation-theory-test", os.MFD_CLOEXEC)
-        resolved = SimpleNamespace(
-            path=checkpoint,
-            sha256=_digest("checkpoint"),
-            size_bytes=checkpoint.stat().st_size,
-            snapshot_kind="scheduled",
-            environment_interactions=10000,
-            sealed_descriptor=descriptor,
-            model_state_sha256=_digest("model"),
-            role_state_sha256s={"model": _digest("model role")},
-            validation_sha256=_digest("validation"),
-        )
-
-        class Session:
-            def __init__(self) -> None:
-                self.close_count = 0
-
-            def close(self) -> None:
-                self.close_count += 1
-
-        session = Session()
-        open_session = mock.Mock(return_value=session)
         inputs = TheoryBackendInputsV2(
             project_root=root,
             protocol_path=protocol_path,
@@ -1594,71 +1725,29 @@ class TheoryBridgeV2Test(unittest.TestCase):
             row_id=row["run_id"],
             runtime_authorization={},
         )
-        try:
-            with (
-                mock.patch(
-                    "scripts.policy_improvement_theory_backend_v2.validate_theory_request",
-                    return_value=request,
-                ),
-                mock.patch(
-                    "scripts.policy_improvement_theory_backend_v2.validate_runtime_authorization",
-                    return_value=authorization,
-                ),
-                mock.patch(
-                    "scripts.policy_improvement_theory_backend_v2.runtime_authorization_sha256",
-                    return_value=authorization_sha256,
-                ),
-                mock.patch(
-                    "scripts.policy_improvement_theory_backend_v2.discover_clean_git_source",
-                    return_value={"git_commit": "1" * 40, "git_clean": True},
-                ),
-                mock.patch(
-                    "scripts.policy_improvement_theory_backend_v2.load_registered_full_run",
-                    return_value=registered_run,
-                ) as load_run,
-                mock.patch(
-                    "scripts.policy_improvement_theory_backend_v2.resolve_authenticated_full_checkpoint",
-                    return_value=resolved,
-                ) as resolve,
-                mock.patch(
-                    "scripts.policy_improvement_theory_backend_v2._expected_validation_identity",
-                    return_value=request["identity"],
-                ),
-                mock.patch(
-                    "scripts.policy_improvement_theory_backend_v2.load_registered_base_configs",
-                    return_value={row["base_method_id"]: {}},
-                ),
-                mock.patch(
-                    "scripts.policy_improvement_theory_backend_v2.build_validation_theory_request",
-                    return_value=request,
-                ),
-                mock.patch(
-                    "scripts.policy_improvement_theory_backend_v2.importlib.import_module",
-                    side_effect=[
-                        SimpleNamespace(
-                            open_validation_theory_bridge_session_v2=open_session
-                        ),
-                        SimpleNamespace(),
-                    ],
-                ),
+        with (
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.validate_theory_request",
+                return_value=request,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.validate_runtime_authorization",
+                return_value=authorization,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.load_registered_full_run"
+            ) as load_run,
+            mock.patch(
+                "scripts.policy_improvement_theory_backend_v2.resolve_authenticated_full_checkpoint"
+            ) as resolve,
+        ):
+            with self.assertRaisesRegex(
+                TheoryBridgeV2Error,
+                "canonical 30-request schedule",
             ):
-                backend = create_theory_bridge_backend_v2(
-                    request,
-                    checkpoint,
-                    inputs,
-                )
-            resolve.assert_called_once()
-            self.assertIs(load_run.call_args.kwargs["require_stage1_selection"], True)
-            open_session.assert_called_once()
-            with self.assertRaises(OSError):
-                os.fstat(descriptor)
-            backend.close()
-            self.assertEqual(session.close_count, 1)
-        finally:
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
+                create_theory_bridge_backend_v2(request, checkpoint, inputs)
+        load_run.assert_not_called()
+        resolve.assert_not_called()
 
 
 if __name__ == "__main__":

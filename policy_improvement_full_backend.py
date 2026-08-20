@@ -13,6 +13,7 @@ import copy
 import hashlib
 import math
 import os
+import stat
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -116,6 +117,66 @@ _THEORY_TRAINING_RUNTIME_ROLES: frozenset[str] = frozenset(
     {"policy-improvement-full", "policy-improvement-smoke"}
 )
 _LOWER_HEX: frozenset[str] = frozenset("0123456789abcdef")
+
+
+def _canonical_regular_dataset_file(path: Path, *, name: str) -> Path:
+    """Reject symlinked dataset metadata before a loader can consume it."""
+
+    try:
+        status = path.lstat()
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise FullBackendError(f"{name} is unavailable.") from exc
+    if (
+        resolved != path
+        or stat.S_ISLNK(status.st_mode)
+        or not stat.S_ISREG(status.st_mode)
+    ):
+        raise FullBackendError(f"{name} must be a canonical regular file.")
+    return path
+
+
+def _canonical_dataset_directory(path: Path, *, name: str) -> Path:
+    """Reject symlinked split directories before any array is opened."""
+
+    try:
+        status = path.lstat()
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise FullBackendError(f"{name} is unavailable.") from exc
+    if (
+        resolved != path
+        or stat.S_ISLNK(status.st_mode)
+        or not stat.S_ISDIR(status.st_mode)
+    ):
+        raise FullBackendError(f"{name} must be a canonical directory.")
+    return path
+
+
+def _require_registered_dataset_root(run: RegisteredFullRun) -> Path:
+    """Bind protocol-v2 dataset access to its registered project-relative root."""
+
+    if run.dataset_root is None:
+        raise FullBackendError("The authenticated launcher omitted dataset root.")
+    if run.protocol.get("schema_name") != "policy_improvement_protocol_v2":
+        return run.dataset_root
+    dataset = run.protocol.get("dataset")
+    relative_root = dataset.get("root") if isinstance(dataset, Mapping) else None
+    if (
+        not isinstance(relative_root, str)
+        or not relative_root
+        or Path(relative_root).is_absolute()
+        or ".." in Path(relative_root).parts
+    ):
+        raise FullBackendError("Protocol v2 dataset root registration is invalid.")
+    registered_root = run.project_root / relative_root
+    _canonical_dataset_directory(
+        registered_root,
+        name="Protocol v2 registered dataset root",
+    )
+    if run.dataset_root != registered_root:
+        raise FullBackendError("Dataset root differs from protocol registration.")
+    return registered_root
 
 
 class FullBackendError(RuntimeError):
@@ -947,8 +1008,7 @@ class TorchLearnedRunEngine:
         run: RegisteredFullRun,
         runtime: SealedRuntimeIdentity,
     ) -> LearnedSession:
-        if run.dataset_root is None:
-            raise FullBackendError("The authenticated launcher omitted dataset root.")
+        dataset_root = _require_registered_dataset_root(run)
         self._module.set_global_seed(int(run.row["seed"]))
         base_method = str(run.row["base_method_id"])
         methods = [
@@ -1002,10 +1062,31 @@ class TorchLearnedRunEngine:
         )
         rl_config = self._module.RLConfig(**merged)
 
+        evaluation_split = str(run.row["evaluation_split"])
+        manifest_paths = {
+            "dataset": _canonical_regular_dataset_file(
+                dataset_root / "MANIFEST.json",
+                name="Dataset top-level manifest",
+            ),
+            "train": _canonical_regular_dataset_file(
+                dataset_root / "manifests/train.json",
+                name="Train split manifest",
+            ),
+            evaluation_split: _canonical_regular_dataset_file(
+                dataset_root / "manifests" / f"{evaluation_split}.json",
+                name=f"{evaluation_split.capitalize()} split manifest",
+            ),
+        }
+        for split in {"train", evaluation_split}:
+            _canonical_dataset_directory(
+                dataset_root / split,
+                name=f"{split.capitalize()} split content directory",
+            )
+
         def load_split(split: str) -> tuple[Any, int, int, int]:
             split_config = run.protocol["dataset"]["splits"][split]
             return self._module.build_dataset_from_paths(
-                dataset_paths=[str(run.dataset_root)],
+                dataset_paths=[str(dataset_root)],
                 pool_size=int(split_config["count"]),
                 split=split,
             )
@@ -1020,7 +1101,6 @@ class TorchLearnedRunEngine:
             evaluation_vocab_size,
             evaluation_identifiers,
         ) = evaluation_values
-        evaluation_split = str(run.row["evaluation_split"])
         if (evaluation_seq_len, evaluation_vocab_size) != (seq_len, vocab_size):
             raise FullBackendError("Train and evaluation split shapes differ.")
         if set(dataset_input_sha256s(train_dataset)).intersection(
@@ -1034,18 +1114,16 @@ class TorchLearnedRunEngine:
             expected_manifest = run.protocol["dataset"]["splits"][split][
                 "manifest_sha256"
             ]["value"]
-            observed_manifest = file_sha256(
-                run.dataset_root / "manifests" / f"{split}.json"
-            )
+            observed_manifest = file_sha256(manifest_paths[split])
             if observed_manifest != expected_manifest:
                 raise FullBackendError(f"{split} manifest digest differs.")
             self._module._validate_materialized_split_manifest(
-                dataset_root=run.dataset_root,
+                dataset_root=dataset_root,
                 split=split,
                 registered_sha256=expected_manifest,
                 dataset=dataset,
             )
-        dataset_manifest_sha256 = file_sha256(run.dataset_root / "MANIFEST.json")
+        dataset_manifest_sha256 = file_sha256(manifest_paths["dataset"])
         if (
             dataset_manifest_sha256
             != run.protocol["dataset"]["manifest_sha256"]["value"]
@@ -1080,7 +1158,7 @@ class TorchLearnedRunEngine:
         )
         action_count = seq_len * vocab_size + 1
         env.set_stop_action_id(action_count - 1)
-        sources = dataset_source_build_metadata([str(run.dataset_root)])
+        sources = dataset_source_build_metadata([str(dataset_root)])
         if len(sources) != 1:
             raise FullBackendError("Registered dataset must have one source record.")
         source = sources[0]
@@ -3846,26 +3924,20 @@ def _validation_bridge_session_v2(
         raise FullBackendError(
             "Restored full checkpoint is not bound to validation_select."
         )
-    if run.dataset_root is None:
-        raise FullBackendError(
-            "Validation bridge lacks its authenticated dataset root."
-        )
+    dataset_root = _require_registered_dataset_root(run)
     split_registration = (
         run.protocol.get("dataset", {}).get("splits", {}).get("validation")
     )
     if not isinstance(split_registration, Mapping):
         raise FullBackendError("Validation split registration is unavailable.")
-    full_validation, seq_len, vocab_size, _ = training_module.build_dataset_from_paths(
-        dataset_paths=[str(run.dataset_root)],
-        pool_size=int(split_registration["count"]),
-        split="validation",
+    validation_manifest = _canonical_regular_dataset_file(
+        dataset_root / "manifests/validation.json",
+        name="Validation bridge manifest",
     )
-    if int(seq_len) != int(checkpoint_session.evaluation_dataset.seq_len) or int(
-        vocab_size
-    ) != int(checkpoint_session.evaluation_dataset.vocab_size):
-        raise FullBackendError(
-            "Validation bridge dataset shape differs from the restored checkpoint."
-        )
+    _canonical_dataset_directory(
+        dataset_root / "validation",
+        name="Validation bridge content directory",
+    )
     expected_manifest = split_registration.get("manifest_sha256")
     expected_order = split_registration.get("ordered_record_sha256")
     if (
@@ -3875,13 +3947,21 @@ def _validation_bridge_session_v2(
         or expected_order.get("status") != "available"
     ):
         raise FullBackendError("Validation split identities are unavailable.")
-    if (
-        file_sha256(run.dataset_root / "manifests/validation.json")
-        != expected_manifest["value"]
-    ):
+    if file_sha256(validation_manifest) != expected_manifest["value"]:
         raise FullBackendError("Validation bridge manifest differs from protocol.")
+    full_validation, seq_len, vocab_size, _ = training_module.build_dataset_from_paths(
+        dataset_paths=[str(dataset_root)],
+        pool_size=int(split_registration["count"]),
+        split="validation",
+    )
+    if int(seq_len) != int(checkpoint_session.evaluation_dataset.seq_len) or int(
+        vocab_size
+    ) != int(checkpoint_session.evaluation_dataset.vocab_size):
+        raise FullBackendError(
+            "Validation bridge dataset shape differs from the restored checkpoint."
+        )
     training_module._validate_materialized_split_manifest(
-        dataset_root=run.dataset_root,
+        dataset_root=dataset_root,
         split="validation",
         registered_sha256=expected_manifest["value"],
         dataset=full_validation,
