@@ -21,7 +21,10 @@ from policy_improvement_sealed_evidence import (
     authenticate_sealed_checkpoint_field,
     SEALED_CHECKPOINT_SCHEMA_NAME,
 )
-from scripts.policy_improvement_evidence import authenticate_complete_generation
+from scripts.policy_improvement_evidence import (
+    _producer_runtime_role_name,
+    authenticate_complete_generation,
+)
 from scripts.policy_improvement_schema import (
     canonical_json_bytes,
     PolicyImprovementSchemaError,
@@ -126,6 +129,26 @@ class CompleteGenerationTest(unittest.TestCase):
         (self.generation / "checkpoints").mkdir(parents=True)
         (self.generation / "evaluations").mkdir()
         self.materialize_generation()
+
+    def test_v3_role_selection_separates_stage0_from_full_runs(self) -> None:
+        authorization = {
+            "schema_name": "policy_improvement_runtime_authorization_v3"
+        }
+        self.assertEqual(
+            _producer_runtime_role_name(authorization, {"tier": "smoke"}),
+            "policy-improvement-training",
+        )
+        self.assertEqual(
+            _producer_runtime_role_name(authorization, {"tier": "pilot"}),
+            "policy-improvement-full",
+        )
+        self.assertEqual(
+            _producer_runtime_role_name(
+                {"schema_name": "policy_improvement_runtime_authorization_v2"},
+                {"tier": "pilot"},
+            ),
+            "policy-improvement-training",
+        )
 
     def materialize_generation(
         self,

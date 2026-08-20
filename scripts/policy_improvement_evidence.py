@@ -94,6 +94,38 @@ def _available(value: object, *, path: str) -> object:
     return availability["value"]
 
 
+def _authorized_runtime_role(
+    authorization: Mapping[str, object], role_name: str
+) -> Mapping[str, object]:
+    roles = authorization.get("roles")
+    if not isinstance(roles, list):
+        raise PolicyImprovementSchemaError(
+            "Runtime authorization has no role inventory."
+        )
+    matches = [
+        role
+        for role in roles
+        if isinstance(role, Mapping) and role.get("role") == role_name
+    ]
+    if len(matches) != 1:
+        raise PolicyImprovementSchemaError(
+            f"Runtime authorization does not bind exactly one {role_name} role."
+        )
+    return matches[0]
+
+
+def _producer_runtime_role_name(
+    authorization: Mapping[str, object], result: Mapping[str, object]
+) -> str:
+    if (
+        authorization.get("schema_name")
+        == "policy_improvement_runtime_authorization_v3"
+        and result.get("tier") != "smoke"
+    ):
+        return "policy-improvement-full"
+    return "policy-improvement-training"
+
+
 @dataclass(frozen=True)
 class _PendingCheckpointValidation:
     """One authenticated checkpoint awaiting sealing and semantic validation.
@@ -118,6 +150,7 @@ def _validate_checkpoint_validator_identity(
     validator: object,
     result: Mapping[str, object],
     path: str,
+    producer_role_name: str = "policy-improvement-training",
 ) -> None:
     identity = _fields(
         value,
@@ -138,7 +171,7 @@ def _validate_checkpoint_validator_identity(
         "policy_improvement_full_runtime",
     }:
         expected = {
-            "role": "policy-improvement-training",
+            "role": producer_role_name,
             "source_git_commit": result_identities["training_source_git_commit"],
             "runtime_sha256": result_identities["training_runtime_sha256"],
             "runtime_profile_sha256": result_identities[
@@ -788,9 +821,20 @@ def _authenticate_historical_failed_attempts(
                 raise PolicyImprovementSchemaError(
                     "Historical failed-attempt generation is invalid."
                 )
-            _, raw_result = validated_result_payload(
+            raw_document, raw_result = validated_result_payload(
                 _load_ascii_json(attempt / "result.json")
             )
+            complete_is_v2 = (
+                complete_result.get("schema_name")
+                == "policy_improvement_full_result_payload_v2"
+            )
+            failed_is_v2 = (
+                raw_document.get("schema_name") == "policy_improvement_result_v2"
+            )
+            if complete_is_v2 != failed_is_v2:
+                raise PolicyImprovementSchemaError(
+                    "Historical failed-attempt schema differs from its retry."
+                )
             for field in (
                 "protocol_id",
                 "run_id",
@@ -912,19 +956,24 @@ def _authenticate_historical_failed_attempts(
                 raise PolicyImprovementSchemaError(
                     "Historical failed-attempt runtime authorization differs."
                 )
-            training_role = authorization["roles"][0]
+            producer_role_name = _producer_runtime_role_name(
+                authorization, complete_result
+            )
+            producer_role = _authorized_runtime_role(
+                authorization, producer_role_name
+            )
             expected_runtime_bindings = {
                 "producer_git_commit": authorization["producer_git_commit"],
                 "producer_manifest_sha256": authorization[
                     "producer_source_manifest_sha256"
                 ],
                 "launcher_sha256": authorization["launcher_sha256"],
-                "training_source_git_commit": training_role["source_git_commit"],
-                "training_runtime_sha256": training_role["runtime_sha256"],
-                "training_runtime_profile_sha256": training_role[
+                "training_source_git_commit": producer_role["source_git_commit"],
+                "training_runtime_sha256": producer_role["runtime_sha256"],
+                "training_runtime_profile_sha256": producer_role[
                     "runtime_profile_sha256"
                 ],
-                "training_selected_source_manifest_sha256": training_role[
+                "training_selected_source_manifest_sha256": producer_role[
                     "selected_source_manifest_sha256"
                 ],
             }
@@ -1213,6 +1262,16 @@ def authenticate_complete_generation(
 
     result_document, runtime_result = validated_result_payload(result)
     result = runtime_result
+    is_v2_protocol = (
+        protocol.get("schema_name") == "policy_improvement_protocol_v2"
+    )
+    is_v2_result = (
+        result_document.get("schema_name") == "policy_improvement_result_v2"
+    )
+    if is_v2_protocol != is_v2_result:
+        raise PolicyImprovementSchemaError(
+            "Complete result schema differs from its protocol namespace."
+        )
     root = _private_owner_root(evidence_root)
     if retain_checkpoint_sha256 is not None:
         _sha256(retain_checkpoint_sha256, path="retain_checkpoint_sha256")
@@ -1228,7 +1287,10 @@ def authenticate_complete_generation(
     current_authorization = validate_runtime_authorization(runtime_authorization)
     current_authorization_digest = runtime_authorization_sha256(current_authorization)
     result_identities = _object(result["identities"], path="result.identities")
-    training_role = current_authorization["roles"][0]
+    producer_role_name = _producer_runtime_role_name(current_authorization, result)
+    producer_role = _authorized_runtime_role(
+        current_authorization, producer_role_name
+    )
     current_runtime_bindings = {
         "runtime_authorization_sha256": current_authorization_digest,
         "producer_git_commit": current_authorization["producer_git_commit"],
@@ -1236,10 +1298,10 @@ def authenticate_complete_generation(
             "producer_source_manifest_sha256"
         ],
         "launcher_sha256": current_authorization["launcher_sha256"],
-        "training_source_git_commit": training_role["source_git_commit"],
-        "training_runtime_sha256": training_role["runtime_sha256"],
-        "training_runtime_profile_sha256": training_role["runtime_profile_sha256"],
-        "training_selected_source_manifest_sha256": training_role[
+        "training_source_git_commit": producer_role["source_git_commit"],
+        "training_runtime_sha256": producer_role["runtime_sha256"],
+        "training_runtime_profile_sha256": producer_role["runtime_profile_sha256"],
+        "training_selected_source_manifest_sha256": producer_role[
             "selected_source_manifest_sha256"
         ],
     }
@@ -1806,6 +1868,7 @@ def authenticate_complete_generation(
             validator=validation["validator"],
             result=result,
             path=f"checkpoint_validation.{kind}.validator_execution_identity",
+            producer_role_name=producer_role_name,
         )
         snapshot_relative_path, snapshot_size_bytes = snapshot_checkpoint_files[kind]
         pending_validations.append(
@@ -2036,6 +2099,16 @@ def authenticate_failed_attempt(
 
     result_document, runtime_result = validated_result_payload(result)
     result = runtime_result
+    requires_v2_result = result.get("protocol_id") == (
+        "policy-improvement-v2-20260818"
+    )
+    is_v2_result = (
+        result_document.get("schema_name") == "policy_improvement_result_v2"
+    )
+    if requires_v2_result != is_v2_result:
+        raise PolicyImprovementSchemaError(
+            "Failed-attempt result schema differs from its protocol namespace."
+        )
     root = _private_owner_root(evidence_root)
     run_id = str(result["run_id"])
     run_root = root / "runs" / run_id

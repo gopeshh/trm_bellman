@@ -3023,21 +3023,27 @@ def validated_result_payload(
             raise PolicyImprovementSchemaError(
                 f"Result payload {field} differs from its v2 envelope."
             )
+    phase = document["phase"]
+    if phase == "stage0_smoke":
+        expected_payload_schema = "policy_improvement_stage0_result_payload_v2"
+    else:
+        expected_payload_schema = "policy_improvement_full_result_payload_v2"
     if (
-        document["phase"] != "stage0_smoke"
-        or payload.get("schema_name") != "policy_improvement_stage0_result_payload_v2"
+        payload.get("schema_name") != expected_payload_schema
         or payload.get("schema_version") != 1
     ):
         raise PolicyImprovementSchemaError(
-            "Protocol v2 Stage 0 result payload uses an unsupported schema."
+            "Protocol v2 result payload uses an unsupported runtime schema."
         )
     legacy_payload = dict(payload)
     del legacy_payload["evaluation_population_id"]
     del legacy_payload["evaluation_population_binding_sha256"]
     legacy_payload["schema_name"] = SCHEMA_NAME
     legacy_payload["schema_version"] = RESULT_SCHEMA_VERSION
-    # The legacy structural validator fixes Stage 0 to validation. Protocol v2
-    # separately binds the real train-only split in the envelope and registry.
-    legacy_payload["evaluation_split"] = "validation"
+    if phase == "stage0_smoke":
+        # The legacy structural validator fixes Stage 0 to validation. Protocol
+        # v2 separately binds the real train-only split in the envelope and
+        # registry. Non-smoke v2 phases retain their registered split.
+        legacy_payload["evaluation_split"] = "validation"
     validate_result(legacy_payload)
     return document, dict(payload)

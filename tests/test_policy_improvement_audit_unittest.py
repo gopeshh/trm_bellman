@@ -17,6 +17,8 @@ from scripts.policy_improvement_audit import (
     _git_object_bytes,
     _historical_failed_attempt_manifest_sha256s,
     _load_historical_runtime_authorizations,
+    _producer_role_name,
+    _require_result_namespace,
     _validated_runtime_authorization_map,
 )
 from scripts.policy_improvement_schema import (
@@ -93,6 +95,35 @@ class HistoricalAuthorizationLoadingTest(unittest.TestCase):
             canonical_json_bytes(loaded[self.digest]),
             canonical_json_bytes(self.authorization),
         )
+
+    def test_v3_audit_binds_non_smoke_results_to_the_full_role(self) -> None:
+        authorization = {
+            "schema_name": "policy_improvement_runtime_authorization_v3"
+        }
+        self.assertEqual(
+            _producer_role_name(authorization, {"tier": "pilot"}),
+            "policy-improvement-full",
+        )
+        self.assertEqual(
+            _producer_role_name(authorization, {"tier": "smoke"}),
+            "policy-improvement-training",
+        )
+
+    def test_audit_rejects_both_result_namespace_crossings(self) -> None:
+        v1_protocol = {"schema_name": "policy_improvement_v1"}
+        v2_protocol = {"schema_name": "policy_improvement_protocol_v2"}
+        v1_result = {"schema_name": "policy_improvement_v1"}
+        v2_result = {"schema_name": "policy_improvement_result_v2"}
+        _require_result_namespace(v1_protocol, [v1_result])
+        _require_result_namespace(v2_protocol, [v2_result])
+        for protocol, result in (
+            (v1_protocol, v2_result),
+            (v2_protocol, v1_result),
+        ):
+            with self.assertRaisesRegex(
+                PolicyImprovementSchemaError, "protocol namespace"
+            ):
+                _require_result_namespace(protocol, [result])
 
     def test_accepts_ascii_formatting_but_rejects_wrong_duplicate_and_foreign_documents(
         self,

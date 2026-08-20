@@ -262,6 +262,7 @@ python_library(
         ":policy_improvement_schema",
         ":policy_improvement_sealed_evidence",
         ":policy_improvement_theory_schema",
+        ":policy_improvement_v2_schema",
     ],
 )
 
@@ -290,6 +291,7 @@ python_library(
         ":policy_improvement_schema",
         ":policy_improvement_sealed_evidence",
         ":policy_improvement_smoke_runtime",
+        ":policy_improvement_v2_schema",
         ":rl",
         ":upi_trm_train_lib",
         ":utils",

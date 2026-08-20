@@ -20,6 +20,7 @@ import torch
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from policy_improvement_checkpoint_validator import _validate_full_checkpoint
 from policy_improvement_full_backend import (
+    _registered_full_result_document,
     _registered_theory_checkpoint_snapshot_kind,
     build_failed_result,
     calibrate_training_split_throughput,
@@ -51,12 +52,13 @@ from rl.persistent_diagnostic_checkpoint import state_dict_sha256
 from rl.sudoku_checkers import dummy_checker
 from rl.upi_trm_trainer import UPITrmTrainer
 from scripts.policy_improvement_full_runtime import (
+    _validated_result_for_run,
     BackendPackage,
     BackendRequest,
     FullRuntimeError,
     RegisteredFullRun,
 )
-from scripts.policy_improvement_schema import validate_result
+from scripts.policy_improvement_schema import validate_result, validated_result_payload
 from utils.dataset_provenance import dataset_sample_sha256s, ordered_record_sha256
 from utils.run_identity import canonical_json_sha256
 
@@ -189,6 +191,59 @@ def _run(root: Path) -> RegisteredFullRun:
         evaluation_records=8,
         test_open_sha256=None,
         dataset_root=dataset,
+    )
+
+
+def _v2_run(root: Path) -> RegisteredFullRun:
+    run = _run(root)
+    population = {
+        "population_id": "validation_select",
+        "split": "validation",
+        "count": 8,
+        "ordered_record_sha256": _digest("evaluation order"),
+        "ordered_input_sha256": _digest("evaluation inputs"),
+        "binding_sha256": _digest("validation population"),
+    }
+    population_document = {
+        "schema_name": "policy_improvement_populations_v2",
+        "schema_version": 1,
+        "populations": {"validation_select": population},
+    }
+    protocol = {
+        **run.protocol,
+        "schema_name": "policy_improvement_protocol_v2",
+        "schema_version": 2,
+        "protocol_id": "policy-improvement-v2-20260818",
+        "population_registry": {
+            "path": "configs/policy_improvement_v2/populations.json",
+            "schema_name": "policy_improvement_populations_v2",
+            "schema_version": 1,
+            "sha256": canonical_json_sha256(population_document),
+        },
+    }
+    row = {
+        **run.row,
+        "schema_name": "policy_improvement_registry_row_v2",
+        "schema_version": 1,
+        "protocol_id": protocol["protocol_id"],
+        "evaluation_population": "validation_select",
+        "scientific_selection": True,
+        "paper_evidence_eligible": False,
+    }
+    registry = {
+        "schema_name": "policy_improvement_registry_v2",
+        "registry_schema_version": 1,
+        "rows": [row],
+    }
+    return replace(
+        run,
+        protocol=protocol,
+        registry=registry,
+        row=row,
+        protocol_sha256=canonical_json_sha256(protocol),
+        registry_sha256=canonical_json_sha256(registry),
+        registry_row_sha256=canonical_json_sha256(row),
+        population_document=population_document,
     )
 
 
@@ -566,6 +621,61 @@ class FullCheckpointGuardTest(unittest.TestCase):
         self.assertEqual(
             checked["identities"]["test_open_sha256"],
             {"status": "unavailable", "reason": "test_data_not_opened"},
+        )
+
+    def test_v2_full_results_require_the_strict_registered_envelope(self) -> None:
+        run = _v2_run(self.root)
+        runtime = SealedRuntimeIdentity.from_mapping(_runtime_identity())
+        document = build_failed_result(
+            run,
+            runtime,
+            phase="training",
+            error=RuntimeError("synthetic v2 failure"),
+        )
+        self.assertEqual(document["schema_name"], "policy_improvement_result_v2")
+        self.assertTrue(document["validation_data_opened"])
+        self.assertFalse(document["test_data_opened"])
+        self.assertTrue(document["scientific_selection"])
+        checked_document, payload = validated_result_payload(document)
+        self.assertEqual(checked_document, document)
+        self.assertEqual(
+            payload["schema_name"], "policy_improvement_full_result_payload_v2"
+        )
+        self.assertEqual(payload["evaluation_population_id"], "validation_select")
+
+        legacy_payload = dict(payload)
+        del legacy_payload["evaluation_population_id"]
+        del legacy_payload["evaluation_population_binding_sha256"]
+        legacy_payload["schema_name"] = "policy_improvement_v1"
+        legacy_payload["schema_version"] = 3
+        validate_result(legacy_payload)
+        with self.assertRaisesRegex(FullRuntimeError, "protocol namespace"):
+            _validated_result_for_run(
+                run,
+                legacy_payload,
+                result_validator=lambda value: value,
+            )
+
+        v1_run = replace(run, protocol={"schema_name": "policy_improvement_v1"})
+        with self.assertRaisesRegex(FullRuntimeError, "protocol namespace"):
+            _validated_result_for_run(
+                v1_run,
+                document,
+                result_validator=lambda value: value,
+            )
+
+        hostile = dict(document)
+        hostile["registry_sha256"] = "0" * 64
+        with self.assertRaisesRegex(FullRuntimeError, "authenticated registration"):
+            _validated_result_for_run(
+                run,
+                hostile,
+                result_validator=validate_result,
+            )
+
+        self.assertEqual(
+            _registered_full_result_document(run, legacy_payload)["schema_name"],
+            "policy_improvement_result_v2",
         )
 
     def test_theory_upi_restore_uses_only_quiet_resume_entrypoint(self) -> None:

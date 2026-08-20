@@ -1661,6 +1661,35 @@ def _authorized_role(
     raise AssertionError(f"Validated authorization omitted {role_name!r}.")
 
 
+def _producer_role_name(
+    authorization: Mapping[str, object], result: Mapping[str, object]
+) -> str:
+    if (
+        authorization.get("schema_name")
+        == "policy_improvement_runtime_authorization_v3"
+        and result.get("tier") != "smoke"
+    ):
+        return "policy-improvement-full"
+    return "policy-improvement-training"
+
+
+def _require_result_namespace(
+    protocol: Mapping[str, object],
+    results: Sequence[Mapping[str, object]],
+) -> None:
+    requires_v2_results = (
+        protocol.get("schema_name") == "policy_improvement_protocol_v2"
+    )
+    if any(
+        (document.get("schema_name") == "policy_improvement_result_v2")
+        != requires_v2_results
+        for document in results
+    ):
+        raise PolicyImprovementSchemaError(
+            "Result schemas differ from the audited protocol namespace."
+        )
+
+
 def _validate_execution_identity(
     value: object,
     authorization: Mapping[str, object],
@@ -2129,6 +2158,7 @@ def audit_result_set(
             verify_test_content=True,
         )
     checked_result_documents = [validate_result(result) for result in results]
+    _require_result_namespace(protocol, checked_result_documents)
     by_run_id = {str(result["run_id"]): result for result in checked_result_documents}
     if len(by_run_id) != len(checked_result_documents):
         raise PolicyImprovementSchemaError("Result run IDs must be unique.")
@@ -2227,9 +2257,8 @@ def audit_result_set(
             raise PolicyImprovementSchemaError(
                 f"Result {run_id} lacks its frozen runtime authorization."
             )
-        training_role = _authorized_role(
-            result_authorization, "policy-improvement-training"
-        )
+        producer_role_name = _producer_role_name(result_authorization, result)
+        producer_role = _authorized_role(result_authorization, producer_role_name)
         expected_runtime_bindings = {
             "runtime_authorization_sha256": result_authorization_digest,
             "producer_git_commit": result_authorization["producer_git_commit"],
@@ -2237,10 +2266,12 @@ def audit_result_set(
                 "producer_source_manifest_sha256"
             ],
             "launcher_sha256": result_authorization["launcher_sha256"],
-            "training_source_git_commit": training_role["source_git_commit"],
-            "training_runtime_sha256": training_role["runtime_sha256"],
-            "training_runtime_profile_sha256": training_role["runtime_profile_sha256"],
-            "training_selected_source_manifest_sha256": training_role[
+            "training_source_git_commit": producer_role["source_git_commit"],
+            "training_runtime_sha256": producer_role["runtime_sha256"],
+            "training_runtime_profile_sha256": producer_role[
+                "runtime_profile_sha256"
+            ],
+            "training_selected_source_manifest_sha256": producer_role[
                 "selected_source_manifest_sha256"
             ],
         }
@@ -2366,7 +2397,7 @@ def audit_result_set(
         ]
         if result["tier"] != "smoke":
             allowed_evaluation_roles.append(
-                _authorized_role(result_authorization, "policy-improvement-training")
+                _authorized_role(result_authorization, producer_role_name)
             )
         authorized_evaluation_identities = [
             {

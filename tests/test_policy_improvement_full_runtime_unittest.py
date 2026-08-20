@@ -13,6 +13,7 @@ from typing import Any
 from unittest import mock
 
 from scripts.policy_improvement_full_runtime import (
+    _full_producer_runtime_role,
     AuthenticatedFullCheckpoint,
     BackendPackage,
     BackendRequest,
@@ -691,6 +692,27 @@ class FullRuntimePublicationTest(unittest.TestCase):
             sorted(path.name for path in runs.iterdir()),
             [".locks", str(self.run.row["run_id"])],
         )
+
+    def test_v3_full_resolver_uses_the_full_role_not_training(self) -> None:
+        legacy_name, legacy_role = _full_producer_runtime_role(
+            self.runtime_authorization
+        )
+        self.assertEqual(legacy_name, "policy-improvement-training")
+        self.assertEqual(legacy_role["runtime_sha256"], "c" * 64)
+
+        authorization = dict(self.runtime_authorization)
+        authorization["schema_name"] = "policy_improvement_runtime_authorization_v3"
+        authorization["schema_version"] = 3
+        authorization["roles"] = [
+            {
+                **role,
+                "runtime_sha256": f"{index + 1:x}" * 64,
+            }
+            for index, role in enumerate(self.runtime_authorization["roles"])
+        ]
+        role_name, role = _full_producer_runtime_role(authorization)
+        self.assertEqual(role_name, "policy-improvement-full")
+        self.assertEqual(role["runtime_sha256"], "5" * 64)
 
     def test_missing_backend_bad_compute_and_symlink_fail_without_leak(self) -> None:
         with self.assertRaisesRegex(FullRuntimeError, "No sealed"):

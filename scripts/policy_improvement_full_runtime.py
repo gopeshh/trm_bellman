@@ -51,6 +51,11 @@ from scripts.policy_improvement_schema import (
     validate_protocol,
     validate_result,
     validate_runtime_authorization,
+    validated_result_payload,
+)
+from scripts.policy_improvement_v2_schema import (
+    bind_v2_result_to_registration,
+    PolicyImprovementV2SchemaError,
 )
 
 
@@ -98,6 +103,7 @@ class RegisteredFullRun:
     evaluation_records: int
     test_open_sha256: str | None
     dataset_root: Path | None = None
+    population_document: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -546,6 +552,8 @@ def load_registered_full_run(
     if compute_targets["unit"] != "recurrent_map_applications":
         raise FullRuntimeError("Compute schedule uses the wrong unit.")
 
+    if is_v2 and not isinstance(populations_document, Mapping):
+        raise FullRuntimeError("Protocol v2 population registration is unavailable.")
     return RegisteredFullRun(
         project_root=project,
         protocol_path=protocol_file,
@@ -566,6 +574,11 @@ def load_registered_full_run(
         evaluation_records=int(budget["evaluation_records"]),
         test_open_sha256=test_open_digest,
         dataset_root=materialized_dataset,
+        population_document=(
+            dict(populations_document)
+            if isinstance(populations_document, Mapping)
+            else None
+        ),
     )
 
 
@@ -710,18 +723,79 @@ def _rename_noreplace(source: Path, destination: Path) -> None:
         raise FullRuntimeError(f"Atomic run publication failed: {os.strerror(error)}.")
 
 
+def _validated_result_for_run(
+    run: RegisteredFullRun,
+    result: Mapping[str, object],
+    *,
+    result_validator: Callable[[object], Mapping[str, object]],
+) -> tuple[dict[str, object], dict[str, object]]:
+    try:
+        checked_document = dict(result_validator(result))
+    except (
+        PolicyImprovementSchemaError,
+        PolicyImprovementV2SchemaError,
+        ValueError,
+        TypeError,
+    ) as exc:
+        raise FullRuntimeError(
+            "Backend result failed its registered result schema."
+        ) from exc
+    is_v2 = run.protocol.get("schema_name") == "policy_improvement_protocol_v2"
+    is_v2_document = (
+        checked_document.get("schema_name") == "policy_improvement_result_v2"
+    )
+    if is_v2 != is_v2_document:
+        raise FullRuntimeError(
+            "Backend result schema differs from its registered protocol namespace."
+        )
+    if is_v2:
+        if run.population_document is None:
+            raise FullRuntimeError(
+                "Protocol v2 result lacks its authenticated population registration."
+            )
+        try:
+            bind_v2_result_to_registration(
+                checked_document,
+                run.row,
+                run.protocol,
+                run.registry,
+                run.population_document,
+            )
+        except (PolicyImprovementV2SchemaError, KeyError, TypeError) as exc:
+            raise FullRuntimeError(
+                "Protocol v2 result differs from its authenticated registration."
+            ) from exc
+    try:
+        document, checked = validated_result_payload(checked_document)
+    except (
+        PolicyImprovementSchemaError,
+        PolicyImprovementV2SchemaError,
+        ValueError,
+        TypeError,
+    ) as exc:
+        raise FullRuntimeError(
+            "Backend result payload failed its registered runtime schema."
+        ) from exc
+    if is_v2 and checked.get("schema_name") != (
+        "policy_improvement_full_result_payload_v2"
+    ):
+        raise FullRuntimeError(
+            "The full runtime requires the non-smoke protocol v2 payload schema."
+        )
+    return dict(document), dict(checked)
+
+
 def _validate_result_contract(
     run: RegisteredFullRun,
     result: Mapping[str, object],
     *,
     result_validator: Callable[[object], Mapping[str, object]],
 ) -> dict[str, object]:
-    try:
-        checked = dict(result_validator(result))
-    except (PolicyImprovementSchemaError, ValueError, TypeError) as exc:
-        raise FullRuntimeError(
-            "Backend result failed policy_improvement_v1 schema."
-        ) from exc
+    document, checked = _validated_result_for_run(
+        run,
+        result,
+        result_validator=result_validator,
+    )
     row = run.row
     for field in (
         "run_id",
@@ -807,7 +881,7 @@ def _validate_result_contract(
     )
     if test_open != expected_test_open:
         raise FullRuntimeError("Backend result violates validation/test isolation.")
-    return checked
+    return document
 
 
 def _available_digest(value: object, *, name: str) -> str:
@@ -866,6 +940,38 @@ def _seal_authenticated_checkpoint(
         raise FullRuntimeError(str(exc)) from exc
 
 
+def _authorized_runtime_role(
+    authorization: Mapping[str, object], role_name: str
+) -> Mapping[str, object]:
+    roles = authorization.get("roles")
+    if not isinstance(roles, list):
+        raise FullRuntimeError("Runtime authorization has no role inventory.")
+    matches = [
+        role
+        for role in roles
+        if isinstance(role, Mapping) and role.get("role") == role_name
+    ]
+    if len(matches) != 1:
+        raise FullRuntimeError(
+            f"Runtime authorization does not bind exactly one {role_name} role."
+        )
+    return matches[0]
+
+
+def _full_producer_runtime_role(
+    authorization: Mapping[str, object],
+) -> tuple[str, Mapping[str, object]]:
+    """Return the artifact that actually produced a non-smoke full result."""
+
+    role_name = (
+        "policy-improvement-full"
+        if authorization.get("schema_name")
+        == "policy_improvement_runtime_authorization_v3"
+        else "policy-improvement-training"
+    )
+    return role_name, _authorized_runtime_role(authorization, role_name)
+
+
 def resolve_authenticated_full_checkpoint(
     run: RegisteredFullRun,
     *,
@@ -903,11 +1009,7 @@ def resolve_authenticated_full_checkpoint(
         raise FullRuntimeError(
             "Theory runtime authorization differs from the registered full run."
         )
-    roles = authorization["roles"]
-    assert isinstance(roles, list)
-    training_role = roles[0]
-    if not isinstance(training_role, Mapping):
-        raise FullRuntimeError("Theory runtime authorization has no training role.")
+    producer_role_name, producer_role = _full_producer_runtime_role(authorization)
 
     owner = _private_owner_root(run.evidence_root, project_root=run.project_root)
     output_relative = _canonical_relative(
@@ -949,15 +1051,16 @@ def resolve_authenticated_full_checkpoint(
     raw_result, _ = _load_authenticated_json(generation / "result.json")
     if not isinstance(raw_result, Mapping):
         raise FullRuntimeError("Published full-run result must be one JSON object.")
-    result = _validate_result_contract(
+    result_document = _validate_result_contract(
         run,
         raw_result,
         result_validator=result_validator,
     )
+    _, result = validated_result_payload(result_document)
     result_payload, result_file_identity = _stable_regular_file(
         generation / "result.json"
     )
-    if result_payload != canonical_json_bytes(result) + b"\n":
+    if result_payload != canonical_json_bytes(result_document) + b"\n":
         raise FullRuntimeError("Published full-run result is not canonical JSON.")
     if result.get("evaluation_split") != "validation":
         raise FullRuntimeError("Theory evaluation accepts validation-only full runs.")
@@ -968,10 +1071,10 @@ def resolve_authenticated_full_checkpoint(
         "producer_git_commit": authorization["producer_git_commit"],
         "producer_manifest_sha256": authorization["producer_source_manifest_sha256"],
         "runtime_authorization_sha256": authorization_digest,
-        "training_source_git_commit": training_role["source_git_commit"],
-        "training_runtime_sha256": training_role["runtime_sha256"],
-        "training_runtime_profile_sha256": training_role["runtime_profile_sha256"],
-        "training_selected_source_manifest_sha256": training_role[
+        "training_source_git_commit": producer_role["source_git_commit"],
+        "training_runtime_sha256": producer_role["runtime_sha256"],
+        "training_runtime_profile_sha256": producer_role["runtime_profile_sha256"],
+        "training_selected_source_manifest_sha256": producer_role[
             "selected_source_manifest_sha256"
         ],
         "launcher_sha256": authorization["launcher_sha256"],
@@ -1115,10 +1218,10 @@ def resolve_authenticated_full_checkpoint(
         or run_manifest["registry_row_sha256"] != run.registry_row_sha256
         or run_manifest["amendment_history_sha256"] != run.amendment_history_sha256
         or run_manifest["runtime_authorization_sha256"] != authorization_digest
-        or run_manifest["runtime_sha256"] != training_role["runtime_sha256"]
-        or run_manifest["source_git_commit"] != training_role["source_git_commit"]
+        or run_manifest["runtime_sha256"] != producer_role["runtime_sha256"]
+        or run_manifest["source_git_commit"] != producer_role["source_git_commit"]
         or run_manifest["source_manifest_sha256"]
-        != training_role["selected_source_manifest_sha256"]
+        != producer_role["selected_source_manifest_sha256"]
         or run_manifest["dataset_manifest_sha256"]
         != result_identities.get("dataset_manifest_sha256")
     ):
@@ -1173,11 +1276,11 @@ def resolve_authenticated_full_checkpoint(
         raise FullRuntimeError("Published model-state inventory identity differs.")
 
     expected_execution_identity = {
-        "role": "policy-improvement-training",
-        "source_git_commit": training_role["source_git_commit"],
-        "runtime_sha256": training_role["runtime_sha256"],
-        "runtime_profile_sha256": training_role["runtime_profile_sha256"],
-        "selected_source_manifest_sha256": training_role[
+        "role": producer_role_name,
+        "source_git_commit": producer_role["source_git_commit"],
+        "runtime_sha256": producer_role["runtime_sha256"],
+        "runtime_profile_sha256": producer_role["runtime_profile_sha256"],
+        "selected_source_manifest_sha256": producer_role[
             "selected_source_manifest_sha256"
         ],
         "runtime_authorization_sha256": authorization_digest,
@@ -1548,11 +1651,12 @@ def _finish_complete_generation(
     prior_failed_attempts: Sequence[Mapping[str, object]],
     result_validator: Callable[[object], Mapping[str, object]],
 ) -> None:
-    result = _validate_result_contract(
+    result_document = _validate_result_contract(
         run, package.result, result_validator=result_validator
     )
+    _, result = validated_result_payload(result_document)
     result_path = generation / "result.json"
-    expected_result_bytes = canonical_json_bytes(result) + b"\n"
+    expected_result_bytes = canonical_json_bytes(result_document) + b"\n"
     observed_result, _ = _stable_regular_file(result_path)
     if observed_result != expected_result_bytes:
         raise FullRuntimeError("Backend result.json differs from its returned result.")
@@ -1640,12 +1744,11 @@ def _finish_failed_attempt(
     *,
     result_validator: Callable[[object], Mapping[str, object]],
 ) -> Path:
-    try:
-        result = dict(result_validator(failure.result))
-    except (PolicyImprovementSchemaError, ValueError, TypeError) as exc:
-        raise FullRuntimeError(
-            "Backend failure did not provide a schema-valid result."
-        ) from exc
+    result_document, result = _validated_result_for_run(
+        run,
+        failure.result,
+        result_validator=result_validator,
+    )
     if (
         result.get("status") != "failed"
         or result.get("run_id") != run.row["run_id"]
@@ -1661,7 +1764,7 @@ def _finish_failed_attempt(
     attempt_id = f"{time.time_ns():032x}"
     attempt = staging_run / "attempts" / "complete" / attempt_id
     attempt.mkdir(parents=True, mode=0o700)
-    result_sha256 = _write_exclusive_json(attempt / "result.json", result)
+    result_sha256 = _write_exclusive_json(attempt / "result.json", result_document)
     result_bytes = (attempt / "result.json").stat().st_size
     manifest = {
         "schema_name": "policy_improvement_run_failed_attempt_v1",

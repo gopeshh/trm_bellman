@@ -71,6 +71,12 @@ from scripts.policy_improvement_schema import (
     primary_policy_variant_for_method,
     RESULT_SCHEMA_VERSION,
     SCHEMA_NAME,
+    validate_result,
+    validated_result_payload,
+)
+from scripts.policy_improvement_v2_schema import (
+    bind_v2_result_to_registration,
+    validate_v2_result,
 )
 from utils.compute_accounting import (
     add_model_counters,
@@ -252,6 +258,102 @@ def _available(value: object) -> dict[str, object]:
 
 def _unavailable(reason: str) -> dict[str, str]:
     return {"status": "unavailable", "reason": reason}
+
+
+def _registered_full_result_document(
+    run: RegisteredFullRun,
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    """Return the exact result document for the run's protocol namespace."""
+
+    checked_payload = dict(validate_result(payload))
+    if run.protocol.get("schema_name") != "policy_improvement_protocol_v2":
+        return checked_payload
+    if run.row.get("phase") == "stage0_smoke":
+        raise FullBackendError("The full backend cannot emit a Stage 0 result.")
+    population_document = run.population_document
+    populations = (
+        population_document.get("populations")
+        if isinstance(population_document, Mapping)
+        else None
+    )
+    population_id = run.row.get("evaluation_population")
+    population = (
+        populations.get(population_id)
+        if isinstance(populations, Mapping) and isinstance(population_id, str)
+        else None
+    )
+    if not isinstance(population, Mapping):
+        raise FullBackendError(
+            "Protocol v2 full result lacks its authenticated evaluation population."
+        )
+    if (
+        population.get("population_id") != population_id
+        or population.get("split") != run.row.get("evaluation_split")
+        or population.get("count") != run.evaluation_records
+    ):
+        raise FullBackendError(
+            "Protocol v2 full result population differs from its run budget."
+        )
+    checked_payload["schema_name"] = "policy_improvement_full_result_payload_v2"
+    checked_payload["schema_version"] = 1
+    checked_payload["evaluation_population_id"] = population_id
+    checked_payload["evaluation_population_binding_sha256"] = population[
+        "binding_sha256"
+    ]
+    population_registration = run.protocol.get("population_registry")
+    if not isinstance(population_registration, Mapping):
+        raise FullBackendError(
+            "Protocol v2 omits its population-registry registration."
+        )
+    document = {
+        "schema_name": "policy_improvement_result_v2",
+        "schema_version": 1,
+        "protocol_id": run.protocol["protocol_id"],
+        "protocol_schema_name": run.protocol["schema_name"],
+        "protocol_schema_version": run.protocol["schema_version"],
+        "protocol_sha256": run.protocol_sha256,
+        "population_registry_schema_name": population_registration["schema_name"],
+        "population_registry_schema_version": population_registration[
+            "schema_version"
+        ],
+        "population_registry_sha256": population_registration["sha256"],
+        "registry_schema_name": run.registry["schema_name"],
+        "registry_schema_version": run.registry["registry_schema_version"],
+        "registry_sha256": run.registry_sha256,
+        "registry_row_schema_name": run.row["schema_name"],
+        "registry_row_schema_version": run.row["schema_version"],
+        "registry_row_sha256": run.registry_row_sha256,
+        "run_id": run.row["run_id"],
+        "phase": run.row["phase"],
+        "method_id": run.row["method_id"],
+        "status": checked_payload["status"],
+        "evaluation_split": run.row["evaluation_split"],
+        "evaluation_population_id": population_id,
+        "evaluation_population_binding_sha256": population["binding_sha256"],
+        "evaluation_population_ordered_record_sha256": population[
+            "ordered_record_sha256"
+        ],
+        "evaluation_population_ordered_input_sha256": population[
+            "ordered_input_sha256"
+        ],
+        "evaluation_record_count": population["count"],
+        "validation_data_opened": run.row["evaluation_split"] == "validation",
+        "test_data_opened": run.row["evaluation_split"] == "test",
+        "scientific_selection": run.row["scientific_selection"],
+        "paper_evidence_eligible": run.row["paper_evidence_eligible"],
+        "payload": checked_payload,
+    }
+    checked_document = validate_v2_result(document)
+    bind_v2_result_to_registration(
+        checked_document,
+        run.row,
+        run.protocol,
+        run.registry,
+        population_document,
+    )
+    validated_document, _ = validated_result_payload(checked_document)
+    return validated_document
 
 
 def _write_json(path: Path, value: object) -> str:
@@ -933,7 +1035,12 @@ class TorchLearnedRunEngine:
                 checkpoint_directory=directory,
                 identity=identity,
                 validator_execution_identity={
-                    "role": "policy-improvement-training",
+                    "role": (
+                        "policy-improvement-full"
+                        if session.run.protocol.get("schema_name")
+                        == "policy_improvement_protocol_v2"
+                        else "policy-improvement-training"
+                    ),
                     "source_git_commit": runtime.source_git_commit,
                     "runtime_sha256": runtime.runtime_sha256,
                     "runtime_profile_sha256": runtime.runtime_profile_sha256,
@@ -1566,9 +1673,10 @@ class TorchLearnedRunEngine:
                 "run_manifest": _available(run_manifest_sha256),
             },
         }
-        _write_json(request.staging_generation / "result.json", result)
+        result_document = _registered_full_result_document(request.run, result)
+        _write_json(request.staging_generation / "result.json", result_document)
         return BackendPackage(
-            result=result,
+            result=result_document,
             primary_checkpoint_relative_path=interaction.checkpoint.path.relative_to(
                 request.staging_generation
             ).as_posix(),
@@ -3821,15 +3929,30 @@ def build_failed_result(
         train_registration.get("ordered_record_sha256"),
         name="failed train order SHA-256",
     )
-    population_tier = (
-        "confirmatory"
-        if run.row["tier"] in {"confirmatory", "ablation"}
-        else run.row["tier"]
-    )
-    populations = run.protocol.get("evaluation_populations")
-    population = (
-        populations.get(population_tier) if isinstance(populations, Mapping) else None
-    )
+    if run.protocol.get("schema_name") == "policy_improvement_protocol_v2":
+        population_id = run.row.get("evaluation_population")
+        populations = (
+            run.population_document.get("populations")
+            if isinstance(run.population_document, Mapping)
+            else None
+        )
+        population = (
+            populations.get(population_id)
+            if isinstance(populations, Mapping) and isinstance(population_id, str)
+            else None
+        )
+    else:
+        population_tier = (
+            "confirmatory"
+            if run.row["tier"] in {"confirmatory", "ablation"}
+            else run.row["tier"]
+        )
+        populations = run.protocol.get("evaluation_populations")
+        population = (
+            populations.get(population_tier)
+            if isinstance(populations, Mapping)
+            else None
+        )
     if not isinstance(population, Mapping):
         raise FullBackendError(
             "Failed attempt cannot resolve its registered evaluation population."
@@ -3945,4 +4068,4 @@ def build_failed_result(
             "run_manifest": dict(unavailable),
         },
     }
-    return result
+    return _registered_full_result_document(run, result)
