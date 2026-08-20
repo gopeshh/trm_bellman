@@ -499,21 +499,33 @@ def generate_registry(
     protocol = validate_protocol(protocol_value)
     if protocol.get("schema_name") == "policy_improvement_protocol_v2":
         from scripts.policy_improvement_v2_registry import generate_v2_registry
+        from scripts.policy_improvement_v2_schema import (
+            PolicyImprovementV2SchemaError,
+            validate_v2_amendment_history,
+        )
 
-        if amendment_history is not None and len(amendment_history) != 0:
-            raise PolicyImprovementSchemaError(
-                "Protocol v2 registry generation does not accept v1 amendment history."
-            )
         if populations_value is None:
             raise PolicyImprovementSchemaError(
                 "Protocol v2 registry generation requires its authenticated "
                 "population document."
             )
-        return generate_v2_registry(
+        registry = generate_v2_registry(
             protocol,
             populations_value,
             base_configs=base_configs,
         )
+        try:
+            validate_v2_amendment_history(
+                [] if amendment_history is None else amendment_history,
+                protocol=protocol,
+                registry=registry,
+                populations=populations_value,
+            )
+        except PolicyImprovementV2SchemaError as exc:
+            raise PolicyImprovementSchemaError(
+                "Protocol v2 amendment history is invalid."
+            ) from exc
+        return registry
     if base_configs is None:
         base_configs = load_registered_base_configs(
             protocol,
@@ -573,21 +585,24 @@ def validate_registry_document(
     ):
         from scripts.policy_improvement_v2_registry import validate_v2_registry_document
 
-        if amendment_history is not None and len(amendment_history) != 0:
-            raise PolicyImprovementSchemaError(
-                "Protocol v2 registry validation does not accept v1 amendment history."
-            )
         if populations_value is None:
             raise PolicyImprovementSchemaError(
                 "Protocol v2 registry validation requires its authenticated "
                 "population document."
             )
-        return validate_v2_registry_document(
+        base = validate_v2_registry_document(
             value,
             protocol_value,
             populations_value,
             base_configs=base_configs,
         )
+        generate_registry(
+            protocol_value,
+            amendment_history,
+            base_configs=base_configs,
+            populations_value=populations_value,
+        )
+        return base
     base = generate_registry(protocol_value, [], base_configs=base_configs)
     active = generate_registry(
         protocol_value,

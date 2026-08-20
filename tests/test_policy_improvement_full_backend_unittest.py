@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import fcntl
 import hashlib
 import math
@@ -22,6 +23,8 @@ from policy_improvement_checkpoint_validator import _validate_full_checkpoint
 from policy_improvement_full_backend import (
     _registered_full_result_document,
     _registered_theory_checkpoint_snapshot_kind,
+    _select_registered_population,
+    _validation_bridge_session_v2,
     build_failed_result,
     calibrate_training_split_throughput,
     FullBackendError,
@@ -59,7 +62,11 @@ from scripts.policy_improvement_full_runtime import (
     RegisteredFullRun,
 )
 from scripts.policy_improvement_schema import validate_result, validated_result_payload
-from utils.dataset_provenance import dataset_sample_sha256s, ordered_record_sha256
+from utils.dataset_provenance import (
+    dataset_input_sha256s,
+    dataset_sample_sha256s,
+    ordered_record_sha256,
+)
 from utils.run_identity import canonical_json_sha256
 
 
@@ -433,6 +440,171 @@ class FullBackendIdentityTest(unittest.TestCase):
         self.assertEqual((train[0], evaluation[0]), ("train", "validation"))
         self.assertEqual(opened, ["train", "validation"])
         self.assertNotIn("test", opened)
+
+    def test_validation_bridge_uses_separate_noncontiguous_population(self) -> None:
+        import upi_trm_train
+
+        def dataset(size: int) -> Any:
+            samples = []
+            for index in range(size):
+                inputs = torch.tensor([index + 1, 1, 1, 1], dtype=torch.long)
+                samples.append(
+                    {
+                        "inputs": inputs,
+                        "puzzle_identifiers": torch.tensor(index, dtype=torch.long),
+                        "initial_plan": inputs.clone(),
+                        "solution": torch.tensor([2, 3, 4, 2], dtype=torch.long),
+                    }
+                )
+            return SimpleNamespace(
+                samples=samples,
+                seq_len=4,
+                vocab_size=5,
+                num_identifiers=size,
+            )
+
+        full_validation = dataset(6)
+        full_records = dataset_sample_sha256s(full_validation)
+        full_inputs = dataset_input_sha256s(full_validation)
+        selection_indices = [5, 1]
+        bridge_indices = [4, 0]
+        selection_dataset = upi_trm_train.select_materialized_dataset_records(
+            full_validation,
+            selection_indices,
+            expected_record_sha256s=[
+                full_records[index] for index in selection_indices
+            ],
+            expected_input_sha256s=[full_inputs[index] for index in selection_indices],
+        )
+        selection = {
+            "population_id": "validation_select",
+            "split": "validation",
+            "count": 2,
+            "indices": selection_indices,
+            "record_sha256s": [full_records[index] for index in selection_indices],
+            "input_sha256s": [full_inputs[index] for index in selection_indices],
+            "ordered_record_sha256": ordered_record_sha256(
+                [full_records[index] for index in selection_indices]
+            ),
+            "ordered_input_sha256": ordered_record_sha256(
+                [full_inputs[index] for index in selection_indices]
+            ),
+            "binding_sha256": _digest("selection binding"),
+        }
+        bridge = {
+            "population_id": "validation_bridge",
+            "split": "validation",
+            "count": 2,
+            "indices": bridge_indices,
+            "record_sha256s": [full_records[index] for index in bridge_indices],
+            "input_sha256s": [full_inputs[index] for index in bridge_indices],
+            "ordered_record_sha256": ordered_record_sha256(
+                [full_records[index] for index in bridge_indices]
+            ),
+            "ordered_input_sha256": ordered_record_sha256(
+                [full_inputs[index] for index in bridge_indices]
+            ),
+            "binding_sha256": _digest("bridge binding"),
+        }
+        selected_view, selected_records, selected_inputs = (
+            _select_registered_population(
+                training_module=upi_trm_train,
+                materialized_dataset=full_validation,
+                population=selection,
+            )
+        )
+        self.assertEqual(selected_records, selection["record_sha256s"])
+        self.assertEqual(selected_inputs, selection["input_sha256s"])
+        self.assertEqual(
+            [sample["original_dataset_index"] for sample in selected_view.samples],
+            selection_indices,
+        )
+        run = _v2_run(self.root)
+        manifest = run.dataset_root / "manifests/validation.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_bytes(b"validation manifest\n")
+        protocol = copy.deepcopy(run.protocol)
+        protocol["dataset"]["splits"]["validation"].update(
+            {
+                "count": 6,
+                "manifest_sha256": {
+                    "status": "available",
+                    "value": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                },
+                "ordered_record_sha256": {
+                    "status": "available",
+                    "value": ordered_record_sha256(full_records),
+                },
+            }
+        )
+        run = replace(
+            run,
+            protocol=protocol,
+            population_document={
+                "schema_name": "policy_improvement_populations_v2",
+                "schema_version": 1,
+                "populations": {
+                    "validation_select": selection,
+                    "validation_bridge": bridge,
+                },
+            },
+            evaluation_records=2,
+        )
+        checkpoint_session = replace(
+            _tiny_ppo_session(run),
+            evaluation_dataset=selection_dataset,
+            evaluation_ordered_records_sha256=selection["ordered_record_sha256"],
+            evaluation_pool_sha256=selection["binding_sha256"],
+            dataset_provenance={
+                "metadata": {"eval_puzzle_id_offset": 10},
+            },
+        )
+        original_records = dataset_sample_sha256s(checkpoint_session.evaluation_dataset)
+        opened_splits: list[str] = []
+
+        def load_split(*, dataset_paths: list[str], pool_size: int, split: str) -> Any:
+            del dataset_paths, pool_size
+            opened_splits.append(split)
+            return full_validation, 4, 5, 6
+
+        with (
+            mock.patch.object(
+                upi_trm_train,
+                "build_dataset_from_paths",
+                side_effect=load_split,
+            ),
+            mock.patch.object(
+                upi_trm_train,
+                "_validate_materialized_split_manifest",
+            ),
+        ):
+            bridge_session = _validation_bridge_session_v2(
+                checkpoint_session=checkpoint_session,
+                run=run,
+                population=bridge,
+                training_module=upi_trm_train,
+            )
+        self.assertIsNot(bridge_session, checkpoint_session)
+        self.assertIsNot(
+            bridge_session.evaluation_dataset,
+            checkpoint_session.evaluation_dataset,
+        )
+        self.assertEqual(
+            dataset_sample_sha256s(bridge_session.evaluation_dataset),
+            bridge["record_sha256s"],
+        )
+        self.assertEqual(
+            dataset_sample_sha256s(checkpoint_session.evaluation_dataset),
+            original_records,
+        )
+        self.assertEqual(
+            [
+                sample["original_dataset_index"]
+                for sample in bridge_session.evaluation_dataset.samples
+            ],
+            bridge_indices,
+        )
+        self.assertEqual(opened_splits, ["validation"])
 
     def test_test_loader_fails_before_open_without_test_open(self) -> None:
         row = dict(self.run.row)
@@ -1381,6 +1553,33 @@ class FullCheckpointGuardTest(unittest.TestCase):
         self.assertGreater(first_return.environment_steps, 0)
         self.assertLessEqual(first_return.environment_steps, 16)
         self.assertTrue(math.isfinite(first_return.discounted_return))
+        first_pair = adapter.sample_paired_policy_returns(
+            state.state_id,
+            90210,
+            16,
+            config.gamma,
+            0.1,
+        )
+        second_pair = adapter.sample_paired_policy_returns(
+            state.state_id,
+            90210,
+            16,
+            config.gamma,
+            0.2,
+        )
+        repeated_pair = adapter.sample_paired_policy_returns(
+            state.state_id,
+            90210,
+            16,
+            config.gamma,
+            0.1,
+        )
+        self.assertEqual(first_pair, repeated_pair)
+        self.assertEqual(first_pair.current_policy, second_pair.current_policy)
+        self.assertEqual(
+            first_pair.common_random_numbers_sha256,
+            second_pair.common_random_numbers_sha256,
+        )
         self.assertEqual(adapter.read_only_snapshot_v2(), before)
         self.assertEqual(
             hashlib.sha256(checkpoint.read_bytes()).hexdigest(),

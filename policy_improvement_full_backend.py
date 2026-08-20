@@ -35,6 +35,7 @@ from policy_improvement_non_smoke_checkpoint import (
     FullCheckpointArtifact,
     publish_and_validate_full_checkpoint,
     session_model_state_identity,
+    session_theory_model_identity,
     validate_full_checkpoint_identity,
 )
 from policy_improvement_sealed_evidence import (
@@ -268,6 +269,55 @@ def _unavailable(reason: str) -> dict[str, str]:
     return {"status": "unavailable", "reason": reason}
 
 
+def _select_registered_population(
+    *,
+    training_module: Any,
+    materialized_dataset: Any,
+    population: Mapping[str, object],
+) -> tuple[Any, list[str], list[str]]:
+    indices = population.get("indices")
+    records = population.get("record_sha256s")
+    inputs = population.get("input_sha256s")
+    if (
+        not isinstance(indices, list)
+        or not isinstance(records, list)
+        or not isinstance(inputs, list)
+        or isinstance(population.get("count"), bool)
+        or population.get("count") != len(indices)
+        or len(records) != len(indices)
+        or len(inputs) != len(indices)
+    ):
+        raise FullBackendError("Registered evaluation population is incomplete.")
+    try:
+        selected = training_module.select_materialized_dataset_records(
+            materialized_dataset,
+            list(indices),
+            expected_record_sha256s=list(records),
+            expected_input_sha256s=list(inputs),
+        )
+    except (TypeError, ValueError) as exc:
+        raise FullBackendError(
+            "Registered evaluation population differs from materialized data."
+        ) from exc
+    selected_records = dataset_sample_sha256s(selected)
+    selected_inputs = dataset_input_sha256s(selected)
+    selected_samples = getattr(selected, "samples", None)
+    if (
+        not isinstance(selected_samples, list)
+        or any(not isinstance(sample, Mapping) for sample in selected_samples)
+        or [sample.get("original_dataset_index") for sample in selected_samples]
+        != indices
+        or selected_records != records
+        or selected_inputs != inputs
+        or ordered_record_sha256(selected_records)
+        != population.get("ordered_record_sha256")
+        or ordered_record_sha256(selected_inputs)
+        != population.get("ordered_input_sha256")
+    ):
+        raise FullBackendError("Registered evaluation population order differs.")
+    return selected, selected_records, selected_inputs
+
+
 def _registered_full_result_document(
     run: RegisteredFullRun,
     payload: Mapping[str, object],
@@ -322,9 +372,7 @@ def _registered_full_result_document(
         "protocol_schema_version": run.protocol["schema_version"],
         "protocol_sha256": run.protocol_sha256,
         "population_registry_schema_name": population_registration["schema_name"],
-        "population_registry_schema_version": population_registration[
-            "schema_version"
-        ],
+        "population_registry_schema_version": population_registration["schema_version"],
         "population_registry_sha256": population_registration["sha256"],
         "registry_schema_name": run.registry["schema_name"],
         "registry_schema_version": run.registry["registry_schema_version"],
@@ -967,7 +1015,7 @@ class TorchLearnedRunEngine:
         )
         train_dataset, seq_len, vocab_size, train_identifiers = train_values
         (
-            evaluation_dataset,
+            full_evaluation_dataset,
             evaluation_seq_len,
             evaluation_vocab_size,
             evaluation_identifiers,
@@ -976,14 +1024,12 @@ class TorchLearnedRunEngine:
         if (evaluation_seq_len, evaluation_vocab_size) != (seq_len, vocab_size):
             raise FullBackendError("Train and evaluation split shapes differ.")
         if set(dataset_input_sha256s(train_dataset)).intersection(
-            dataset_input_sha256s(evaluation_dataset)
+            dataset_input_sha256s(full_evaluation_dataset)
         ):
             raise FullBackendError("Train and evaluation inputs overlap.")
-        self._module.offset_puzzle_identifiers(evaluation_dataset, train_identifiers)
-        num_identifiers = train_identifiers + evaluation_identifiers
         for split, dataset in (
             ("train", train_dataset),
-            (evaluation_split, evaluation_dataset),
+            (evaluation_split, full_evaluation_dataset),
         ):
             expected_manifest = run.protocol["dataset"]["splits"][split][
                 "manifest_sha256"
@@ -1039,10 +1085,10 @@ class TorchLearnedRunEngine:
             raise FullBackendError("Registered dataset must have one source record.")
         source = sources[0]
         train_records = dataset_sample_sha256s(train_dataset)
-        evaluation_population = dataset_sample_sha256s(evaluation_dataset)
-        evaluation_records = evaluation_population[: run.evaluation_records]
+        full_evaluation_records = dataset_sample_sha256s(full_evaluation_dataset)
+        full_evaluation_inputs = dataset_input_sha256s(full_evaluation_dataset)
         train_order = ordered_record_sha256(train_records)
-        evaluation_population_order = ordered_record_sha256(evaluation_population)
+        evaluation_population_order = ordered_record_sha256(full_evaluation_records)
         if (
             train_order
             != run.protocol["dataset"]["splits"]["train"]["ordered_record_sha256"][
@@ -1054,6 +1100,41 @@ class TorchLearnedRunEngine:
             ]["value"]
         ):
             raise FullBackendError("Loaded dataset record order differs from protocol.")
+        if run.protocol.get("schema_name") == "policy_improvement_protocol_v2":
+            population_id = run.row.get("evaluation_population")
+            populations = (
+                run.population_document.get("populations")
+                if isinstance(run.population_document, Mapping)
+                else None
+            )
+            population = (
+                populations.get(population_id)
+                if isinstance(populations, Mapping) and isinstance(population_id, str)
+                else None
+            )
+            if (
+                not isinstance(population, Mapping)
+                or population.get("split") != evaluation_split
+                or population.get("count") != run.evaluation_records
+                or not isinstance(population.get("indices"), list)
+                or not isinstance(population.get("record_sha256s"), list)
+                or not isinstance(population.get("input_sha256s"), list)
+            ):
+                raise FullBackendError(
+                    "Protocol v2 evaluation population is unavailable."
+                )
+            evaluation_dataset, evaluation_records, _ = _select_registered_population(
+                training_module=self._module,
+                materialized_dataset=full_evaluation_dataset,
+                population=population,
+            )
+            evaluation_population_binding = str(population["binding_sha256"])
+        else:
+            evaluation_dataset = full_evaluation_dataset
+            evaluation_records = full_evaluation_records[: run.evaluation_records]
+            evaluation_population_binding = canonical_json_sha256(evaluation_records)
+        self._module.offset_puzzle_identifiers(evaluation_dataset, train_identifiers)
+        num_identifiers = train_identifiers + evaluation_identifiers
         dataset_provenance = build_dataset_provenance(
             builder_name=str(source["builder_name"]),
             builder_version=source["builder_version"],
@@ -1259,7 +1340,7 @@ class TorchLearnedRunEngine:
             dataset_manifest_sha256=dataset_manifest_sha256,
             train_ordered_records_sha256=train_order,
             evaluation_ordered_records_sha256=ordered_record_sha256(evaluation_records),
-            evaluation_pool_sha256=canonical_json_sha256(evaluation_records),
+            evaluation_pool_sha256=evaluation_population_binding,
         )
         if run.row["method_id"] == "fixed_base_distilled_realization":
 
@@ -1393,6 +1474,9 @@ class TorchLearnedRunEngine:
                     "launcher_sha256": runtime.launcher_sha256,
                 },
                 evaluation_state_dicts=session.evaluation_state_dicts,
+                model_config_sha256=canonical_json_sha256(
+                    self._module._config_dict(session.model.config)
+                ),
             )
         finally:
             session.checkpoint_wall_time_seconds += time.perf_counter() - started
@@ -1719,8 +1803,15 @@ class TorchLearnedRunEngine:
             )
             for snapshot in (interaction, compute)
         }
+        is_v2 = (
+            request.run.protocol.get("schema_name") == "policy_improvement_protocol_v2"
+        )
         state_inventory = {
-            "schema_name": "policy_improvement_model_state_inventory_v1",
+            "schema_name": (
+                "policy_improvement_model_state_inventory_v2"
+                if is_v2
+                else "policy_improvement_model_state_inventory_v1"
+            ),
             "run_id": request.run.row["run_id"],
             "method_id": request.run.row["method_id"],
             "model_state_sha256": interaction.checkpoint.model_state_sha256,
@@ -1731,10 +1822,23 @@ class TorchLearnedRunEngine:
                     "checkpoint_sha256": snapshot.checkpoint.sha256,
                     "model_state_sha256": snapshot.checkpoint.model_state_sha256,
                     "checkpoint_validation_sha256": validation_sha256s[snapshot.kind],
+                    **(
+                        {
+                            "theory_model_identity": (
+                                snapshot.checkpoint.theory_model_identity
+                            )
+                        }
+                        if is_v2
+                        else {}
+                    ),
                 }
                 for snapshot in (interaction, compute)
             ],
         }
+        if is_v2:
+            state_inventory["theory_model_identity"] = (
+                interaction.checkpoint.theory_model_identity
+            )
         model_inventory_sha256 = _write_json(
             request.staging_generation / "model_state_inventory.json",
             state_inventory,
@@ -2665,36 +2769,18 @@ class ReadOnlyTheoryBridgeSession:
 
     def observed_model_identity(self, training_module: Any) -> dict[str, str]:
         """Reconstruct every training-side model identity in a theory request."""
-
-        current, candidate, _, _ = self._policy_models()
-        current_sha256 = state_dict_sha256(current.state_dict())
-        candidate_sha256 = state_dict_sha256(candidate.state_dict())
-        method = str(self._session.run.row["method_id"])
-        if method in {
-            "fixed_base_exact_persistent",
-            "fixed_base_exact_episodic",
-        }:
-            deployed_sha256 = canonical_json_sha256(
-                {
-                    "kind": "exact_probability_mixture",
-                    "current_policy_sha256": current_sha256,
-                    "candidate_policy_sha256": candidate_sha256,
-                    "alpha": float(self._session.run.row["alpha"]),
-                    "recurrent_transition_sha256": (self._recurrent_transition_sha256),
-                }
-            )
-        else:
-            deployed_sha256 = state_dict_sha256(self._deployed_model().state_dict())
-        return {
-            "model_sha256": self._model_state_sha256,
-            "model_config_sha256": canonical_json_sha256(
+        identity = session_theory_model_identity(
+            self._session,
+            model_config_sha256=canonical_json_sha256(
                 training_module._config_dict(self._session.model.config)
             ),
-            "current_policy_sha256": current_sha256,
-            "candidate_policy_sha256": candidate_sha256,
-            "deployed_policy_sha256": deployed_sha256,
-            "recurrent_transition_sha256": self._recurrent_transition_sha256,
-        }
+            evaluation_state_dicts=self._evaluation_state_dicts,
+        )
+        if identity is None:
+            raise FullBackendError(
+                "This checkpoint method has no registered theory model identity."
+            )
+        return identity
 
     def _new_environment(self) -> PlanEditEnv:
         environment = PlanEditEnv(
@@ -3345,6 +3431,181 @@ class ReadOnlyTheoryBridgeSession:
 
         return self._guard(sample)
 
+    @staticmethod
+    def _inverse_cdf_action(
+        probabilities: tuple[float, ...],
+        uniform: float,
+    ) -> int:
+        if not probabilities or not 0.0 <= uniform < 1.0:
+            raise FullBackendError("Theory CRN action draw is invalid.")
+        if any(
+            not math.isfinite(probability) or probability < 0.0
+            for probability in probabilities
+        ) or not math.isclose(
+            sum(probabilities),
+            1.0,
+            rel_tol=0.0,
+            abs_tol=1e-8,
+        ):
+            raise FullBackendError("Theory CRN policy does not sum to one.")
+        cumulative = 0.0
+        fallback = -1
+        for index, probability in enumerate(probabilities):
+            if probability > 0.0:
+                fallback = index
+            cumulative += probability
+            if uniform < cumulative:
+                return index
+        if fallback < 0:
+            raise FullBackendError("Theory CRN policy has no supported action.")
+        return fallback
+
+    def _sample_policy_return_with_uniforms(
+        self,
+        *,
+        state_id: str,
+        uniforms: tuple[float, ...],
+        gamma: float,
+        policy: str,
+        alpha: float | None,
+        seed: int,
+    ) -> SimpleNamespace:
+        current_state: str | None = state_id
+        discounted_return = 0.0
+        discount = 1.0
+        trace: list[dict[str, object]] = []
+        terminal = False
+        for uniform in uniforms:
+            if current_state is None:
+                terminal = True
+                break
+            record = self._record(current_state)
+            if record.terminal:
+                terminal = True
+                break
+            self._populate_probabilities(record)
+            if (
+                record.current_probabilities is None
+                or record.candidate_probabilities is None
+            ):
+                raise FullBackendError("Theory CRN return lacks policy probabilities.")
+            if policy == "current":
+                probabilities = record.current_probabilities
+            elif policy == "exact_mixture" and alpha is not None:
+                probabilities = tuple(
+                    (1.0 - alpha) * current + alpha * candidate
+                    for current, candidate in zip(
+                        record.current_probabilities,
+                        record.candidate_probabilities,
+                    )
+                )
+            else:
+                raise FullBackendError("Theory CRN policy role is unsupported.")
+            action = self._inverse_cdf_action(probabilities, uniform)
+            outcome, step_trace = self._outcome(current_state, action)
+            discounted_return += discount * outcome.reward
+            discount *= gamma
+            trace.append(step_trace)
+            terminal = outcome.terminal
+            current_state = None if terminal else outcome.next_state_id
+            if terminal:
+                break
+        return SimpleNamespace(
+            discounted_return=discounted_return,
+            environment_steps=len(trace),
+            terminal=terminal,
+            trajectory_sha256=canonical_json_sha256(
+                {
+                    "initial_state_id": state_id,
+                    "seed": seed,
+                    "maximum_environment_steps": len(uniforms),
+                    "gamma": gamma,
+                    "policy": policy,
+                    "alpha": alpha,
+                    "steps": trace,
+                    "terminal": terminal,
+                }
+            ),
+        )
+
+    def sample_paired_policy_returns(
+        self,
+        state_id: str,
+        seed: int,
+        maximum_environment_steps: int,
+        gamma: float,
+        alpha: float,
+    ) -> SimpleNamespace:
+        """Sample current and exact-mixture returns from one fixed CRN stream."""
+
+        def sample() -> SimpleNamespace:
+            if str(self._session.run.row["method_id"]) not in {
+                "fixed_base_exact_persistent",
+                "fixed_base_exact_episodic",
+            }:
+                raise FullBackendError(
+                    "Paired exact-mixture returns require an exact method."
+                )
+            if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+                raise FullBackendError("Theory paired-return seed is invalid.")
+            if (
+                isinstance(maximum_environment_steps, bool)
+                or not isinstance(maximum_environment_steps, int)
+                or maximum_environment_steps <= 0
+            ):
+                raise FullBackendError(
+                    "Theory paired-return step limit must be positive."
+                )
+            if (
+                isinstance(gamma, bool)
+                or not isinstance(gamma, (int, float))
+                or not 0.0 <= float(gamma) < 1.0
+                or isinstance(alpha, bool)
+                or not isinstance(alpha, (int, float))
+                or float(alpha) not in {0.05, 0.1, 0.2}
+            ):
+                raise FullBackendError("Theory paired-return parameters are invalid.")
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(seed)
+            uniforms = tuple(
+                float(value)
+                for value in torch.rand(
+                    maximum_environment_steps,
+                    generator=generator,
+                    dtype=torch.float64,
+                ).tolist()
+            )
+            randomness_sha256 = canonical_json_sha256(
+                {
+                    "kind": "inverse_cdf_uniforms_v1",
+                    "seed": seed,
+                    "uniforms": list(uniforms),
+                }
+            )
+            current = self._sample_policy_return_with_uniforms(
+                state_id=state_id,
+                uniforms=uniforms,
+                gamma=float(gamma),
+                policy="current",
+                alpha=None,
+                seed=seed,
+            )
+            mixture = self._sample_policy_return_with_uniforms(
+                state_id=state_id,
+                uniforms=uniforms,
+                gamma=float(gamma),
+                policy="exact_mixture",
+                alpha=float(alpha),
+                seed=seed,
+            )
+            return SimpleNamespace(
+                current_policy=current,
+                exact_mixture=mixture,
+                common_random_numbers_sha256=randomness_sha256,
+            )
+
+        return self._guard(sample)
+
 
 def _theory_mapping(
     value: object,
@@ -3542,6 +3803,280 @@ def _validate_theory_identity_bundle(
         raise FullBackendError("Theory checkpoint mixes registered identities.")
 
 
+def _validation_bridge_session_v2(
+    *,
+    checkpoint_session: LearnedSession,
+    run: RegisteredFullRun,
+    population: Mapping[str, object],
+    training_module: Any,
+) -> LearnedSession:
+    """Build an independent V_bridge view after restoring against V_select."""
+
+    populations = (
+        run.population_document.get("populations")
+        if isinstance(run.population_document, Mapping)
+        else None
+    )
+    selection = (
+        populations.get("validation_select")
+        if isinstance(populations, Mapping)
+        else None
+    )
+    if (
+        run.protocol.get("schema_name") != "policy_improvement_protocol_v2"
+        or run.row.get("evaluation_split") != "validation"
+        or run.row.get("evaluation_population") != "validation_select"
+        or run.test_open_sha256 is not None
+        or not isinstance(selection, Mapping)
+        or population.get("population_id") != "validation_bridge"
+        or population.get("split") != "validation"
+    ):
+        raise FullBackendError(
+            "Protocol v2 validation bridge requires a V_select checkpoint and V_bridge."
+        )
+    checkpoint_records = dataset_sample_sha256s(checkpoint_session.evaluation_dataset)
+    checkpoint_inputs = dataset_input_sha256s(checkpoint_session.evaluation_dataset)
+    if (
+        checkpoint_records != selection.get("record_sha256s")
+        or checkpoint_inputs != selection.get("input_sha256s")
+        or checkpoint_session.evaluation_ordered_records_sha256
+        != selection.get("ordered_record_sha256")
+        or checkpoint_session.evaluation_pool_sha256 != selection.get("binding_sha256")
+    ):
+        raise FullBackendError(
+            "Restored full checkpoint is not bound to validation_select."
+        )
+    if run.dataset_root is None:
+        raise FullBackendError(
+            "Validation bridge lacks its authenticated dataset root."
+        )
+    split_registration = (
+        run.protocol.get("dataset", {}).get("splits", {}).get("validation")
+    )
+    if not isinstance(split_registration, Mapping):
+        raise FullBackendError("Validation split registration is unavailable.")
+    full_validation, seq_len, vocab_size, _ = training_module.build_dataset_from_paths(
+        dataset_paths=[str(run.dataset_root)],
+        pool_size=int(split_registration["count"]),
+        split="validation",
+    )
+    if int(seq_len) != int(checkpoint_session.evaluation_dataset.seq_len) or int(
+        vocab_size
+    ) != int(checkpoint_session.evaluation_dataset.vocab_size):
+        raise FullBackendError(
+            "Validation bridge dataset shape differs from the restored checkpoint."
+        )
+    expected_manifest = split_registration.get("manifest_sha256")
+    expected_order = split_registration.get("ordered_record_sha256")
+    if (
+        not isinstance(expected_manifest, Mapping)
+        or expected_manifest.get("status") != "available"
+        or not isinstance(expected_order, Mapping)
+        or expected_order.get("status") != "available"
+    ):
+        raise FullBackendError("Validation split identities are unavailable.")
+    if (
+        file_sha256(run.dataset_root / "manifests/validation.json")
+        != expected_manifest["value"]
+    ):
+        raise FullBackendError("Validation bridge manifest differs from protocol.")
+    training_module._validate_materialized_split_manifest(
+        dataset_root=run.dataset_root,
+        split="validation",
+        registered_sha256=expected_manifest["value"],
+        dataset=full_validation,
+    )
+    if (
+        ordered_record_sha256(dataset_sample_sha256s(full_validation))
+        != expected_order["value"]
+    ):
+        raise FullBackendError("Validation bridge split order differs from protocol.")
+    bridge_dataset, bridge_records, bridge_inputs = _select_registered_population(
+        training_module=training_module,
+        materialized_dataset=full_validation,
+        population=population,
+    )
+    provenance_metadata = checkpoint_session.dataset_provenance.get("metadata")
+    puzzle_offset = (
+        provenance_metadata.get("eval_puzzle_id_offset")
+        if isinstance(provenance_metadata, Mapping)
+        else None
+    )
+    if isinstance(puzzle_offset, bool) or not isinstance(puzzle_offset, int):
+        raise FullBackendError(
+            "Restored checkpoint lacks its evaluation puzzle-ID offset."
+        )
+    training_module.offset_puzzle_identifiers(bridge_dataset, puzzle_offset)
+    if not bridge_records or not bridge_inputs:
+        raise FullBackendError("Validation-bridge population is empty.")
+    return dataclass_replace(
+        checkpoint_session,
+        evaluation_dataset=bridge_dataset,
+        evaluation_ordered_records_sha256=str(population["ordered_record_sha256"]),
+        evaluation_pool_sha256=str(population["binding_sha256"]),
+    )
+
+
+def _validate_theory_identity_bundle_v2(
+    *,
+    supplied: Mapping[str, object],
+    run: RegisteredFullRun,
+    runtime: SealedRuntimeIdentity,
+    checkpoint_sha256: str,
+    checkpoint_size_bytes: int,
+    embedded_checkpoint_identity: Mapping[str, object],
+    checkpoint_session: LearnedSession,
+    adapter: ReadOnlyTheoryBridgeSession,
+    training_module: Any,
+    population: Mapping[str, object],
+) -> None:
+    from scripts.policy_improvement_theory_schema_v2 import validate_identity_bundle
+
+    try:
+        checked = validate_identity_bundle(supplied)
+    except ValueError as exc:
+        raise FullBackendError("Protocol v2 theory identity is invalid.") from exc
+    if canonical_json_bytes(checked) != canonical_json_bytes(supplied):
+        raise FullBackendError("Protocol v2 theory identity is not canonical.")
+    _validate_theory_evaluator_identity(supplied)
+    evaluator_runtime = supplied["evaluator_runtime"]
+    assert isinstance(evaluator_runtime, Mapping)
+    if evaluator_runtime["runtime_authorization_sha256"] != (
+        run.runtime_authorization_sha256
+    ):
+        raise FullBackendError("Theory evaluator mixes runtime authorizations.")
+    theory_amendments = [
+        amendment
+        for amendment in run.amendment_history
+        if amendment.get("schema_name")
+        == "policy_improvement_theory_bridge_amendment_v2"
+    ]
+    if len(theory_amendments) != 1:
+        raise FullBackendError(
+            "Registered v2 run must contain exactly one theory amendment."
+        )
+    methods = [
+        method
+        for method in run.protocol.get("methods", [])
+        if isinstance(method, Mapping)
+        and method.get("id") == run.row.get("base_method_id")
+    ]
+    if len(methods) != 1:
+        raise FullBackendError("Protocol v2 method config does not resolve exactly.")
+    split_registration = (
+        run.protocol.get("dataset", {}).get("splits", {}).get("validation")
+    )
+    if not isinstance(split_registration, Mapping):
+        raise FullBackendError("Protocol v2 validation split is unavailable.")
+    selected_indices = population.get("indices")
+    selected_records = population.get("record_sha256s")
+    selected_inputs = population.get("input_sha256s")
+    if not all(
+        isinstance(value, list)
+        for value in (selected_indices, selected_records, selected_inputs)
+    ):
+        raise FullBackendError("Protocol v2 bridge population is incomplete.")
+    assert isinstance(selected_indices, list)
+    assert isinstance(selected_records, list)
+    assert isinstance(selected_inputs, list)
+    record_pairs = [
+        {"record_index": index, "dataset_record_sha256": digest}
+        for index, digest in zip(selected_indices, selected_records)
+    ]
+    population_registration = run.protocol.get("population_registry")
+    if not isinstance(population_registration, Mapping):
+        raise FullBackendError("Protocol v2 population registration is unavailable.")
+    expected_runtime = {
+        "role": runtime.role,
+        "source_git_commit": runtime.source_git_commit,
+        "source_manifest_sha256": runtime.source_manifest_sha256,
+        "runtime_sha256": runtime.runtime_sha256,
+        "runtime_profile_sha256": runtime.runtime_profile_sha256,
+        "selected_source_manifest_sha256": runtime.selected_source_manifest_sha256,
+        "runtime_authorization_sha256": runtime.runtime_authorization_sha256,
+        "launcher_sha256": runtime.launcher_sha256,
+    }
+    expected = {
+        "protocol_id": run.protocol["protocol_id"],
+        "protocol_schema_name": run.protocol["schema_name"],
+        "protocol_schema_version": run.protocol["schema_version"],
+        "protocol_sha256": run.protocol_sha256,
+        "population_registry_schema_name": population_registration["schema_name"],
+        "population_registry_schema_version": population_registration["schema_version"],
+        "population_registry_sha256": population_registration["sha256"],
+        "registry_schema_name": run.registry["schema_name"],
+        "registry_schema_version": run.registry["registry_schema_version"],
+        "registry_sha256": run.registry_sha256,
+        "registry_row_schema_name": run.row["schema_name"],
+        "registry_row_schema_version": run.row["schema_version"],
+        "theory_amendment_sha256": canonical_json_sha256(theory_amendments[0]),
+        "registry_row_sha256": run.registry_row_sha256,
+        "checkpoint": {
+            "sha256": checkpoint_sha256,
+            "size_bytes": checkpoint_size_bytes,
+            "snapshot_kind": embedded_checkpoint_identity["snapshot_kind"],
+            "environment_interactions": embedded_checkpoint_identity[
+                "environment_interactions"
+            ],
+        },
+        "model": adapter.observed_model_identity(training_module),
+        "config": {
+            "file_sha256": methods[0].get("config_sha256"),
+            "base_canonical_sha256": run.row.get("base_config_canonical_sha256"),
+            "effective_config_sha256": run.row.get("expected_effective_config_sha256"),
+        },
+        "producer_source": {
+            "git_commit": runtime.source_git_commit,
+            "source_manifest_sha256": runtime.producer_source_manifest_sha256,
+        },
+        "training_runtime": expected_runtime,
+        "dataset_records": {
+            "split": "validation",
+            "population_id": population["population_id"],
+            "population_binding_sha256": population["binding_sha256"],
+            "split_manifest_sha256": split_registration["manifest_sha256"]["value"],
+            "ordered_record_sha256": population["ordered_record_sha256"],
+            "ordered_input_sha256": population["ordered_input_sha256"],
+            "selected_record_indices": list(selected_indices),
+            "selected_record_indices_sha256": canonical_json_sha256(selected_indices),
+            "selected_records": record_pairs,
+            "selected_records_sha256": canonical_json_sha256(record_pairs),
+            "selected_input_sha256s": list(selected_inputs),
+            "selected_input_sha256s_sha256": canonical_json_sha256(selected_inputs),
+            "record_count": population["count"],
+        },
+        "evaluator_source": copy.deepcopy(supplied["evaluator_source"]),
+        "evaluator_runtime": copy.deepcopy(supplied["evaluator_runtime"]),
+    }
+    if dict(supplied) != expected:
+        raise FullBackendError(
+            "Protocol v2 theory request contains missing or mixed identities."
+        )
+    embedded_expected = {
+        "run_id": run.row["run_id"],
+        "method_id": run.row["method_id"],
+        "protocol_sha256": run.protocol_sha256,
+        "registry_row_sha256": run.registry_row_sha256,
+        "amendment_history_sha256": run.amendment_history_sha256,
+        "runtime_authorization_sha256": run.runtime_authorization_sha256,
+        "training_runtime_sha256": runtime.runtime_sha256,
+        "training_source_git_commit": runtime.source_git_commit,
+        "training_source_manifest_sha256": runtime.source_manifest_sha256,
+        "launcher_sha256": runtime.launcher_sha256,
+        "dataset_manifest_sha256": checkpoint_session.dataset_manifest_sha256,
+        "dataset_provenance_sha256": canonical_json_sha256(
+            checkpoint_session.dataset_provenance
+        ),
+        "effective_config_sha256": checkpoint_session.effective_config_sha256,
+        "test_open_sha256": None,
+    }
+    if any(
+        embedded_checkpoint_identity.get(field) != value
+        for field, value in embedded_expected.items()
+    ):
+        raise FullBackendError("Protocol v2 theory checkpoint mixes identities.")
+
+
 def _registered_theory_checkpoint_snapshot_kind(
     run: RegisteredFullRun,
     environment_interactions: object,
@@ -3592,12 +4127,20 @@ def open_theory_bridge_session(
 ) -> ReadOnlyTheoryBridgeSession:
     """Open a disposable, mutation-guarded checkpoint for theory evaluation."""
 
-    if set(request) != {
+    v1_fields = {
         "identity",
         "registered_run",
         "registered_state_indices",
-    }:
+    }
+    v2_fields = {
+        *v1_fields,
+        "reported_record_indices",
+        "evaluation_population",
+    }
+    request_fields = frozenset(request)
+    if request_fields not in {frozenset(v1_fields), frozenset(v2_fields)}:
         raise FullBackendError("Theory bridge request field inventory differs.")
+    is_v2_request = request_fields == frozenset(v2_fields)
     identity = request["identity"]
     run = request["registered_run"]
     indices = request["registered_state_indices"]
@@ -3618,6 +4161,24 @@ def open_theory_bridge_session(
         or len(set(indices)) != len(indices)
     ):
         raise FullBackendError("Theory bridge registered-state indices are invalid.")
+    reported_indices: tuple[int, ...] | None = None
+    evaluation_population: Mapping[str, object] | None = None
+    if is_v2_request:
+        raw_reported_indices = request["reported_record_indices"]
+        raw_population = request["evaluation_population"]
+        if (
+            not isinstance(raw_reported_indices, (list, tuple))
+            or len(raw_reported_indices) != len(indices)
+            or any(
+                isinstance(index, bool) or not isinstance(index, int) or index < 0
+                for index in raw_reported_indices
+            )
+            or len(set(raw_reported_indices)) != len(raw_reported_indices)
+            or not isinstance(raw_population, Mapping)
+        ):
+            raise FullBackendError("Protocol v2 theory population indices are invalid.")
+        reported_indices = tuple(raw_reported_indices)
+        evaluation_population = raw_population
     expected = _require_digest(
         expected_checkpoint_sha256, name="theory checkpoint SHA-256"
     )
@@ -3776,6 +4337,19 @@ def open_theory_bridge_session(
             "Restored theory model differs from its authenticated checkpoint "
             f"validation {authenticated_validation}."
         )
+    checkpoint_session = session
+    if is_v2_request:
+        assert evaluation_population is not None
+        bridge_rng_state = training_module._capture_rng_state()
+        try:
+            session = _validation_bridge_session_v2(
+                checkpoint_session=checkpoint_session,
+                run=run,
+                population=evaluation_population,
+                training_module=training_module,
+            )
+        finally:
+            training_module._restore_rng_state(bridge_rng_state)
     try:
         adapter_descriptor = os.dup(sealed_checkpoint_descriptor)
     except OSError as exc:
@@ -3791,27 +4365,87 @@ def open_theory_bridge_session(
             training_module=training_module,
             evaluation_state_dicts=evaluation_states,
             registered_state_indices=tuple(indices),
+            reported_record_indices=reported_indices,
         )
     except BaseException:
         os.close(adapter_descriptor)
         raise
     try:
-        _validate_theory_identity_bundle(
-            supplied=identity,
-            run=run,
-            runtime=runtime,
-            checkpoint_sha256=expected,
-            checkpoint_size_bytes=sealed_size_bytes,
-            embedded_checkpoint_identity=embedded_identity,
-            session=session,
-            adapter=adapter,
-            training_module=training_module,
-            registered_state_indices=tuple(indices),
-        )
+        if is_v2_request:
+            assert evaluation_population is not None
+            _validate_theory_identity_bundle_v2(
+                supplied=identity,
+                run=run,
+                runtime=runtime,
+                checkpoint_sha256=expected,
+                checkpoint_size_bytes=sealed_size_bytes,
+                embedded_checkpoint_identity=embedded_identity,
+                checkpoint_session=checkpoint_session,
+                adapter=adapter,
+                training_module=training_module,
+                population=evaluation_population,
+            )
+        else:
+            _validate_theory_identity_bundle(
+                supplied=identity,
+                run=run,
+                runtime=runtime,
+                checkpoint_sha256=expected,
+                checkpoint_size_bytes=sealed_size_bytes,
+                embedded_checkpoint_identity=embedded_identity,
+                session=session,
+                adapter=adapter,
+                training_module=training_module,
+                registered_state_indices=tuple(indices),
+            )
     except BaseException:
         adapter.close()
         raise
     return adapter
+
+
+def open_validation_theory_bridge_session_v2(
+    request_identity: Mapping[str, object],
+    checkpoint_path: str | Path,
+    *,
+    registered_run: RegisteredFullRun,
+    evaluation_population: Mapping[str, object],
+    expected_checkpoint_sha256: str,
+    sealed_checkpoint_descriptor: int,
+    authenticated_model_state_sha256: str,
+    authenticated_role_state_sha256s: Mapping[str, object],
+    authenticated_validation_sha256: str,
+    runtime_identity: Mapping[str, object],
+    training_module: Any,
+) -> ReadOnlyTheoryBridgeSession:
+    """Restore a V_select checkpoint and expose a separate V_bridge view."""
+
+    raw_indices = evaluation_population.get("indices")
+    count = evaluation_population.get("count")
+    if (
+        not isinstance(raw_indices, list)
+        or isinstance(count, bool)
+        or not isinstance(count, int)
+        or count != len(raw_indices)
+    ):
+        raise FullBackendError("Validation-bridge population is invalid.")
+    return open_theory_bridge_session(
+        {
+            "identity": request_identity,
+            "registered_run": registered_run,
+            "registered_state_indices": tuple(range(count)),
+            "reported_record_indices": tuple(raw_indices),
+            "evaluation_population": evaluation_population,
+        },
+        checkpoint_path,
+        expected_checkpoint_sha256=expected_checkpoint_sha256,
+        sealed_checkpoint_descriptor=sealed_checkpoint_descriptor,
+        authenticated_model_state_sha256=authenticated_model_state_sha256,
+        authenticated_role_state_sha256s=authenticated_role_state_sha256s,
+        authenticated_validation_sha256=authenticated_validation_sha256,
+        runtime_identity=runtime_identity,
+        training_module=training_module,
+    )
 
 
 def _stage0_learned_session(

@@ -8,9 +8,11 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from scripts.policy_improvement_audit import (
@@ -21,6 +23,9 @@ from scripts.policy_improvement_audit import (
     _load_historical_runtime_authorizations,
     _producer_role_name,
     _require_result_namespace,
+    _authenticated_v2_source_audit_report,
+    _expected_registered_environment_interactions,
+    _selected_v2_screen_rows,
     _validated_runtime_authorization_map,
 )
 from scripts.policy_improvement_schema import (
@@ -99,9 +104,7 @@ class HistoricalAuthorizationLoadingTest(unittest.TestCase):
         )
 
     def test_v3_audit_binds_non_smoke_results_to_the_full_role(self) -> None:
-        authorization = {
-            "schema_name": "policy_improvement_runtime_authorization_v3"
-        }
+        authorization = {"schema_name": "policy_improvement_runtime_authorization_v3"}
         self.assertEqual(
             _producer_role_name(authorization, {"tier": "pilot"}),
             "policy-improvement-full",
@@ -160,16 +163,12 @@ class HistoricalAuthorizationLoadingTest(unittest.TestCase):
                 "schema_name": protocol["schema_name"],
                 "schema_version": protocol["schema_version"],
                 "protocol_id": protocol["protocol_id"],
-                "sha256": hashlib.sha256(
-                    canonical_json_bytes(protocol)
-                ).hexdigest(),
+                "sha256": hashlib.sha256(canonical_json_bytes(protocol)).hexdigest(),
             },
             "registry": {
                 "schema_name": registry["schema_name"],
                 "schema_version": registry["registry_schema_version"],
-                "sha256": hashlib.sha256(
-                    canonical_json_bytes(registry)
-                ).hexdigest(),
+                "sha256": hashlib.sha256(canonical_json_bytes(registry)).hexdigest(),
             },
             "amendments": [
                 {
@@ -405,6 +404,144 @@ class HistoricalAttemptBindingTest(unittest.TestCase):
             _historical_failed_attempt_manifest_sha256s(
                 {"historical_failed_attempts": [attempt]}
             )
+
+
+class V2SelectedScreenRowsTest(unittest.TestCase):
+    def test_only_selected_exact_configurations_continue(self) -> None:
+        seeds = (784831257, 2087907586, 4056782312)
+        rows = [
+            {"method_id": method, "n": n, "K": horizon, "seed": seed}
+            for method in (
+                "fixed_base_exact_persistent",
+                "fixed_base_exact_episodic",
+            )
+            for n in (2, 4)
+            for horizon in (1, 5)
+            for seed in seeds
+        ]
+        selection = {
+            "selected_configurations": [
+                {
+                    "method_id": "fixed_base_exact_persistent",
+                    "n": 2,
+                    "K": 5,
+                },
+                {
+                    "method_id": "fixed_base_exact_episodic",
+                    "n": 4,
+                    "K": 1,
+                },
+            ]
+        }
+        selected = _selected_v2_screen_rows(rows, selection)
+        self.assertEqual(len(selected), 6)
+        self.assertEqual(
+            {(row["method_id"], row["n"], row["K"]) for row in selected},
+            {
+                ("fixed_base_exact_persistent", 2, 5),
+                ("fixed_base_exact_episodic", 4, 1),
+            },
+        )
+
+    def test_incomplete_selection_fails_closed(self) -> None:
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "six registered screen rows",
+        ):
+            _selected_v2_screen_rows(
+                [
+                    {
+                        "method_id": "fixed_base_exact_persistent",
+                        "n": 2,
+                        "K": 1,
+                        "seed": 784831257,
+                    }
+                ],
+                {
+                    "selected_configurations": [
+                        {
+                            "method_id": "fixed_base_exact_persistent",
+                            "n": 2,
+                            "K": 1,
+                        }
+                    ]
+                },
+            )
+
+    def test_amendment_prefix_selects_the_registered_screen_cap(self) -> None:
+        protocol = {
+            "schema_name": "policy_improvement_protocol_v2",
+            "budgets": {},
+        }
+        row = {
+            "phase": "stage1_screen",
+            "tier": "pilot",
+            "checkpoint_environment_interactions": [10000, 20000, 40000, 80000],
+        }
+        self.assertEqual(
+            _expected_registered_environment_interactions(
+                row,
+                protocol=protocol,
+                amendment_count=3,
+            ),
+            10000,
+        )
+        self.assertEqual(
+            _expected_registered_environment_interactions(
+                row,
+                protocol=protocol,
+                amendment_count=4,
+            ),
+            80000,
+        )
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "invalid amendment prefix",
+        ):
+            _expected_registered_environment_interactions(
+                row,
+                protocol=protocol,
+                amendment_count=2,
+            )
+
+
+class V2SourceAuditEvidenceTest(unittest.TestCase):
+    def test_runtime_measurements_may_differ_but_decisions_must_match(self) -> None:
+        def accounting(seconds: float, rss: int) -> dict[str, object]:
+            return {
+                "schema_name": "policy_improvement_compute_accounting_v2",
+                "owner_role": "audit",
+                "audit_seconds": seconds,
+                "process_peak_rss_bytes": rss,
+            }
+
+        source = {
+            "schema_name": "policy_improvement_audit_v6",
+            "expected_rows": 24,
+            "complete_rows": 24,
+            "audit_compute_accounting": accounting(2.0, 4096),
+        }
+        recomputed = {
+            **source,
+            "audit_compute_accounting": accounting(3.0, 8192),
+        }
+        fake_compute_module = SimpleNamespace(
+            validate_authenticated_compute_accounting=lambda value: dict(value)
+        )
+        with mock.patch.dict(
+            sys.modules,
+            {"utils.compute_accounting": fake_compute_module},
+        ):
+            self.assertEqual(
+                _authenticated_v2_source_audit_report(source, recomputed=recomputed),
+                source,
+            )
+            changed = {**recomputed, "complete_rows": 23}
+            with self.assertRaisesRegex(
+                PolicyImprovementSchemaError,
+                "decisions differ",
+            ):
+                _authenticated_v2_source_audit_report(source, recomputed=changed)
 
 
 if __name__ == "__main__":

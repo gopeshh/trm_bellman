@@ -23,6 +23,7 @@ THEORY_AMENDMENT_SCHEMA_NAME = "policy_improvement_theory_bridge_amendment_v2"
 THEORY_REQUEST_SCHEMA_NAME = "policy_improvement_theory_bridge_request_v2"
 THEORY_RESULT_SCHEMA_NAME = "policy_improvement_theory_bridge_result_v2"
 THEORY_SCHEMA_VERSION = 1
+PAIRED_RETURN_ALPHA_VALUES = (0.05, 0.1, 0.2)
 
 EXACT_METHOD_IDS = (
     "fixed_base_exact_persistent",
@@ -936,7 +937,7 @@ def validate_theory_amendment(value: object) -> dict[str, Any]:
             "kind": "fixed_rank_quantile_bins_v1",
             "ties": "stable_record_index_order",
         },
-        "alpha_values": [0.05, 0.1, 0.2],
+        "alpha_values": list(PAIRED_RETURN_ALPHA_VALUES),
         "claims": "no_uniform_certificate_and_no_claim_from_smoke_values",
         "deployment_discrepancy_policies": [
             "legacy_parameter_interpolation",
@@ -1152,6 +1153,103 @@ def build_stage0_theory_request(
     return checked
 
 
+def build_validation_theory_request(
+    *,
+    amendment_value: object,
+    row: Mapping[str, object],
+    identity: Mapping[str, object],
+    effective_config: Mapping[str, object],
+    checkpoint_environment_interactions: int,
+    reference_depth_m: int = 8,
+) -> dict[str, Any]:
+    """Build one non-selection V_bridge request from a concrete validation row."""
+
+    amendment = validate_theory_amendment(amendment_value)
+    method_id = row.get("method_id")
+    alpha = row.get("alpha")
+    n = row.get("n")
+    horizon = row.get("K")
+    checkpoints = row.get("checkpoint_environment_interactions")
+    if (
+        row.get("row_kind") != "concrete"
+        or row.get("phase")
+        not in {"stage1_screen", "stage1_alpha", "stage1_baseline_readiness"}
+        or row.get("evaluation_split") != "validation"
+        or row.get("evaluation_population") != "validation_select"
+        or method_id not in THEORY_METHOD_IDS
+        or isinstance(n, bool)
+        or not isinstance(n, int)
+        or isinstance(horizon, bool)
+        or not isinstance(horizon, int)
+        or isinstance(alpha, bool)
+        or not isinstance(alpha, (int, float))
+        or not isinstance(checkpoints, list)
+        or checkpoint_environment_interactions not in checkpoints
+    ):
+        raise TheoryBridgeV2SchemaError(
+            "Validation theory request requires one concrete V_select row."
+        )
+    gamma = effective_config.get("gamma")
+    if isinstance(gamma, bool) or not isinstance(gamma, (int, float)):
+        raise TheoryBridgeV2SchemaError(
+            "Validation effective configuration lacks gamma."
+        )
+    raw_clip = effective_config.get("advantage_clip")
+    if raw_clip is None:
+        clipping: dict[str, object] = {"kind": "none", "clip_value": None}
+    elif isinstance(raw_clip, bool) or not isinstance(raw_clip, (int, float)):
+        raise TheoryBridgeV2SchemaError(
+            "Validation effective configuration has an invalid advantage clip."
+        )
+    else:
+        clipping = {
+            "kind": "clip_then_exact_recenter",
+            "clip_value": float(raw_clip),
+        }
+    request = {
+        "schema_name": THEORY_REQUEST_SCHEMA_NAME,
+        "schema_version": THEORY_SCHEMA_VERSION,
+        "protocol_id": PROTOCOL_ID,
+        "evaluation_id": (
+            f"{row['run_id']}.validation-bridge."
+            f"env{checkpoint_environment_interactions}.m{reference_depth_m}.k{horizon}"
+        ),
+        "evaluation_population": "validation_bridge",
+        "run_id": row["run_id"],
+        "method_id": method_id,
+        "latent_mode": (
+            "episodic" if method_id == "fixed_base_exact_episodic" else "persistent"
+        ),
+        "checkpoint_environment_interactions": (checkpoint_environment_interactions),
+        "n": n,
+        "reference_depth_m": reference_depth_m,
+        "reference_role": "primary" if reference_depth_m == 8 else "exploratory",
+        "bellman_horizon": horizon,
+        "gamma": float(gamma),
+        "alpha": float(alpha),
+        "bellman_estimator": copy.deepcopy(
+            amendment["bellman_estimators"][f"K{horizon}"]
+        ),
+        "return_estimator": copy.deepcopy(amendment["predictive_return_estimator"]),
+        "advantage_clipping": clipping,
+        "constructed_centering_tolerance": amendment["centering_contract"][
+            "constructed_centering_roundoff_absolute_tolerance"
+        ],
+        "centering_parity_tolerance": amendment["centering_contract"][
+            "training_estimator_parity_absolute_tolerance"
+        ],
+        "deployment_identity_tolerance": amendment["deployment_contract"][
+            "exact_mixture_identity_tv_absolute_tolerance"
+        ],
+        "scientific_selection": False,
+        "paper_evidence_eligible": True,
+        "identity": copy.deepcopy(dict(identity)),
+        "test_data_opened": False,
+    }
+    checked, _ = validate_request_against_amendment(request, amendment)
+    return checked
+
+
 def validate_theory_result(value: object, *, request: object) -> dict[str, Any]:
     checked_request = validate_theory_request(request)
     result = _fields(
@@ -1256,6 +1354,7 @@ def validate_theory_result(value: object, *, request: object) -> dict[str, Any]:
                 "V_hat_pi",
                 "V_hat_pi_standard_error",
                 "E_n",
+                "paired_current_to_exact_mixture_return",
                 "exact_mixture_deployment_identity_tv",
                 "deployment_discrepancy_delta_dep",
             },
@@ -1297,6 +1396,10 @@ def validate_theory_result(value: object, *, request: object) -> dict[str, Any]:
             _number(row[field], path=f"result.states[{offset}].{field}", minimum=0.0)
         exact_tv = row["exact_mixture_deployment_identity_tv"]
         realized_tv = row["deployment_discrepancy_delta_dep"]
+        paired = _object(
+            row["paired_current_to_exact_mixture_return"],
+            path=(f"result.states[{offset}]." "paired_current_to_exact_mixture_return"),
+        )
         if checked_request["method_id"] in EXACT_METHOD_IDS:
             _number(
                 exact_tv,
@@ -1318,6 +1421,152 @@ def validate_theory_result(value: object, *, request: object) -> dict[str, Any]:
             if exact_tv is not None:
                 raise TheoryBridgeV2SchemaError(
                     "Realized method cannot claim exact-mixture identity."
+                )
+        paired_path = f"result.states[{offset}].paired_current_to_exact_mixture_return"
+        paired_expected = (
+            checked_request["evaluation_population"] == "validation_bridge"
+            and checked_request["method_id"] in EXACT_METHOD_IDS
+        )
+        if not paired_expected:
+            unavailable = _fields(paired, {"status", "reason"}, path=paired_path)
+            expected_reason = (
+                "stage0_smoke_not_scientific_calibration"
+                if checked_request["evaluation_population"] == "stage0_smoke"
+                else "not_an_exact_probability_mixture_method"
+            )
+            if (
+                unavailable["status"] != "unavailable"
+                or unavailable["reason"] != expected_reason
+            ):
+                raise TheoryBridgeV2SchemaError(
+                    "Paired-return diagnostic has the wrong unavailable reason."
+                )
+        else:
+            available = _fields(
+                paired,
+                {
+                    "status",
+                    "kind",
+                    "difference_definition",
+                    "alpha_results",
+                },
+                path=paired_path,
+            )
+            if (
+                available["status"] != "available"
+                or available["kind"] != "paired_crn_current_vs_exact_mixture_v2"
+                or available["difference_definition"] != "exact_mixture_minus_current"
+            ):
+                raise TheoryBridgeV2SchemaError(
+                    "Paired-return diagnostic has the wrong role."
+                )
+            alpha_results = available["alpha_results"]
+            if not isinstance(alpha_results, list) or len(alpha_results) != len(
+                PAIRED_RETURN_ALPHA_VALUES
+            ):
+                raise TheoryBridgeV2SchemaError(
+                    "Paired-return alpha inventory differs from registration."
+                )
+            current_means: list[float] = []
+            randomness_digests: list[str] = []
+            for alpha_offset, (raw_alpha, expected_alpha) in enumerate(
+                zip(alpha_results, PAIRED_RETURN_ALPHA_VALUES)
+            ):
+                alpha_path = f"{paired_path}.alpha_results[{alpha_offset}]"
+                alpha_result = _fields(
+                    raw_alpha,
+                    {
+                        "alpha",
+                        "rollout_count",
+                        "current_policy_return_mean",
+                        "exact_mixture_return_mean",
+                        "paired_difference_mean",
+                        "paired_difference_standard_error",
+                        "negative_paired_difference_count",
+                        "negative_paired_difference_probability",
+                        "common_random_numbers_sha256",
+                    },
+                    path=alpha_path,
+                )
+                if (
+                    float(_number(alpha_result["alpha"], path=f"{alpha_path}.alpha"))
+                    != expected_alpha
+                ):
+                    raise TheoryBridgeV2SchemaError(
+                        "Paired-return alpha order differs from registration."
+                    )
+                rollout_count = _integer(
+                    alpha_result["rollout_count"],
+                    path=f"{alpha_path}.rollout_count",
+                    minimum=2,
+                )
+                if (
+                    rollout_count
+                    != checked_request["return_estimator"]["rollout_count"]
+                ):
+                    raise TheoryBridgeV2SchemaError(
+                        "Paired-return rollout count differs from registration."
+                    )
+                current_mean = _number(
+                    alpha_result["current_policy_return_mean"],
+                    path=f"{alpha_path}.current_policy_return_mean",
+                )
+                mixture_mean = _number(
+                    alpha_result["exact_mixture_return_mean"],
+                    path=f"{alpha_path}.exact_mixture_return_mean",
+                )
+                difference_mean = _number(
+                    alpha_result["paired_difference_mean"],
+                    path=f"{alpha_path}.paired_difference_mean",
+                )
+                _number(
+                    alpha_result["paired_difference_standard_error"],
+                    path=f"{alpha_path}.paired_difference_standard_error",
+                    minimum=0.0,
+                )
+                negative_count = _integer(
+                    alpha_result["negative_paired_difference_count"],
+                    path=f"{alpha_path}.negative_paired_difference_count",
+                    minimum=0,
+                )
+                if negative_count > rollout_count:
+                    raise TheoryBridgeV2SchemaError(
+                        "Paired-return negative count exceeds rollout count."
+                    )
+                negative_probability = _number(
+                    alpha_result["negative_paired_difference_probability"],
+                    path=f"{alpha_path}.negative_paired_difference_probability",
+                    minimum=0.0,
+                    maximum=1.0,
+                )
+                if not math.isclose(
+                    negative_probability,
+                    negative_count / rollout_count,
+                    rel_tol=0.0,
+                    abs_tol=1e-12,
+                ):
+                    raise TheoryBridgeV2SchemaError(
+                        "Paired-return negative probability differs from its count."
+                    )
+                if not math.isclose(
+                    difference_mean,
+                    mixture_mean - current_mean,
+                    rel_tol=1e-12,
+                    abs_tol=1e-12,
+                ):
+                    raise TheoryBridgeV2SchemaError(
+                        "Paired-return mean differs from its definition."
+                    )
+                current_means.append(current_mean)
+                randomness_digests.append(
+                    _sha256(
+                        alpha_result["common_random_numbers_sha256"],
+                        path=f"{alpha_path}.common_random_numbers_sha256",
+                    )
+                )
+            if len(set(current_means)) != 1 or len(set(randomness_digests)) != 1:
+                raise TheoryBridgeV2SchemaError(
+                    "Paired-return current-policy or CRN identity changed by alpha."
                 )
         if float(row["training_estimator_parity_max_abs_error"]) > float(
             row["training_estimator_parity_tolerance"]

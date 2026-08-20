@@ -24,10 +24,12 @@ from scripts.policy_improvement_populations import (
     validate_v2_populations,
 )
 from scripts.policy_improvement_registry import (
+    generate_registry,
     load_flat_registered_yaml as load_v1_flat_registered_yaml,
     main as registry_main,
 )
 from scripts.policy_improvement_schema import (
+    amendment_history_sha256,
     PolicyImprovementSchemaError,
     runtime_authorization_sha256,
     validate_protocol,
@@ -50,6 +52,10 @@ from scripts.policy_improvement_v2_schema import (
     load_strict_json,
     PolicyImprovementV2SchemaError,
     sha256_json,
+    validate_base_policy_amendment,
+    validate_compute_freeze_v2,
+    validate_stage1_configuration_selection,
+    validate_v2_amendment_history,
     validate_v2_protocol,
     validate_v2_result,
 )
@@ -353,8 +359,7 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
 
     def test_test_open_record_binds_the_supplied_v2_population_document(self) -> None:
         history = [
-            {"created_at_utc": f"2026-08-18T00:00:0{index}Z"}
-            for index in range(4)
+            {"created_at_utc": f"2026-08-18T00:00:0{index}Z"} for index in range(4)
         ]
         authorization = {"protocol_sha256": sha256_json(self.protocol)}
         with (
@@ -401,13 +406,10 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
             pass
 
         history = [
-            {"created_at_utc": f"2026-08-18T00:00:0{index}Z"}
-            for index in range(4)
+            {"created_at_utc": f"2026-08-18T00:00:0{index}Z"} for index in range(4)
         ]
 
-        def stop_after_registry(
-            *_args: object, **kwargs: object
-        ) -> dict[str, object]:
+        def stop_after_registry(*_args: object, **kwargs: object) -> dict[str, object]:
             self.assertEqual(kwargs["populations_value"], self.populations)
             raise StopAfterRegistryAuthentication
 
@@ -532,6 +534,222 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
             artifact["reason"],
             "no_authenticated_train_only_base_policy_artifact_supplied_for_v2",
         )
+
+    def test_future_stage1_selection_is_vselect_only_and_fully_bound(self) -> None:
+        selected: list[dict[str, object]] = []
+        for method_id, n, horizon in (
+            ("fixed_base_exact_persistent", 2, 1),
+            ("fixed_base_exact_episodic", 4, 5),
+        ):
+            selected.append(
+                {
+                    "method_id": method_id,
+                    "n": n,
+                    "K": horizon,
+                    "source_results": [
+                        {
+                            "run_id": (f"s1-{method_id}-n{n}-k{horizon}-s{seed}"),
+                            "seed": seed,
+                            "result_sha256": _digest(
+                                f"{method_id}-{n}-{horizon}", seed
+                            ),
+                        }
+                        for seed in (784831257, 2087907586, 4056782312)
+                    ],
+                }
+            )
+        selection = {
+            "schema_name": "policy_improvement_stage1_configuration_selection_v2",
+            "schema_version": 1,
+            "amendment_id": "stage1-configuration-selection-v2",
+            "created_at_utc": "2026-08-20T12:00:00Z",
+            "protocol_id": self.protocol["protocol_id"],
+            "protocol_schema_name": self.protocol["schema_name"],
+            "protocol_schema_version": self.protocol["schema_version"],
+            "protocol_sha256": sha256_json(self.protocol),
+            "population_registry_sha256": self.protocol["population_registry"][
+                "sha256"
+            ],
+            "source_registry_schema_name": self.registry["schema_name"],
+            "source_registry_schema_version": self.registry["registry_schema_version"],
+            "source_registry_sha256": sha256_json(self.registry),
+            "prior_amendment_history_sha256": _digest("prior", 1),
+            "compute_freeze_sha256": _digest("compute", 1),
+            "base_policy_artifact_sha256": _digest("base", 1),
+            "runtime_authorization_sha256": _digest("authorization", 1),
+            "selection_checkpoint_environment_interactions": 10000,
+            "selection_population_id": "validation_select",
+            "selection_population_binding_sha256": self.populations["populations"][
+                "validation_select"
+            ]["binding_sha256"],
+            "bridge_population_id": "validation_bridge",
+            "bridge_population_binding_sha256": self.populations["populations"][
+                "validation_bridge"
+            ]["binding_sha256"],
+            "outcome_evidence_inspected": True,
+            "inspected_population_ids": ["validation_select"],
+            "bridge_not_inspected": True,
+            "test_data_opened": False,
+            "selection_rule": (
+                "mean_seed_level_interaction_matched_solve_rate_then_"
+                "n_ascending_then_K_ascending_v2"
+            ),
+            "source_audit_sha256": _digest("audit", 1),
+            "selected_configurations": selected,
+        }
+        self.assertEqual(validate_stage1_configuration_selection(selection), selection)
+        opened_bridge = copy.deepcopy(selection)
+        opened_bridge["bridge_not_inspected"] = False
+        with self.assertRaisesRegex(
+            PolicyImprovementV2SchemaError,
+            "contract differs",
+        ):
+            validate_stage1_configuration_selection(opened_bridge)
+        wrong_source = copy.deepcopy(selection)
+        wrong_source["selected_configurations"][0]["source_results"][0][
+            "run_id"
+        ] = "another-run"
+        with self.assertRaisesRegex(
+            PolicyImprovementV2SchemaError,
+            "source rows differ",
+        ):
+            validate_stage1_configuration_selection(wrong_source)
+
+    def test_future_base_policy_amendment_is_train_only_and_registry_stable(
+        self,
+    ) -> None:
+        theory = load_strict_json(THEORY_AMENDMENT)
+        amendment = {
+            "schema_name": "policy_improvement_base_policy_amendment_v2",
+            "schema_version": 1,
+            "amendment_id": "base-policy-v2",
+            "created_at_utc": "2026-08-20T12:00:00Z",
+            "protocol_id": self.protocol["protocol_id"],
+            "protocol_schema_name": self.protocol["schema_name"],
+            "protocol_schema_version": self.protocol["schema_version"],
+            "protocol_sha256": sha256_json(self.protocol),
+            "population_registry_sha256": self.protocol["population_registry"][
+                "sha256"
+            ],
+            "source_registry_schema_name": self.registry["schema_name"],
+            "source_registry_schema_version": self.registry["registry_schema_version"],
+            "source_registry_sha256": sha256_json(self.registry),
+            "prior_amendment_history_sha256": amendment_history_sha256([theory]),
+            "runtime_authorization_sha256": _digest("authorization", 2),
+            "validation_data_inspected": False,
+            "test_data_opened": False,
+            "base_policy_artifact": {
+                "status": "available",
+                "initialization_kind": "train_only_pretrained",
+                "architecture_sha256": sha256_json(self.protocol["architecture"]),
+                "model_state_sha256": _digest("model", 2),
+                "producer_git_commit": "1" * 40,
+                "producer_source_manifest_sha256": _digest("source", 2),
+                "training_dataset_manifest_sha256": self.protocol["dataset"][
+                    "manifest_sha256"
+                ]["value"],
+                "training_split": "train",
+                "training_split_ordered_record_sha256": self.protocol["dataset"][
+                    "splits"
+                ]["train"]["ordered_record_sha256"]["value"],
+                "training_procedure_sha256": _digest("procedure", 2),
+                "checkpoint_sha256": _digest("checkpoint", 2),
+                "checkpoint_size_bytes": 4096,
+                "shared_across_persistent_and_episodic": True,
+                "not_selected_by_validation_or_test": True,
+            },
+        }
+        self.assertEqual(validate_base_policy_amendment(amendment), amendment)
+        active = generate_registry(
+            self.protocol,
+            [theory, amendment],
+            base_configs=self.configs,
+            populations_value=self.populations,
+        )
+        self.assertEqual(active, self.registry)
+        compute = {
+            "schema_name": "policy_improvement_compute_freeze_v2",
+            "schema_version": 1,
+            "amendment_id": "post-smoke-compute-freeze-v2",
+            "created_at_utc": "2026-08-20T12:01:00Z",
+            "protocol_id": self.protocol["protocol_id"],
+            "protocol_schema_name": self.protocol["schema_name"],
+            "protocol_schema_version": self.protocol["schema_version"],
+            "protocol_sha256": sha256_json(self.protocol),
+            "population_registry_sha256": self.protocol["population_registry"][
+                "sha256"
+            ],
+            "source_registry_schema_name": self.registry["schema_name"],
+            "source_registry_schema_version": self.registry["registry_schema_version"],
+            "source_registry_sha256": sha256_json(self.registry),
+            "prior_amendment_history_sha256": amendment_history_sha256(
+                [theory, amendment]
+            ),
+            "base_policy_artifact_sha256": sha256_json(
+                amendment["base_policy_artifact"]
+            ),
+            "runtime_authorization_sha256": amendment["runtime_authorization_sha256"],
+            "test_data_opened": False,
+            "evidence": {
+                "phase": "stage0_smoke",
+                "audit_report_sha256": _digest("stage0 audit", 2),
+                "result_set_sha256": _digest("stage0 results", 2),
+                "per_instance_set_sha256": _digest("stage0 instances", 2),
+                "expected_rows": 4,
+                "complete_rows": 4,
+                "failed_rows": 0,
+            },
+            "common_compute_targets": {
+                "unit": "recurrent_map_applications",
+                "pilot": 1000,
+                "confirmatory": 2000,
+                "ablation": 2000,
+                "maximum_relative_mismatch": 0.05,
+            },
+        }
+        self.assertEqual(validate_compute_freeze_v2(compute), compute)
+        self.assertEqual(
+            validate_v2_amendment_history(
+                [theory, amendment, compute],
+                protocol=self.protocol,
+                registry=self.registry,
+                populations=self.populations,
+            ),
+            [theory, amendment, compute],
+        )
+        v1_compute = copy.deepcopy(compute)
+        v1_compute["schema_name"] = "policy_improvement_compute_freeze_v1"
+        with self.assertRaisesRegex(
+            PolicyImprovementV2SchemaError,
+            "amendment 2 is invalid",
+        ):
+            validate_v2_amendment_history(
+                [theory, amendment, v1_compute],
+                protocol=self.protocol,
+                registry=self.registry,
+                populations=self.populations,
+            )
+        leaked = copy.deepcopy(amendment)
+        leaked["validation_data_inspected"] = True
+        with self.assertRaisesRegex(
+            PolicyImprovementV2SchemaError,
+            "train-only",
+        ):
+            validate_base_policy_amendment(leaked)
+        wrong_training_data = copy.deepcopy(amendment)
+        wrong_training_data["base_policy_artifact"][
+            "training_split_ordered_record_sha256"
+        ] = _digest("another train split", 2)
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "amendment history is invalid",
+        ):
+            generate_registry(
+                self.protocol,
+                [theory, wrong_training_data],
+                base_configs=self.configs,
+                populations_value=self.populations,
+            )
 
     def test_v2_configs_preserve_v1_canonical_values(self) -> None:
         for method in self.protocol["methods"]:

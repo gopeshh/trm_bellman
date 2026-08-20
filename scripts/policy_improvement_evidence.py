@@ -88,6 +88,25 @@ def _sha256(value: object, *, path: str) -> str:
     return value
 
 
+def _theory_model_identity(value: object, *, path: str) -> dict[str, str]:
+    identity = _fields(
+        value,
+        {
+            "model_sha256",
+            "model_config_sha256",
+            "current_policy_sha256",
+            "candidate_policy_sha256",
+            "deployed_policy_sha256",
+            "recurrent_transition_sha256",
+        },
+        path=path,
+    )
+    return {
+        field: _sha256(digest, path=f"{path}.{field}")
+        for field, digest in identity.items()
+    }
+
+
 def _available(value: object, *, path: str) -> object:
     availability = _fields(value, {"status", "value"}, path=path)
     if availability["status"] != "available":
@@ -309,6 +328,15 @@ def _semantic_checkpoint_validation(
                     path="compute.target.registered_quantity",
                 ),
                 "test_open_sha256": test_open_sha256,
+                **(
+                    {
+                        "generation_environment_interactions": (
+                            expected_environment_interactions
+                        )
+                    }
+                    if protocol.get("schema_name") == "policy_improvement_protocol_v2"
+                    else {}
+                ),
             }
         )
     computed = _fields(
@@ -344,45 +372,46 @@ def _semantic_checkpoint_validation(
             "Semantic checkpoint role-state inventory is invalid."
         )
     theory_model_identity = computed["theory_model_identity"]
-    exact_stage0 = (
-        protocol.get("schema_name") == "policy_improvement_protocol_v2"
-        and result.get("tier") == "smoke"
-        and result.get("method_id")
-        in {
-            "fixed_base_exact_persistent",
-            "fixed_base_exact_episodic",
-        }
-    )
-    if exact_stage0:
-        identity = _fields(
+    theory_capable_v2 = protocol.get(
+        "schema_name"
+    ) == "policy_improvement_protocol_v2" and result.get("method_id") in {
+        "fixed_base_exact_persistent",
+        "fixed_base_exact_episodic",
+        "legacy_parameter_interpolation",
+        "fixed_base_distilled_realization",
+    }
+    if theory_capable_v2:
+        identity = _theory_model_identity(
             theory_model_identity,
-            {
-                "model_sha256",
-                "model_config_sha256",
-                "current_policy_sha256",
-                "candidate_policy_sha256",
-                "deployed_policy_sha256",
-                "recurrent_transition_sha256",
-            },
             path="checkpoint_semantic_validation.theory_model_identity",
         )
-        for field, digest in identity.items():
-            _sha256(
-                digest,
-                path=f"checkpoint_semantic_validation.theory_model_identity.{field}",
+        if result.get("method_id") in {
+            "fixed_base_exact_persistent",
+            "fixed_base_exact_episodic",
+        }:
+            role_names = ("policy_model_old", "policy_model_candidate")
+        elif result.get("method_id") == "legacy_parameter_interpolation":
+            role_names = (
+                "preinterpolation_policy_base",
+                "preinterpolation_policy_candidate",
             )
+        else:
+            role_names = ("base", "candidate")
         if (
             identity["model_sha256"] != computed["model_state_sha256"]
-            or identity["current_policy_sha256"] != role_hashes.get("policy_model_old")
-            or identity["candidate_policy_sha256"]
-            != role_hashes.get("policy_model_candidate")
+            or identity["current_policy_sha256"] != role_hashes.get(role_names[0])
+            or identity["candidate_policy_sha256"] != role_hashes.get(role_names[1])
+            or (
+                result.get("tier") != "smoke"
+                and identity != validation.get("theory_model_identity")
+            )
         ):
             raise PolicyImprovementSchemaError(
                 "Theory model identity differs from semantic checkpoint roles."
             )
     elif theory_model_identity is not None:
         raise PolicyImprovementSchemaError(
-            "Only exact Stage 0 checkpoints may expose a theory model identity."
+            "This checkpoint method cannot expose a theory model identity."
         )
     if (
         computed["schema_name"]
@@ -1001,9 +1030,7 @@ def _authenticate_historical_failed_attempts(
             producer_role_name = _producer_runtime_role_name(
                 authorization, complete_result
             )
-            producer_role = _authorized_runtime_role(
-                authorization, producer_role_name
-            )
+            producer_role = _authorized_runtime_role(authorization, producer_role_name)
             expected_runtime_bindings = {
                 "producer_git_commit": authorization["producer_git_commit"],
                 "producer_manifest_sha256": authorization[
@@ -1304,12 +1331,8 @@ def authenticate_complete_generation(
 
     result_document, runtime_result = validated_result_payload(result)
     result = runtime_result
-    is_v2_protocol = (
-        protocol.get("schema_name") == "policy_improvement_protocol_v2"
-    )
-    is_v2_result = (
-        result_document.get("schema_name") == "policy_improvement_result_v2"
-    )
+    is_v2_protocol = protocol.get("schema_name") == "policy_improvement_protocol_v2"
+    is_v2_result = result_document.get("schema_name") == "policy_improvement_result_v2"
     if is_v2_protocol != is_v2_result:
         raise PolicyImprovementSchemaError(
             "Complete result schema differs from its protocol namespace."
@@ -1330,9 +1353,7 @@ def authenticate_complete_generation(
     current_authorization_digest = runtime_authorization_sha256(current_authorization)
     result_identities = _object(result["identities"], path="result.identities")
     producer_role_name = _producer_runtime_role_name(current_authorization, result)
-    producer_role = _authorized_runtime_role(
-        current_authorization, producer_role_name
-    )
+    producer_role = _authorized_runtime_role(current_authorization, producer_role_name)
     current_runtime_bindings = {
         "runtime_authorization_sha256": current_authorization_digest,
         "producer_git_commit": current_authorization["producer_git_commit"],
@@ -1717,20 +1738,28 @@ def authenticate_complete_generation(
         raise PolicyImprovementSchemaError(
             "Model-state inventory digest differs from immutable bytes."
         )
+    model_inventory_fields = {
+        "schema_name",
+        "run_id",
+        "method_id",
+        "model_state_sha256",
+        "role_state_sha256s",
+        "snapshot_state_bindings",
+    }
+    if is_v2_protocol and not is_smoke:
+        model_inventory_fields.add("theory_model_identity")
     model_inventory = _fields(
         _load_ascii_json(model_inventory_path),
-        {
-            "schema_name",
-            "run_id",
-            "method_id",
-            "model_state_sha256",
-            "role_state_sha256s",
-            "snapshot_state_bindings",
-        },
+        model_inventory_fields,
         path="model_state_inventory",
     )
     if (
-        model_inventory["schema_name"] != "policy_improvement_model_state_inventory_v1"
+        model_inventory["schema_name"]
+        != (
+            "policy_improvement_model_state_inventory_v2"
+            if is_v2_protocol and not is_smoke
+            else "policy_improvement_model_state_inventory_v1"
+        )
         or model_inventory["run_id"] != run_id
         or model_inventory["method_id"] != result["method_id"]
         or model_inventory["model_state_sha256"]
@@ -1751,15 +1780,41 @@ def authenticate_complete_generation(
             "Model-state snapshot bindings must be a list."
         )
     snapshot_bindings: dict[str, Mapping[str, object]] = {}
+    theory_identity_required = (
+        is_v2_protocol
+        and not is_smoke
+        and result.get("method_id")
+        in {
+            "fixed_base_exact_persistent",
+            "fixed_base_exact_episodic",
+            "legacy_parameter_interpolation",
+            "fixed_base_distilled_realization",
+        }
+    )
+    inventory_theory_identity = None
+    if is_v2_protocol and not is_smoke:
+        raw_inventory_theory = model_inventory.get("theory_model_identity")
+        if raw_inventory_theory is not None:
+            inventory_theory_identity = _theory_model_identity(
+                raw_inventory_theory,
+                path="model_state_inventory.theory_model_identity",
+            )
+        elif theory_identity_required:
+            raise PolicyImprovementSchemaError(
+                "Theory-capable model-state inventory lacks its model identity."
+            )
     for index, raw_binding in enumerate(raw_snapshot_bindings):
+        binding_fields = {
+            "snapshot_kind",
+            "checkpoint_sha256",
+            "model_state_sha256",
+            "checkpoint_validation_sha256",
+        }
+        if is_v2_protocol and not is_smoke:
+            binding_fields.add("theory_model_identity")
         binding = _fields(
             raw_binding,
-            {
-                "snapshot_kind",
-                "checkpoint_sha256",
-                "model_state_sha256",
-                "checkpoint_validation_sha256",
-            },
+            binding_fields,
             path=f"model_state_inventory.snapshot_state_bindings[{index}]",
         )
         kind = binding["snapshot_kind"]
@@ -1773,6 +1828,24 @@ def authenticate_complete_generation(
             "checkpoint_validation_sha256",
         ):
             _sha256(binding[field], path=f"snapshot_binding.{kind}.{field}")
+        if is_v2_protocol and not is_smoke:
+            raw_theory_identity = binding.get("theory_model_identity")
+            if raw_theory_identity is not None:
+                binding_theory_identity = _theory_model_identity(
+                    raw_theory_identity,
+                    path=f"snapshot_binding.{kind}.theory_model_identity",
+                )
+                if (
+                    binding_theory_identity["model_sha256"]
+                    != binding["model_state_sha256"]
+                ):
+                    raise PolicyImprovementSchemaError(
+                        "Snapshot theory identity differs from its model state."
+                    )
+            elif theory_identity_required:
+                raise PolicyImprovementSchemaError(
+                    "Theory-capable snapshot lacks its model identity."
+                )
         snapshot_bindings[kind] = binding
 
     available_snapshot_kinds = {
@@ -1784,6 +1857,16 @@ def authenticate_complete_generation(
         raise PolicyImprovementSchemaError(
             "Model-state bindings differ from available evaluation snapshots."
         )
+    if is_v2_protocol and not is_smoke:
+        interaction_binding = snapshot_bindings.get("interaction_matched")
+        if (
+            interaction_binding is None
+            or interaction_binding.get("theory_model_identity")
+            != inventory_theory_identity
+        ):
+            raise PolicyImprovementSchemaError(
+                "Top-level and interaction model-state theory identities differ."
+            )
     validation_digests: set[str] = set()
     pending_validations: list[_PendingCheckpointValidation] = []
     if parent_identity is not None:
@@ -1843,23 +1926,26 @@ def authenticate_complete_generation(
             raise PolicyImprovementSchemaError(
                 "Snapshot strict checkpoint validation artifact is missing or ambiguous."
             )
+        validation_fields = {
+            "schema_name",
+            "schema_version",
+            "validator",
+            "validator_execution_identity",
+            "run_id",
+            "method_id",
+            "snapshot_kind",
+            "environment_interactions",
+            "checkpoint_sha256",
+            "parent_checkpoint_sha256",
+            "model_state_sha256",
+            "role_state_sha256s",
+            "strict_resume_validated",
+        }
+        if is_v2_protocol and not is_smoke:
+            validation_fields.add("theory_model_identity")
         validation = _fields(
             _load_ascii_json(validation_paths[0]),
-            {
-                "schema_name",
-                "schema_version",
-                "validator",
-                "validator_execution_identity",
-                "run_id",
-                "method_id",
-                "snapshot_kind",
-                "environment_interactions",
-                "checkpoint_sha256",
-                "parent_checkpoint_sha256",
-                "model_state_sha256",
-                "role_state_sha256s",
-                "strict_resume_validated",
-            },
+            validation_fields,
             path=f"checkpoint_validation.{kind}",
         )
         observed_interactions = _available(
@@ -1874,7 +1960,8 @@ def authenticate_complete_generation(
             )
         if (
             validation["schema_name"] != "policy_improvement_checkpoint_validation_v1"
-            or validation["schema_version"] != 1
+            or validation["schema_version"]
+            != (2 if is_v2_protocol and not is_smoke else 1)
             or validation["validator"]
             not in {
                 "policy_improvement_smoke_runtime",
@@ -1901,6 +1988,12 @@ def authenticate_complete_generation(
             ).hexdigest()
             != validation["model_state_sha256"]
             or validation["strict_resume_validated"] is not True
+            or (
+                is_v2_protocol
+                and not is_smoke
+                and validation.get("theory_model_identity")
+                != binding.get("theory_model_identity")
+            )
         ):
             raise PolicyImprovementSchemaError(
                 "Strict checkpoint validation differs from its result snapshot."
@@ -2143,12 +2236,8 @@ def authenticate_failed_attempt(
 
     result_document, runtime_result = validated_result_payload(result)
     result = runtime_result
-    requires_v2_result = result.get("protocol_id") == (
-        "policy-improvement-v2-20260818"
-    )
-    is_v2_result = (
-        result_document.get("schema_name") == "policy_improvement_result_v2"
-    )
+    requires_v2_result = result.get("protocol_id") == ("policy-improvement-v2-20260818")
+    is_v2_result = result_document.get("schema_name") == "policy_improvement_result_v2"
     if requires_v2_result != is_v2_result:
         raise PolicyImprovementSchemaError(
             "Failed-attempt result schema differs from its protocol namespace."

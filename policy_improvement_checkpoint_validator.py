@@ -77,6 +77,9 @@ _FULL_REQUEST_FIELDS = _REQUEST_FIELDS | {
     "compute_target_recurrent_map_applications",
     "test_open_sha256",
 }
+_FULL_V2_REQUEST_FIELDS = _FULL_REQUEST_FIELDS | {
+    "generation_environment_interactions",
+}
 _RESULT_FIELDS = {
     "schema_name",
     "schema_version",
@@ -216,7 +219,11 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
     SealedCheckpoint,
 ]:
     request_fields = set(value)
-    if request_fields != _REQUEST_FIELDS and request_fields != _FULL_REQUEST_FIELDS:
+    if frozenset(request_fields) not in {
+        frozenset(_REQUEST_FIELDS),
+        frozenset(_FULL_REQUEST_FIELDS),
+        frozenset(_FULL_V2_REQUEST_FIELDS),
+    }:
         raise PolicyImprovementCheckpointValidationError(
             "Checkpoint validation request field inventory differs."
         )
@@ -301,7 +308,12 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
         else:
             _sha256(parent, name="parent_checkpoint_sha256")
     else:
-        if set(value) != _FULL_REQUEST_FIELDS:
+        expected_full_fields = (
+            _FULL_V2_REQUEST_FIELDS
+            if protocol.get("schema_name") == "policy_improvement_protocol_v2"
+            else _FULL_REQUEST_FIELDS
+        )
+        if set(value) != expected_full_fields:
             raise PolicyImprovementCheckpointValidationError(
                 "Non-smoke validation request omits full-run identities."
             )
@@ -322,6 +334,11 @@ def _validate_request(value: Mapping[str, object]) -> tuple[
         for field in (
             "recurrent_map_applications",
             "compute_target_recurrent_map_applications",
+            *(
+                ("generation_environment_interactions",)
+                if protocol.get("schema_name") == "policy_improvement_protocol_v2"
+                else ()
+            ),
         ):
             item = value[field]
             if isinstance(item, bool) or not isinstance(item, int) or item <= 0:
@@ -754,6 +771,7 @@ def _validate_full_checkpoint(
     )
     from policy_improvement_non_smoke_checkpoint import (
         session_model_state_identity,
+        session_theory_model_identity,
         validate_full_checkpoint_identity,
     )
     from scripts.policy_improvement_full_runtime import RegisteredFullRun
@@ -799,9 +817,51 @@ def _validate_full_checkpoint(
     tier = str(row["tier"])
     budget_tier = "confirmatory" if tier in {"confirmatory", "ablation"} else tier
     budget = protocol["budgets"][budget_tier]
+    is_v2 = protocol.get("schema_name") == "policy_improvement_protocol_v2"
     interaction_checkpoints = tuple(
-        int(value) for value in budget["checkpoint_environment_interactions"]
+        int(value)
+        for value in (
+            row["checkpoint_environment_interactions"]
+            if is_v2
+            else budget["checkpoint_environment_interactions"]
+        )
     )
+    final_environment_interactions = (
+        int(request["generation_environment_interactions"])
+        if is_v2
+        else int(budget["environment_interactions"])
+    )
+    if is_v2:
+        interaction_checkpoints = tuple(
+            checkpoint
+            for checkpoint in interaction_checkpoints
+            if checkpoint <= final_environment_interactions
+        )
+        if (
+            not interaction_checkpoints
+            or interaction_checkpoints[-1] != final_environment_interactions
+        ):
+            raise PolicyImprovementCheckpointValidationError(
+                "Full v2 generation endpoint differs from its registered schedule."
+            )
+    population_document: dict[str, Any] | None = None
+    if is_v2:
+        from scripts.policy_improvement_populations import load_registered_populations
+
+        population_document = load_registered_populations(protocol, project_root)
+        populations = population_document.get("populations")
+        population = (
+            populations.get(row.get("evaluation_population"))
+            if isinstance(populations, Mapping)
+            else None
+        )
+        if not isinstance(population, Mapping):
+            raise PolicyImprovementCheckpointValidationError(
+                "Full v2 checkpoint population is unavailable."
+            )
+        evaluation_records = int(population["count"])
+    else:
+        evaluation_records = int(budget["evaluation_records"])
     registered_run = RegisteredFullRun(
         project_root=project_root,
         protocol_path=project_root
@@ -827,17 +887,18 @@ def _validate_full_checkpoint(
         registry_row_sha256=str(request["registry_row_sha256"]),
         runtime_authorization_sha256=authorization_sha256,
         interaction_checkpoints=interaction_checkpoints,
-        final_environment_interactions=int(budget["environment_interactions"]),
+        final_environment_interactions=final_environment_interactions,
         compute_target_recurrent_map_applications=int(
             request["compute_target_recurrent_map_applications"]
         ),
-        evaluation_records=int(budget["evaluation_records"]),
+        evaluation_records=evaluation_records,
         test_open_sha256=(
             str(request["test_open_sha256"])
             if request["test_open_sha256"] is not None
             else None
         ),
         dataset_root=dataset_root,
+        population_document=population_document,
     )
     training_module = importlib.import_module("upi_trm_train")
     engine = TorchLearnedRunEngine(training_module)
@@ -856,6 +917,7 @@ def _validate_full_checkpoint(
         str,
         dict[str, str],
         dict[str, object],
+        dict[str, str] | None,
     ]:
         if type(session.trainer).__name__ == "PPOTrainer":
             payload, observed_sha256 = load_stable_checkpoint(
@@ -882,6 +944,7 @@ def _validate_full_checkpoint(
                 canonical_json_sha256(role_hashes),
                 role_hashes,
                 embedded,
+                None,
             )
 
         raw, observed_sha256 = training_module._load_checkpoint_payload(
@@ -922,6 +985,17 @@ def _validate_full_checkpoint(
             session,
             evaluation_state_dicts=evaluation_states,
         )
+        theory_model_identity = (
+            session_theory_model_identity(
+                session,
+                model_config_sha256=canonical_json_sha256(
+                    training_module._config_dict(session.model.config)
+                ),
+                evaluation_state_dicts=evaluation_states,
+            )
+            if is_v2
+            else None
+        )
         progress = _object(raw.get("progress"), name="full_upi.progress")
         return (
             observed_sha256,
@@ -930,6 +1004,7 @@ def _validate_full_checkpoint(
             model_sha256,
             role_hashes,
             embedded,
+            theory_model_identity,
         )
 
     with _forbid_training_and_optimizer_steps(session.trainer) as calls:
@@ -940,6 +1015,7 @@ def _validate_full_checkpoint(
             model_sha256,
             role_hashes,
             embedded,
+            theory_model_identity,
         ) = validate_payload()
 
     expected_embedded = {
@@ -987,7 +1063,7 @@ def _validate_full_checkpoint(
         "initialization_sha256": initialization_sha256,
         "model_state_sha256": model_sha256,
         "role_state_sha256s": role_hashes,
-        "theory_model_identity": None,
+        "theory_model_identity": theory_model_identity,
         "method_config_sha256": session.method_config_sha256,
         "registered_effective_config_sha256": row["expected_effective_config_sha256"],
         "effective_config_sha256": session.effective_config_sha256,

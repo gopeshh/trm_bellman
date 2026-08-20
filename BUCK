@@ -373,6 +373,7 @@ python_library(
     deps = [
         ":policy_improvement_checkpoint_validator",
         ":policy_improvement_evidence",
+        ":policy_improvement_full_runtime",
         ":policy_improvement_populations",
         ":policy_improvement_registry",
         ":policy_improvement_schema",

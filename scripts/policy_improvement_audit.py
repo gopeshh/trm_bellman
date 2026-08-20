@@ -1847,6 +1847,151 @@ def _audited_stage0_theory_request(
     }
 
 
+def _audited_validation_theory_request(
+    *,
+    protocol: Mapping[str, object],
+    registry: Mapping[str, object],
+    row: Mapping[str, object],
+    population: Mapping[str, object],
+    result_authorization: Mapping[str, object],
+    evaluator_authorization: Mapping[str, object],
+    theory_amendment: Mapping[str, object],
+    semantic_validation: Mapping[str, object],
+    checkpoint_path: Path,
+    checkpoint_size_bytes: int,
+    base_config: Mapping[str, object],
+) -> dict[str, Any]:
+    """Build one canonical V_bridge request only from green audited evidence."""
+
+    from scripts.policy_improvement_theory_schema_v2 import (
+        build_validation_theory_request,
+        theory_document_sha256,
+    )
+
+    if runtime_authorization_sha256(
+        result_authorization
+    ) != runtime_authorization_sha256(evaluator_authorization):
+        raise PolicyImprovementSchemaError(
+            "Validation theory requires the same runtime authorization as training."
+        )
+    training_role = _authorized_role(
+        result_authorization,
+        "policy-improvement-full",
+    )
+    evaluator_role = _authorized_role(
+        evaluator_authorization,
+        "policy-improvement-theory-bridge",
+    )
+    model_identity = semantic_validation.get("theory_model_identity")
+    if not isinstance(model_identity, Mapping):
+        raise PolicyImprovementSchemaError(
+            "Exact validation checkpoint lacks its independently verified theory "
+            "model identity."
+        )
+    indices = list(population["indices"])
+    records = list(population["record_sha256s"])
+    inputs = list(population["input_sha256s"])
+    selected_records = [
+        {"record_index": index, "dataset_record_sha256": digest}
+        for index, digest in zip(indices, records)
+    ]
+    method = next(
+        item for item in protocol["methods"] if item["id"] == row["base_method_id"]
+    )
+    authorization_sha256 = runtime_authorization_sha256(evaluator_authorization)
+    identity = {
+        "protocol_id": protocol["protocol_id"],
+        "protocol_schema_name": protocol["schema_name"],
+        "protocol_schema_version": protocol["schema_version"],
+        "protocol_sha256": hashlib.sha256(canonical_json_bytes(protocol)).hexdigest(),
+        "population_registry_schema_name": "policy_improvement_populations_v2",
+        "population_registry_schema_version": 1,
+        "population_registry_sha256": protocol["population_registry"]["sha256"],
+        "registry_schema_name": registry["schema_name"],
+        "registry_schema_version": registry["registry_schema_version"],
+        "registry_sha256": registry_sha256(registry),
+        "registry_row_schema_name": row["schema_name"],
+        "registry_row_schema_version": row["schema_version"],
+        "theory_amendment_sha256": theory_document_sha256(theory_amendment),
+        "registry_row_sha256": hashlib.sha256(canonical_json_bytes(row)).hexdigest(),
+        "checkpoint": {
+            "sha256": semantic_validation["checkpoint_sha256"],
+            "size_bytes": checkpoint_size_bytes,
+            "snapshot_kind": semantic_validation["snapshot_kind"],
+            "environment_interactions": semantic_validation["environment_interactions"],
+        },
+        "model": copy.deepcopy(dict(model_identity)),
+        "config": {
+            "file_sha256": method["config_sha256"],
+            "base_canonical_sha256": row["base_config_canonical_sha256"],
+            "effective_config_sha256": row["expected_effective_config_sha256"],
+        },
+        "producer_source": {
+            "git_commit": result_authorization["producer_git_commit"],
+            "source_manifest_sha256": result_authorization[
+                "producer_source_manifest_sha256"
+            ],
+        },
+        "training_runtime": {
+            "role": "policy-improvement-full",
+            "source_git_commit": training_role["source_git_commit"],
+            "source_manifest_sha256": training_role["selected_source_manifest_sha256"],
+            "runtime_sha256": training_role["runtime_sha256"],
+            "runtime_profile_sha256": training_role["runtime_profile_sha256"],
+            "selected_source_manifest_sha256": training_role[
+                "selected_source_manifest_sha256"
+            ],
+            "runtime_authorization_sha256": authorization_sha256,
+            "launcher_sha256": evaluator_authorization["launcher_sha256"],
+        },
+        "dataset_records": {
+            "split": "validation",
+            "population_id": population["population_id"],
+            "population_binding_sha256": population["binding_sha256"],
+            "split_manifest_sha256": _available_value(
+                protocol["dataset"]["splits"]["validation"]["manifest_sha256"],
+                path="protocol.dataset.splits.validation.manifest_sha256",
+            ),
+            "ordered_record_sha256": population["ordered_record_sha256"],
+            "ordered_input_sha256": population["ordered_input_sha256"],
+            "selected_record_indices": indices,
+            "selected_record_indices_sha256": theory_document_sha256(indices),
+            "selected_records": selected_records,
+            "selected_records_sha256": theory_document_sha256(selected_records),
+            "selected_input_sha256s": inputs,
+            "selected_input_sha256s_sha256": theory_document_sha256(inputs),
+            "record_count": population["count"],
+        },
+        "evaluator_source": {
+            "git_commit": evaluator_role["source_git_commit"],
+            "source_manifest_sha256": evaluator_role["selected_source_manifest_sha256"],
+        },
+        "evaluator_runtime": {
+            "runtime_sha256": evaluator_role["runtime_sha256"],
+            "runtime_profile_sha256": evaluator_role["runtime_profile_sha256"],
+            "runtime_authorization_sha256": authorization_sha256,
+            "launcher_sha256": evaluator_authorization["launcher_sha256"],
+        },
+    }
+    effective_config = dict(base_config)
+    effective_config.update(row["config_override"])
+    request = build_validation_theory_request(
+        amendment_value=theory_amendment,
+        row=row,
+        identity=identity,
+        effective_config=effective_config,
+        checkpoint_environment_interactions=int(
+            semantic_validation["environment_interactions"]
+        ),
+    )
+    return {
+        "run_id": row["run_id"],
+        "checkpoint_path": str(checkpoint_path),
+        "request_sha256": hashlib.sha256(canonical_json_bytes(request)).hexdigest(),
+        "request": request,
+    }
+
+
 def _require_result_namespace(
     protocol: Mapping[str, object],
     results: Sequence[Mapping[str, object]],
@@ -2041,6 +2186,125 @@ def derive_registered_selection(
     )
 
 
+def _selected_v2_screen_rows(
+    rows: Sequence[Mapping[str, object]],
+    selection: Mapping[str, object],
+) -> list[Mapping[str, object]]:
+    """Return the six seed rows authorized to continue past the 10k screen."""
+
+    configurations = selection.get("selected_configurations")
+    if not isinstance(configurations, list):
+        raise PolicyImprovementSchemaError(
+            "Protocol v2 selection lacks selected configurations."
+        )
+    selected_keys = {
+        (item.get("method_id"), item.get("n"), item.get("K"))
+        for item in configurations
+        if isinstance(item, Mapping)
+    }
+    selected = [
+        row
+        for row in rows
+        if (row.get("method_id"), row.get("n"), row.get("K")) in selected_keys
+    ]
+    if (
+        len(selected_keys) != 2
+        or len(selected) != 6
+        or {row.get("seed") for row in selected} != {784831257, 2087907586, 4056782312}
+    ):
+        raise PolicyImprovementSchemaError(
+            "Protocol v2 selection does not resolve to six registered screen rows."
+        )
+    return selected
+
+
+def _expected_registered_environment_interactions(
+    row: Mapping[str, object],
+    *,
+    protocol: Mapping[str, object],
+    amendment_count: int,
+) -> int:
+    """Resolve the generation cap authenticated by this audit prefix."""
+
+    if (
+        protocol.get("schema_name") == "policy_improvement_protocol_v2"
+        and row.get("phase") == "stage1_screen"
+    ):
+        checkpoints = row.get("checkpoint_environment_interactions")
+        if (
+            not isinstance(checkpoints, list)
+            or not checkpoints
+            or any(
+                isinstance(value, bool) or not isinstance(value, int)
+                for value in checkpoints
+            )
+        ):
+            raise PolicyImprovementSchemaError(
+                "Protocol v2 screen row lacks its checkpoint schedule."
+            )
+        if amendment_count == 3:
+            return checkpoints[0]
+        if amendment_count == 4:
+            return checkpoints[-1]
+        raise PolicyImprovementSchemaError(
+            "Protocol v2 screen audit uses an invalid amendment prefix."
+        )
+    tier = str(row["tier"])
+    interaction_tier = "confirmatory" if tier == "ablation" else tier
+    return int(protocol["budgets"][interaction_tier]["environment_interactions"])
+
+
+def _authenticated_v2_source_audit_report(
+    source: object,
+    *,
+    recomputed: Mapping[str, object],
+) -> dict[str, object]:
+    """Bind the published audit while independently reproducing its decisions.
+
+    Audit wall time and peak RSS are measurements, so a fresh audit cannot
+    reproduce those two values byte for byte. Every decision-bearing field
+    must match the independent re-audit exactly. The original measured report
+    remains the object hashed by the downstream amendment.
+    """
+
+    source_report = dict(_object(source, path="amendment_evidence.audit_report"))
+    if set(source_report) != set(recomputed):
+        raise PolicyImprovementSchemaError(
+            "Source and recomputed v2 audit field inventories differ."
+        )
+    source_accounting = source_report.get("audit_compute_accounting")
+    recomputed_accounting = recomputed.get("audit_compute_accounting")
+    if source_accounting is None or recomputed_accounting is None:
+        raise PolicyImprovementSchemaError(
+            "Protocol v2 amendment evidence lacks audit compute accounting."
+        )
+    from utils.compute_accounting import validate_authenticated_compute_accounting
+
+    try:
+        checked_accounting = validate_authenticated_compute_accounting(
+            source_accounting
+        )
+    except ValueError as exc:
+        raise PolicyImprovementSchemaError(
+            "Protocol v2 amendment audit compute accounting is invalid."
+        ) from exc
+    if checked_accounting.get("owner_role") != "audit":
+        raise PolicyImprovementSchemaError(
+            "Protocol v2 amendment evidence was not produced by the audit role."
+        )
+    source_decisions = dict(source_report)
+    recomputed_decisions = dict(recomputed)
+    del source_decisions["audit_compute_accounting"]
+    del recomputed_decisions["audit_compute_accounting"]
+    if canonical_json_bytes(source_decisions) != canonical_json_bytes(
+        recomputed_decisions
+    ):
+        raise PolicyImprovementSchemaError(
+            "Source v2 audit decisions differ from independent reaudit."
+        )
+    return source_report
+
+
 def audit_result_set(
     protocol_value: object,
     registry_value: object,
@@ -2072,10 +2336,10 @@ def audit_result_set(
 
     audit_started = time.perf_counter()
     protocol = validate_protocol(protocol_value)
-    history = validate_amendment_history(amendment_history, protocol=protocol)
+    is_v2 = protocol.get("schema_name") == "policy_improvement_protocol_v2"
     authorization = validate_runtime_authorization(runtime_authorization)
     if (
-        protocol.get("schema_name") == "policy_improvement_protocol_v2"
+        is_v2
         and [
             authorization.get("schema_name"),
             authorization.get("schema_version"),
@@ -2105,13 +2369,6 @@ def audit_result_set(
         protocol_sha256=protocol_digest,
         producer_source_authenticator=producer_source_authenticator,
     )
-    if (
-        len(history) >= 2
-        and history[1]["runtime_authorization_sha256"] != authorization_digest
-    ):
-        raise PolicyImprovementSchemaError(
-            "Compute freeze binds a different runtime/source authorization."
-        )
     checked_execution_identity = _validate_execution_identity(
         audit_execution_identity,
         authorization,
@@ -2124,14 +2381,47 @@ def audit_result_set(
         raise PolicyImprovementSchemaError("Unsupported evidence-audit execution role.")
     registered_population_document: Mapping[str, Any] | None = None
     registered_populations: Mapping[str, Any] | None = None
-    if protocol.get("schema_name") == "policy_improvement_protocol_v2":
+    if is_v2:
         from scripts.policy_improvement_populations import load_registered_populations
+        from scripts.policy_improvement_v2_schema import (
+            PolicyImprovementV2SchemaError,
+            validate_v2_amendment_history,
+        )
 
         registered_population_document = load_registered_populations(
             protocol,
             project_root,
         )
         registered_populations = registered_population_document["populations"]
+        base_registry = validate_registry_document(
+            registry_value,
+            protocol,
+            [],
+            base_configs=base_configs,
+            populations_value=registered_population_document,
+        )
+        try:
+            history = validate_v2_amendment_history(
+                amendment_history,
+                protocol=protocol,
+                registry=base_registry,
+                populations=registered_population_document,
+            )
+        except PolicyImprovementV2SchemaError as exc:
+            raise PolicyImprovementSchemaError(
+                "Protocol v2 amendment history is invalid."
+            ) from exc
+    else:
+        history = validate_amendment_history(amendment_history, protocol=protocol)
+    compute_index = 2 if is_v2 else 1
+    if (
+        len(history) > compute_index
+        and history[compute_index]["runtime_authorization_sha256"]
+        != authorization_digest
+    ):
+        raise PolicyImprovementSchemaError(
+            "Compute freeze binds a different runtime/source authorization."
+        )
     registry = validate_registry_document(
         registry_value,
         protocol,
@@ -2145,12 +2435,27 @@ def audit_result_set(
         or any(phase not in PHASE_CONTRACTS for phase in phases)
     ):
         raise PolicyImprovementSchemaError("Audit phases are invalid or duplicated.")
-    required_prefixes = {PHASE_AMENDMENT_PREFIX_LENGTH[phase] for phase in phases}
-    if required_prefixes != {len(history)}:
-        raise PolicyImprovementSchemaError(
-            "Audit phases do not use their exact registered amendment-history prefix."
-        )
+    if is_v2:
+        if set(phases) == {"stage0_smoke"}:
+            valid_history_lengths = {0}
+        elif set(phases) == {"stage1_screen"}:
+            valid_history_lengths = {3, 4}
+        else:
+            valid_history_lengths = set()
+        if len(history) not in valid_history_lengths:
+            raise PolicyImprovementSchemaError(
+                "Protocol v2 audit phase lacks its exact capability prefix."
+            )
+    else:
+        required_prefixes = {PHASE_AMENDMENT_PREFIX_LENGTH[phase] for phase in phases}
+        if required_prefixes != {len(history)}:
+            raise PolicyImprovementSchemaError(
+                "Audit phases do not use their exact registered amendment-history "
+                "prefix."
+            )
     expected_rows = [row for row in registry["rows"] if row["phase"] in set(phases)]
+    if is_v2 and len(history) == 4:
+        expected_rows = _selected_v2_screen_rows(expected_rows, history[3])
     if any(row["row_kind"] != "concrete" for row in expected_rows):
         raise PolicyImprovementSchemaError(
             "Selection-dependent rows cannot be audited before materialization."
@@ -2190,9 +2495,13 @@ def audit_result_set(
     )
     if _verify_amendment_evidence and len(history) > 1:
         evidence_amendments = (
-            (1, "stage0_smoke", 0),
-            (2, "stage1_screen", 2),
-            (3, "stage1_alpha", 3),
+            ((2, "stage0_smoke", 0), (3, "stage1_screen", 3))
+            if is_v2
+            else (
+                (1, "stage0_smoke", 0),
+                (2, "stage1_screen", 2),
+                (3, "stage1_alpha", 3),
+            )
         )
         if amendment_evidence is None:
             raise PolicyImprovementSchemaError(
@@ -2207,7 +2516,11 @@ def audit_result_set(
                 )
             supplied = _fields(
                 amendment_evidence[phase],
-                {"results", "per_instance_documents"},
+                (
+                    {"results", "per_instance_documents", "audit_report"}
+                    if is_v2
+                    else {"results", "per_instance_documents"}
+                ),
                 path=f"amendment_evidence.{phase}",
             )
             if not isinstance(supplied["results"], Sequence) or isinstance(
@@ -2263,6 +2576,65 @@ def audit_result_set(
                         ],
                     }
                 )
+            if is_v2:
+                evidence_report = _authenticated_v2_source_audit_report(
+                    supplied["audit_report"],
+                    recomputed=evidence_report,
+                )
+            if is_v2 and amendment_index == 3:
+                selection = history[amendment_index]
+                if (
+                    selection["source_audit_sha256"]
+                    != hashlib.sha256(canonical_json_bytes(evidence_report)).hexdigest()
+                ):
+                    raise PolicyImprovementSchemaError(
+                        "Stage 1 selection audit digest differs from independent "
+                        "reaudit."
+                    )
+                derived: list[dict[str, object]] = []
+                for method_id in (
+                    "fixed_base_exact_persistent",
+                    "fixed_base_exact_episodic",
+                ):
+                    method_results = [
+                        result
+                        for result in supplied["results"]
+                        if validated_result_payload(result)[1]["method_id"] == method_id
+                    ]
+                    selected_exact = derive_registered_selection(
+                        "stage1_screen",
+                        method_results,
+                    )
+                    source_results = sorted(
+                        (
+                            {
+                                "run_id": validated_result_payload(result)[1]["run_id"],
+                                "seed": validated_result_payload(result)[1]["seed"],
+                                "result_sha256": hashlib.sha256(
+                                    canonical_json_bytes(result)
+                                ).hexdigest(),
+                            }
+                            for result in method_results
+                            if validated_result_payload(result)[1]["n"]
+                            == selected_exact["n"]
+                            and validated_result_payload(result)[1]["K"]
+                            == selected_exact["K"]
+                        ),
+                        key=lambda item: int(item["seed"]),
+                    )
+                    derived.append(
+                        {
+                            "method_id": method_id,
+                            "n": selected_exact["n"],
+                            "K": selected_exact["K"],
+                            "source_results": source_results,
+                        }
+                    )
+                if selection["selected_configurations"] != derived:
+                    raise PolicyImprovementSchemaError(
+                        "Stage 1 V_select choices differ from independent reaudit."
+                    )
+                continue
             evidence = history[amendment_index]["evidence"]
             expected_evidence = {
                 "phase": phase,
@@ -2356,6 +2728,7 @@ def audit_result_set(
     consumed_per_instance_sha256s: set[str] = set()
     compute_accounting_sha256s: list[str] = []
     stage0_theory_request_sources: list[dict[str, object]] = []
+    validation_theory_request_sources: list[dict[str, object]] = []
     for run_id, result_document in by_run_id.items():
         row = rows_by_id[run_id]
         if result_document.get("schema_name") == "policy_improvement_result_v2":
@@ -2444,9 +2817,7 @@ def audit_result_set(
             "launcher_sha256": result_authorization["launcher_sha256"],
             "training_source_git_commit": producer_role["source_git_commit"],
             "training_runtime_sha256": producer_role["runtime_sha256"],
-            "training_runtime_profile_sha256": producer_role[
-                "runtime_profile_sha256"
-            ],
+            "training_runtime_profile_sha256": producer_role["runtime_profile_sha256"],
             "training_selected_source_manifest_sha256": producer_role[
                 "selected_source_manifest_sha256"
             ],
@@ -2482,9 +2853,10 @@ def audit_result_set(
                 "Result dataset identities differ from the frozen protocol."
             )
         tier = str(row["tier"])
-        interaction_tier = "confirmatory" if tier == "ablation" else tier
-        expected_interactions = int(
-            protocol["budgets"][interaction_tier]["environment_interactions"]
+        expected_interactions = _expected_registered_environment_interactions(
+            row,
+            protocol=protocol,
+            amendment_count=len(history),
         )
         if result["status"] == "failed":
             failed_identity = authenticate_failed_attempt(
@@ -2570,6 +2942,39 @@ def audit_result_set(
                     "population_id": row["evaluation_population"],
                     "result_authorization": result_authorization,
                     "semantic_validation": resume_validations[0],
+                    "checkpoint_path": str(
+                        Path(str(generation_identity["generation_path"]))
+                        / str(generation_identity["checkpoint_relative_path"])
+                    ),
+                    "checkpoint_size_bytes": generation_identity[
+                        "checkpoint_size_bytes"
+                    ],
+                }
+            )
+        if (
+            protocol.get("schema_name") == "policy_improvement_protocol_v2"
+            and row["phase"] == "stage1_screen"
+            and len(history) == 4
+            and row["method_id"]
+            in {"fixed_base_exact_persistent", "fixed_base_exact_episodic"}
+        ):
+            primary_validations = [
+                item
+                for item in semantic_validations
+                if isinstance(item, Mapping)
+                and item.get("checkpoint_sha256")
+                == generation_identity["checkpoint_sha256"]
+                and item.get("environment_interactions") == expected_interactions
+            ]
+            if len(primary_validations) != 1:
+                raise PolicyImprovementSchemaError(
+                    "Audited validation theory checkpoint does not resolve exactly."
+                )
+            validation_theory_request_sources.append(
+                {
+                    "row": row,
+                    "result_authorization": result_authorization,
+                    "semantic_validation": primary_validations[0],
                     "checkpoint_path": str(
                         Path(str(generation_identity["generation_path"]))
                         / str(generation_identity["checkpoint_relative_path"])
@@ -2731,7 +3136,7 @@ def audit_result_set(
                 raise PolicyImprovementSchemaError(
                     "Non-smoke compute snapshots require the post-smoke freeze."
                 )
-            targets = history[1]["common_compute_targets"]
+            targets = history[2 if is_v2 else 1]["common_compute_targets"]
             if (
                 compute["status"] != "available"
                 or _available_value(
@@ -2899,6 +3304,55 @@ def audit_result_set(
                     base_config=registered_base_configs[str(row["base_method_id"])],
                 )
             )
+    validation_theory_requests: list[dict[str, Any]] = []
+    if (
+        is_v2_report
+        and _verify_amendment_evidence
+        and list(phases) == ["stage1_screen"]
+        and len(history) == 4
+        and failed_count == 0
+        and complete_count == len(expected_rows)
+    ):
+        if len(validation_theory_request_sources) != 6:
+            raise PolicyImprovementSchemaError(
+                "Green selected Stage 1 audit must resolve six exact-method theory "
+                "requests."
+            )
+        assert registered_population_document is not None
+        theory_amendment = _load_authorized_v2_theory_amendment(
+            project_root=project_root,
+            authorization=authorization,
+        )
+        registered_base_configs = (
+            dict(base_configs)
+            if base_configs is not None
+            else load_registered_base_configs(protocol, project_root)
+        )
+        bridge_population = registered_population_document["populations"][
+            "validation_bridge"
+        ]
+        for source in sorted(
+            validation_theory_request_sources,
+            key=lambda item: str(item["row"]["run_id"]),
+        ):
+            row = source["row"]
+            validation_theory_requests.append(
+                _audited_validation_theory_request(
+                    protocol=protocol,
+                    registry=registry,
+                    row=row,
+                    population=bridge_population,
+                    result_authorization=source["result_authorization"],
+                    evaluator_authorization=authorization,
+                    theory_amendment=theory_amendment,
+                    semantic_validation=source["semantic_validation"],
+                    checkpoint_path=Path(str(source["checkpoint_path"])).resolve(
+                        strict=True
+                    ),
+                    checkpoint_size_bytes=int(source["checkpoint_size_bytes"]),
+                    base_config=registered_base_configs[str(row["base_method_id"])],
+                )
+            )
     report = {
         "schema_name": (
             str(protocol["document_schemas"]["audit"][0])
@@ -3005,6 +3459,8 @@ def audit_result_set(
                 ),
             }
         )
+        if validation_theory_requests:
+            report["validation_theory_requests"] = validation_theory_requests
     canonical_json_bytes(report)
     return report
 

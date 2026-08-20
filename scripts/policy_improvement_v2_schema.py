@@ -26,6 +26,15 @@ REGISTRY_ROW_SCHEMA_NAME = "policy_improvement_registry_row_v2"
 REGISTRY_ROW_SCHEMA_VERSION = 1
 RESULT_SCHEMA_NAME = "policy_improvement_result_v2"
 RESULT_SCHEMA_VERSION = 1
+STAGE1_CONFIGURATION_SELECTION_SCHEMA_NAME = (
+    "policy_improvement_stage1_configuration_selection_v2"
+)
+STAGE1_CONFIGURATION_SELECTION_SCHEMA_VERSION = 1
+BASE_POLICY_AMENDMENT_SCHEMA_NAME = "policy_improvement_base_policy_amendment_v2"
+BASE_POLICY_AMENDMENT_SCHEMA_VERSION = 1
+COMPUTE_FREEZE_SCHEMA_NAME = "policy_improvement_compute_freeze_v2"
+COMPUTE_FREEZE_SCHEMA_VERSION = 1
+PILOT_SEEDS = (784831257, 2087907586, 4056782312)
 METHOD_IDS = (
     "fixed_base_exact_persistent",
     "fixed_base_exact_episodic",
@@ -114,7 +123,9 @@ IMMUTABLE_DATASET_V1: dict[str, object] = {
     },
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_GIT_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_UTC_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 
 
 class PolicyImprovementV2SchemaError(RuntimeError):
@@ -198,6 +209,19 @@ def _sha256(value: object, *, path: str) -> str:
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
         raise PolicyImprovementV2SchemaError(f"{path} is not a SHA-256 digest.")
     return value
+
+
+def _git_commit(value: object, *, path: str) -> str:
+    if not isinstance(value, str) or _GIT_COMMIT.fullmatch(value) is None:
+        raise PolicyImprovementV2SchemaError(f"{path} is not a Git commit.")
+    return value
+
+
+def _timestamp(value: object, *, path: str) -> str:
+    text = _string(value, path=path)
+    if _UTC_TIMESTAMP.fullmatch(text) is None:
+        raise PolicyImprovementV2SchemaError(f"{path} is not a UTC timestamp.")
+    return text
 
 
 def _integer(value: object, *, path: str, minimum: int | None = None) -> int:
@@ -1013,6 +1037,490 @@ def validate_v2_registry_row(value: object) -> dict[str, Any]:
         raise PolicyImprovementV2SchemaError("Executable base row is not concrete.")
     canonical_json_bytes(row)
     return row
+
+
+def validate_stage1_configuration_selection(value: object) -> dict[str, Any]:
+    """Validate the future V_select-only exact-configuration selection record."""
+
+    selection = _exact_fields(
+        value,
+        {
+            "schema_name",
+            "schema_version",
+            "amendment_id",
+            "created_at_utc",
+            "protocol_id",
+            "protocol_schema_name",
+            "protocol_schema_version",
+            "protocol_sha256",
+            "population_registry_sha256",
+            "source_registry_schema_name",
+            "source_registry_schema_version",
+            "source_registry_sha256",
+            "prior_amendment_history_sha256",
+            "compute_freeze_sha256",
+            "base_policy_artifact_sha256",
+            "runtime_authorization_sha256",
+            "selection_checkpoint_environment_interactions",
+            "selection_population_id",
+            "selection_population_binding_sha256",
+            "bridge_population_id",
+            "bridge_population_binding_sha256",
+            "outcome_evidence_inspected",
+            "inspected_population_ids",
+            "bridge_not_inspected",
+            "test_data_opened",
+            "selection_rule",
+            "source_audit_sha256",
+            "selected_configurations",
+        },
+        path="stage1_configuration_selection",
+    )
+    if (
+        selection["schema_name"] != STAGE1_CONFIGURATION_SELECTION_SCHEMA_NAME
+        or selection["schema_version"] != STAGE1_CONFIGURATION_SELECTION_SCHEMA_VERSION
+        or selection["protocol_id"] != PROTOCOL_ID
+        or selection["protocol_schema_name"] != PROTOCOL_SCHEMA_NAME
+        or selection["protocol_schema_version"] != PROTOCOL_SCHEMA_VERSION
+        or selection["source_registry_schema_name"] != REGISTRY_SCHEMA_NAME
+        or selection["source_registry_schema_version"] != REGISTRY_SCHEMA_VERSION
+    ):
+        raise PolicyImprovementV2SchemaError(
+            "Stage 1 configuration-selection schema differs."
+        )
+    _string(
+        selection["amendment_id"],
+        path="stage1_configuration_selection.amendment_id",
+        identifier=True,
+    )
+    _timestamp(
+        selection["created_at_utc"],
+        path="stage1_configuration_selection.created_at_utc",
+    )
+    for field in (
+        "protocol_sha256",
+        "population_registry_sha256",
+        "source_registry_sha256",
+        "prior_amendment_history_sha256",
+        "compute_freeze_sha256",
+        "base_policy_artifact_sha256",
+        "runtime_authorization_sha256",
+        "selection_population_binding_sha256",
+        "bridge_population_binding_sha256",
+        "source_audit_sha256",
+    ):
+        _sha256(
+            selection[field],
+            path=f"stage1_configuration_selection.{field}",
+        )
+    if (
+        selection["selection_checkpoint_environment_interactions"] != 10000
+        or selection["selection_population_id"] != "validation_select"
+        or selection["bridge_population_id"] != "validation_bridge"
+        or selection["outcome_evidence_inspected"] is not True
+        or selection["inspected_population_ids"] != ["validation_select"]
+        or selection["bridge_not_inspected"] is not True
+        or selection["test_data_opened"] is not False
+        or selection["selection_rule"]
+        != (
+            "mean_seed_level_interaction_matched_solve_rate_then_"
+            "n_ascending_then_K_ascending_v2"
+        )
+    ):
+        raise PolicyImprovementV2SchemaError(
+            "Stage 1 configuration-selection contract differs."
+        )
+    configurations = selection["selected_configurations"]
+    if not isinstance(configurations, list) or len(configurations) != 2:
+        raise PolicyImprovementV2SchemaError(
+            "Stage 1 selection must contain persistent and episodic choices."
+        )
+    expected_methods = EXACT_METHOD_IDS
+    seen_results: set[str] = set()
+    for offset, (raw, expected_method) in enumerate(
+        zip(configurations, expected_methods)
+    ):
+        path = f"stage1_configuration_selection.selected_configurations[{offset}]"
+        configuration = _exact_fields(
+            raw,
+            {"method_id", "n", "K", "source_results"},
+            path=path,
+        )
+        if configuration["method_id"] != expected_method:
+            raise PolicyImprovementV2SchemaError(
+                "Stage 1 selected methods are missing or reordered."
+            )
+        n = _integer(configuration["n"], path=f"{path}.n", minimum=1)
+        horizon = _integer(configuration["K"], path=f"{path}.K", minimum=1)
+        if n not in {2, 4} or horizon not in {1, 5}:
+            raise PolicyImprovementV2SchemaError(
+                "Stage 1 selection chose an unregistered n/K pair."
+            )
+        source_results = configuration["source_results"]
+        if not isinstance(source_results, list) or len(source_results) != len(
+            PILOT_SEEDS
+        ):
+            raise PolicyImprovementV2SchemaError(
+                "Stage 1 selection lacks all three seed-level 10k results."
+            )
+        for result_offset, (raw_result, seed) in enumerate(
+            zip(source_results, PILOT_SEEDS)
+        ):
+            result_path = f"{path}.source_results[{result_offset}]"
+            source_result = _exact_fields(
+                raw_result,
+                {"run_id", "seed", "result_sha256"},
+                path=result_path,
+            )
+            expected_run_id = f"s1-{expected_method}-n{n}-k{horizon}-s{seed}"
+            if (
+                source_result["run_id"] != expected_run_id
+                or source_result["seed"] != seed
+            ):
+                raise PolicyImprovementV2SchemaError(
+                    "Stage 1 selection source rows differ from the registered grid."
+                )
+            digest = _sha256(
+                source_result["result_sha256"],
+                path=f"{result_path}.result_sha256",
+            )
+            if digest in seen_results:
+                raise PolicyImprovementV2SchemaError(
+                    "Stage 1 selection source result is duplicated."
+                )
+            seen_results.add(digest)
+    canonical_json_bytes(selection)
+    return dict(selection)
+
+
+def validate_base_policy_amendment(value: object) -> dict[str, Any]:
+    """Validate a future train-only base-policy artifact without selecting it."""
+
+    amendment = _exact_fields(
+        value,
+        {
+            "schema_name",
+            "schema_version",
+            "amendment_id",
+            "created_at_utc",
+            "protocol_id",
+            "protocol_schema_name",
+            "protocol_schema_version",
+            "protocol_sha256",
+            "population_registry_sha256",
+            "source_registry_schema_name",
+            "source_registry_schema_version",
+            "source_registry_sha256",
+            "prior_amendment_history_sha256",
+            "runtime_authorization_sha256",
+            "validation_data_inspected",
+            "test_data_opened",
+            "base_policy_artifact",
+        },
+        path="base_policy_amendment",
+    )
+    if (
+        amendment["schema_name"] != BASE_POLICY_AMENDMENT_SCHEMA_NAME
+        or amendment["schema_version"] != BASE_POLICY_AMENDMENT_SCHEMA_VERSION
+        or amendment["protocol_id"] != PROTOCOL_ID
+        or amendment["protocol_schema_name"] != PROTOCOL_SCHEMA_NAME
+        or amendment["protocol_schema_version"] != PROTOCOL_SCHEMA_VERSION
+        or amendment["source_registry_schema_name"] != REGISTRY_SCHEMA_NAME
+        or amendment["source_registry_schema_version"] != REGISTRY_SCHEMA_VERSION
+    ):
+        raise PolicyImprovementV2SchemaError("Base-policy amendment schema differs.")
+    _string(
+        amendment["amendment_id"],
+        path="base_policy_amendment.amendment_id",
+        identifier=True,
+    )
+    _timestamp(
+        amendment["created_at_utc"],
+        path="base_policy_amendment.created_at_utc",
+    )
+    for field in (
+        "protocol_sha256",
+        "population_registry_sha256",
+        "source_registry_sha256",
+        "prior_amendment_history_sha256",
+        "runtime_authorization_sha256",
+    ):
+        _sha256(amendment[field], path=f"base_policy_amendment.{field}")
+    if (
+        amendment["validation_data_inspected"] is not False
+        or amendment["test_data_opened"] is not False
+    ):
+        raise PolicyImprovementV2SchemaError(
+            "Base-policy selection must remain train-only."
+        )
+    artifact = _exact_fields(
+        amendment["base_policy_artifact"],
+        {
+            "status",
+            "initialization_kind",
+            "architecture_sha256",
+            "model_state_sha256",
+            "producer_git_commit",
+            "producer_source_manifest_sha256",
+            "training_dataset_manifest_sha256",
+            "training_split",
+            "training_split_ordered_record_sha256",
+            "training_procedure_sha256",
+            "checkpoint_sha256",
+            "checkpoint_size_bytes",
+            "shared_across_persistent_and_episodic",
+            "not_selected_by_validation_or_test",
+        },
+        path="base_policy_amendment.base_policy_artifact",
+    )
+    if (
+        artifact["status"] != "available"
+        or artifact["training_split"] != "train"
+        or artifact["shared_across_persistent_and_episodic"] is not True
+        or artifact["not_selected_by_validation_or_test"] is not True
+    ):
+        raise PolicyImprovementV2SchemaError(
+            "Base-policy artifact does not satisfy the train-only shared contract."
+        )
+    _string(
+        artifact["initialization_kind"],
+        path="base_policy_amendment.base_policy_artifact.initialization_kind",
+        choices={"train_only_pretrained", "random_base_stress"},
+    )
+    _git_commit(
+        artifact["producer_git_commit"],
+        path="base_policy_amendment.base_policy_artifact.producer_git_commit",
+    )
+    for field in (
+        "architecture_sha256",
+        "model_state_sha256",
+        "producer_source_manifest_sha256",
+        "training_dataset_manifest_sha256",
+        "training_split_ordered_record_sha256",
+        "training_procedure_sha256",
+        "checkpoint_sha256",
+    ):
+        _sha256(
+            artifact[field],
+            path=f"base_policy_amendment.base_policy_artifact.{field}",
+        )
+    _integer(
+        artifact["checkpoint_size_bytes"],
+        path="base_policy_amendment.base_policy_artifact.checkpoint_size_bytes",
+        minimum=1,
+    )
+    canonical_json_bytes(amendment)
+    return dict(amendment)
+
+
+def validate_compute_freeze_v2(value: object) -> dict[str, Any]:
+    """Validate the v2 compute freeze and its exact protocol namespace."""
+
+    freeze = _exact_fields(
+        value,
+        {
+            "schema_name",
+            "schema_version",
+            "amendment_id",
+            "created_at_utc",
+            "protocol_id",
+            "protocol_schema_name",
+            "protocol_schema_version",
+            "protocol_sha256",
+            "population_registry_sha256",
+            "source_registry_schema_name",
+            "source_registry_schema_version",
+            "source_registry_sha256",
+            "prior_amendment_history_sha256",
+            "base_policy_artifact_sha256",
+            "runtime_authorization_sha256",
+            "test_data_opened",
+            "evidence",
+            "common_compute_targets",
+        },
+        path="compute_freeze_v2",
+    )
+    if (
+        freeze["schema_name"] != COMPUTE_FREEZE_SCHEMA_NAME
+        or freeze["schema_version"] != COMPUTE_FREEZE_SCHEMA_VERSION
+        or freeze["protocol_id"] != PROTOCOL_ID
+        or freeze["protocol_schema_name"] != PROTOCOL_SCHEMA_NAME
+        or freeze["protocol_schema_version"] != PROTOCOL_SCHEMA_VERSION
+        or freeze["source_registry_schema_name"] != REGISTRY_SCHEMA_NAME
+        or freeze["source_registry_schema_version"] != REGISTRY_SCHEMA_VERSION
+    ):
+        raise PolicyImprovementV2SchemaError("Compute-freeze v2 schema differs.")
+    _string(
+        freeze["amendment_id"], path="compute_freeze_v2.amendment_id", identifier=True
+    )
+    _timestamp(freeze["created_at_utc"], path="compute_freeze_v2.created_at_utc")
+    for field in (
+        "protocol_sha256",
+        "population_registry_sha256",
+        "source_registry_sha256",
+        "prior_amendment_history_sha256",
+        "base_policy_artifact_sha256",
+        "runtime_authorization_sha256",
+    ):
+        _sha256(freeze[field], path=f"compute_freeze_v2.{field}")
+    from scripts.policy_improvement_schema import validate_compute_freeze
+
+    try:
+        validate_compute_freeze(
+            {
+                "schema_name": "policy_improvement_compute_freeze_v1",
+                "schema_version": 1,
+                "amendment_id": freeze["amendment_id"],
+                "created_at_utc": freeze["created_at_utc"],
+                "protocol_id": freeze["protocol_id"],
+                "protocol_sha256": freeze["protocol_sha256"],
+                "prior_amendment_history_sha256": freeze[
+                    "prior_amendment_history_sha256"
+                ],
+                "source_registry_sha256": freeze["source_registry_sha256"],
+                "runtime_authorization_sha256": freeze["runtime_authorization_sha256"],
+                "test_data_opened": freeze["test_data_opened"],
+                "evidence": freeze["evidence"],
+                "common_compute_targets": freeze["common_compute_targets"],
+            }
+        )
+    except ValueError as exc:
+        raise PolicyImprovementV2SchemaError(
+            "Compute-freeze v2 payload is invalid."
+        ) from exc
+    canonical_json_bytes(freeze)
+    return dict(freeze)
+
+
+def validate_v2_amendment_history(
+    values: Sequence[object],
+    *,
+    protocol: Mapping[str, object],
+    registry: Mapping[str, object],
+    populations: Mapping[str, object],
+) -> list[dict[str, Any]]:
+    """Validate the ordered future v2 amendment chain without enabling it."""
+
+    if len(values) > 4:
+        raise PolicyImprovementV2SchemaError(
+            "Protocol v2 amendment history is longer than registered."
+        )
+    from scripts.policy_improvement_schema import amendment_history_sha256
+    from scripts.policy_improvement_theory_schema_v2 import (
+        validate_theory_amendment,
+    )
+
+    validators = (
+        validate_theory_amendment,
+        validate_base_policy_amendment,
+        validate_compute_freeze_v2,
+        validate_stage1_configuration_selection,
+    )
+    expected_names = (
+        "policy_improvement_theory_bridge_amendment_v2",
+        BASE_POLICY_AMENDMENT_SCHEMA_NAME,
+        COMPUTE_FREEZE_SCHEMA_NAME,
+        STAGE1_CONFIGURATION_SELECTION_SCHEMA_NAME,
+    )
+    protocol_sha256 = sha256_json(protocol)
+    registry_sha256 = sha256_json(registry)
+    population_registration = protocol.get("population_registry")
+    population_values = populations.get("populations")
+    if not isinstance(population_registration, Mapping) or not isinstance(
+        population_values, Mapping
+    ):
+        raise PolicyImprovementV2SchemaError(
+            "Protocol v2 population registration is incomplete."
+        )
+    checked: list[dict[str, Any]] = []
+    for index, raw in enumerate(values):
+        try:
+            amendment = validators[index](raw)
+        except (PolicyImprovementV2SchemaError, ValueError) as exc:
+            raise PolicyImprovementV2SchemaError(
+                f"Protocol v2 amendment {index} is invalid."
+            ) from exc
+        if amendment.get("schema_name") != expected_names[index]:
+            raise PolicyImprovementV2SchemaError(
+                "Protocol v2 amendments are out of order."
+            )
+        if (
+            amendment.get("protocol_id") != protocol.get("protocol_id")
+            or amendment.get("protocol_sha256") != protocol_sha256
+            or amendment.get("source_registry_sha256") != registry_sha256
+            or amendment.get("prior_amendment_history_sha256")
+            != amendment_history_sha256(checked)
+        ):
+            raise PolicyImprovementV2SchemaError(
+                "Protocol v2 amendment history binding differs."
+            )
+        if "population_registry_sha256" in amendment and amendment[
+            "population_registry_sha256"
+        ] != population_registration.get("sha256"):
+            raise PolicyImprovementV2SchemaError(
+                "Protocol v2 amendment population identity differs."
+            )
+        checked.append(amendment)
+    if len(checked) >= 3:
+        if checked[2]["runtime_authorization_sha256"] != checked[1][
+            "runtime_authorization_sha256"
+        ] or checked[2]["base_policy_artifact_sha256"] != sha256_json(
+            checked[1]["base_policy_artifact"]
+        ):
+            raise PolicyImprovementV2SchemaError(
+                "Base-policy and compute amendments have different prerequisites."
+            )
+    if len(checked) >= 2:
+        dataset = protocol.get("dataset")
+        artifact = checked[1]["base_policy_artifact"]
+        train = (
+            dataset.get("splits", {}).get("train")
+            if isinstance(dataset, Mapping)
+            else None
+        )
+        dataset_manifest = (
+            dataset.get("manifest_sha256") if isinstance(dataset, Mapping) else None
+        )
+        train_order = (
+            train.get("ordered_record_sha256") if isinstance(train, Mapping) else None
+        )
+        if (
+            not isinstance(dataset_manifest, Mapping)
+            or dataset_manifest.get("status") != "available"
+            or not isinstance(train_order, Mapping)
+            or train_order.get("status") != "available"
+            or artifact["architecture_sha256"]
+            != sha256_json(protocol.get("architecture"))
+            or artifact["training_dataset_manifest_sha256"]
+            != dataset_manifest.get("value")
+            or artifact["training_split_ordered_record_sha256"]
+            != train_order.get("value")
+        ):
+            raise PolicyImprovementV2SchemaError(
+                "Base-policy artifact differs from the registered architecture or "
+                "train split."
+            )
+    if len(checked) >= 4:
+        selection = checked[3]
+        validation_select = population_values.get("validation_select")
+        validation_bridge = population_values.get("validation_bridge")
+        if (
+            not isinstance(validation_select, Mapping)
+            or not isinstance(validation_bridge, Mapping)
+            or selection["compute_freeze_sha256"] != sha256_json(checked[2])
+            or selection["base_policy_artifact_sha256"]
+            != sha256_json(checked[1]["base_policy_artifact"])
+            or selection["runtime_authorization_sha256"]
+            != checked[2]["runtime_authorization_sha256"]
+            or selection["selection_population_binding_sha256"]
+            != validation_select.get("binding_sha256")
+            or selection["bridge_population_binding_sha256"]
+            != validation_bridge.get("binding_sha256")
+        ):
+            raise PolicyImprovementV2SchemaError(
+                "Stage 1 selection differs from its prerequisite artifacts."
+            )
+    return checked
 
 
 def validate_v2_result(value: object) -> dict[str, Any]:

@@ -48,6 +48,7 @@ class FullCheckpointArtifact:
     sha256: str
     model_state_sha256: str
     role_state_sha256s: dict[str, str]
+    theory_model_identity: dict[str, str] | None
     validation: dict[str, object]
 
 
@@ -237,6 +238,94 @@ def session_model_state_identity(
     return canonical_json_sha256(hashes), hashes
 
 
+def session_theory_model_identity(
+    session: Any,
+    *,
+    model_config_sha256: str,
+    evaluation_state_dicts: Mapping[str, Mapping[str, object]] | None = None,
+) -> dict[str, str] | None:
+    """Derive the theorem-facing model identity from one restored session."""
+
+    _sha256(model_config_sha256, name="Theory model config")
+    method = str(session.run.row["method_id"])
+    trainer = session.trainer
+    if method in {
+        "fixed_base_exact_persistent",
+        "fixed_base_exact_episodic",
+    }:
+        current_state = trainer.policy_model_old.state_dict()
+        candidate_state = trainer.policy_model_candidate.state_dict()
+        deployed_state = current_state
+        deployed_policy_sha256 = canonical_json_sha256(
+            {
+                "kind": "exact_probability_mixture",
+                "current_policy_sha256": state_dict_sha256(current_state),
+                "candidate_policy_sha256": state_dict_sha256(candidate_state),
+                "alpha": float(session.run.row["alpha"]),
+                "recurrent_transition_sha256": state_dict_sha256(
+                    {
+                        name: value
+                        for name, value in deployed_state.items()
+                        if not name.startswith("edit_policy.")
+                        and not name.startswith("value_head.")
+                    }
+                ),
+            }
+        )
+    elif method == "legacy_parameter_interpolation":
+        current_model = getattr(trainer, "preinterpolation_policy_base", None)
+        candidate_model = getattr(trainer, "preinterpolation_policy_candidate", None)
+        if current_model is None or candidate_model is None:
+            raise FullCheckpointError(
+                "Legacy checkpoint lacks its pre-interpolation policy pair."
+            )
+        current_state = current_model.state_dict()
+        candidate_state = candidate_model.state_dict()
+        deployed_state = trainer.policy_model_old.state_dict()
+        deployed_policy_sha256 = state_dict_sha256(deployed_state)
+    elif method == "fixed_base_distilled_realization":
+        states = dict(evaluation_state_dicts or {})
+        if set(states) != {"base", "candidate"}:
+            raise FullCheckpointError(
+                "Distilled checkpoint lacks its frozen base/candidate pair."
+            )
+        current_state = states["base"]
+        candidate_state = states["candidate"]
+        deployed_state = trainer.policy_model_old.state_dict()
+        deployed_policy_sha256 = state_dict_sha256(deployed_state)
+    else:
+        return None
+
+    def recurrent_state(state: Mapping[str, object]) -> dict[str, object]:
+        return {
+            name: value
+            for name, value in state.items()
+            if not name.startswith("edit_policy.")
+            and not name.startswith("value_head.")
+        }
+
+    recurrent_sha256s = {
+        state_dict_sha256(recurrent_state(state))
+        for state in (current_state, candidate_state, deployed_state)
+    }
+    if len(recurrent_sha256s) != 1:
+        raise FullCheckpointError(
+            "Theory policy roles do not share one frozen recurrent map."
+        )
+    model_sha256, _ = session_model_state_identity(
+        session,
+        evaluation_state_dicts=evaluation_state_dicts,
+    )
+    return {
+        "model_sha256": model_sha256,
+        "model_config_sha256": model_config_sha256,
+        "current_policy_sha256": state_dict_sha256(current_state),
+        "candidate_policy_sha256": state_dict_sha256(candidate_state),
+        "deployed_policy_sha256": deployed_policy_sha256,
+        "recurrent_transition_sha256": next(iter(recurrent_sha256s)),
+    }
+
+
 def _rewrite_upi_checkpoint(
     path: Path,
     payload: Mapping[str, object],
@@ -321,6 +410,7 @@ def publish_and_validate_full_checkpoint(
     identity: Mapping[str, object],
     validator_execution_identity: Mapping[str, object],
     evaluation_state_dicts: Mapping[str, Mapping[str, object]] | None = None,
+    model_config_sha256: str,
 ) -> FullCheckpointArtifact:
     """Publish one checkpoint and prove an exact restore on a fresh session."""
 
@@ -333,6 +423,15 @@ def publish_and_validate_full_checkpoint(
     evaluation_states = dict(evaluation_state_dicts or {})
     before_model, before_roles = session_model_state_identity(
         session, evaluation_state_dicts=evaluation_states
+    )
+    before_theory = (
+        session_theory_model_identity(
+            session,
+            model_config_sha256=model_config_sha256,
+            evaluation_state_dicts=evaluation_states,
+        )
+        if session.run.protocol.get("schema_name") == "policy_improvement_protocol_v2"
+        else None
     )
     rng_state = training_module._capture_rng_state()
     ppo = type(session.trainer).__name__ == "PPOTrainer"
@@ -431,11 +530,22 @@ def publish_and_validate_full_checkpoint(
             fresh,
             evaluation_state_dicts=restored_states,
         )
+        restored_theory = (
+            session_theory_model_identity(
+                fresh,
+                model_config_sha256=model_config_sha256,
+                evaluation_state_dicts=restored_states,
+            )
+            if session.run.protocol.get("schema_name")
+            == "policy_improvement_protocol_v2"
+            else None
+        )
         if (
             fresh.trainer.get_env_step_count()
             != checked_identity["environment_interactions"]
             or restored_model != before_model
             or restored_roles != before_roles
+            or restored_theory != before_theory
         ):
             raise FullCheckpointError(
                 "Checkpoint restore changed progress or behavior-bearing model state."
@@ -477,11 +587,15 @@ def publish_and_validate_full_checkpoint(
         "role_state_sha256s": before_roles,
         "strict_resume_validated": True,
     }
+    if session.run.protocol.get("schema_name") == "policy_improvement_protocol_v2":
+        validation["schema_version"] = 2
+        validation["theory_model_identity"] = before_theory
     return FullCheckpointArtifact(
         path=checkpoint,
         sha256=checkpoint_sha256,
         model_state_sha256=before_model,
         role_state_sha256s=before_roles,
+        theory_model_identity=before_theory,
         validation=validation,
     )
 

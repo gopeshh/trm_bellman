@@ -56,6 +56,7 @@ from scripts.policy_improvement_schema import (
 from scripts.policy_improvement_v2_schema import (
     bind_v2_result_to_registration,
     PolicyImprovementV2SchemaError,
+    validate_v2_amendment_history,
 )
 
 
@@ -143,6 +144,7 @@ class AuthenticatedFullCheckpoint:
     run_manifest_sha256: str
     validation_sha256: str
     sealed_descriptor: int = -1
+    theory_model_identity: dict[str, str] | None = None
 
 
 class FullRunBackend(Protocol):
@@ -354,6 +356,7 @@ def load_registered_full_run(
     runtime_authorization_sha256: str,
     dataset_root: str | Path | None = None,
     environment: Mapping[str, str] | None = None,
+    require_stage1_selection: bool = False,
 ) -> RegisteredFullRun:
     """Authenticate one concrete non-smoke row and freeze its exact schedules."""
 
@@ -393,7 +396,11 @@ def load_registered_full_run(
     raw_protocol, _ = _load_authenticated_json(protocol_file)
     try:
         protocol = validate_protocol(raw_protocol)
-    except PolicyImprovementSchemaError as exc:
+    except (
+        PolicyImprovementSchemaError,
+        PolicyImprovementV2SchemaError,
+        ValueError,
+    ) as exc:
         raise FullRuntimeError("Protocol validation failed.") from exc
     is_v2 = protocol.get("schema_name") == "policy_improvement_protocol_v2"
     expected_gate = protocol["full_execution_gate"]
@@ -410,21 +417,6 @@ def load_registered_full_run(
         )
     if expected_gate != required_gate:
         raise FullRuntimeError("Protocol full-execution gate differs from the runtime.")
-    if is_v2:
-        base_policy = protocol.get("base_policy_artifact")
-        if (
-            not isinstance(base_policy, Mapping)
-            or base_policy.get("schema_name")
-            != "policy_improvement_base_policy_artifact_v2"
-            or base_policy.get("schema_version") != 1
-            or base_policy.get("status") != "available"
-            or base_policy.get("stage1_execution_allowed") is not True
-        ):
-            raise FullRuntimeError(
-                "Stage 1-3 execution is blocked until an authenticated train-only "
-                "base-policy artifact is frozen."
-            )
-
     history: list[dict[str, Any]] = []
     for index, raw_path in enumerate(amendment_paths):
         path = _absolute_canonical_file(raw_path, name=f"amendment {index}")
@@ -433,7 +425,6 @@ def load_registered_full_run(
             raise FullRuntimeError("Every amendment must be one JSON object.")
         history.append(dict(raw_amendment))
     try:
-        history = validate_amendment_history(history, protocol=protocol)
         base_configs = load_registered_base_configs(protocol, project)
         populations_document: object | None = None
         if is_v2:
@@ -452,11 +443,65 @@ def load_registered_full_run(
         )
         registry = generate_registry(
             protocol,
-            history,
+            [] if is_v2 else history,
             base_configs=base_configs,
             populations_value=populations_document,
         )
-    except PolicyImprovementSchemaError as exc:
+        if is_v2:
+            if len(history) not in {3, 4}:
+                raise FullRuntimeError(
+                    "Protocol v2 Stage 1 requires theory, base-policy, and compute "
+                    "amendments, followed by at most one V_select configuration "
+                    "selection."
+                )
+            assert isinstance(populations_document, Mapping)
+            history = validate_v2_amendment_history(
+                history,
+                protocol=protocol,
+                registry=registry,
+                populations=populations_document,
+            )
+            registry = generate_registry(
+                protocol,
+                history,
+                base_configs=base_configs,
+                populations_value=populations_document,
+            )
+            base_policy = history[1]
+            compute_freeze = history[2]
+            selection = history[3] if len(history) == 4 else None
+            if (
+                base_policy["runtime_authorization_sha256"]
+                != runtime_authorization_sha256
+                or compute_freeze["runtime_authorization_sha256"]
+                != runtime_authorization_sha256
+                or (
+                    selection is not None
+                    and selection["runtime_authorization_sha256"]
+                    != runtime_authorization_sha256
+                )
+            ):
+                raise FullRuntimeError(
+                    "Protocol v2 amendments bind another runtime authorization."
+                )
+            if require_stage1_selection and selection is None:
+                raise FullRuntimeError(
+                    "Validation-bridge evaluation requires an authenticated "
+                    "V_select configuration selection."
+                )
+            if not require_stage1_selection:
+                raise FullRuntimeError(
+                    "Protocol v2 learned execution remains blocked until train-only "
+                    "base-artifact restore and cross-generation continuation are "
+                    "implemented."
+                )
+        else:
+            history = validate_amendment_history(history, protocol=protocol)
+    except (
+        PolicyImprovementSchemaError,
+        PolicyImprovementV2SchemaError,
+        ValueError,
+    ) as exc:
         raise FullRuntimeError(
             "Registry or amendment history differs from deterministic regeneration."
         ) from exc
@@ -465,19 +510,38 @@ def load_registered_full_run(
         raise FullRuntimeError("Requested run ID does not resolve to exactly one row.")
     row = rows[0]
     phase = str(row["phase"])
-    if phase not in PHASE_AMENDMENT_PREFIX_LENGTH or phase == "stage0_smoke":
+    if is_v2:
+        if phase != "stage1_screen":
+            raise FullRuntimeError(
+                "Protocol v2 full execution requires future selection amendments "
+                "outside the Stage 1 screen."
+            )
+    elif phase not in PHASE_AMENDMENT_PREFIX_LENGTH or phase == "stage0_smoke":
         raise FullRuntimeError("The full runtime rejects smoke and unknown phases.")
     if row["row_kind"] != "concrete":
         raise FullRuntimeError(
             "Selection-dependent rows cannot run before their registered amendment."
         )
+    if is_v2 and len(history) == 4:
+        selected = history[3]["selected_configurations"]
+        matching = [
+            item for item in selected if item["method_id"] == row.get("method_id")
+        ]
+        if (
+            len(matching) != 1
+            or matching[0]["n"] != row.get("n")
+            or matching[0]["K"] != row.get("K")
+        ):
+            raise FullRuntimeError("Protocol v2 row was not selected from V_select.")
     if row["base_method_id"] not in _PRIMARY_METHODS or (
         phase != "stage3_ablation" and row["method_id"] not in _PRIMARY_METHODS
     ):
         raise FullRuntimeError(
             "Registered row does not use one of the four pre-registered methods."
         )
-    expected_history_length = PHASE_AMENDMENT_PREFIX_LENGTH[phase]
+    expected_history_length = (
+        len(history) if is_v2 else PHASE_AMENDMENT_PREFIX_LENGTH[phase]
+    )
     if len(history) != expected_history_length:
         raise FullRuntimeError(
             f"{phase} requires exactly {expected_history_length} registered amendments."
@@ -529,9 +593,18 @@ def load_registered_full_run(
     budget_tier = "confirmatory" if tier in {"confirmatory", "ablation"} else tier
     budget = protocol["budgets"][budget_tier]
     checkpoints = tuple(
-        int(value) for value in budget["checkpoint_environment_interactions"]
+        int(value)
+        for value in (
+            row["checkpoint_environment_interactions"]
+            if is_v2
+            else budget["checkpoint_environment_interactions"]
+        )
     )
-    final_interactions = int(budget["environment_interactions"])
+    if is_v2 and len(history) == 3:
+        checkpoints = checkpoints[:1]
+    final_interactions = int(
+        checkpoints[-1] if is_v2 else budget["environment_interactions"]
+    )
     if not checkpoints or checkpoints[-1] != final_interactions:
         raise FullRuntimeError(
             "Interaction checkpoint schedule does not end at its budget."
@@ -540,7 +613,11 @@ def load_registered_full_run(
     compute_freezes = [
         amendment
         for amendment in history
-        if amendment.get("schema_name") == "policy_improvement_compute_freeze_v1"
+        if amendment.get("schema_name")
+        in {
+            "policy_improvement_compute_freeze_v1",
+            "policy_improvement_compute_freeze_v2",
+        }
         or ("schema_name" not in amendment and "common_compute_targets" in amendment)
     ]
     if len(compute_freezes) != 1:
@@ -554,6 +631,26 @@ def load_registered_full_run(
 
     if is_v2 and not isinstance(populations_document, Mapping):
         raise FullRuntimeError("Protocol v2 population registration is unavailable.")
+    if is_v2:
+        populations = populations_document.get("populations")
+        population_id = row.get("evaluation_population")
+        population = (
+            populations.get(population_id)
+            if isinstance(populations, Mapping) and isinstance(population_id, str)
+            else None
+        )
+        if (
+            not isinstance(population, Mapping)
+            or population.get("split") != split
+            or isinstance(population.get("count"), bool)
+            or not isinstance(population.get("count"), int)
+        ):
+            raise FullRuntimeError(
+                "Protocol v2 row lacks its exact registered evaluation population."
+            )
+        evaluation_records = int(population["count"])
+    else:
+        evaluation_records = int(budget["evaluation_records"])
     return RegisteredFullRun(
         project_root=project,
         protocol_path=protocol_file,
@@ -571,7 +668,7 @@ def load_registered_full_run(
         interaction_checkpoints=checkpoints,
         final_environment_interactions=final_interactions,
         compute_target_recurrent_map_applications=compute_target,
-        evaluation_records=int(budget["evaluation_records"]),
+        evaluation_records=evaluation_records,
         test_open_sha256=test_open_digest,
         dataset_root=materialized_dataset,
         population_document=(
@@ -899,6 +996,39 @@ def _available_digest(value: object, *, name: str) -> str:
     ):
         raise FullRuntimeError(f"{name} must be a lowercase SHA-256 digest.")
     return digest
+
+
+def _validated_theory_model_identity(
+    value: object,
+    *,
+    required: bool,
+    name: str,
+) -> dict[str, str] | None:
+    if value is None:
+        if required:
+            raise FullRuntimeError(f"{name} is required for this method.")
+        return None
+    fields = {
+        "model_sha256",
+        "model_config_sha256",
+        "current_policy_sha256",
+        "candidate_policy_sha256",
+        "deployed_policy_sha256",
+        "recurrent_transition_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise FullRuntimeError(f"{name} field inventory differs.")
+    checked: dict[str, str] = {}
+    for field in sorted(fields):
+        digest = value[field]
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise FullRuntimeError(f"{name}.{field} is not a SHA-256 digest.")
+        checked[field] = digest
+    return checked
 
 
 def _authenticated_publication_directory(path: Path, *, name: str) -> tuple[int, int]:
@@ -1259,21 +1389,41 @@ def resolve_authenticated_full_checkpoint(
     if not isinstance(raw_model_inventory, Mapping):
         raise FullRuntimeError("Published model-state inventory is invalid.")
     model_inventory = dict(raw_model_inventory)
-    if set(model_inventory) != {
+    is_v2_run = run.protocol.get("schema_name") == "policy_improvement_protocol_v2"
+    theory_identity_required = is_v2_run and run.row.get("method_id") in {
+        "fixed_base_exact_persistent",
+        "fixed_base_exact_episodic",
+        "legacy_parameter_interpolation",
+        "fixed_base_distilled_realization",
+    }
+    model_inventory_fields = {
         "schema_name",
         "run_id",
         "method_id",
         "model_state_sha256",
         "role_state_sha256s",
         "snapshot_state_bindings",
-    } or (
-        model_inventory["schema_name"] != "policy_improvement_model_state_inventory_v1"
+    }
+    if is_v2_run:
+        model_inventory_fields.add("theory_model_identity")
+    if set(model_inventory) != model_inventory_fields or (
+        model_inventory["schema_name"]
+        != (
+            "policy_improvement_model_state_inventory_v2"
+            if is_v2_run
+            else "policy_improvement_model_state_inventory_v1"
+        )
         or model_inventory["run_id"] != run.row["run_id"]
         or model_inventory["method_id"] != run.row["method_id"]
         or model_inventory["model_state_sha256"] != run_manifest["model_state_sha256"]
         or model_inventory["role_state_sha256s"] != run_manifest["model_state_sha256s"]
     ):
         raise FullRuntimeError("Published model-state inventory identity differs.")
+    inventory_theory_identity = _validated_theory_model_identity(
+        model_inventory.get("theory_model_identity"),
+        required=theory_identity_required,
+        name="Published model-state theory identity",
+    )
 
     expected_execution_identity = {
         "role": producer_role_name,
@@ -1337,6 +1487,8 @@ def resolve_authenticated_full_checkpoint(
             "role_state_sha256s",
             "strict_resume_validated",
         }
+        if is_v2_run:
+            validation_fields.add("theory_model_identity")
         if (
             not isinstance(raw_validation, Mapping)
             or set(raw_validation) != validation_fields
@@ -1351,7 +1503,7 @@ def resolve_authenticated_full_checkpoint(
             observed_validation_sha256 != validation_sha256
             or validation["schema_name"]
             != "policy_improvement_checkpoint_validation_v1"
-            or validation["schema_version"] != 1
+            or validation["schema_version"] != (2 if is_v2_run else 1)
             or validation["validator"] != "policy_improvement_full_runtime"
             or validation["validator_execution_identity"] != expected_execution_identity
             or validation["run_id"] != run.row["run_id"]
@@ -1369,6 +1521,39 @@ def resolve_authenticated_full_checkpoint(
             raise FullRuntimeError(
                 f"Published {snapshot_kind} validation differs from its checkpoint."
             )
+        validation_theory_identity = _validated_theory_model_identity(
+            validation.get("theory_model_identity"),
+            required=theory_identity_required,
+            name=f"Published {snapshot_kind} theory identity",
+        )
+        if validation_theory_identity is not None:
+            role_names = {
+                "fixed_base_exact_persistent": (
+                    "policy_model_old",
+                    "policy_model_candidate",
+                ),
+                "fixed_base_exact_episodic": (
+                    "policy_model_old",
+                    "policy_model_candidate",
+                ),
+                "legacy_parameter_interpolation": (
+                    "preinterpolation_policy_base",
+                    "preinterpolation_policy_candidate",
+                ),
+                "fixed_base_distilled_realization": ("base", "candidate"),
+            }.get(str(run.row.get("method_id")))
+            if (
+                validation_theory_identity["model_sha256"] != model_state_sha256
+                or role_names is None
+                or validation_theory_identity["current_policy_sha256"]
+                != role_hashes.get(role_names[0])
+                or validation_theory_identity["candidate_policy_sha256"]
+                != role_hashes.get(role_names[1])
+            ):
+                raise FullRuntimeError(
+                    f"Published {snapshot_kind} theory identity differs from its "
+                    "model roles."
+                )
         parent = validation["parent_checkpoint_sha256"]
         if parent is not None and (
             not isinstance(parent, str)
@@ -1388,6 +1573,7 @@ def resolve_authenticated_full_checkpoint(
             role_state_sha256s={
                 str(name): str(digest) for name, digest in role_hashes.items()
             },
+            theory_model_identity=validation_theory_identity,
             parent_checkpoint_sha256=parent,
             generation_manifest_sha256=generation_manifest_sha256,
             run_manifest_sha256=run_manifest_sha256,
@@ -1504,12 +1690,15 @@ def resolve_authenticated_full_checkpoint(
         raise FullRuntimeError("Published model-state snapshot bindings differ.")
     bindings: dict[str, Mapping[str, object]] = {}
     for raw_binding in raw_bindings:
-        if not isinstance(raw_binding, Mapping) or set(raw_binding) != {
+        binding_fields = {
             "snapshot_kind",
             "checkpoint_sha256",
             "model_state_sha256",
             "checkpoint_validation_sha256",
-        }:
+        }
+        if is_v2_run:
+            binding_fields.add("theory_model_identity")
+        if not isinstance(raw_binding, Mapping) or set(raw_binding) != binding_fields:
             raise FullRuntimeError("Published model-state binding fields differ.")
         kind = raw_binding["snapshot_kind"]
         if kind not in snapshots or kind in bindings:
@@ -1522,6 +1711,11 @@ def resolve_authenticated_full_checkpoint(
             "checkpoint_sha256": checkpoint.sha256,
             "model_state_sha256": checkpoint.model_state_sha256,
             "checkpoint_validation_sha256": checkpoint.validation_sha256,
+            **(
+                {"theory_model_identity": checkpoint.theory_model_identity}
+                if is_v2_run
+                else {}
+            ),
         }:
             raise FullRuntimeError("Published model-state binding differs.")
 
@@ -1541,6 +1735,11 @@ def resolve_authenticated_full_checkpoint(
     ):
         raise FullRuntimeError(
             "Published result does not bind its primary validation and model state."
+        )
+    if is_v2_run and interaction.theory_model_identity != inventory_theory_identity:
+        raise FullRuntimeError(
+            "Published model-state inventory and interaction checkpoint theory "
+            "identities differ."
         )
     result_snapshots = result.get("evaluation_snapshots")
     if not isinstance(result_snapshots, list) or len(result_snapshots) != 2:

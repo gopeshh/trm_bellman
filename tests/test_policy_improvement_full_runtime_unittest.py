@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -581,6 +582,264 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                 environment={},
             )
 
+    def test_v2_full_run_uses_static_registry_and_registered_population(self) -> None:
+        protocol_path = self.project / "configs/policy_improvement_v2/protocol.json"
+        registry_path = self.project / "configs/policy_improvement_v2/registry.json"
+        theory_path = self.project / "configs/policy_improvement_v2/theory.json"
+        base_policy_path = self.project / "configs/policy_improvement_v2/base.json"
+        compute_path = self.project / "configs/policy_improvement_v2/compute.json"
+        selection_path = self.project / "configs/policy_improvement_v2/selection.json"
+        for path in (
+            protocol_path,
+            registry_path,
+            theory_path,
+            base_policy_path,
+            compute_path,
+            selection_path,
+        ):
+            _write_json(path, {"fixture": path.stem})
+        authorization_sha256 = _digest("runtime authorization")
+        population_document = {
+            "populations": {
+                "validation_select": {
+                    "population_id": "validation_select",
+                    "split": "validation",
+                    "count": 128,
+                    "binding_sha256": _digest("validation select"),
+                },
+                "validation_bridge": {
+                    "population_id": "validation_bridge",
+                    "split": "validation",
+                    "count": 128,
+                    "binding_sha256": _digest("validation bridge"),
+                },
+            }
+        }
+        protocol = {
+            "schema_name": "policy_improvement_protocol_v2",
+            "schema_version": 2,
+            "protocol_id": "policy-improvement-v2-20260818",
+            "full_execution_gate": {
+                "environment_variable": "RUN_UPITRM_FULL_EXPERIMENTS",
+                "required_value": "1",
+                "stage0_exempt": True,
+                "stage1_to_stage3_blocked_by_base_policy": True,
+            },
+            "base_policy_artifact": {
+                "schema_name": "policy_improvement_base_policy_artifact_v2",
+                "schema_version": 1,
+                "status": "available",
+                "stage1_execution_allowed": True,
+            },
+            "output_root": {"relative_path": "policy_improvement_v2"},
+            "population_registry": {"sha256": _digest("populations")},
+            "budgets": {
+                "pilot": {
+                    "checkpoint_environment_interactions": [
+                        10000,
+                        20000,
+                        40000,
+                        80000,
+                    ],
+                    "maximum_environment_interactions": 80000,
+                    "selection_records": 128,
+                    "bridge_records": 128,
+                }
+            },
+        }
+        row = {
+            **self._row("fixed_base_exact_persistent"),
+            "schema_name": "policy_improvement_registry_row_v2",
+            "schema_version": 1,
+            "protocol_id": protocol["protocol_id"],
+            "evaluation_population": "validation_select",
+            "checkpoint_environment_interactions": [
+                10000,
+                20000,
+                40000,
+                80000,
+            ],
+        }
+        registry = {
+            "schema_name": "policy_improvement_registry_v2",
+            "registry_schema_version": 1,
+            "rows": [row],
+        }
+        protocol_sha256 = hashlib.sha256(canonical_json_bytes(protocol)).hexdigest()
+        registry_sha256 = hashlib.sha256(canonical_json_bytes(registry)).hexdigest()
+        theory = {
+            "schema_name": "policy_improvement_theory_bridge_amendment_v2",
+            "protocol_id": protocol["protocol_id"],
+            "protocol_sha256": protocol_sha256,
+            "population_registry_sha256": protocol["population_registry"]["sha256"],
+            "source_registry_sha256": registry_sha256,
+            "prior_amendment_history_sha256": hashlib.sha256(b"[]").hexdigest(),
+        }
+        base_policy = {
+            "schema_name": "policy_improvement_base_policy_amendment_v2",
+            "runtime_authorization_sha256": authorization_sha256,
+        }
+        compute = {
+            "schema_name": "policy_improvement_compute_freeze_v2",
+            "protocol_id": protocol["protocol_id"],
+            "protocol_sha256": protocol_sha256,
+            "source_registry_sha256": registry_sha256,
+            "prior_amendment_history_sha256": hashlib.sha256(
+                canonical_json_bytes([theory, base_policy])
+            ).hexdigest(),
+            "runtime_authorization_sha256": authorization_sha256,
+            "common_compute_targets": {
+                "unit": "recurrent_map_applications",
+                "pilot": 900,
+                "confirmatory": 1200,
+                "ablation": 1300,
+            },
+        }
+        selection = {
+            "schema_name": "policy_improvement_stage1_configuration_selection_v2",
+            "protocol_sha256": protocol_sha256,
+            "population_registry_sha256": protocol["population_registry"]["sha256"],
+            "source_registry_sha256": registry_sha256,
+            "prior_amendment_history_sha256": hashlib.sha256(
+                canonical_json_bytes([theory, base_policy, compute])
+            ).hexdigest(),
+            "compute_freeze_sha256": hashlib.sha256(
+                canonical_json_bytes(compute)
+            ).hexdigest(),
+            "base_policy_artifact_sha256": _digest("base artifact"),
+            "runtime_authorization_sha256": authorization_sha256,
+            "selection_population_binding_sha256": population_document["populations"][
+                "validation_select"
+            ]["binding_sha256"],
+            "bridge_population_binding_sha256": population_document["populations"][
+                "validation_bridge"
+            ]["binding_sha256"],
+            "selected_configurations": [
+                {
+                    "method_id": "fixed_base_exact_persistent",
+                    "n": 2,
+                    "K": 1,
+                },
+                {
+                    "method_id": "fixed_base_exact_episodic",
+                    "n": 4,
+                    "K": 5,
+                },
+            ],
+        }
+        with (
+            mock.patch(
+                "scripts.policy_improvement_full_runtime.validate_protocol",
+                return_value=protocol,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_full_runtime.load_registered_base_configs",
+                return_value={},
+            ),
+            mock.patch(
+                "scripts.policy_improvement_full_runtime.validate_registry_document",
+                return_value=registry,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_full_runtime.generate_registry",
+                return_value=registry,
+            ) as generate,
+            mock.patch(
+                "scripts.policy_improvement_populations.load_registered_populations",
+                return_value=population_document,
+            ),
+            mock.patch(
+                "scripts.policy_improvement_full_runtime.validate_v2_amendment_history",
+                side_effect=lambda history, **_: [
+                    theory,
+                    base_policy,
+                    compute,
+                    *([selection] if len(history) == 4 else []),
+                ],
+            ) as validate_history,
+        ):
+            with self.assertRaisesRegex(
+                FullRuntimeError,
+                "learned execution remains blocked",
+            ):
+                load_registered_full_run(
+                    project_root=self.project,
+                    protocol_path=protocol_path,
+                    registry_path=registry_path,
+                    amendment_paths=[theory_path, base_policy_path, compute_path],
+                    evidence_root=self.evidence,
+                    row_id=str(row["run_id"]),
+                    runtime_authorization_sha256=authorization_sha256,
+                    environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
+                )
+            with self.assertRaisesRegex(
+                FullRuntimeError,
+                "requires an authenticated V_select configuration selection",
+            ):
+                load_registered_full_run(
+                    project_root=self.project,
+                    protocol_path=protocol_path,
+                    registry_path=registry_path,
+                    amendment_paths=[theory_path, base_policy_path, compute_path],
+                    evidence_root=self.evidence,
+                    row_id=str(row["run_id"]),
+                    runtime_authorization_sha256=authorization_sha256,
+                    environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
+                    require_stage1_selection=True,
+                )
+            selected_run = load_registered_full_run(
+                project_root=self.project,
+                protocol_path=protocol_path,
+                registry_path=registry_path,
+                amendment_paths=[
+                    theory_path,
+                    base_policy_path,
+                    compute_path,
+                    selection_path,
+                ],
+                evidence_root=self.evidence,
+                row_id=str(row["run_id"]),
+                runtime_authorization_sha256=authorization_sha256,
+                environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
+                require_stage1_selection=True,
+            )
+            self.assertEqual(len(selected_run.amendment_history), 4)
+            rejected_selection = copy.deepcopy(selection)
+            rejected_selection["selected_configurations"][0]["n"] = 4
+            validate_history.side_effect = lambda history, **_: [
+                theory,
+                base_policy,
+                compute,
+                rejected_selection,
+            ]
+            with self.assertRaisesRegex(FullRuntimeError, "was not selected"):
+                load_registered_full_run(
+                    project_root=self.project,
+                    protocol_path=protocol_path,
+                    registry_path=registry_path,
+                    amendment_paths=[
+                        theory_path,
+                        base_policy_path,
+                        compute_path,
+                        selection_path,
+                    ],
+                    evidence_root=self.evidence,
+                    row_id=str(row["run_id"]),
+                    runtime_authorization_sha256=authorization_sha256,
+                    environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
+                    require_stage1_selection=True,
+                )
+        self.assertEqual(
+            selected_run.interaction_checkpoints,
+            (10000, 20000, 40000, 80000),
+        )
+        self.assertEqual(selected_run.final_environment_interactions, 80000)
+        self.assertEqual(selected_run.evaluation_records, 128)
+        self.assertEqual(selected_run.compute_target_recurrent_map_applications, 900)
+        self.assertEqual(selected_run.population_document, population_document)
+        self.assertEqual(generate.call_args_list[0].args[1], [])
+        self.assertEqual(len(generate.call_args.args[1]), 4)
+
     def test_selection_template_and_validation_test_mismatch_fail_closed(self) -> None:
         template = self._row("matched_ppo")
         template["row_kind"] = "selection_template"
@@ -819,8 +1078,7 @@ class FullRuntimePublicationTest(unittest.TestCase):
         )
         generation = final / "segments/env_000000080"
         scheduled = (
-            generation
-            / "checkpoints/scheduled/env_000000010/rl_checkpoint_step_10.pt"
+            generation / "checkpoints/scheduled/env_000000010/rl_checkpoint_step_10.pt"
         )
         interaction = next(
             (generation / "checkpoints/interaction_matched").rglob("*.pt")
@@ -834,7 +1092,9 @@ class FullRuntimePublicationTest(unittest.TestCase):
             (compute, interaction),
             (scheduled, compute),
         ):
-            with self.subTest(source=source.parent.name, target=destination.parent.name):
+            with self.subTest(
+                source=source.parent.name, target=destination.parent.name
+            ):
                 original = destination.read_bytes()
                 destination.write_bytes(source.read_bytes())
                 try:

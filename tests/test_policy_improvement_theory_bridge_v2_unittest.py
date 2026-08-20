@@ -28,6 +28,7 @@ from scripts.policy_improvement_theory_bridge_v2 import (
     CurrentPolicyReturnV2,
     evaluate_theory_bridge_v2,
     main,
+    PairedPolicyReturnV2,
     PersistentEndpointWitnessV2,
     ReadOnlySnapshotV2,
     state_identity,
@@ -39,12 +40,14 @@ from scripts.policy_improvement_theory_bridge_v2 import (
 )
 from scripts.policy_improvement_theory_schema_v2 import (
     build_stage0_theory_request,
+    build_validation_theory_request,
     PROTOCOL_ID,
     THEORY_AMENDMENT_SCHEMA_NAME,
     theory_document_sha256,
     THEORY_REQUEST_SCHEMA_NAME,
     THEORY_RESULT_SCHEMA_NAME,
     THEORY_SCHEMA_VERSION,
+    validate_theory_result,
 )
 
 
@@ -53,6 +56,7 @@ def _digest(value: str) -> str:
 
 
 _INDICES = [17, 3, 91, 22, 5, 73, 40, 11]
+_VALIDATION_INDICES = [(index * 37) % 256 for index in range(128)]
 
 
 def _records(indices: list[int]) -> list[dict[str, object]]:
@@ -346,6 +350,66 @@ def _request(
     }
 
 
+def _validation_identity(
+    amendment: dict[str, Any],
+    checkpoint: Path,
+) -> dict[str, Any]:
+    identity = _identity(amendment, checkpoint)
+    indices = list(_VALIDATION_INDICES)
+    records = _records(indices)
+    inputs = [_digest(f"input-{index}") for index in indices]
+    identity["checkpoint"] = {
+        "sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+        "size_bytes": checkpoint.stat().st_size,
+        "snapshot_kind": "scheduled",
+        "environment_interactions": 10000,
+    }
+    identity["training_runtime"]["role"] = "policy-improvement-full"
+    identity["dataset_records"] = {
+        "split": "validation",
+        "population_id": "validation_bridge",
+        "population_binding_sha256": _digest("validation-bridge-binding"),
+        "split_manifest_sha256": _digest("validation-manifest"),
+        "ordered_record_sha256": _digest("validation-bridge-record-order"),
+        "ordered_input_sha256": _digest("validation-bridge-input-order"),
+        "selected_record_indices": indices,
+        "selected_record_indices_sha256": theory_document_sha256(indices),
+        "selected_records": records,
+        "selected_records_sha256": theory_document_sha256(records),
+        "selected_input_sha256s": inputs,
+        "selected_input_sha256s_sha256": theory_document_sha256(inputs),
+        "record_count": 128,
+    }
+    return identity
+
+
+def _validation_request(
+    amendment: dict[str, Any],
+    identity: dict[str, Any],
+    *,
+    method_id: str = "fixed_base_exact_persistent",
+) -> dict[str, Any]:
+    row = {
+        "row_kind": "concrete",
+        "phase": "stage1_screen",
+        "run_id": "validation-run",
+        "method_id": method_id,
+        "evaluation_split": "validation",
+        "evaluation_population": "validation_select",
+        "n": 2,
+        "K": 1,
+        "alpha": 0.1,
+        "checkpoint_environment_interactions": [10000, 20000, 40000, 80000],
+    }
+    return build_validation_theory_request(
+        amendment_value=amendment,
+        row=row,
+        identity=identity,
+        effective_config={"gamma": 0.9, "advantage_clip": None},
+        checkpoint_environment_interactions=10000,
+    )
+
+
 _MUTABLE_NAMES = (
     "optimizer_states",
     "scheduler_states",
@@ -376,6 +440,7 @@ class _Backend:
         self.closed = False
         self.transaction_active = False
         self.return_calls: list[tuple[str, int]] = []
+        self.paired_return_calls: list[tuple[str, int, float]] = []
         self.mutable = {name: _digest(name) for name in _MUTABLE_NAMES}
         self.states = self._states()
 
@@ -391,7 +456,7 @@ class _Backend:
 
     def _states(self) -> tuple[TheoryStateV2, ...]:
         result: list[TheoryStateV2] = []
-        for index in _INDICES:
+        for index in self.identity["dataset_records"]["selected_record_indices"]:
             current = (0.6, 0.4, 0.0)
             candidate = (0.2, 0.8, 0.0)
             deployed = (
@@ -500,6 +565,35 @@ class _Backend:
             environment_steps=2,
             terminal=True,
             trajectory_sha256=_digest(f"return-{state_id}-{seed}"),
+        )
+
+    def sample_paired_policy_returns(
+        self,
+        state_id: str,
+        seed: int,
+        maximum_environment_steps: int,
+        gamma: float,
+        alpha: float,
+    ) -> PairedPolicyReturnV2:
+        self.paired_return_calls.append((state_id, seed, alpha))
+        current_return = 1.5 + 0.1 * (seed % 2)
+        paired_delta = -alpha if seed % 2 == 0 else 2.0 * alpha
+        current = CurrentPolicyReturnV2(
+            discounted_return=current_return,
+            environment_steps=2,
+            terminal=True,
+            trajectory_sha256=_digest(f"paired-current-{state_id}-{seed}"),
+        )
+        mixture = CurrentPolicyReturnV2(
+            discounted_return=current_return + paired_delta,
+            environment_steps=2,
+            terminal=True,
+            trajectory_sha256=(_digest(f"paired-mixture-{state_id}-{seed}-{alpha}")),
+        )
+        return PairedPolicyReturnV2(
+            current_policy=current,
+            exact_mixture=mixture,
+            common_random_numbers_sha256=_digest(f"crn-{state_id}-{seed}"),
         )
 
     def close(self) -> None:
@@ -658,6 +752,117 @@ class TheoryBridgeV2Test(unittest.TestCase):
             all(
                 row["exact_mixture_deployment_identity_tv"] is None
                 and row["deployment_discrepancy_delta_dep"] is not None
+                for row in result["states"]
+            )
+        )
+        self.assertTrue(
+            all(
+                row["paired_current_to_exact_mixture_return"]
+                == {
+                    "status": "unavailable",
+                    "reason": "stage0_smoke_not_scientific_calibration",
+                }
+                for row in result["states"]
+            )
+        )
+
+    def test_validation_bridge_exact_reports_registered_paired_crn_alphas(
+        self,
+    ) -> None:
+        identity = _validation_identity(self.amendment, self.checkpoint)
+        request = _validation_request(self.amendment, identity)
+        backend = _Backend(identity)
+        result = evaluate_theory_bridge_v2(
+            request_document=request,
+            amendment_document=self.amendment,
+            checkpoint_path=self.checkpoint,
+            backend=backend,
+        )
+        self.assertEqual(len(backend.return_calls), 0)
+        self.assertEqual(len(backend.paired_return_calls), 128 * 4 * 3)
+        first_state_calls = [
+            call
+            for call in backend.paired_return_calls
+            if call[0] == f"state-{_VALIDATION_INDICES[0]}"
+        ]
+        self.assertEqual(
+            {
+                alpha: [
+                    seed
+                    for _, seed, observed_alpha in first_state_calls
+                    if observed_alpha == alpha
+                ]
+                for alpha in (0.05, 0.1, 0.2)
+            },
+            {
+                alpha: [
+                    seed
+                    for _, seed, observed_alpha in first_state_calls
+                    if observed_alpha == 0.05
+                ]
+                for alpha in (0.05, 0.1, 0.2)
+            },
+        )
+        for row in result["states"]:
+            diagnostic = row["paired_current_to_exact_mixture_return"]
+            self.assertEqual(diagnostic["status"], "available")
+            self.assertEqual(
+                [item["alpha"] for item in diagnostic["alpha_results"]],
+                [0.05, 0.1, 0.2],
+            )
+            self.assertEqual(
+                len(
+                    {
+                        item["current_policy_return_mean"]
+                        for item in diagnostic["alpha_results"]
+                    }
+                ),
+                1,
+            )
+            self.assertEqual(
+                len(
+                    {
+                        item["common_random_numbers_sha256"]
+                        for item in diagnostic["alpha_results"]
+                    }
+                ),
+                1,
+            )
+        corrupted = copy.deepcopy(result)
+        corrupted_alpha = corrupted["states"][0][
+            "paired_current_to_exact_mixture_return"
+        ]["alpha_results"][1]
+        corrupted_alpha["current_policy_return_mean"] += 0.25
+        corrupted_alpha["exact_mixture_return_mean"] += 0.25
+        with self.assertRaisesRegex(
+            ValueError,
+            "current-policy or CRN identity changed by alpha",
+        ):
+            validate_theory_result(corrupted, request=request)
+
+    def test_validation_bridge_legacy_keeps_paired_return_unavailable(self) -> None:
+        identity = _validation_identity(self.amendment, self.checkpoint)
+        request = _validation_request(
+            self.amendment,
+            identity,
+            method_id="legacy_parameter_interpolation",
+        )
+        backend = _Backend(identity, method_id="legacy_parameter_interpolation")
+        result = evaluate_theory_bridge_v2(
+            request_document=request,
+            amendment_document=self.amendment,
+            checkpoint_path=self.checkpoint,
+            backend=backend,
+        )
+        self.assertEqual(len(backend.return_calls), 128 * 4)
+        self.assertEqual(backend.paired_return_calls, [])
+        self.assertTrue(
+            all(
+                row["paired_current_to_exact_mixture_return"]
+                == {
+                    "status": "unavailable",
+                    "reason": "not_an_exact_probability_mixture_method",
+                }
                 for row in result["states"]
             )
         )
@@ -940,9 +1145,7 @@ class TheoryBridgeV2Test(unittest.TestCase):
                         "parent_checkpoint_sha256": parent_sha256,
                         "model_state_sha256": model_sha256,
                         "role_state_sha256s": roles,
-                        "theory_model_identity": copy.deepcopy(
-                            theory_model_identity
-                        ),
+                        "theory_model_identity": copy.deepcopy(theory_model_identity),
                     },
                 ],
             }
@@ -1273,6 +1476,189 @@ class TheoryBridgeV2Test(unittest.TestCase):
         ):
             create_theory_bridge_backend_v2(request, root / "checkpoint.pt", inputs)
         resolve.assert_not_called()
+
+    def test_validation_factory_uses_authenticated_full_checkpoint_and_closes_fd(
+        self,
+    ) -> None:
+        root = Path(self.temporary.name)
+        protocol_path = root / "configs/policy_improvement_v2/protocol.json"
+        registry_path = root / "configs/policy_improvement_v2/registry.json"
+        theory_path = (
+            root / "configs/policy_improvement_v2/amendments/theory_bridge_v2.json"
+        )
+        checkpoint = root / "checkpoint.pt"
+        checkpoint.write_bytes(b"authenticated full checkpoint")
+        theory = {"schema_name": THEORY_AMENDMENT_SCHEMA_NAME}
+        theory_sha256 = theory_document_sha256(theory)
+        authorization_sha256 = _digest("authorization")
+        authorization = {
+            "schema_name": "policy_improvement_runtime_authorization_v3",
+            "producer_git_commit": "1" * 40,
+            "producer_source_manifest_sha256": _digest("producer source"),
+            "launcher_sha256": _digest("launcher"),
+            "protocol_sha256": _digest("protocol"),
+            "registry": {"sha256": _digest("registry")},
+            "amendments": [
+                {
+                    "schema_name": THEORY_AMENDMENT_SCHEMA_NAME,
+                    "sha256": theory_sha256,
+                }
+            ],
+            "roles": [
+                {
+                    "role": role,
+                    "source_git_commit": "1" * 40,
+                    "runtime_sha256": _digest(f"{role} runtime"),
+                    "runtime_profile_sha256": _digest(f"{role} profile"),
+                    "selected_source_manifest_sha256": _digest(f"{role} profile"),
+                }
+                for role in (
+                    "policy-improvement-full",
+                    "policy-improvement-theory-bridge",
+                )
+            ],
+        }
+        row = {
+            "schema_name": "policy_improvement_registry_row_v2",
+            "schema_version": 1,
+            "row_kind": "concrete",
+            "phase": "stage1_screen",
+            "run_id": "validation-run",
+            "method_id": "fixed_base_exact_persistent",
+            "base_method_id": "fixed_base_exact_persistent",
+            "evaluation_split": "validation",
+            "evaluation_population": "validation_select",
+            "n": 2,
+            "K": 1,
+            "alpha": 0.1,
+            "config_override": {},
+            "base_config_canonical_sha256": _digest("base config"),
+            "expected_effective_config_sha256": _digest("effective config"),
+        }
+        population = {
+            "population_id": "validation_bridge",
+            "split": "validation",
+            "count": 128,
+        }
+        registered_run = SimpleNamespace(
+            protocol_sha256=authorization["protocol_sha256"],
+            registry_sha256=authorization["registry"]["sha256"],
+            amendment_history=(theory, {"schema_name": "compute"}),
+            row=row,
+            population_document={"populations": {"validation_bridge": population}},
+            protocol={"methods": [{"id": row["base_method_id"]}]},
+            project_root=root,
+        )
+        request = {
+            "evaluation_population": "validation_bridge",
+            "run_id": row["run_id"],
+            "method_id": row["method_id"],
+            "n": row["n"],
+            "bellman_horizon": row["K"],
+            "alpha": row["alpha"],
+            "reference_depth_m": 8,
+            "identity": {
+                "checkpoint": {"environment_interactions": 10000},
+                "training_runtime": {},
+            },
+        }
+        descriptor = os.memfd_create("validation-theory-test", os.MFD_CLOEXEC)
+        resolved = SimpleNamespace(
+            path=checkpoint,
+            sha256=_digest("checkpoint"),
+            size_bytes=checkpoint.stat().st_size,
+            snapshot_kind="scheduled",
+            environment_interactions=10000,
+            sealed_descriptor=descriptor,
+            model_state_sha256=_digest("model"),
+            role_state_sha256s={"model": _digest("model role")},
+            validation_sha256=_digest("validation"),
+        )
+
+        class Session:
+            def __init__(self) -> None:
+                self.close_count = 0
+
+            def close(self) -> None:
+                self.close_count += 1
+
+        session = Session()
+        open_session = mock.Mock(return_value=session)
+        inputs = TheoryBackendInputsV2(
+            project_root=root,
+            protocol_path=protocol_path,
+            registry_path=registry_path,
+            amendment_paths=(theory_path, root / "compute.json"),
+            evidence_root=root,
+            dataset_root=root,
+            row_id=row["run_id"],
+            runtime_authorization={},
+        )
+        try:
+            with (
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.validate_theory_request",
+                    return_value=request,
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.validate_runtime_authorization",
+                    return_value=authorization,
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.runtime_authorization_sha256",
+                    return_value=authorization_sha256,
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.discover_clean_git_source",
+                    return_value={"git_commit": "1" * 40, "git_clean": True},
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.load_registered_full_run",
+                    return_value=registered_run,
+                ) as load_run,
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.resolve_authenticated_full_checkpoint",
+                    return_value=resolved,
+                ) as resolve,
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2._expected_validation_identity",
+                    return_value=request["identity"],
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.load_registered_base_configs",
+                    return_value={row["base_method_id"]: {}},
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.build_validation_theory_request",
+                    return_value=request,
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_theory_backend_v2.importlib.import_module",
+                    side_effect=[
+                        SimpleNamespace(
+                            open_validation_theory_bridge_session_v2=open_session
+                        ),
+                        SimpleNamespace(),
+                    ],
+                ),
+            ):
+                backend = create_theory_bridge_backend_v2(
+                    request,
+                    checkpoint,
+                    inputs,
+                )
+            resolve.assert_called_once()
+            self.assertIs(load_run.call_args.kwargs["require_stage1_selection"], True)
+            open_session.assert_called_once()
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+            backend.close()
+            self.assertEqual(session.close_count, 1)
+        finally:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

@@ -17,6 +17,13 @@ from policy_improvement_sealed_evidence import (
     load_sealed_checkpoint_validator,
     SealedCheckpoint,
 )
+from scripts.policy_improvement_full_runtime import (
+    FULL_EXECUTION_ENV,
+    FULL_EXECUTION_VALUE,
+    FullRuntimeError,
+    load_registered_full_run,
+    resolve_authenticated_full_checkpoint,
+)
 from scripts.policy_improvement_evidence import authenticate_complete_generation
 from scripts.policy_improvement_populations import load_registered_populations
 from scripts.policy_improvement_registry import (
@@ -37,6 +44,7 @@ from scripts.policy_improvement_schema import (
 from scripts.policy_improvement_theory_bridge_v2 import (
     BellmanRolloutV2,
     CurrentPolicyReturnV2,
+    PairedPolicyReturnV2,
     PersistentEndpointWitnessV2,
     ReadOnlySnapshotV2,
     TheoryBackendInputsV2,
@@ -47,12 +55,14 @@ from scripts.policy_improvement_theory_bridge_v2 import (
 )
 from scripts.policy_improvement_theory_schema_v2 import (
     build_stage0_theory_request,
+    build_validation_theory_request,
     theory_document_sha256,
     validate_theory_request,
 )
 from scripts.policy_improvement_v2_schema import (
     bind_v2_result_to_registration,
     PolicyImprovementV2SchemaError,
+    validate_v2_result as validate_full_v2_result,
 )
 from utils.run_identity import discover_clean_git_source
 
@@ -90,6 +100,15 @@ class FullTheorySessionV2(Protocol):
         seed: int,
         maximum_environment_steps: int,
         gamma: float,
+    ) -> object: ...
+
+    def sample_paired_policy_returns(
+        self,
+        state_id: str,
+        seed: int,
+        maximum_environment_steps: int,
+        gamma: float,
+        alpha: float,
     ) -> object: ...
 
     def close(self) -> None: ...
@@ -317,6 +336,61 @@ class SealedTheoryBackendV2:
             environment_steps=int(value.environment_steps),
             terminal=bool(value.terminal),
             trajectory_sha256=str(value.trajectory_sha256),
+        )
+
+    def sample_paired_policy_returns(
+        self,
+        state_id: str,
+        seed: int,
+        maximum_environment_steps: int,
+        gamma: float,
+        alpha: float,
+    ) -> PairedPolicyReturnV2:
+        value = self._session.sample_paired_policy_returns(
+            state_id,
+            seed,
+            maximum_environment_steps,
+            gamma,
+            alpha,
+        )
+        _attributes(
+            value,
+            (
+                "current_policy",
+                "exact_mixture",
+                "common_random_numbers_sha256",
+            ),
+            label="v2 paired policy return",
+        )
+
+        def convert(raw: object, *, label: str) -> CurrentPolicyReturnV2:
+            _attributes(
+                raw,
+                (
+                    "discounted_return",
+                    "environment_steps",
+                    "terminal",
+                    "trajectory_sha256",
+                ),
+                label=label,
+            )
+            return CurrentPolicyReturnV2(
+                discounted_return=float(raw.discounted_return),
+                environment_steps=int(raw.environment_steps),
+                terminal=bool(raw.terminal),
+                trajectory_sha256=str(raw.trajectory_sha256),
+            )
+
+        return PairedPolicyReturnV2(
+            current_policy=convert(
+                value.current_policy,
+                label="v2 paired current-policy return",
+            ),
+            exact_mixture=convert(
+                value.exact_mixture,
+                label="v2 paired exact-mixture return",
+            ),
+            common_random_numbers_sha256=str(value.common_random_numbers_sha256),
         )
 
     def close(self) -> None:
@@ -687,8 +761,12 @@ def _resolve_stage0_checkpoint(
         raise TheoryBridgeV2Error("Stage 0 complete result differs from its row.")
     if result.get("amendment_history_sha256") != amendment_history_sha256([]):
         raise TheoryBridgeV2Error("Stage 0 result has nonempty training amendments.")
-    checkpoint_identity = request["identity"]["checkpoint"]
-    assert isinstance(checkpoint_identity, Mapping)
+    request_identity = request.get("identity")
+    if not isinstance(request_identity, Mapping):
+        raise TheoryBridgeV2Error("Stage 0 theory request lacks identity.")
+    checkpoint_identity = request_identity.get("checkpoint")
+    if not isinstance(checkpoint_identity, Mapping):
+        raise TheoryBridgeV2Error("Stage 0 theory request lacks checkpoint identity.")
     requested_checkpoint_sha256 = str(checkpoint_identity["sha256"])
     try:
         authenticated = authenticate_complete_generation(
@@ -884,6 +962,377 @@ def _expected_stage0_identity(
     return expected
 
 
+def _runtime_role(
+    authorization: Mapping[str, object],
+    role_name: str,
+) -> Mapping[str, object]:
+    roles = authorization.get("roles")
+    if not isinstance(roles, list):
+        raise TheoryBridgeV2Error("Runtime authorization has no role inventory.")
+    matches = [
+        role
+        for role in roles
+        if isinstance(role, Mapping) and role.get("role") == role_name
+    ]
+    if len(matches) != 1:
+        raise TheoryBridgeV2Error(
+            f"Runtime authorization does not bind exactly one {role_name} role."
+        )
+    return matches[0]
+
+
+def _expected_validation_identity(
+    *,
+    request_identity: Mapping[str, object],
+    registered_run: object,
+    population: Mapping[str, object],
+    checkpoint: object,
+    authorization: Mapping[str, object],
+) -> dict[str, object]:
+    protocol = getattr(registered_run, "protocol", None)
+    registry = getattr(registered_run, "registry", None)
+    row = getattr(registered_run, "row", None)
+    history = getattr(registered_run, "amendment_history", None)
+    if (
+        not isinstance(protocol, Mapping)
+        or not isinstance(registry, Mapping)
+        or not isinstance(row, Mapping)
+        or not isinstance(history, tuple)
+    ):
+        raise TheoryBridgeV2Error("Registered validation run is incomplete.")
+    theory_amendments = [
+        amendment
+        for amendment in history
+        if amendment.get("schema_name")
+        == "policy_improvement_theory_bridge_amendment_v2"
+    ]
+    if len(theory_amendments) != 1:
+        raise TheoryBridgeV2Error(
+            "Registered validation run lacks one v2 theory amendment."
+        )
+    method = [
+        item
+        for item in protocol.get("methods", [])
+        if isinstance(item, Mapping) and item.get("id") == row.get("base_method_id")
+    ]
+    if len(method) != 1:
+        raise TheoryBridgeV2Error("Registered validation method does not resolve.")
+    full_role = _runtime_role(authorization, "policy-improvement-full")
+    theory_role = _runtime_role(authorization, "policy-improvement-theory-bridge")
+    authorization_digest = runtime_authorization_sha256(authorization)
+    evaluator_source = request_identity.get("evaluator_source")
+    evaluator_runtime = request_identity.get("evaluator_runtime")
+    expected_evaluator_source = {
+        "git_commit": theory_role["source_git_commit"],
+        "source_manifest_sha256": theory_role["selected_source_manifest_sha256"],
+    }
+    expected_evaluator_runtime = {
+        "runtime_sha256": theory_role["runtime_sha256"],
+        "runtime_profile_sha256": theory_role["runtime_profile_sha256"],
+        "runtime_authorization_sha256": authorization_digest,
+        "launcher_sha256": authorization["launcher_sha256"],
+    }
+    if (
+        not isinstance(evaluator_source, Mapping)
+        or dict(evaluator_source) != expected_evaluator_source
+        or not isinstance(evaluator_runtime, Mapping)
+        or dict(evaluator_runtime) != expected_evaluator_runtime
+    ):
+        raise TheoryBridgeV2Error(
+            "Validation evaluator identity differs from runtime authorization."
+        )
+    indices = population.get("indices")
+    records = population.get("record_sha256s")
+    inputs = population.get("input_sha256s")
+    if not all(isinstance(value, list) for value in (indices, records, inputs)):
+        raise TheoryBridgeV2Error("Validation-bridge population is incomplete.")
+    assert isinstance(indices, list)
+    assert isinstance(records, list)
+    assert isinstance(inputs, list)
+    selected_records = [
+        {"record_index": index, "dataset_record_sha256": digest}
+        for index, digest in zip(indices, records)
+    ]
+    checkpoint_fields = {
+        "sha256": getattr(checkpoint, "sha256", None),
+        "size_bytes": getattr(checkpoint, "size_bytes", None),
+        "snapshot_kind": getattr(checkpoint, "snapshot_kind", None),
+        "environment_interactions": getattr(
+            checkpoint, "environment_interactions", None
+        ),
+    }
+    split_registration = protocol.get("dataset", {}).get("splits", {}).get("validation")
+    population_registration = protocol.get("population_registry")
+    if not isinstance(split_registration, Mapping) or not isinstance(
+        population_registration, Mapping
+    ):
+        raise TheoryBridgeV2Error("Validation dataset registration is incomplete.")
+    split_manifest = _available(
+        split_registration.get("manifest_sha256"),
+        label="validation manifest",
+    )
+    model = getattr(checkpoint, "theory_model_identity", None)
+    if not isinstance(model, Mapping):
+        raise TheoryBridgeV2Error(
+            "Authenticated validation checkpoint lacks its theory model identity."
+        )
+    return {
+        "protocol_id": protocol["protocol_id"],
+        "protocol_schema_name": protocol["schema_name"],
+        "protocol_schema_version": protocol["schema_version"],
+        "protocol_sha256": getattr(registered_run, "protocol_sha256"),
+        "population_registry_schema_name": population_registration["schema_name"],
+        "population_registry_schema_version": population_registration["schema_version"],
+        "population_registry_sha256": population_registration["sha256"],
+        "registry_schema_name": registry["schema_name"],
+        "registry_schema_version": registry["registry_schema_version"],
+        "registry_sha256": getattr(registered_run, "registry_sha256"),
+        "registry_row_schema_name": row["schema_name"],
+        "registry_row_schema_version": row["schema_version"],
+        "theory_amendment_sha256": theory_document_sha256(theory_amendments[0]),
+        "registry_row_sha256": getattr(registered_run, "registry_row_sha256"),
+        "checkpoint": checkpoint_fields,
+        "model": copy.deepcopy(dict(model)),
+        "config": {
+            "file_sha256": method[0]["config_sha256"],
+            "base_canonical_sha256": row["base_config_canonical_sha256"],
+            "effective_config_sha256": row["expected_effective_config_sha256"],
+        },
+        "producer_source": {
+            "git_commit": authorization["producer_git_commit"],
+            "source_manifest_sha256": authorization["producer_source_manifest_sha256"],
+        },
+        "training_runtime": {
+            "role": "policy-improvement-full",
+            "source_git_commit": full_role["source_git_commit"],
+            "source_manifest_sha256": full_role["selected_source_manifest_sha256"],
+            "runtime_sha256": full_role["runtime_sha256"],
+            "runtime_profile_sha256": full_role["runtime_profile_sha256"],
+            "selected_source_manifest_sha256": full_role[
+                "selected_source_manifest_sha256"
+            ],
+            "runtime_authorization_sha256": authorization_digest,
+            "launcher_sha256": authorization["launcher_sha256"],
+        },
+        "dataset_records": {
+            "split": "validation",
+            "population_id": population["population_id"],
+            "population_binding_sha256": population["binding_sha256"],
+            "split_manifest_sha256": split_manifest,
+            "ordered_record_sha256": population["ordered_record_sha256"],
+            "ordered_input_sha256": population["ordered_input_sha256"],
+            "selected_record_indices": list(indices),
+            "selected_record_indices_sha256": theory_document_sha256(indices),
+            "selected_records": selected_records,
+            "selected_records_sha256": theory_document_sha256(selected_records),
+            "selected_input_sha256s": list(inputs),
+            "selected_input_sha256s_sha256": theory_document_sha256(inputs),
+            "record_count": population["count"],
+        },
+        "evaluator_source": expected_evaluator_source,
+        "evaluator_runtime": expected_evaluator_runtime,
+    }
+
+
+def _create_validation_theory_backend_v2(
+    *,
+    request: Mapping[str, object],
+    checkpoint_path: Path,
+    inputs: TheoryBackendInputsV2,
+    authorization: Mapping[str, object],
+) -> SealedTheoryBackendV2:
+    if (
+        authorization.get("schema_name")
+        != "policy_improvement_runtime_authorization_v3"
+    ):
+        raise TheoryBridgeV2Error(
+            "Validation bridge requires runtime authorization v3."
+        )
+    if discover_clean_git_source(inputs.project_root) != {
+        "git_commit": authorization["producer_git_commit"],
+        "git_clean": True,
+    }:
+        raise TheoryBridgeV2Error(
+            "Validation theory source differs from runtime authorization."
+        )
+    expected_protocol = (
+        inputs.project_root / "configs/policy_improvement_v2/protocol.json"
+    )
+    expected_registry = (
+        inputs.project_root / "configs/policy_improvement_v2/registry.json"
+    )
+    expected_theory = (
+        inputs.project_root
+        / "configs/policy_improvement_v2/amendments/theory_bridge_v2.json"
+    )
+    if (
+        inputs.protocol_path != expected_protocol
+        or inputs.registry_path != expected_registry
+        or not inputs.amendment_paths
+        or inputs.amendment_paths[0] != expected_theory
+    ):
+        raise TheoryBridgeV2Error(
+            "Validation bridge requires the canonical protocol-v2 registration."
+        )
+    authorization_digest = runtime_authorization_sha256(authorization)
+    try:
+        registered_run = load_registered_full_run(
+            project_root=inputs.project_root,
+            protocol_path=inputs.protocol_path,
+            registry_path=inputs.registry_path,
+            amendment_paths=inputs.amendment_paths,
+            evidence_root=inputs.evidence_root,
+            dataset_root=inputs.dataset_root,
+            row_id=inputs.row_id,
+            runtime_authorization_sha256=authorization_digest,
+            environment={FULL_EXECUTION_ENV: FULL_EXECUTION_VALUE},
+            require_stage1_selection=True,
+        )
+    except FullRuntimeError as exc:
+        raise TheoryBridgeV2Error(
+            "Registered validation run cannot be authenticated."
+        ) from exc
+    authorization_amendments = authorization.get("amendments")
+    theory_amendment_sha256 = theory_document_sha256(
+        registered_run.amendment_history[0]
+    )
+    if (
+        authorization.get("protocol_sha256") != registered_run.protocol_sha256
+        or not isinstance(authorization.get("registry"), Mapping)
+        or authorization["registry"].get("sha256") != registered_run.registry_sha256
+        or not isinstance(authorization_amendments, list)
+        or len(authorization_amendments) != 1
+        or not isinstance(authorization_amendments[0], Mapping)
+        or authorization_amendments[0].get("schema_name")
+        != "policy_improvement_theory_bridge_amendment_v2"
+        or authorization_amendments[0].get("sha256") != theory_amendment_sha256
+    ):
+        raise TheoryBridgeV2Error(
+            "Validation registration differs from runtime authorization."
+        )
+    row = registered_run.row
+    if (
+        request.get("evaluation_population") != "validation_bridge"
+        or row.get("row_kind") != "concrete"
+        or row.get("evaluation_split") != "validation"
+        or row.get("evaluation_population") != "validation_select"
+        or request.get("run_id") != row.get("run_id")
+        or request.get("method_id") != row.get("method_id")
+        or request.get("n") != row.get("n")
+        or request.get("bellman_horizon") != row.get("K")
+        or request.get("alpha") != row.get("alpha")
+    ):
+        raise TheoryBridgeV2Error(
+            "Validation theory request differs from its exact V_select row."
+        )
+    populations = (
+        registered_run.population_document.get("populations")
+        if isinstance(registered_run.population_document, Mapping)
+        else None
+    )
+    population = (
+        populations.get("validation_bridge")
+        if isinstance(populations, Mapping)
+        else None
+    )
+    if (
+        not isinstance(population, Mapping)
+        or population.get("split") != "validation"
+        or population.get("count") != 128
+    ):
+        raise TheoryBridgeV2Error("Validation-bridge population does not resolve.")
+    request_identity = request.get("identity")
+    if not isinstance(request_identity, Mapping):
+        raise TheoryBridgeV2Error("Validation theory request lacks identity.")
+    checkpoint_identity = request_identity.get("checkpoint")
+    if not isinstance(checkpoint_identity, Mapping):
+        raise TheoryBridgeV2Error(
+            "Validation theory request lacks checkpoint identity."
+        )
+    try:
+        resolved = resolve_authenticated_full_checkpoint(
+            registered_run,
+            checkpoint_environment_interactions=int(
+                checkpoint_identity["environment_interactions"]
+            ),
+            runtime_authorization=authorization,
+            result_validator=validate_full_v2_result,
+        )
+    except (FullRuntimeError, TypeError, ValueError) as exc:
+        raise TheoryBridgeV2Error(
+            "Validation checkpoint is not bound to complete authenticated evidence."
+        ) from exc
+    try:
+        if checkpoint_path != resolved.path:
+            raise TheoryBridgeV2Error(
+                "Validation checkpoint path differs from authenticated evidence."
+            )
+        expected_identity = _expected_validation_identity(
+            request_identity=request_identity,
+            registered_run=registered_run,
+            population=population,
+            checkpoint=resolved,
+            authorization=authorization,
+        )
+        if canonical_json_bytes(request_identity) != canonical_json_bytes(
+            expected_identity
+        ):
+            raise TheoryBridgeV2Error(
+                "Validation theory request contains missing or mixed identities."
+            )
+        theory_amendment = registered_run.amendment_history[0]
+        base_configs = load_registered_base_configs(
+            registered_run.protocol,
+            registered_run.project_root,
+        )
+        base_config = base_configs.get(str(row["base_method_id"]))
+        if not isinstance(base_config, Mapping):
+            raise TheoryBridgeV2Error(
+                "Validation theory request lacks its base configuration."
+            )
+        canonical_request = build_validation_theory_request(
+            amendment_value=theory_amendment,
+            row=row,
+            identity=expected_identity,
+            effective_config={**base_config, **row["config_override"]},
+            checkpoint_environment_interactions=int(
+                checkpoint_identity["environment_interactions"]
+            ),
+            reference_depth_m=int(request["reference_depth_m"]),
+        )
+        if canonical_json_bytes(request) != canonical_json_bytes(canonical_request):
+            raise TheoryBridgeV2Error(
+                "Validation theory request differs from canonical registration."
+            )
+        full_backend = importlib.import_module("policy_improvement_full_backend")
+        open_session = getattr(
+            full_backend,
+            "open_validation_theory_bridge_session_v2",
+            None,
+        )
+        if not callable(open_session):
+            raise TheoryBridgeV2Error(
+                "Full backend does not expose the v2 validation theory API."
+            )
+        training_module = importlib.import_module("upi_trm_train")
+        session = open_session(
+            request_identity,
+            resolved.path,
+            registered_run=registered_run,
+            evaluation_population=population,
+            expected_checkpoint_sha256=resolved.sha256,
+            sealed_checkpoint_descriptor=resolved.sealed_descriptor,
+            authenticated_model_state_sha256=resolved.model_state_sha256,
+            authenticated_role_state_sha256s=resolved.role_state_sha256s,
+            authenticated_validation_sha256=resolved.validation_sha256,
+            runtime_identity=expected_identity["training_runtime"],
+            training_module=training_module,
+        )
+        return SealedTheoryBackendV2(session)
+    finally:
+        os.close(resolved.sealed_descriptor)
+
+
 def create_theory_bridge_backend_v2(
     request_value: Mapping[str, object],
     checkpoint_path: Path,
@@ -898,10 +1347,12 @@ def create_theory_bridge_backend_v2(
         raise TheoryBridgeV2Error(
             "Theory request or runtime authorization is invalid."
         ) from exc
-    if request["evaluation_population"] != "stage0_smoke":
-        raise TheoryBridgeV2Error(
-            "Validation-bridge restoration is unavailable until Stage 1 evidence "
-            "exists."
+    if request["evaluation_population"] == "validation_bridge":
+        return _create_validation_theory_backend_v2(
+            request=request,
+            checkpoint_path=checkpoint_path,
+            inputs=inputs,
+            authorization=authorization,
         )
     context, population, training_role = _stage0_context(
         request=request,

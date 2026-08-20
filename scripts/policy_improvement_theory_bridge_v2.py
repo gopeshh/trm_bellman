@@ -24,6 +24,7 @@ from scripts.policy_improvement_schema import (
 )
 from scripts.policy_improvement_theory_schema_v2 import (
     EXACT_METHOD_IDS,
+    PAIRED_RETURN_ALPHA_VALUES,
     theory_document_sha256,
     THEORY_METRIC_IDS,
     THEORY_RESULT_SCHEMA_NAME,
@@ -76,6 +77,15 @@ class CurrentPolicyReturnV2:
     environment_steps: int
     terminal: bool
     trajectory_sha256: str
+
+
+@dataclass(frozen=True)
+class PairedPolicyReturnV2:
+    """One common-random-number current-policy/exact-mixture comparison."""
+
+    current_policy: CurrentPolicyReturnV2
+    exact_mixture: CurrentPolicyReturnV2
+    common_random_numbers_sha256: str
 
 
 @dataclass(frozen=True)
@@ -163,6 +173,15 @@ class TheoryBridgeV2Backend(Protocol):
         maximum_environment_steps: int,
         gamma: float,
     ) -> CurrentPolicyReturnV2: ...
+
+    def sample_paired_policy_returns(
+        self,
+        state_id: str,
+        seed: int,
+        maximum_environment_steps: int,
+        gamma: float,
+        alpha: float,
+    ) -> PairedPolicyReturnV2: ...
 
     def close(self) -> None: ...
 
@@ -489,6 +508,134 @@ def _summary(values: Sequence[float]) -> dict[str, object]:
         "minimum": min(checked),
         "maximum": max(checked),
     }
+
+
+def _validated_policy_return(
+    value: object,
+    *,
+    label: str,
+    maximum_environment_steps: int,
+) -> CurrentPolicyReturnV2:
+    if not isinstance(value, CurrentPolicyReturnV2):
+        raise TheoryBridgeV2Error(f"Backend returned an invalid {label} return.")
+    _sha256(value.trajectory_sha256, label=f"{label} trajectory SHA-256")
+    if (
+        value.terminal is not True
+        or value.environment_steps <= 0
+        or value.environment_steps > maximum_environment_steps
+    ):
+        raise TheoryBridgeV2Error(f"{label} return did not terminate as registered.")
+    _finite(value.discounted_return, label=f"{label} discounted return")
+    return value
+
+
+def _paired_return_diagnostic(
+    *,
+    backend: TheoryBridgeV2Backend,
+    request: Mapping[str, object],
+    identity: Mapping[str, object],
+    checkpoint_identity: Mapping[str, object],
+    state: TheoryStateV2,
+    estimator: Mapping[str, object],
+    gamma: float,
+) -> tuple[dict[str, object], list[float]]:
+    """Evaluate registered alphas with paired common random numbers."""
+
+    rollout_count = int(estimator["rollout_count"])
+    maximum_environment_steps = int(estimator["maximum_environment_steps"])
+    reference_current: list[CurrentPolicyReturnV2] | None = None
+    alpha_results: list[dict[str, object]] = []
+    for alpha in PAIRED_RETURN_ALPHA_VALUES:
+        current_returns: list[CurrentPolicyReturnV2] = []
+        mixture_returns: list[CurrentPolicyReturnV2] = []
+        randomness_sha256s: list[str] = []
+        for repeat_index in range(rollout_count):
+            seed = _seed(
+                namespace="upi-trm-policy-improvement-v2-paired-return-crn",
+                protocol_id=str(request["protocol_id"]),
+                protocol_sha256=str(identity["protocol_sha256"]),
+                checkpoint_sha256=str(checkpoint_identity["sha256"]),
+                base_seed=int(estimator["base_seed"]),
+                state=state,
+                repeat_index=repeat_index,
+            )
+            paired = backend.sample_paired_policy_returns(
+                state.state_id,
+                seed,
+                maximum_environment_steps,
+                gamma,
+                alpha,
+            )
+            if not isinstance(paired, PairedPolicyReturnV2):
+                raise TheoryBridgeV2Error(
+                    "Backend returned an invalid paired policy return."
+                )
+            current_returns.append(
+                _validated_policy_return(
+                    paired.current_policy,
+                    label="paired current-policy",
+                    maximum_environment_steps=maximum_environment_steps,
+                )
+            )
+            mixture_returns.append(
+                _validated_policy_return(
+                    paired.exact_mixture,
+                    label="paired exact-mixture",
+                    maximum_environment_steps=maximum_environment_steps,
+                )
+            )
+            randomness_sha256s.append(
+                _sha256(
+                    paired.common_random_numbers_sha256,
+                    label="paired common-random-numbers SHA-256",
+                )
+            )
+        if reference_current is None:
+            reference_current = current_returns
+        elif current_returns != reference_current:
+            raise TheoryBridgeV2Error(
+                "Current-policy CRN returns changed across registered alpha values."
+            )
+        differences = [
+            mixture.discounted_return - current.discounted_return
+            for current, mixture in zip(current_returns, mixture_returns)
+        ]
+        alpha_results.append(
+            {
+                "alpha": alpha,
+                "rollout_count": rollout_count,
+                "current_policy_return_mean": fmean(
+                    [value.discounted_return for value in current_returns]
+                ),
+                "exact_mixture_return_mean": fmean(
+                    [value.discounted_return for value in mixture_returns]
+                ),
+                "paired_difference_mean": fmean(differences),
+                "paired_difference_standard_error": (
+                    stdev(differences) / math.sqrt(len(differences))
+                ),
+                "negative_paired_difference_count": sum(
+                    difference < 0.0 for difference in differences
+                ),
+                "negative_paired_difference_probability": sum(
+                    difference < 0.0 for difference in differences
+                )
+                / len(differences),
+                "common_random_numbers_sha256": theory_document_sha256(
+                    randomness_sha256s
+                ),
+            }
+        )
+    assert reference_current is not None
+    return (
+        {
+            "status": "available",
+            "kind": "paired_crn_current_vs_exact_mixture_v2",
+            "difference_definition": "exact_mixture_minus_current",
+            "alpha_results": alpha_results,
+        },
+        [value.discounted_return for value in reference_current],
+    )
 
 
 def _snapshot(value: object, *, label: str) -> ReadOnlySnapshotV2:
@@ -832,44 +979,52 @@ def _evaluate(
             operator_m = fmean(returns)
             operator_se = stdev(returns) / math.sqrt(len(returns))
 
-        return_samples: list[float] = []
-        for repeat_index in range(int(return_estimator["rollout_count"])):
-            seed = _seed(
-                namespace="upi-trm-policy-improvement-v2-current-return-crn",
-                protocol_id=str(request["protocol_id"]),
-                protocol_sha256=str(identity["protocol_sha256"]),
-                checkpoint_sha256=str(checkpoint_identity["sha256"]),
-                base_seed=int(return_estimator["base_seed"]),
+        if (
+            request["evaluation_population"] == "validation_bridge"
+            and request["method_id"] in EXACT_METHOD_IDS
+        ):
+            paired_return_diagnostic, return_samples = _paired_return_diagnostic(
+                backend=backend,
+                request=request,
+                identity=identity,
+                checkpoint_identity=checkpoint_identity,
                 state=state,
-                repeat_index=repeat_index,
+                estimator=return_estimator,
+                gamma=gamma,
             )
-            sampled = backend.sample_current_policy_return(
-                state.state_id,
-                seed,
-                int(return_estimator["maximum_environment_steps"]),
-                gamma,
-            )
-            if not isinstance(sampled, CurrentPolicyReturnV2):
-                raise TheoryBridgeV2Error(
-                    "Backend returned an invalid current-policy return."
+        else:
+            return_samples = []
+            for repeat_index in range(int(return_estimator["rollout_count"])):
+                seed = _seed(
+                    namespace="upi-trm-policy-improvement-v2-current-return-crn",
+                    protocol_id=str(request["protocol_id"]),
+                    protocol_sha256=str(identity["protocol_sha256"]),
+                    checkpoint_sha256=str(checkpoint_identity["sha256"]),
+                    base_seed=int(return_estimator["base_seed"]),
+                    state=state,
+                    repeat_index=repeat_index,
                 )
-            _sha256(
-                sampled.trajectory_sha256, label="current-policy trajectory SHA-256"
-            )
-            if (
-                sampled.terminal is not True
-                or sampled.environment_steps <= 0
-                or sampled.environment_steps
-                > int(return_estimator["maximum_environment_steps"])
-            ):
-                raise TheoryBridgeV2Error(
-                    "Current-policy return did not terminate as registered."
+                sampled = _validated_policy_return(
+                    backend.sample_current_policy_return(
+                        state.state_id,
+                        seed,
+                        int(return_estimator["maximum_environment_steps"]),
+                        gamma,
+                    ),
+                    label="current-policy",
+                    maximum_environment_steps=int(
+                        return_estimator["maximum_environment_steps"]
+                    ),
                 )
-            return_samples.append(
-                _finite(
-                    sampled.discounted_return, label="current-policy discounted return"
-                )
-            )
+                return_samples.append(sampled.discounted_return)
+            paired_return_diagnostic = {
+                "status": "unavailable",
+                "reason": (
+                    "stage0_smoke_not_scientific_calibration"
+                    if request["evaluation_population"] == "stage0_smoke"
+                    else "not_an_exact_probability_mixture_method"
+                ),
+            }
         value_hat = fmean(return_samples)
         value_hat_se = stdev(return_samples) / math.sqrt(len(return_samples))
 
@@ -921,6 +1076,7 @@ def _evaluate(
                 "V_hat_pi": value_hat,
                 "V_hat_pi_standard_error": value_hat_se,
                 "E_n": abs(value_n - value_hat),
+                "paired_current_to_exact_mixture_return": (paired_return_diagnostic),
                 "exact_mixture_deployment_identity_tv": exact_identity_tv,
                 "deployment_discrepancy_delta_dep": realized_delta,
             }
