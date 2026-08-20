@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -14,6 +15,7 @@ import secrets
 import stat
 import subprocess
 import sys
+import zlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,6 +75,85 @@ _PROFILE_NAMES = (
 _RUNTIME_NAMES = ("training", "full", "theory", "audit", "analysis")
 _LOWER_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _READ_SIZE = 1024 * 1024
+# These identities are from the optimized platform010 phase4 launcher. A Buck
+# bootstrap or toolchain change must fail closed until this reviewed boundary
+# is updated from a freshly built launcher.
+_LAUNCHER_DYNAMIC_SUPPORT_MEMBERS = frozenset(
+    {
+        "__manifest__.py",
+        "__par__/__startup_function_loader__.py",
+    }
+)
+_LAUNCHER_PINNED_SUPPORT_MEMBERS = (
+    "__main__.py",
+    "__main__.pyc",
+    "__par__/__init__.py",
+    "__par__/bootstrap.py",
+    "__par__/meta_only/__init__.py",
+    "__par__/meta_only/bootstrap.py",
+    "__par__/meta_only/devfd_zipimport.py",
+    "__par__/meta_only/multiprocessing_fork_default.py",
+    "__par__/meta_only/pexutil.py",
+    "__par__/meta_only/process_title.py",
+    "clifoundation/__init__.py",
+    "clifoundation/lib/__init__.py",
+    "clifoundation/lib/py/__init__.py",
+    "clifoundation/lib/py/error/__init__.py",
+    "clifoundation/lib/py/error/state.py",
+    "clifoundation/lib/py/error/typing.py",
+    "clifoundation/lib/py/error/utils.py",
+    "clifoundation/lib/py/scrut.py",
+    "clifoundation/lib/py/usage/__init__.py",
+    "clifoundation/lib/py/usage/additional.py",
+    "clifoundation/lib/py/usage/bootstrap.py",
+    "clifoundation/lib/py/usage/cinder.py",
+    "clifoundation/lib/py/usage/consts.py",
+    "clifoundation/lib/py/usage/logger_cat.py",
+    "clifoundation/lib/py/usage/sample.py",
+    "clifoundation/lib/py/usage/scribe_cat.py",
+    "clifoundation/lib/py/usage/state.py",
+    "clifoundation/lib/py/usage/typing.py",
+    "fbvscode/__init__.py",
+    "fbvscode/__main__.py",
+    "fbvscode/bootstrapping.py",
+    "fbvscode/common.py",
+    "fbvscode/pid_inject.py",
+    "fbvscode/scribe_logging.py",
+    "fbvscode/socket.py",
+    "python/__init__.py",
+    "python/debuggers/__init__.py",
+    "python/debuggers/debugpy.py",
+    "python/debuggers/determine_par_type.py",
+    "python/debuggers/guess_main_breakpoint.py",
+    "python/debuggers/pdb.py",
+    "python/debuggers/sys_path_trampoline.py",
+    "sitecustomize.py",
+    "static_extension_finder.py",
+)
+_LAUNCHER_PINNED_SUPPORT_MANIFEST_SHA256 = (
+    "ca176dc0f2544a8da47946713bc9dc41c3fd4b25a1a1550a2c92ba78506691d2"
+)
+_LAUNCHER_ARCHIVE_PREFIX_SIZE = 8215
+_LAUNCHER_ARCHIVE_PREFIX_SHA256 = (
+    "87e71b36ae3f0dff3321a09ad2d09f1255ababea6f2e3577419c7f01c8e50f05"
+)
+_LAUNCHER_NATIVE_SUPPORT_MEMBERS = (
+    "runtime/bin/phase4_runtime_launcher#native-main#platform-runtime#python#py_version_3_12",
+    "runtime/lib/__python_generated_allocator_preload",
+)
+_LAUNCHER_NATIVE_SUPPORT_MANIFEST_SHA256 = (
+    "4f2d213fe8530f0bbf048de5fc62fd49b8dd1f1dee46cd9d37943440ab29b4ee"
+)
+_LAUNCHER_STARTUP_LOADER_NORMALIZED_SHA256 = (
+    "a0ae1cf90c52a29f713e4713d081c42c60d777755b2a64b673e1dfb5ef0cc80e"
+)
+_LAUNCHER_STARTUP_FUNCTIONS = {
+    "00_STATIC_EXTENSION_FINDER": "static_extension_finder:_initialize"
+}
+_LAUNCHER_LABEL = re.compile(
+    r"^(?:fbcode|fbsource)//[A-Za-z0-9_./-]+:phase4_runtime_launcher "
+    r"\(cfg:opt-linux-x86_64-fbcode-platform010-clang[0-9]+-no-san#[0-9a-f]{16}\)$"
+)
 
 
 class RuntimeAuthorizationGenerationError(RuntimeError):
@@ -442,6 +523,266 @@ def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return value
 
 
+def _launcher_member_bytes(archive: ZipFile, name: str) -> bytes:
+    try:
+        return archive.read(name)
+    except (BadZipFile, KeyError, OSError, RuntimeError, zlib.error) as exc:
+        raise RuntimeAuthorizationGenerationError(
+            f"Launcher PAR member {name!r} cannot be authenticated."
+        ) from exc
+
+
+def _validate_launcher_archive_prefix(archive: ZipFile) -> None:
+    handle = archive.fp
+    if handle is None:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR archive is not backed by an open file."
+        )
+    infos = archive.infolist()
+    if not infos:
+        raise RuntimeAuthorizationGenerationError("Launcher PAR is empty.")
+    prefix_size = min(info.header_offset for info in infos)
+    try:
+        position = handle.tell()
+        handle.seek(0)
+        prefix = handle.read(prefix_size)
+        handle.seek(position)
+    except OSError as exc:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR executable prefix cannot be authenticated."
+        ) from exc
+    if (
+        prefix_size != _LAUNCHER_ARCHIVE_PREFIX_SIZE
+        or hashlib.sha256(prefix).hexdigest() != _LAUNCHER_ARCHIVE_PREFIX_SHA256
+    ):
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR executable prefix differs from the pinned Buck bootstrap."
+        )
+
+
+def _validate_launcher_native_support(archive: ZipFile) -> None:
+    identity = {
+        name: hashlib.sha256(_launcher_member_bytes(archive, name)).hexdigest()
+        for name in _LAUNCHER_NATIVE_SUPPORT_MEMBERS
+    }
+    if hashlib.sha256(canonical_json_bytes(identity)).hexdigest() != (
+        _LAUNCHER_NATIVE_SUPPORT_MANIFEST_SHA256
+    ):
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR native runtime support differs."
+        )
+
+
+def _launcher_executable_manifest(archive: ZipFile) -> dict[str, object]:
+    try:
+        manifest = json.loads(
+            _launcher_member_bytes(archive, "__manifest__.json").decode("utf-8"),
+            object_pairs_hook=_strict_json_object,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR lacks a valid executable manifest."
+        ) from exc
+    expected_fields = {
+        "buck_labels",
+        "env",
+        "fbmake",
+        "library_versions",
+        "python_features",
+        "startup_functions",
+    }
+    if not isinstance(manifest, dict) or set(manifest) != expected_fields:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR executable manifest inventory differs."
+        )
+    fbmake = manifest["fbmake"]
+    if not isinstance(fbmake, dict):
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR executable manifest has no fbmake identity."
+        )
+    build_rule = fbmake.get("build_rule")
+    if (
+        fbmake.get("main_module") != "phase4_runtime_launcher"
+        or "main_function" not in fbmake
+        or fbmake["main_function"] is not None
+        or fbmake.get("build_rule_type") != "python_binary"
+        or type(fbmake.get("rule_type_is_unit_test")) is not int
+        or fbmake["rule_type_is_unit_test"] != 0
+        or fbmake.get("build_tool") != "buck2"
+        or fbmake.get("build_mode") != "opt"
+        or fbmake.get("par_style") != "fastzip"
+        or fbmake.get("platform") != "platform010"
+        or fbmake.get("link_strategy") != "native"
+        or not isinstance(build_rule, str)
+        or not build_rule.endswith(":phase4_runtime_launcher")
+        or manifest["startup_functions"] != _LAUNCHER_STARTUP_FUNCTIONS
+        or manifest["env"] != {}
+        or manifest["library_versions"] != []
+    ):
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR does not execute the authenticated launcher module."
+        )
+    return manifest
+
+
+def _launcher_expected_modules(
+    authorized: AuthorizedPhase4Profile,
+) -> frozenset[str]:
+    excluded = {
+        "__main__.py",
+        "sitecustomize.py",
+        "static_extension_finder.py",
+    }
+    paths = {
+        *(
+            path
+            for path in _LAUNCHER_PINNED_SUPPORT_MEMBERS
+            if path.endswith(".py")
+        ),
+        *(path for path in authorized.sources if path.endswith(".py")),
+    }
+    return frozenset(
+        path.removesuffix(".py").replace("/", ".")
+        for path in paths - excluded
+    )
+
+
+def _validate_launcher_python_manifest(
+    archive: ZipFile,
+    authorized: AuthorizedPhase4Profile,
+    executable_manifest: Mapping[str, object],
+) -> None:
+    try:
+        tree = ast.parse(
+            _launcher_member_bytes(archive, "__manifest__.py").decode("utf-8"),
+            filename="__manifest__.py",
+        )
+        values: dict[str, object] = {}
+        for statement in tree.body:
+            if (
+                not isinstance(statement, ast.Assign)
+                or len(statement.targets) != 1
+                or not isinstance(statement.targets[0], ast.Name)
+            ):
+                raise ValueError("non-literal launcher manifest statement")
+            name = statement.targets[0].id
+            if name in values:
+                raise ValueError("duplicate launcher manifest assignment")
+            values[name] = ast.literal_eval(statement.value)
+    except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR Python manifest is not literal-only."
+        ) from exc
+    expected_fields = {
+        "buck_labels",
+        "env",
+        "fbmake",
+        "library_versions",
+        "modules",
+        "origins",
+        "python_features",
+        "startup_functions",
+    }
+    if set(values) != expected_fields or any(
+        values[field] != executable_manifest[field]
+        for field in expected_fields - {"modules", "origins"}
+    ):
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR Python and JSON manifests differ."
+        )
+    modules = values["modules"]
+    origins = values["origins"]
+    expected_modules = _launcher_expected_modules(authorized)
+    if (
+        not isinstance(modules, list)
+        or not all(isinstance(module, str) for module in modules)
+        or len(modules) != len(set(modules))
+        or frozenset(modules) != expected_modules
+        or not isinstance(origins, tuple)
+        or len(origins) != len(modules)
+        or not all(
+            isinstance(origin, str) and "\n" not in origin and "\r" not in origin
+            for origin in origins
+        )
+    ):
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR module provenance differs from its executable closure."
+        )
+
+
+def _validate_launcher_startup_loader(archive: ZipFile) -> None:
+    payload = _launcher_member_bytes(
+        archive,
+        "__par__/__startup_function_loader__.py",
+    )
+    try:
+        lines = payload.decode("utf-8").splitlines(keepends=True)
+        variable_lines = [line for line in lines if line.startswith("VARS = ")]
+        if len(variable_lines) != 1:
+            raise ValueError("launcher startup variables are ambiguous")
+        variables = ast.literal_eval(variable_lines[0].removeprefix("VARS = ").strip())
+    except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR startup loader has an invalid generated identity."
+        ) from exc
+    if (
+        not isinstance(variables, dict)
+        or set(variables) != {"label", "name"}
+        or variables["name"] != "phase4_runtime_launcher"
+        or not isinstance(variables["label"], str)
+        or _LAUNCHER_LABEL.fullmatch(variables["label"]) is None
+    ):
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR startup loader identifies another target."
+        )
+    normalized = "".join(
+        line for line in lines if not line.startswith("VARS = ")
+    ).encode("utf-8")
+    if hashlib.sha256(normalized).hexdigest() != (
+        _LAUNCHER_STARTUP_LOADER_NORMALIZED_SHA256
+    ):
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR startup loader implementation differs."
+        )
+
+
+def _validate_launcher_executable_closure(
+    archive: ZipFile,
+    authorized: AuthorizedPhase4Profile,
+) -> None:
+    executable_members = {
+        info.filename
+        for info in archive.infolist()
+        if not info.is_dir()
+        and info.filename.endswith((".py", ".pyc", ".pyo", ".so", ".pyd", ".dylib"))
+    }
+    profiled_python = {
+        path for path in authorized.sources if path.endswith(".py")
+    }
+    expected = {
+        *_LAUNCHER_PINNED_SUPPORT_MEMBERS,
+        *_LAUNCHER_DYNAMIC_SUPPORT_MEMBERS,
+        *profiled_python,
+    }
+    if executable_members != expected:
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR executable member inventory differs."
+        )
+    pinned_identity = {
+        name: hashlib.sha256(_launcher_member_bytes(archive, name)).hexdigest()
+        for name in _LAUNCHER_PINNED_SUPPORT_MEMBERS
+    }
+    if hashlib.sha256(canonical_json_bytes(pinned_identity)).hexdigest() != (
+        _LAUNCHER_PINNED_SUPPORT_MANIFEST_SHA256
+    ):
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR pinned support implementation differs."
+        )
+    executable_manifest = _launcher_executable_manifest(archive)
+    _validate_launcher_python_manifest(archive, authorized, executable_manifest)
+    _validate_launcher_startup_loader(archive)
+
+
 def _launcher_archive_validator(
     authorized: AuthorizedPhase4Profile,
 ) -> Callable[[ZipFile], None]:
@@ -454,42 +795,9 @@ def _launcher_archive_validator(
             raise RuntimeAuthorizationGenerationError(
                 "Launcher PAR source profile differs from the clean checkout."
             ) from exc
-        try:
-            raw_manifest = archive.read("__manifest__.json")
-            manifest = json.loads(
-                raw_manifest.decode("utf-8"),
-                object_pairs_hook=_strict_json_object,
-            )
-        except (
-            BadZipFile,
-            KeyError,
-            OSError,
-            RuntimeError,
-            UnicodeDecodeError,
-            json.JSONDecodeError,
-        ) as exc:
-            if isinstance(exc, RuntimeAuthorizationGenerationError):
-                raise
-            raise RuntimeAuthorizationGenerationError(
-                "Launcher PAR lacks a valid executable manifest."
-            ) from exc
-        if not isinstance(manifest, dict):
-            raise RuntimeAuthorizationGenerationError(
-                "Launcher PAR executable manifest must be one JSON object."
-            )
-        fbmake = manifest.get("fbmake")
-        if (
-            not isinstance(fbmake, dict)
-            or fbmake.get("main_module") != "phase4_runtime_launcher"
-            or "main_function" not in fbmake
-            or fbmake["main_function"] is not None
-            or fbmake.get("build_rule_type") != "python_binary"
-            or type(fbmake.get("rule_type_is_unit_test")) is not int
-            or fbmake["rule_type_is_unit_test"] != 0
-        ):
-            raise RuntimeAuthorizationGenerationError(
-                "Launcher PAR does not execute the authenticated launcher module."
-            )
+        _validate_launcher_archive_prefix(archive)
+        _validate_launcher_native_support(archive)
+        _validate_launcher_executable_closure(archive, authorized)
 
     return validate
 

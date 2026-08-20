@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import hashlib
 import json
 import os
@@ -15,6 +15,7 @@ import stat
 import subprocess
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from unittest import mock
 from zipfile import ZipFile
@@ -440,16 +441,42 @@ class RuntimeAuthorizationGeneratorTest(unittest.TestCase):
                 ),
             },
         )
-        executable_manifest = canonical_json_bytes(
-            {
-                "fbmake": {
-                    "build_rule_type": "python_binary",
-                    "main_function": None,
-                    "main_module": "phase4_runtime_launcher",
-                    "rule_type_is_unit_test": 0,
+        support = {
+            "__main__.py": b"# bootstrap\n",
+            "__main__.pyc": b"compiled bootstrap",
+            "__par__/bootstrap.py": b"# par bootstrap\n",
+            "sitecustomize.py": b"# site customization\n",
+        }
+        support_digest = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    name: hashlib.sha256(payload).hexdigest()
+                    for name, payload in support.items()
                 }
-            }
+            )
+        ).hexdigest()
+        native_support = {
+            "runtime/bin/phase4_runtime_launcher#native-main#platform-runtime#python#py_version_3_12": b"native main",
+            "runtime/lib/__python_generated_allocator_preload": b"allocator",
+        }
+        native_support_digest = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    name: hashlib.sha256(payload).hexdigest()
+                    for name, payload in native_support.items()
+                }
+            )
+        ).hexdigest()
+        startup_variables = (
+            'VARS = {"label": "fbsource//test:phase4_runtime_launcher '
+            '(cfg:opt-linux-x86_64-fbcode-platform010-clang21-no-san#'
+            '0123456789abcdef)", "name": "phase4_runtime_launcher"}\n'
         )
+        startup_body = (
+            "STARTUP_FUNCTIONS=['''static_extension_finder:_initialize''',]\n"
+        )
+        startup_loader = (startup_variables + startup_body).encode("ascii")
+        startup_digest = hashlib.sha256(startup_body.encode("ascii")).hexdigest()
         self.assertEqual(
             set(authorized.sources),
             set(POLICY_IMPROVEMENT_LAUNCHER_PROFILE_PATHS),
@@ -465,23 +492,62 @@ class RuntimeAuthorizationGeneratorTest(unittest.TestCase):
                 phase4_source: bytes = phase4_launcher_source,
                 manifest: bytes = producer_manifest,
                 main_module: str = "phase4_runtime_launcher",
+                extra_members: Mapping[str, bytes] | None = None,
+                support_overrides: Mapping[str, bytes] | None = None,
+                native_overrides: Mapping[str, bytes] | None = None,
+                duplicate_member: str | None = None,
             ) -> Path:
                 path = root / name
-                selected_manifest = (
-                    executable_manifest
-                    if main_module == "phase4_runtime_launcher"
-                    else canonical_json_bytes(
-                        {
-                            "fbmake": {
-                                "build_rule_type": "python_binary",
-                                "main_function": None,
-                                "main_module": main_module,
-                                "rule_type_is_unit_test": 0,
-                            }
-                        }
+                fbmake = {
+                    "build_mode": "opt",
+                    "build_rule": "fbsource//test:phase4_runtime_launcher",
+                    "build_rule_type": "python_binary",
+                    "build_tool": "buck2",
+                    "link_strategy": "native",
+                    "main_function": None,
+                    "main_module": main_module,
+                    "par_style": "fastzip",
+                    "platform": "platform010",
+                    "rule_type_is_unit_test": 0,
+                }
+                executable_manifest = {
+                    "buck_labels": [],
+                    "env": {},
+                    "fbmake": fbmake,
+                    "library_versions": [],
+                    "python_features": [],
+                    "startup_functions": dict(
+                        authorization._LAUNCHER_STARTUP_FUNCTIONS
+                    ),
+                }
+                modules = [
+                    "__par__.bootstrap",
+                    "confirmatory_runtime_launcher",
+                    "phase4_runtime_launcher",
+                    "phase4_runtime_profile",
+                ]
+                python_manifest = "\n".join(
+                    (
+                        f"fbmake = {fbmake!r}",
+                        "buck_labels = []",
+                        "env = {}",
+                        "python_features = []",
+                        "startup_functions = "
+                        f"{authorization._LAUNCHER_STARTUP_FUNCTIONS!r}",
+                        "library_versions = []",
+                        f"modules = {modules!r}",
+                        f"origins = {tuple('test' for _ in modules)!r}",
+                        "",
                     )
-                )
+                ).encode("ascii")
+                selected_support = {**support, **(support_overrides or {})}
+                selected_native = {
+                    **native_support,
+                    **(native_overrides or {}),
+                }
                 with ZipFile(path, "w") as archive:
+                    for support_name, payload in selected_support.items():
+                        archive.writestr(support_name, payload)
                     archive.writestr(
                         "confirmatory_runtime_launcher.py",
                         confirmatory_source,
@@ -498,54 +564,161 @@ class RuntimeAuthorizationGeneratorTest(unittest.TestCase):
                         "configs/iclr_confirmatory/producer_source_manifest.json",
                         manifest,
                     )
-                    archive.writestr("__manifest__.json", selected_manifest)
+                    archive.writestr(
+                        "__manifest__.json",
+                        canonical_json_bytes(executable_manifest),
+                    )
+                    archive.writestr("__manifest__.py", python_manifest)
+                    archive.writestr(
+                        "__par__/__startup_function_loader__.py",
+                        startup_loader,
+                    )
+                    for native_name, payload in selected_native.items():
+                        archive.writestr(native_name, payload)
+                    for extra_name, payload in (extra_members or {}).items():
+                        archive.writestr(extra_name, payload)
+                    if duplicate_member is not None:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore", UserWarning)
+                            archive.writestr(
+                                duplicate_member,
+                                selected_support[duplicate_member],
+                            )
                 return path
 
-            valid = write_launcher("valid.par")
-            identity = authorization._authenticate_artifact(
-                str(valid),
-                label="Launcher",
-                archive_validator=authorization._launcher_archive_validator(
-                    authorized
+            with (
+                mock.patch.object(
+                    authorization,
+                    "_LAUNCHER_PINNED_SUPPORT_MEMBERS",
+                    tuple(support),
                 ),
-            )
-            self.assertEqual(
-                identity.sha256,
-                hashlib.sha256(valid.read_bytes()).hexdigest(),
-            )
-
-            for name, path in (
-                (
-                    "stale phase4 launcher",
-                    write_launcher("stale-phase4.par", phase4_source=b"old\n"),
+                mock.patch.object(
+                    authorization,
+                    "_LAUNCHER_PINNED_SUPPORT_MANIFEST_SHA256",
+                    support_digest,
                 ),
-                (
-                    "stale confirmatory launcher",
-                    write_launcher(
-                        "stale-confirmatory.par",
-                        confirmatory_source=b"old\n",
-                    ),
+                mock.patch.object(
+                    authorization,
+                    "_LAUNCHER_STARTUP_LOADER_NORMALIZED_SHA256",
+                    startup_digest,
                 ),
-                (
-                    "stale producer manifest",
-                    write_launcher("stale-manifest.par", manifest=b"{}\n"),
+                mock.patch.object(
+                    authorization,
+                    "_LAUNCHER_ARCHIVE_PREFIX_SIZE",
+                    0,
                 ),
-                (
-                    "different entrypoint",
-                    write_launcher("wrong-main.par", main_module="attacker"),
+                mock.patch.object(
+                    authorization,
+                    "_LAUNCHER_ARCHIVE_PREFIX_SHA256",
+                    hashlib.sha256(b"").hexdigest(),
+                ),
+                mock.patch.object(
+                    authorization,
+                    "_LAUNCHER_NATIVE_SUPPORT_MEMBERS",
+                    tuple(native_support),
+                ),
+                mock.patch.object(
+                    authorization,
+                    "_LAUNCHER_NATIVE_SUPPORT_MANIFEST_SHA256",
+                    native_support_digest,
                 ),
             ):
-                with (
-                    self.subTest(case=name),
-                    self.assertRaises(authorization.RuntimeAuthorizationGenerationError),
-                ):
-                    authorization._authenticate_artifact(
-                        str(path),
-                        label="Launcher",
-                        archive_validator=authorization._launcher_archive_validator(
-                            authorized
+                valid = write_launcher("valid.par")
+                identity = authorization._authenticate_artifact(
+                    str(valid),
+                    label="Launcher",
+                    archive_validator=authorization._launcher_archive_validator(
+                        authorized
+                    ),
+                )
+                self.assertEqual(
+                    identity.sha256,
+                    hashlib.sha256(valid.read_bytes()).hexdigest(),
+                )
+                prefixed = root / "prefixed.par"
+                prefixed.write_bytes(b"#!/bin/sh\nexit 0\n" + valid.read_bytes())
+
+                for name, path in (
+                    ("modified executable prefix", prefixed),
+                    (
+                        "stale phase4 launcher",
+                        write_launcher("stale-phase4.par", phase4_source=b"old\n"),
+                    ),
+                    (
+                        "stale confirmatory launcher",
+                        write_launcher(
+                            "stale-confirmatory.par",
+                            confirmatory_source=b"old\n",
                         ),
-                    )
+                    ),
+                    (
+                        "stale producer manifest",
+                        write_launcher("stale-manifest.par", manifest=b"{}\n"),
+                    ),
+                    (
+                        "different entrypoint",
+                        write_launcher("wrong-main.par", main_module="attacker"),
+                    ),
+                    (
+                        "stdlib shadow",
+                        write_launcher(
+                            "hashlib-shadow.par",
+                            extra_members={"hashlib.py": b"raise SystemExit\n"},
+                        ),
+                    ),
+                    (
+                        "subprocess shadow",
+                        write_launcher(
+                            "subprocess-shadow.par",
+                            extra_members={"subprocess.py": b"raise SystemExit\n"},
+                        ),
+                    ),
+                    (
+                        "modified sitecustomize",
+                        write_launcher(
+                            "sitecustomize.par",
+                            support_overrides={"sitecustomize.py": b"malicious\n"},
+                        ),
+                    ),
+                    (
+                        "modified bootstrap",
+                        write_launcher(
+                            "bootstrap.par",
+                            support_overrides={
+                                "__par__/bootstrap.py": b"malicious\n"
+                            },
+                        ),
+                    ),
+                    (
+                        "modified native main",
+                        write_launcher(
+                            "native-main.par",
+                            native_overrides={
+                                "runtime/bin/phase4_runtime_launcher#native-main#platform-runtime#python#py_version_3_12": b"malicious\n"
+                            },
+                        ),
+                    ),
+                    (
+                        "duplicate sitecustomize",
+                        write_launcher(
+                            "duplicate-sitecustomize.par",
+                            duplicate_member="sitecustomize.py",
+                        ),
+                    ),
+                ):
+                    with (
+                        self.subTest(case=name),
+                        self.assertRaises(
+                            authorization.RuntimeAuthorizationGenerationError
+                        ),
+                    ):
+                        authorization._authenticate_artifact(
+                            str(path),
+                            label="Launcher",
+                            archive_validator=authorization._launcher_archive_validator(
+                                authorized
+                            ),
+                        )
 
     def test_private_publication_rejects_repo_output_and_wrong_directory_mode(
         self,
