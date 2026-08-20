@@ -2319,6 +2319,7 @@ def audit_result_set(
             opened_at_utc=str(test_open_record.get("opened_at_utc")),
             expected_sha256=test_open_sha256,
             base_configs=base_configs,
+            populations_value=registered_population_document,
         )
         if canonical_json_bytes(test_open_record) != canonical_json_bytes(
             authenticated_test_open["record"]

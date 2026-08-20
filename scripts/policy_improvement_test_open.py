@@ -192,6 +192,7 @@ def expected_test_open_record(
     runtime_authorization: Mapping[str, object],
     opened_at_utc: str,
     base_configs: Mapping[str, Mapping[str, object]] | None = None,
+    populations_value: object | None = None,
 ) -> dict[str, object]:
     checked_protocol = validate_protocol(protocol)
     checked_history = validate_amendment_history(
@@ -206,6 +207,7 @@ def expected_test_open_record(
         checked_protocol,
         checked_history,
         base_configs=base_configs,
+        populations_value=populations_value,
     )
     checked_authorization = validate_runtime_authorization(runtime_authorization)
     opened = _timestamp(opened_at_utc, path="test_open.opened_at_utc")
@@ -304,6 +306,7 @@ def publish_test_open(
     amendment_history: Sequence[Mapping[str, object]],
     runtime_authorization: Mapping[str, object],
     base_configs: Mapping[str, Mapping[str, object]] | None = None,
+    populations_value: object | None = None,
 ) -> dict[str, str]:
     """Validate final selection and atomically publish the only test opening."""
 
@@ -319,6 +322,7 @@ def publish_test_open(
         runtime_authorization=runtime_authorization,
         opened_at_utc=opened_at_utc,
         base_configs=base_configs,
+        populations_value=populations_value,
     )
     return _publish_record(owner_root=owner_root, record=record)
 
@@ -354,6 +358,7 @@ def authenticate_test_open(
     opened_at_utc: str,
     expected_sha256: str,
     base_configs: Mapping[str, Mapping[str, object]] | None = None,
+    populations_value: object | None = None,
 ) -> dict[str, Any]:
     expected_record = expected_test_open_record(
         protocol=protocol,
@@ -362,6 +367,7 @@ def authenticate_test_open(
         runtime_authorization=runtime_authorization,
         opened_at_utc=opened_at_utc,
         base_configs=base_configs,
+        populations_value=populations_value,
     )
     identity = _authenticate_record(
         owner_root=owner_root,

@@ -92,6 +92,16 @@ def main(
         )
 
     protocol = validate_protocol(load_strict_json(arguments.protocol))
+    populations_document: object | None = None
+    if protocol.get("schema_name") == "policy_improvement_protocol_v2":
+        from scripts.policy_improvement_populations import (
+            load_registered_populations,
+        )
+
+        populations_document = load_registered_populations(
+            protocol,
+            arguments.project_root,
+        )
     history = validate_amendment_history(
         [load_strict_json(path) for path in arguments.amendment],
         protocol=protocol,
@@ -106,6 +116,7 @@ def main(
         protocol,
         history,
         base_configs=base_configs,
+        populations_value=populations_document,
     )
     authorization = _protected_authorization(
         arguments.runtime_authorization_json,
@@ -190,6 +201,7 @@ def main(
         protocol,
         history[:3],
         base_configs=base_configs,
+        populations_value=populations_document,
     )
     prior_evidence = {
         phase: evidence_by_phase[phase] for phase in ("stage0_smoke", "stage1_screen")
@@ -254,6 +266,7 @@ def main(
         amendment_history=history,
         runtime_authorization=authorization,
         base_configs=base_configs,
+        populations_value=populations_document,
     )
     print(canonical_json_bytes(identity).decode("ascii"))
     return 0

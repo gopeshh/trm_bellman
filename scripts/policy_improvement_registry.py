@@ -713,7 +713,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     protocol = load_strict_json(arguments.protocol)
     amendments = [load_strict_json(path) for path in arguments.amendment]
     base_configs = load_registered_base_configs(protocol, arguments.project_root)
-    registry = generate_registry(protocol, amendments, base_configs=base_configs)
+    populations_document: object | None = None
+    if isinstance(protocol, Mapping) and protocol.get("schema_name") == (
+        "policy_improvement_protocol_v2"
+    ):
+        from scripts.policy_improvement_populations import (
+            load_registered_populations,
+        )
+
+        populations_document = load_registered_populations(
+            protocol,
+            arguments.project_root,
+        )
+    registry = generate_registry(
+        protocol,
+        amendments,
+        base_configs=base_configs,
+        populations_value=populations_document,
+    )
     payload = canonical_json_bytes(registry)
     if arguments.output is None:
         print(payload.decode("ascii"))

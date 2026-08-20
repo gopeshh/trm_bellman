@@ -6,9 +6,12 @@ from __future__ import annotations
 import ast
 import copy
 import hashlib
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from scripts.policy_improvement_analysis import _registered_secondary_contrasts
 from scripts.policy_improvement_populations import (
     canonical_json_bytes as population_json_bytes,
     derive_population_score,
@@ -22,6 +25,7 @@ from scripts.policy_improvement_populations import (
 )
 from scripts.policy_improvement_registry import (
     load_flat_registered_yaml as load_v1_flat_registered_yaml,
+    main as registry_main,
 )
 from scripts.policy_improvement_schema import (
     PolicyImprovementSchemaError,
@@ -30,6 +34,8 @@ from scripts.policy_improvement_schema import (
     validate_runtime_authorization,
 )
 from scripts.policy_improvement_smoke_plan import render_smoke_plan
+import scripts.policy_improvement_test_open as test_open_module
+from scripts.policy_improvement_test_open_cli import main as test_open_main
 from scripts.policy_improvement_v2_registry import (
     EXPECTED_PHASE_COUNTS,
     generate_v2_registry,
@@ -326,6 +332,153 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
         changed["population_registry"]["sha256"] = "0" * 64
         with self.assertRaises(PolicyImprovementPopulationError):
             load_registered_populations(changed, ROOT)
+
+    def test_generic_registry_cli_regenerates_v2_with_bound_populations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "registry.json"
+            self.assertEqual(
+                registry_main(
+                    [
+                        "--protocol",
+                        str(PROTOCOL),
+                        "--project-root",
+                        str(ROOT),
+                        "--output",
+                        str(output),
+                    ]
+                ),
+                0,
+            )
+            self.assertEqual(output.read_bytes(), REGISTRY.read_bytes())
+
+    def test_test_open_record_binds_the_supplied_v2_population_document(self) -> None:
+        history = [
+            {"created_at_utc": f"2026-08-18T00:00:0{index}Z"}
+            for index in range(4)
+        ]
+        authorization = {"protocol_sha256": sha256_json(self.protocol)}
+        with (
+            mock.patch.object(
+                test_open_module,
+                "validate_amendment_history",
+                return_value=history,
+            ),
+            mock.patch.object(
+                test_open_module,
+                "validate_registry_document",
+                return_value=self.registry,
+            ) as validate_registry,
+            mock.patch.object(
+                test_open_module,
+                "validate_runtime_authorization",
+                return_value=authorization,
+            ),
+            mock.patch.object(
+                test_open_module,
+                "runtime_authorization_sha256",
+                return_value="f" * 64,
+            ),
+        ):
+            test_open_module.expected_test_open_record(
+                protocol=self.protocol,
+                registry=self.registry,
+                amendment_history=history,
+                runtime_authorization=authorization,
+                opened_at_utc="2026-08-20T00:00:00Z",
+                base_configs=self.configs,
+                populations_value=self.populations,
+            )
+        validate_registry.assert_called_once_with(
+            self.registry,
+            self.protocol,
+            history,
+            base_configs=self.configs,
+            populations_value=self.populations,
+        )
+
+    def test_test_open_cli_loads_v2_populations_before_any_publication(self) -> None:
+        class StopAfterRegistryAuthentication(Exception):
+            pass
+
+        history = [
+            {"created_at_utc": f"2026-08-18T00:00:0{index}Z"}
+            for index in range(4)
+        ]
+
+        def stop_after_registry(
+            *_args: object, **kwargs: object
+        ) -> dict[str, object]:
+            self.assertEqual(kwargs["populations_value"], self.populations)
+            raise StopAfterRegistryAuthentication
+
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_root = Path(directory) / "evidence"
+            evidence_root.mkdir(mode=0o700)
+            arguments = [
+                "--protocol",
+                str(PROTOCOL),
+                "--registry",
+                str(REGISTRY),
+                "--amendment",
+                str(THEORY_AMENDMENT),
+                "--project-root",
+                str(ROOT),
+                "--dataset-root",
+                str(Path(directory) / "dataset"),
+                "--evidence-root",
+                str(evidence_root),
+                "--amendment-evidence",
+                "stage0_smoke=/not/read.json",
+                "--audit-runtime-sha256",
+                "1" * 64,
+                "--audit-runtime-profile-sha256",
+                "2" * 64,
+                "--audit-source-git-commit",
+                "3" * 40,
+                "--launcher-sha256",
+                "4" * 64,
+                "--producer-git-commit",
+                "5" * 40,
+                "--producer-source-manifest-sha256",
+                "6" * 64,
+                "--runtime-authorization-json",
+                "{}",
+                "--runtime-authorization-sha256",
+                "7" * 64,
+            ]
+            with (
+                mock.patch(
+                    "scripts.policy_improvement_test_open_cli.validate_amendment_history",
+                    return_value=history,
+                ),
+                mock.patch(
+                    "scripts.policy_improvement_test_open_cli.validate_registry_document",
+                    side_effect=stop_after_registry,
+                ),
+                self.assertRaises(StopAfterRegistryAuthentication),
+            ):
+                test_open_main(arguments, checkpoint_validator=lambda _: {})
+            self.assertFalse((evidence_root / "TEST_OPEN.json").exists())
+
+    def test_v2_analysis_runs_only_registered_secondary_contrasts(self) -> None:
+        self.assertEqual(
+            _registered_secondary_contrasts(self.protocol["statistics"]),
+            (),
+        )
+        v1 = validate_protocol(load_strict_json(V1_PROTOCOL))
+        self.assertEqual(
+            _registered_secondary_contrasts(v1["statistics"]),
+            (
+                (
+                    "fixed_base_exact_episodic-minus-matched_ppo",
+                    "fixed_base_exact_episodic",
+                ),
+                (
+                    "legacy_parameter_interpolation-minus-matched_ppo",
+                    "legacy_parameter_interpolation",
+                ),
+            ),
+        )
 
     def test_registry_has_only_the_prespecified_139_rows(self) -> None:
         self.assertEqual(self.registry["counts"]["total_rows"], 139)

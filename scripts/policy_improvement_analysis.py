@@ -294,6 +294,32 @@ def _summarize_bootstrap(value: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _registered_secondary_contrasts(
+    statistics: Mapping[str, object],
+) -> tuple[tuple[str, str], ...]:
+    """Resolve only secondary contrasts explicitly registered by the protocol."""
+
+    raw = statistics.get("prespecified_secondary_contrasts", [])
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise PolicyImprovementSchemaError(
+            "Prespecified secondary contrasts must be a sequence."
+        )
+    methods = {
+        "fixed_base_exact_episodic-minus-matched_ppo": "fixed_base_exact_episodic",
+        "legacy_parameter_interpolation-minus-matched_ppo": (
+            "legacy_parameter_interpolation"
+        ),
+    }
+    resolved: list[tuple[str, str]] = []
+    for value in raw:
+        if not isinstance(value, str) or value not in methods:
+            raise PolicyImprovementSchemaError(
+                "Prespecified secondary contrast is unsupported."
+            )
+        resolved.append((value, methods[value]))
+    return tuple(resolved)
+
+
 def analyze_stage2_confirmatory(
     protocol_value: object,
     registry_value: object,
@@ -425,13 +451,7 @@ def analyze_stage2_confirmatory(
 
     secondary_outputs: list[dict[str, Any]] = []
     secondary_p_values: dict[str, float] = {}
-    secondary_methods = (
-        "fixed_base_exact_episodic",
-        "legacy_parameter_interpolation",
-    )
-    for contrast, treatment_method in zip(
-        statistics["prespecified_secondary_contrasts"], secondary_methods
-    ):
+    for contrast, treatment_method in _registered_secondary_contrasts(statistics):
         pairs, seed_differences, per_seed = _pairs_for_contrast(
             by_method_seed,
             per_instance_documents,

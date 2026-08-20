@@ -202,6 +202,7 @@ python_library(
     srcs = ["scripts/policy_improvement_registry.py"],
     base_module = "",
     deps = [
+        ":policy_improvement_populations",
         ":policy_improvement_schema",
         ":policy_improvement_v2_registry",
     ],
@@ -447,6 +448,7 @@ python_library(
     base_module = "",
     deps = [
         ":policy_improvement_audit_lib",
+        ":policy_improvement_populations",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
         ":policy_improvement_test_open",
@@ -1035,10 +1037,13 @@ python_unittest(
         "configs/policy_improvement_v2/registry.json",
     ],
     deps = [
+        ":policy_improvement_analysis_lib",
         ":policy_improvement_populations",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
         ":policy_improvement_smoke_plan_lib",
+        ":policy_improvement_test_open",
+        ":policy_improvement_test_open_cli",
         ":policy_improvement_v2_registry",
         ":policy_improvement_v2_schema",
     ],
