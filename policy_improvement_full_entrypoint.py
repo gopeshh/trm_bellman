@@ -18,6 +18,7 @@ from runtime_archive_preflight import preflight_runtime
 
 _FULL_RUNTIME_ROLE = "policy-improvement-full"
 _FULL_LAUNCHER_SHA256_ENV = "UPI_TRM_POLICY_FULL_LAUNCHER_SHA256"
+_THROUGHPUT_ENTRYPOINT = "--policy-improvement-throughput-entrypoint"
 _LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 _PREFLIGHT = preflight_runtime(
@@ -48,9 +49,12 @@ required_attestation = (
 )
 if any(value is None for value in required_attestation):
     raise RuntimeError("Full learned runtime authorization is incomplete.")
+authorization_json = _PREFLIGHT.policy_runtime_authorization_json
+if not isinstance(authorization_json, str):
+    raise RuntimeError("Full learned runtime authorization is incomplete.")
 try:
-    authorization_bytes = _PREFLIGHT.policy_runtime_authorization_json.encode("ascii")
-    authorization = json.loads(_PREFLIGHT.policy_runtime_authorization_json)
+    authorization_bytes = authorization_json.encode("ascii")
+    authorization = json.loads(authorization_json)
     canonical_authorization = json.dumps(
         authorization,
         allow_nan=False,
@@ -111,8 +115,15 @@ _RUNTIME_BYTECODE_CACHE = tempfile.TemporaryDirectory(
 )
 sys.pycache_prefix = str(Path(_RUNTIME_BYTECODE_CACHE.name).resolve())
 
+throughput_requested = sys.argv[1:2] == [_THROUGHPUT_ENTRYPOINT]
+if _THROUGHPUT_ENTRYPOINT in sys.argv[2:]:
+    raise RuntimeError("Throughput entrypoint marker is not launcher-owned.")
 backend_module = importlib.import_module("policy_improvement_full_backend")
-runtime_module = importlib.import_module("scripts.policy_improvement_full_runtime")
+runtime_module = importlib.import_module(
+    "scripts.policy_improvement_throughput"
+    if throughput_requested
+    else "scripts.policy_improvement_full_runtime"
+)
 training_module = importlib.import_module("upi_trm_train")
 backend_class = getattr(backend_module, "SealedFullRunBackend")
 backend = backend_class(
@@ -137,4 +148,5 @@ main = cast(Callable[..., int], getattr(runtime_module, "main"))
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:], backend=backend))
+    runtime_arguments = sys.argv[2:] if throughput_requested else sys.argv[1:]
+    raise SystemExit(main(runtime_arguments, backend=backend))

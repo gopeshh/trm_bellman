@@ -25,7 +25,7 @@ from dataclasses import (
 )
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Protocol
+from typing import Any, cast, Protocol
 
 import torch
 import yaml
@@ -64,6 +64,13 @@ from scripts.policy_improvement_full_runtime import (
     FullRuntimeError,
     load_registered_full_run,
     RegisteredFullRun,
+)
+from scripts.policy_improvement_throughput import (
+    CALIBRATION_PPO_ROLLOUT_INTERACTIONS,
+    load_training_only_dataset,
+    THROUGHPUT_SAMPLE_SCHEMA_NAME,
+    THROUGHPUT_SAMPLE_SCHEMA_VERSION,
+    ThroughputSampleRequest,
 )
 from scripts.policy_improvement_schema import (
     canonical_json_bytes,
@@ -423,7 +430,15 @@ def calibrate_training_split_throughput(
     sampler.start()
     started = time.perf_counter()
     try:
-        TorchLearnedRunEngine._train_step(session, environment_interactions)
+        while int(session.trainer.get_env_step_count()) < environment_interactions:
+            before_step = int(session.trainer.get_env_step_count())
+            remaining = environment_interactions - before_step
+            TorchLearnedRunEngine._train_step(session, remaining)
+            after_step = int(session.trainer.get_env_step_count())
+            if after_step <= before_step:
+                raise FullBackendError(
+                    "Calibration trainer made no progress toward its exact cap."
+                )
     finally:
         elapsed = time.perf_counter() - started
         utilization = sampler.stop()
@@ -553,6 +568,330 @@ class TorchLearnedRunEngine:
         except ImportError:
             task = None
         return resolution.checker_fn, task, resolution.checker_kind
+
+    def _build_throughput_session(
+        self,
+        request: ThroughputSampleRequest,
+        runtime: SealedRuntimeIdentity,
+    ) -> tuple[LearnedSession, str]:
+        """Build one fresh train-only session without an evaluation dataset."""
+
+        registration = request.registration
+        protocol = registration.protocol
+        self._module.set_global_seed(request.engineering_seed)
+        methods = [
+            item for item in protocol["methods"] if item["id"] == request.method_id
+        ]
+        if len(methods) != 1:
+            raise FullBackendError("Calibration method is not registered exactly once.")
+        method = methods[0]
+        config_path = (registration.project_root / str(method["config_path"])).resolve(
+            strict=True
+        )
+        try:
+            config_path.relative_to(registration.project_root)
+        except ValueError as exc:
+            raise FullBackendError(
+                "Calibration method configuration escaped the project root."
+            ) from exc
+        method_config_sha256 = _require_digest(
+            method["config_sha256"], name="method config SHA-256"
+        )
+        if file_sha256(config_path) != method_config_sha256:
+            raise FullBackendError("Calibration method configuration changed.")
+        config_layer = dict(registration.method_configs[request.method_id])
+        if canonical_json_sha256(config_layer) != method["canonical_config_sha256"]:
+            raise FullBackendError("Calibration method configuration is not canonical.")
+        base_config = self._module.RLConfig(
+            batch_size=32,
+            num_train_steps=request.environment_interactions,
+            rollout_episodes_per_step=1,
+            max_edits=8,
+            log_interval=request.environment_interactions,
+            eval_interval=0,
+            eval_num_episodes=0,
+            eval_seed=1729,
+            use_tqdm=False,
+            debug_checks=False,
+        )
+        merged = self._module._config_dict(base_config)
+        merged = self._module.merge_rl_config_layer(merged, config_layer)
+        merged.update(
+            {
+                "num_train_steps": request.environment_interactions,
+                "eval_num_episodes": 0,
+                "eval_interval": 0,
+                "log_interval": request.environment_interactions,
+                "use_tqdm": False,
+                "debug_checks": False,
+                "track_theory_metrics": False,
+            }
+        )
+        rl_config = self._module.RLConfig(**merged)
+
+        def load_split(root: Path, split: str, count: int) -> tuple[Any, int, int, int]:
+            if root != registration.dataset_root or split != "train":
+                raise FullBackendError(
+                    "Calibration dataset loader received a non-train path."
+                )
+            return self._module.build_dataset_from_paths(
+                dataset_paths=[str(root)],
+                pool_size=count,
+                split=split,
+            )
+
+        loaded = load_training_only_dataset(registration, load_split)
+        if not isinstance(loaded, tuple) or len(loaded) != 4:
+            raise FullBackendError("Calibration train loader returned invalid data.")
+        train_dataset, seq_len, vocab_size, train_identifiers = loaded
+        train_manifest = protocol["dataset"]["splits"]["train"]["manifest_sha256"][
+            "value"
+        ]
+        self._module._validate_materialized_split_manifest(
+            dataset_root=registration.dataset_root,
+            split="train",
+            registered_sha256=train_manifest,
+            dataset=train_dataset,
+        )
+        train_records = dataset_sample_sha256s(train_dataset)
+        train_ordered_record_sha256 = ordered_record_sha256(train_records)
+        if train_ordered_record_sha256 != registration.train_ordered_record_sha256:
+            raise FullBackendError("Calibration train record order changed.")
+        if (
+            file_sha256(registration.dataset_root / "MANIFEST.json")
+            != registration.dataset_manifest_sha256
+            or file_sha256(registration.dataset_root / "manifests/train.json")
+            != registration.train_manifest_sha256
+        ):
+            raise FullBackendError("Calibration dataset identity changed.")
+
+        checker, task, checker_kind = self._task_config(
+            rl_config, train_dataset, int(seq_len)
+        )
+        env_config = PlanEditEnvConfig(
+            max_edits=rl_config.max_edits,
+            gamma=rl_config.gamma,
+            reward_shaping=rl_config.reward_shaping,
+            vocab_size=int(vocab_size),
+            solved_threshold=(
+                rl_config.solved_threshold
+                if checker_kind in {"solution", "constraint", "progress", "feasibility"}
+                else None
+            ),
+            task_type=rl_config.task_name,
+            stop_action_mode=rl_config.stop_action_mode,
+            stop_action_penalty=rl_config.stop_action_penalty,
+            fail_terminal_reward=rl_config.fail_terminal_reward,
+            solve_terminal_reward=rl_config.solve_terminal_reward,
+            C_max=rl_config.C_max,
+            disable_constraint_masking=rl_config.disable_constraint_masking,
+        )
+        env = PlanEditEnv(
+            dataset=train_dataset,
+            checker=checker,
+            config=env_config,
+            task_config=task,
+        )
+        action_count = int(seq_len) * int(vocab_size) + 1
+        env.set_stop_action_id(action_count - 1)
+        architecture = protocol["architecture"]
+        model_config = {
+            "batch_size": rl_config.batch_size,
+            "seq_len": int(seq_len),
+            "puzzle_emb_ndim": 0,
+            "puzzle_emb_len": 0,
+            "num_puzzle_identifiers": max(int(train_identifiers), rl_config.batch_size),
+            "vocab_size": int(vocab_size),
+            "H_cycles": int(architecture["h_cycles"]),
+            "L_cycles": int(architecture["l_cycles"]),
+            "H_layers": 0,
+            "L_layers": int(architecture["l_layers"]),
+            "hidden_size": int(architecture["hidden_size"]),
+            "expansion": 2.0,
+            "num_heads": max(4, int(architecture["hidden_size"]) // 16),
+            "pos_encodings": "rope",
+            "rms_norm_eps": 1e-5,
+            "rope_theta": 10000.0,
+            "halt_max_steps": 2,
+            "halt_exploration_prob": 0.0,
+            "forward_dtype": "float32",
+            "mlp_t": False,
+            "no_ACT_continue": True,
+            "rl_enable_value_head": True,
+            "rl_enable_contraction": rl_config.enable_contraction,
+            "rl_target_Lz": rl_config.target_Lz,
+            "rl_target_Lv": rl_config.target_Lv,
+            "rl_disable_value_head_norm": rl_config.disable_value_head_norm,
+            "rl_enable_policy_head": True,
+            "rl_num_actions": action_count,
+            "rl_latent_projection_mode": rl_config.latent_projection_mode,
+            "rl_latent_ball_radius": rl_config.latent_ball_radius,
+        }
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
+        model = TinyRecursiveReasoningModel_ACTV1(model_config)
+        initialization_sha256 = state_dict_sha256(model.state_dict())
+        baseline = self._module.select_baseline_from_configs(None, [str(config_path)])
+        if request.method_id == "matched_ppo":
+            original_lookup = baseline.get_yaml_key
+
+            def throughput_lookup(name: str, default: object) -> object:
+                if name == "ppo_num_steps":
+                    return CALIBRATION_PPO_ROLLOUT_INTERACTIONS
+                return original_lookup(name, default)
+
+            baseline = self._module.BaselineSelection(
+                baseline.selected_baseline,
+                baseline.yaml_algorithm,
+                throughput_lookup,
+            )
+        trainer = self._module.build_trainer(
+            model=model,
+            env=env,
+            rl_cfg=rl_config,
+            device=device,
+            baseline_selection=baseline,
+            cli_baseline=None,
+            verbose=False,
+        )
+        if request.method_id == "matched_ppo":
+            if (
+                type(trainer).__name__ != "PPOTrainer"
+                or trainer.config.num_steps != CALIBRATION_PPO_ROLLOUT_INTERACTIONS
+            ):
+                raise FullBackendError("Calibration PPO rollout is not frozen.")
+        elif not isinstance(trainer, UPITrmTrainer):
+            raise FullBackendError("Calibration UPI trainer differs.")
+        if isinstance(trainer, UPITrmTrainer):
+            trainer.set_checker_fn(checker)
+        effective_config = {
+            "schema_name": "policy_improvement_throughput_effective_config_v2",
+            "schema_version": 1,
+            "protocol_sha256": registration.protocol_sha256,
+            "registry_sha256": registration.registry_sha256,
+            "runtime_authorization_sha256": (registration.runtime_authorization_sha256),
+            "runtime_sha256": runtime.runtime_sha256,
+            "method_id": request.method_id,
+            "method_config_sha256": method_config_sha256,
+            "engineering_seed": request.engineering_seed,
+            "environment_interaction_cap": request.environment_interactions,
+            "training_split": "train",
+            "evaluation_rollouts": False,
+            "ppo_rollout_environment_interactions": (
+                CALIBRATION_PPO_ROLLOUT_INTERACTIONS
+                if request.method_id == "matched_ppo"
+                else None
+            ),
+            "rl_config": self._module._config_dict(rl_config),
+            "trainer_config": (
+                self._module._config_dict(trainer.config)
+                if getattr(trainer, "config", None) is not None
+                else None
+            ),
+            "model_config": self._module._config_dict(model.config),
+            "dataset_manifest_sha256": registration.dataset_manifest_sha256,
+            "train_manifest_sha256": registration.train_manifest_sha256,
+            "train_ordered_record_sha256": train_ordered_record_sha256,
+            "execution_device": self._module._canonical_device(device),
+        }
+        effective_config_sha256 = canonical_json_sha256(effective_config)
+        run = cast(
+            RegisteredFullRun,
+            SimpleNamespace(row={"evaluation_split": "train"}),
+        )
+        session = LearnedSession(
+            run=run,
+            model=model,
+            trainer=trainer,
+            rl_config=rl_config,
+            env_config=env_config,
+            train_dataset=train_dataset,
+            evaluation_dataset=None,
+            checker=checker,
+            task_config=task,
+            dataset_provenance={},
+            effective_config=effective_config,
+            effective_config_sha256=effective_config_sha256,
+            initialization_sha256=initialization_sha256,
+            device=device,
+            config_path=config_path,
+            method_config_sha256=method_config_sha256,
+            run_identity=None,
+            evidence_identity={},
+            dataset_manifest_sha256=registration.dataset_manifest_sha256,
+            train_ordered_records_sha256=train_ordered_record_sha256,
+            evaluation_ordered_records_sha256="",
+            evaluation_pool_sha256="",
+        )
+        return session, effective_config_sha256
+
+    def execute_throughput_sample(
+        self,
+        request: ThroughputSampleRequest,
+        runtime: SealedRuntimeIdentity,
+    ) -> dict[str, object]:
+        started = time.perf_counter()
+        session, effective_config_sha256 = self._build_throughput_session(
+            request, runtime
+        )
+        setup_seconds = time.perf_counter() - started
+        calibration = calibrate_training_split_throughput(
+            session,
+            environment_interactions=request.environment_interactions,
+        )
+        raw_elapsed_seconds = calibration["elapsed_seconds"]
+        if isinstance(raw_elapsed_seconds, bool) or not isinstance(
+            raw_elapsed_seconds, (int, float)
+        ):
+            raise FullBackendError("Calibration elapsed time is invalid.")
+        elapsed_seconds = setup_seconds + float(raw_elapsed_seconds)
+        return {
+            "schema_name": THROUGHPUT_SAMPLE_SCHEMA_NAME,
+            "schema_version": THROUGHPUT_SAMPLE_SCHEMA_VERSION,
+            "method_id": request.method_id,
+            "environment_interaction_cap": request.environment_interactions,
+            "engineering_seed": request.engineering_seed,
+            "training_split": "train",
+            "started_environment_interactions": 0,
+            "completed_environment_interactions": calibration[
+                "environment_interactions"
+            ],
+            "session_setup_seconds": setup_seconds,
+            "elapsed_seconds": elapsed_seconds,
+            "recurrent_map_applications": calibration["recurrent_map_applications"],
+            "method_config_sha256": session.method_config_sha256,
+            "effective_config_sha256": effective_config_sha256,
+            "dataset_manifest_sha256": request.registration.dataset_manifest_sha256,
+            "train_manifest_sha256": request.registration.train_manifest_sha256,
+            "train_ordered_record_sha256": (
+                request.registration.train_ordered_record_sha256
+            ),
+            "runtime_identity": {
+                "role": runtime.role,
+                "runtime_sha256": runtime.runtime_sha256,
+                "source_git_commit": runtime.source_git_commit,
+                "source_manifest_sha256": runtime.source_manifest_sha256,
+                "producer_source_manifest_sha256": (
+                    runtime.producer_source_manifest_sha256
+                ),
+                "runtime_profile_sha256": runtime.runtime_profile_sha256,
+                "selected_source_manifest_sha256": (
+                    runtime.selected_source_manifest_sha256
+                ),
+                "runtime_authorization_sha256": (runtime.runtime_authorization_sha256),
+                "launcher_sha256": runtime.launcher_sha256,
+            },
+            "compute_snapshot": calibration["compute_snapshot"],
+            "compute_accounting": calibration["compute_accounting"],
+            "evaluation_rollouts": False,
+            "validation_data_opened": False,
+            "test_data_opened": False,
+            "test_open_bound": False,
+            "scientific_selection": False,
+            "paper_evidence_eligible": False,
+            "performance_metrics_collected": False,
+        }
 
     def _build_session(
         self,
@@ -3792,6 +4131,34 @@ class SealedFullRunBackend(FullRunBackend):
         if not request.require_interaction_and_compute_snapshots:
             raise FullRuntimeError("Full execution cannot omit a registered snapshot.")
         return self._engine.execute(request, self._runtime)
+
+    def execute_throughput_sample(
+        self, request: ThroughputSampleRequest
+    ) -> Mapping[str, object]:
+        """Run one fresh v2 train-only sample under the authenticated full role."""
+
+        registration = request.registration
+        if (
+            registration.protocol.get("schema_name") != "policy_improvement_protocol_v2"
+            or registration.protocol.get("protocol_id")
+            != "policy-improvement-v2-20260818"
+            or registration.runtime_authorization_sha256
+            != self._runtime.runtime_authorization_sha256
+        ):
+            raise FullRuntimeError(
+                "Throughput request differs from the sealed v2 authorization."
+            )
+        if registration.dataset_root is None:
+            raise FullRuntimeError("Throughput calibration requires dataset root.")
+        execute_sample = getattr(self._engine, "execute_throughput_sample", None)
+        if not callable(execute_sample):
+            raise FullRuntimeError(
+                "The sealed full backend lacks the throughput calibration engine."
+            )
+        result = execute_sample(request, self._runtime)
+        if not isinstance(result, Mapping):
+            raise FullRuntimeError("Throughput backend returned a non-mapping sample.")
+        return result
 
 
 def _failed_snapshot(reason: str, kind: str) -> dict[str, object]:

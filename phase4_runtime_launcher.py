@@ -59,6 +59,7 @@ POLICY_DATASET_BUILDER_PURPOSE = "policy-dataset-builder"
 POLICY_IMPROVEMENT_AUDIT_PURPOSE = "policy-improvement-audit"
 POLICY_IMPROVEMENT_ANALYSIS_PURPOSE = "policy-improvement-analysis"
 POLICY_IMPROVEMENT_FULL_PURPOSE = "policy-improvement-full"
+POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE = "policy-improvement-throughput"
 POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE = "policy-improvement-theory-bridge"
 POLICY_IMPROVEMENT_FULL_LAUNCHER_SHA256_ENV = "UPI_TRM_POLICY_FULL_LAUNCHER_SHA256"
 POLICY_IMPROVEMENT_THEORY_BRIDGE_LAUNCHER_SHA256_ENV = (
@@ -84,6 +85,7 @@ _PURPOSE_TO_PROFILE = {
     POLICY_IMPROVEMENT_AUDIT_PURPOSE: (POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE),
     POLICY_IMPROVEMENT_ANALYSIS_PURPOSE: (POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE),
     POLICY_IMPROVEMENT_FULL_PURPOSE: POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE,
+    POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE: (POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE),
     POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE: (
         POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE
     ),
@@ -568,6 +570,7 @@ def _load_policy_consumer_runtime_authorization(
         purpose
         in {
             POLICY_IMPROVEMENT_FULL_PURPOSE,
+            POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
             POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
         }
         and role_names != _POLICY_RUNTIME_ROLES_V2
@@ -650,6 +653,7 @@ def _load_policy_consumer_runtime_authorization(
         POLICY_IMPROVEMENT_AUDIT_PURPOSE: "policy-improvement-audit",
         POLICY_IMPROVEMENT_ANALYSIS_PURPOSE: "policy-improvement-analysis",
         POLICY_IMPROVEMENT_FULL_PURPOSE: POLICY_IMPROVEMENT_FULL_PURPOSE,
+        POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE: POLICY_IMPROVEMENT_FULL_PURPOSE,
         POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE: (
             POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE
         ),
@@ -913,6 +917,109 @@ def _normalize_child_args(
             source_project_root,
             *arguments,
         ]
+    if purpose == POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE:
+        if not policy_protocol_v2:
+            raise ConfirmatoryRuntimeError(
+                "Throughput calibration accepts only protocol v2 authorization."
+            )
+        if (
+            not isinstance(runtime_authorization_sha256, str)
+            or _LOWER_SHA256.fullmatch(runtime_authorization_sha256) is None
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Throughput calibration lacks its authorization digest."
+            )
+        project_root = policy_project_root or source_project_root
+        if arguments == ["--help"]:
+            return [
+                "--policy-improvement-throughput-entrypoint",
+                "--project-root",
+                project_root,
+                "--protocol",
+                str(Path(project_root) / _POLICY_V2_PROTOCOL_RELATIVE_PATH),
+                "--registry",
+                str(Path(project_root) / _POLICY_V2_REGISTRY_RELATIVE_PATH),
+                "--runtime-authorization-sha256",
+                runtime_authorization_sha256,
+                "--help",
+            ]
+        throughput_values: dict[str, str] = {}
+        authorize_4096 = False
+        index = 0
+        while index < len(arguments):
+            argument = arguments[index]
+            name, separator, inline_value = argument.partition("=")
+            if name == "--authorize-4096-tier":
+                if separator or authorize_4096:
+                    raise ConfirmatoryRuntimeError(
+                        "Throughput 4096 authorization is duplicated or valued."
+                    )
+                authorize_4096 = True
+                index += 1
+                continue
+            if name not in {
+                "--dataset-root",
+                "--maximum-total-predicted-4096-seconds",
+            }:
+                raise ConfirmatoryRuntimeError(
+                    "Throughput arguments contain a protected or unsupported option."
+                )
+            if name in throughput_values:
+                raise ConfirmatoryRuntimeError(
+                    "Throughput arguments repeat a singleton option."
+                )
+            if separator:
+                value = inline_value
+                index += 1
+            else:
+                if index + 1 >= len(arguments):
+                    raise ConfirmatoryRuntimeError(
+                        "Throughput option is missing its value."
+                    )
+                value = arguments[index + 1]
+                index += 2
+            if not value or value.startswith("--"):
+                raise ConfirmatoryRuntimeError(
+                    "Throughput option has an empty or missing value."
+                )
+            throughput_values[name] = value
+        dataset_root = throughput_values.get("--dataset-root")
+        if dataset_root is None:
+            raise ConfirmatoryRuntimeError(
+                "Throughput calibration requires dataset root."
+            )
+        dataset_path = Path(dataset_root)
+        if not dataset_path.is_absolute() or ".." in dataset_path.parts:
+            raise ConfirmatoryRuntimeError(
+                "Throughput dataset root must be absolute and canonical."
+            )
+        ceiling = throughput_values.get("--maximum-total-predicted-4096-seconds")
+        if authorize_4096 != (ceiling is not None):
+            raise ConfirmatoryRuntimeError(
+                "Throughput 4096 execution requires authorization and a ceiling."
+            )
+        return [
+            "--policy-improvement-throughput-entrypoint",
+            "--project-root",
+            project_root,
+            "--protocol",
+            str(Path(project_root) / _POLICY_V2_PROTOCOL_RELATIVE_PATH),
+            "--registry",
+            str(Path(project_root) / _POLICY_V2_REGISTRY_RELATIVE_PATH),
+            "--dataset-root",
+            dataset_root,
+            "--runtime-authorization-sha256",
+            runtime_authorization_sha256,
+            *(
+                [
+                    "--authorize-4096-tier",
+                    "--maximum-total-predicted-4096-seconds",
+                    ceiling,
+                ]
+                if authorize_4096 and ceiling is not None
+                else []
+            ),
+        ]
     if purpose in {
         POLICY_IMPROVEMENT_FULL_PURPOSE,
         POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
@@ -951,6 +1058,7 @@ def _normalize_child_args(
             )
         if arguments == ["--help"]:
             if purpose == POLICY_IMPROVEMENT_FULL_PURPOSE:
+                assert isinstance(runtime_authorization_sha256, str)
                 return [
                     "--project-root",
                     project_root,
@@ -1179,6 +1287,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             POLICY_IMPROVEMENT_AUDIT_PURPOSE,
             POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
             POLICY_IMPROVEMENT_FULL_PURPOSE,
+            POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
             POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
         }
         if requires_runtime_authorization != all(authorization_options_present):
@@ -1234,26 +1343,33 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.expected_source_git_commit,
                 profile,
             )
-            producer_authorized = (
-                authorize_phase4_training_source(
+            if separate_producer_consumer:
+                assert producer_source_root is not None
+                assert arguments.expected_producer_git_commit is not None
+                producer_authorized = authorize_phase4_training_source(
                     producer_source_root,
                     arguments.expected_producer_git_commit,
                 )
-                if separate_producer_consumer
-                else (
+            else:
+                producer_authorized = (
                     authorize_phase4_training_source(
                         source_root,
                         arguments.expected_source_git_commit,
                     )
-                    if arguments.purpose == POLICY_IMPROVEMENT_FULL_PURPOSE
+                    if arguments.purpose
+                    in {
+                        POLICY_IMPROVEMENT_FULL_PURPOSE,
+                        POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
+                    }
                     else None
                 )
-            )
             role = profile
             archive_validator = _consumer_archive_validator(authorized)
         policy_project_root = (
             producer_source_root if separate_producer_consumer else source_root
         )
+        if policy_project_root is None:
+            raise ConfirmatoryRuntimeError("Policy project root is unavailable.")
         policy_protocol_sha256 = (
             (
                 _canonical_policy_protocol_sha256(policy_project_root, v2=True)
@@ -1308,6 +1424,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             attestation_environment[POLICY_PROTOCOL_SHA256_ENV] = policy_protocol_sha256
         if arguments.purpose in {
             POLICY_IMPROVEMENT_FULL_PURPOSE,
+            POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
             POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
         }:
             assert producer_authorized is not None
@@ -1347,7 +1464,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 POLICY_SMOKE_SELECTED_SOURCE_MANIFEST_SHA256_ENV
             ] = authorized.source_manifest_sha256
             attestation_environment[POLICY_PROTOCOL_SHA256_ENV] = policy_protocol_sha256
-            if arguments.purpose == POLICY_IMPROVEMENT_FULL_PURPOSE:
+            if arguments.purpose in {
+                POLICY_IMPROVEMENT_FULL_PURPOSE,
+                POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
+            }:
                 attestation_environment[POLICY_IMPROVEMENT_FULL_LAUNCHER_SHA256_ENV] = (
                     policy_launcher_sha256
                 )

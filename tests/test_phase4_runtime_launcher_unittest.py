@@ -34,6 +34,7 @@ from phase4_runtime_launcher import (
     POLICY_IMPROVEMENT_AUDIT_PURPOSE,
     POLICY_IMPROVEMENT_FULL_LAUNCHER_SHA256_ENV,
     POLICY_IMPROVEMENT_FULL_PURPOSE,
+    POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
     POLICY_IMPROVEMENT_THEORY_BRIDGE_LAUNCHER_SHA256_ENV,
     POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
     POLICY_PRODUCER_GIT_COMMIT_ENV,
@@ -1044,6 +1045,115 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 ],
                 policy_project_root="/producer",
             )
+
+    def test_throughput_launcher_is_v2_train_only_and_owns_all_sensitive_inputs(
+        self,
+    ) -> None:
+        normalized = _normalize_child_args(
+            POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
+            "/producer",
+            ["--dataset-root", "/dataset"],
+            runtime_authorization_sha256="4" * 64,
+            policy_protocol_v2=True,
+        )
+        self.assertEqual(
+            normalized,
+            [
+                "--policy-improvement-throughput-entrypoint",
+                "--project-root",
+                "/producer",
+                "--protocol",
+                "/producer/configs/policy_improvement_v2/protocol.json",
+                "--registry",
+                "/producer/configs/policy_improvement_v2/registry.json",
+                "--dataset-root",
+                "/dataset",
+                "--runtime-authorization-sha256",
+                "4" * 64,
+            ],
+        )
+        authorized = _normalize_child_args(
+            POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
+            "/producer",
+            [
+                "--dataset-root=/dataset",
+                "--authorize-4096-tier",
+                "--maximum-total-predicted-4096-seconds=7200",
+            ],
+            runtime_authorization_sha256="4" * 64,
+            policy_protocol_v2=True,
+        )
+        self.assertEqual(
+            authorized[-3:],
+            [
+                "--authorize-4096-tier",
+                "--maximum-total-predicted-4096-seconds",
+                "7200",
+            ],
+        )
+        for forbidden in (
+            "--split=test",
+            "--evaluation-split=validation",
+            "--test-open=/evidence/TEST_OPEN.json",
+            "--evidence-root=/evidence",
+            "--protocol=/forged",
+            "--registry=/forged",
+            "--runtime-authorization-sha256=" + "0" * 64,
+        ):
+            with (
+                self.subTest(forbidden=forbidden),
+                self.assertRaisesRegex(
+                    ConfirmatoryRuntimeError,
+                    "protected or unsupported",
+                ),
+            ):
+                _normalize_child_args(
+                    POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
+                    "/producer",
+                    ["--dataset-root", "/dataset", forbidden],
+                    runtime_authorization_sha256="4" * 64,
+                    policy_protocol_v2=True,
+                )
+        for unsafe_root in ("relative", "/dataset/../test"):
+            with self.assertRaisesRegex(
+                ConfirmatoryRuntimeError,
+                "absolute and canonical",
+            ):
+                _normalize_child_args(
+                    POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
+                    "/producer",
+                    ["--dataset-root", unsafe_root],
+                    runtime_authorization_sha256="4" * 64,
+                    policy_protocol_v2=True,
+                )
+        with self.assertRaisesRegex(ConfirmatoryRuntimeError, "only protocol v2"):
+            _normalize_child_args(
+                POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
+                "/producer",
+                ["--dataset-root", "/dataset"],
+                runtime_authorization_sha256="4" * 64,
+                policy_protocol_v2=False,
+            )
+        for partial in (
+            ["--dataset-root", "/dataset", "--authorize-4096-tier"],
+            [
+                "--dataset-root",
+                "/dataset",
+                "--maximum-total-predicted-4096-seconds",
+                "7200",
+            ],
+        ):
+            with self.assertRaisesRegex(
+                ConfirmatoryRuntimeError,
+                "requires authorization and a ceiling",
+            ):
+                _normalize_child_args(
+                    POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
+                    "/producer",
+                    partial,
+                    runtime_authorization_sha256="4" * 64,
+                    policy_protocol_v2=True,
+                )
 
     def test_training_launcher_owns_publication_and_producer_flags(self) -> None:
         child_args = _normalize_child_args(

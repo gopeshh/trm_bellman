@@ -267,6 +267,19 @@ python_library(
 )
 
 python_library(
+    name = "policy_improvement_throughput",
+    srcs = ["scripts/policy_improvement_throughput.py"],
+    base_module = "",
+    typing = True,
+    deps = [
+        ":policy_improvement_populations",
+        ":policy_improvement_v2_registry",
+        ":policy_improvement_v2_schema",
+        ":utils",
+    ],
+)
+
+python_library(
     name = "policy_improvement_non_smoke_checkpoint",
     srcs = ["policy_improvement_non_smoke_checkpoint.py"],
     base_module = "",
@@ -292,6 +305,7 @@ python_library(
         ":policy_improvement_sealed_evidence",
         ":policy_improvement_smoke_runtime",
         ":policy_improvement_v2_schema",
+        ":policy_improvement_throughput",
         ":rl",
         ":upi_trm_train_lib",
         ":utils",
@@ -1146,6 +1160,30 @@ python_unittest(
         ":policy_improvement_sealed_evidence",
         ":policy_improvement_smoke_checkpoint",
         ":rl",
+        ":utils",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_throughput",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_throughput_unittest.py",
+    ],
+    base_module = "",
+    typing = True,
+    resources = [
+        "configs/policy_improvement_v2/fixed_base_exact_episodic.yaml",
+        "configs/policy_improvement_v2/fixed_base_exact_persistent.yaml",
+        "configs/policy_improvement_v2/legacy_parameter_interpolation.yaml",
+        "configs/policy_improvement_v2/matched_ppo.yaml",
+        "configs/policy_improvement_v2/populations.json",
+        "configs/policy_improvement_v2/protocol.json",
+        "configs/policy_improvement_v2/registry.json",
+    ],
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        ":policy_improvement_throughput",
         ":utils",
     ],
 )
