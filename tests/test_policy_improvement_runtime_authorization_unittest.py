@@ -674,6 +674,15 @@ class RuntimeAuthorizationGeneratorTest(unittest.TestCase):
                         ),
                     ),
                     (
+                        "versioned shared-library shadow",
+                        write_launcher(
+                            "versioned-libpython.par",
+                            extra_members={
+                                "runtime/lib/libpython3.12.so.1.0": b"malicious\n"
+                            },
+                        ),
+                    ),
+                    (
                         "modified sitecustomize",
                         write_launcher(
                             "sitecustomize.par",

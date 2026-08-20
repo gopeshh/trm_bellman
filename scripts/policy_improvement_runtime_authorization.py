@@ -561,6 +561,15 @@ def _validate_launcher_archive_prefix(archive: ZipFile) -> None:
 
 
 def _validate_launcher_native_support(archive: ZipFile) -> None:
+    runtime_members = {
+        info.filename
+        for info in archive.infolist()
+        if not info.is_dir() and info.filename.startswith("runtime/")
+    }
+    if runtime_members != set(_LAUNCHER_NATIVE_SUPPORT_MEMBERS):
+        raise RuntimeAuthorizationGenerationError(
+            "Launcher PAR native runtime member inventory differs."
+        )
     identity = {
         name: hashlib.sha256(_launcher_member_bytes(archive, name)).hexdigest()
         for name in _LAUNCHER_NATIVE_SUPPORT_MEMBERS
