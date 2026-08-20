@@ -218,6 +218,31 @@ python_library(
 )
 
 python_library(
+    name = "policy_improvement_runtime_authorization",
+    srcs = ["scripts/policy_improvement_runtime_authorization.py"],
+    base_module = "",
+    typing = True,
+    deps = [
+        ":confirmatory_runtime_launcher_lib",
+        ":phase4_runtime_profile",
+        ":policy_improvement_populations",
+        ":policy_improvement_schema",
+        ":policy_improvement_v2_registry",
+        ":policy_improvement_v2_schema",
+    ],
+)
+
+python_binary(
+    name = "generate_policy_improvement_runtime_authorization",
+    srcs = [],
+    base_module = "",
+    main_module = "scripts.policy_improvement_runtime_authorization",
+    deps = [
+        ":policy_improvement_runtime_authorization",
+    ],
+)
+
+python_library(
     name = "policy_improvement_evidence",
     srcs = ["scripts/policy_improvement_evidence.py"],
     base_module = "",
@@ -998,6 +1023,31 @@ python_unittest(
         ":policy_improvement_smoke_plan_lib",
         ":policy_improvement_v2_registry",
         ":policy_improvement_v2_schema",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_runtime_authorization",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_runtime_authorization_unittest.py",
+    ],
+    base_module = "",
+    typing = True,
+    resources = [
+        "configs/policy_improvement_v2/fixed_base_exact_episodic.yaml",
+        "configs/policy_improvement_v2/fixed_base_exact_persistent.yaml",
+        "configs/policy_improvement_v2/legacy_parameter_interpolation.yaml",
+        "configs/policy_improvement_v2/matched_ppo.yaml",
+        "configs/policy_improvement_v2/amendments/theory_bridge_v2.json",
+        "configs/policy_improvement_v2/populations.json",
+        "configs/policy_improvement_v2/protocol.json",
+        "configs/policy_improvement_v2/registry.json",
+    ],
+    deps = [
+        ":phase4_runtime_profile",
+        ":policy_improvement_runtime_authorization",
+        ":policy_improvement_schema",
     ],
 )
 
