@@ -15,6 +15,7 @@ from typing import Any
 from unittest import mock
 
 from policy_improvement_sealed_evidence import seal_generation_checkpoint
+from scripts import policy_improvement_audit
 from scripts.policy_improvement_schema import canonical_json_bytes
 from scripts.policy_improvement_theory_backend_v2 import (
     _AuthenticatedStage0Checkpoint,
@@ -1447,8 +1448,9 @@ class TheoryBridgeV2Test(unittest.TestCase):
                 "scripts.policy_improvement_theory_backend_v2.load_sealed_checkpoint_validator",
                 return_value=object(),
             ),
-            mock.patch(
-                "scripts.policy_improvement_audit.audit_result_set",
+            mock.patch.object(
+                policy_improvement_audit,
+                "audit_result_set",
                 return_value=report,
             ) as audit,
         ):

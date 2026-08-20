@@ -1226,6 +1226,7 @@ python_unittest(
     ],
     base_module = "",
     deps = [
+        ":policy_improvement_audit_lib",
         ":policy_improvement_sealed_evidence",
         ":policy_improvement_theory_backend_v2",
         ":policy_improvement_theory_bridge_v2_lib",

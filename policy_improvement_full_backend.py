@@ -117,6 +117,9 @@ _THEORY_TRAINING_RUNTIME_ROLES: frozenset[str] = frozenset(
     {"policy-improvement-full", "policy-improvement-smoke"}
 )
 _LOWER_HEX: frozenset[str] = frozenset("0123456789abcdef")
+# A 21-action float32 softmax can accumulate about 2e-8 error after export to
+# Python floats. Accept a bounded float32 rounding envelope, then normalize.
+_FLOAT32_PROBABILITY_SUM_TOLERANCE: float = 1e-6
 
 
 def _canonical_regular_dataset_file(path: Path, *, name: str) -> Path:
@@ -3519,19 +3522,23 @@ class ReadOnlyTheoryBridgeSession:
         if any(
             not math.isfinite(probability) or probability < 0.0
             for probability in probabilities
-        ) or not math.isclose(
-            sum(probabilities),
+        ):
+            raise FullBackendError("Theory CRN policy does not sum to one.")
+        total_probability = math.fsum(probabilities)
+        if not math.isclose(
+            total_probability,
             1.0,
             rel_tol=0.0,
-            abs_tol=1e-8,
+            abs_tol=_FLOAT32_PROBABILITY_SUM_TOLERANCE,
         ):
             raise FullBackendError("Theory CRN policy does not sum to one.")
         cumulative = 0.0
         fallback = -1
         for index, probability in enumerate(probabilities):
-            if probability > 0.0:
+            normalized_probability = probability / total_probability
+            if normalized_probability > 0.0:
                 fallback = index
-            cumulative += probability
+            cumulative += normalized_probability
             if uniform < cumulative:
                 return index
         if fallback < 0:
@@ -5017,7 +5024,8 @@ def build_failed_result(
         train_registration.get("ordered_record_sha256"),
         name="failed train order SHA-256",
     )
-    if run.protocol.get("schema_name") == "policy_improvement_protocol_v2":
+    is_v2 = run.protocol.get("schema_name") == "policy_improvement_protocol_v2"
+    if is_v2:
         population_id = run.row.get("evaluation_population")
         populations = (
             run.population_document.get("populations")
@@ -5045,10 +5053,16 @@ def build_failed_result(
         raise FullBackendError(
             "Failed attempt cannot resolve its registered evaluation population."
         )
-    evaluation_order_sha256 = registered_digest(
-        population.get("ordered_record_sha256"),
-        name="failed evaluation order SHA-256",
-    )
+    if is_v2:
+        evaluation_order_sha256 = _require_digest(
+            population.get("ordered_record_sha256"),
+            name="failed evaluation order SHA-256",
+        )
+    else:
+        evaluation_order_sha256 = registered_digest(
+            population.get("ordered_record_sha256"),
+            name="failed evaluation order SHA-256",
+        )
     initialization_sha256 = (
         session.initialization_sha256
         if session is not None

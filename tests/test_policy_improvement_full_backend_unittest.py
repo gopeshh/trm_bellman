@@ -301,7 +301,9 @@ class _TinyDataset:
         return self._samples[index]
 
 
-def _tiny_ppo_session(run: RegisteredFullRun) -> LearnedSession:
+def _tiny_ppo_session(
+    run: RegisteredFullRun, *, train: bool = True
+) -> LearnedSession:
     torch.manual_seed(17)
     dataset = _TinyDataset()
     env_config = PlanEditEnvConfig(
@@ -362,7 +364,8 @@ def _tiny_ppo_session(run: RegisteredFullRun) -> LearnedSession:
         ),
         device=torch.device("cpu"),
     )
-    trainer.train_step(max_env_steps_to_collect=16)
+    if train:
+        trainer.train_step(max_env_steps_to_collect=16)
     return LearnedSession(
         run=run,
         model=model,
@@ -463,7 +466,7 @@ class FullBackendIdentityTest(unittest.TestCase):
                         "solution": torch.tensor([2, 3, 4, 2], dtype=torch.long),
                     }
                 )
-            return SimpleNamespace(
+            return upi_trm_train.OfflinePuzzleDataset(
                 samples=samples,
                 seq_len=4,
                 vocab_size=5,
@@ -689,7 +692,7 @@ class FullBackendIdentityTest(unittest.TestCase):
         self.assertEqual(opened, ["train", "test"])
 
     def test_synthetic_throughput_calibration_is_mechanics_only(self) -> None:
-        session = _tiny_ppo_session(self.run)
+        session = _tiny_ppo_session(self.run, train=False)
         result = calibrate_training_split_throughput(
             session,
             environment_interactions=16,
@@ -728,6 +731,33 @@ class FullBackendIdentityTest(unittest.TestCase):
         )
         self.assertFalse(result["scientific_selection"])
         self.assertFalse(result["test_data_opened"])
+
+    def test_inverse_cdf_normalizes_float32_probability_roundoff(self) -> None:
+        rounded_probability = float(
+            torch.tensor(1.0 / 21.0, dtype=torch.float32).item()
+        )
+        probabilities = (rounded_probability,) * 21
+        self.assertGreater(abs(math.fsum(probabilities) - 1.0), 1e-8)
+        self.assertEqual(
+            ReadOnlyTheoryBridgeSession._inverse_cdf_action(
+                probabilities,
+                0.999999999,
+            ),
+            20,
+        )
+        self.assertEqual(
+            ReadOnlyTheoryBridgeSession._inverse_cdf_action(
+                (0.0, 0.50000006, 0.50000006),
+                0.0,
+            ),
+            1,
+        )
+        for invalid in ((0.4, 0.4), (-0.1, 1.1), (float("nan"), 1.0)):
+            with (
+                self.subTest(probabilities=invalid),
+                self.assertRaisesRegex(FullBackendError, "does not sum to one"),
+            ):
+                ReadOnlyTheoryBridgeSession._inverse_cdf_action(invalid, 0.5)
 
 
 class FullCheckpointGuardTest(unittest.TestCase):
@@ -868,6 +898,10 @@ class FullCheckpointGuardTest(unittest.TestCase):
             payload["schema_name"], "policy_improvement_full_result_payload_v2"
         )
         self.assertEqual(payload["evaluation_population_id"], "validation_select")
+        self.assertEqual(
+            payload["identities"]["evaluation_ordered_records_sha256"],
+            _digest("evaluation order"),
+        )
 
         legacy_payload = dict(payload)
         del legacy_payload["evaluation_population_id"]
@@ -1053,7 +1087,7 @@ class FullCheckpointGuardTest(unittest.TestCase):
             "launcher_sha256": runtime["launcher_sha256"],
             "roles": [
                 {
-                    "role": "policy-improvement-training",
+                    "role": "policy-improvement-full",
                     "source_git_commit": runtime["source_git_commit"],
                     "runtime_sha256": runtime["runtime_sha256"],
                     "runtime_profile_sha256": runtime["runtime_profile_sha256"],
