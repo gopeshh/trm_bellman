@@ -223,6 +223,7 @@ python_library(
     srcs = ["scripts/policy_improvement_full_runtime.py"],
     base_module = "",
     deps = [
+        ":policy_improvement_populations",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
         ":policy_improvement_sealed_evidence",
@@ -377,6 +378,7 @@ python_library(
     deps = [
         ":policy_improvement_checkpoint_validator",
         ":policy_improvement_evidence",
+        ":policy_improvement_populations",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
         ":policy_improvement_test_open",
@@ -394,6 +396,7 @@ python_library(
         ":policy_improvement_full_backend",
         ":policy_improvement_full_runtime",
         ":policy_improvement_non_smoke_checkpoint",
+        ":policy_improvement_populations",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
         ":policy_improvement_sealed_evidence",
@@ -578,6 +581,7 @@ python_library(
     srcs = ["scripts/policy_improvement_smoke_plan.py"],
     base_module = "",
     deps = [
+        ":policy_improvement_populations",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
     ],
@@ -950,6 +954,7 @@ python_unittest(
         ":policy_improvement_populations",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
+        ":policy_improvement_smoke_plan_lib",
         ":policy_improvement_v2_registry",
         ":policy_improvement_v2_schema",
     ],

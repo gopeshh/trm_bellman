@@ -24,9 +24,8 @@ try:
 except ImportError:  # The owned Buck test supplies NumPy; host fbpython may not.
     np = None
 import scripts.policy_improvement_audit as audit_module
-from policy_improvement_sealed_evidence import (
-    authenticate_sealed_checkpoint_field,
-)
+from phase4_runtime_profile import POLICY_DATASET_BUILDER_PROFILE_PATHS
+from policy_improvement_sealed_evidence import authenticate_sealed_checkpoint_field
 from scripts.policy_improvement_analysis import (
     _contrast_estimates,
     analyze_stage2_confirmatory as _analyze_stage2_confirmatory,
@@ -40,7 +39,6 @@ from scripts.policy_improvement_audit import (
     audit_result_set as _audit_result_set,
     derive_registered_selection,
 )
-from phase4_runtime_profile import POLICY_DATASET_BUILDER_PROFILE_PATHS
 from scripts.policy_improvement_registry import (
     derive_seed,
     generate_registry,
@@ -53,8 +51,8 @@ from scripts.policy_improvement_schema import (
     canonical_json_bytes,
     load_strict_json,
     policy_variants_for_method,
-    primary_policy_variant_for_method,
     PolicyImprovementSchemaError,
+    primary_policy_variant_for_method,
     runtime_authorization_sha256,
     stage3_method_id,
     validate_amendment_history,
@@ -64,6 +62,7 @@ from scripts.policy_improvement_schema import (
     validate_result,
     validate_runtime_authorization,
     validate_screen_selection,
+    validated_result_payload,
 )
 from scripts.policy_improvement_smoke_plan import render_smoke_plan
 from scripts.policy_improvement_statistics import (
@@ -1859,7 +1858,6 @@ class ProtocolAndRegistryTest(unittest.TestCase):
         import gc
 
         import torch
-
         from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
         from rl.config import RLConfig
         from rl.envs.plan_edit_env import PlanEditEnv, PlanEditEnvConfig
@@ -2038,6 +2036,55 @@ class ProtocolAndRegistryTest(unittest.TestCase):
 
 
 class ResultSchemaTest(unittest.TestCase):
+    def test_v2_stage0_payload_has_an_exact_schema(self) -> None:
+        payload = _valid_result()
+        payload["schema_name"] = "policy_improvement_stage0_result_payload_v2"
+        payload["schema_version"] = 1
+        payload["protocol_id"] = "policy-improvement-v2-20260818"
+        payload["evaluation_split"] = "train"
+        payload["evaluation_population_id"] = "stage0_smoke"
+        payload["evaluation_population_binding_sha256"] = "b" * 64
+        envelope = {
+            "schema_name": "policy_improvement_result_v2",
+            "schema_version": 1,
+            "protocol_id": payload["protocol_id"],
+            "protocol_schema_name": "policy_improvement_protocol_v2",
+            "protocol_schema_version": 2,
+            "protocol_sha256": payload["protocol_sha256"],
+            "population_registry_schema_name": "policy_improvement_populations_v2",
+            "population_registry_schema_version": 1,
+            "population_registry_sha256": "c" * 64,
+            "registry_schema_name": "policy_improvement_registry_v2",
+            "registry_schema_version": 1,
+            "registry_sha256": "d" * 64,
+            "registry_row_schema_name": "policy_improvement_registry_row_v2",
+            "registry_row_schema_version": 1,
+            "registry_row_sha256": payload["registry_row_sha256"],
+            "run_id": payload["run_id"],
+            "phase": payload["phase"],
+            "method_id": payload["method_id"],
+            "status": payload["status"],
+            "evaluation_split": "train",
+            "evaluation_population_id": "stage0_smoke",
+            "evaluation_population_binding_sha256": "b" * 64,
+            "evaluation_population_ordered_record_sha256": "e" * 64,
+            "evaluation_population_ordered_input_sha256": "f" * 64,
+            "evaluation_record_count": 8,
+            "validation_data_opened": False,
+            "test_data_opened": False,
+            "scientific_selection": False,
+            "paper_evidence_eligible": False,
+            "payload": payload,
+        }
+        document, checked_payload = validated_result_payload(envelope)
+        self.assertEqual(document, envelope)
+        self.assertEqual(checked_payload, payload)
+
+        hostile = copy.deepcopy(envelope)
+        hostile["payload"]["unregistered"] = True
+        with self.assertRaises(PolicyImprovementSchemaError):
+            validated_result_payload(hostile)
+
     def test_complete_result_is_strict_and_consistent(self) -> None:
         result = _valid_result()
         self.assertEqual(validate_result(result)["status"], "complete")
@@ -2307,6 +2354,28 @@ class ResultAuditTest(unittest.TestCase):
             report["execution_source_git_commit"],
             self.authorization["roles"][2]["source_git_commit"],
         )
+
+    def test_audit_rejects_unreferenced_per_instance_artifact(self) -> None:
+        documents = dict(self.documents)
+        extra = copy.deepcopy(next(iter(documents.values())))
+        extra["evaluation_id"] = "unreferenced-evaluation"
+        extra_sha256 = hashlib.sha256(canonical_json_bytes(extra)).hexdigest()
+        documents[extra_sha256] = extra
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "Per-instance artifact inventory differs",
+        ):
+            audit_result_set(
+                self.protocol,
+                self.registry,
+                self.results,
+                documents,
+                phases=["stage0_smoke"],
+                dataset_root=self.dataset_root,
+                evidence_root=self.evidence_root,
+                runtime_authorization=self.authorization,
+                audit_execution_identity=self.audit_execution,
+            )
 
     def test_audit_stdout_is_exactly_one_canonical_json_document(self) -> None:
         """Adversarial test 8: sealing must not add a second stdout writer."""
@@ -2682,6 +2751,11 @@ class ResultAuditTest(unittest.TestCase):
     def test_failed_cell_is_retained_and_counted(self) -> None:
         results = copy.deepcopy(self.results)
         failed = results[2]
+        failed_per_instance_sha256s = {
+            str(evaluation["per_instance_artifact_sha256"]["value"])
+            for snapshot in failed["evaluation_snapshots"]
+            for evaluation in snapshot["policy_evaluations"]
+        }
         failed["status"] = "failed"
         failed["failure"] = {
             "phase": "evaluation",
@@ -2706,11 +2780,16 @@ class ResultAuditTest(unittest.TestCase):
             snapshot["policy_evaluations"] = []
         shutil.rmtree(self.evidence_root / "runs" / str(failed["run_id"]) / "segments")
         _materialize_failed_attempt(failed, self.evidence_root)
+        documents = {
+            digest: document
+            for digest, document in self.documents.items()
+            if digest not in failed_per_instance_sha256s
+        }
         report = audit_result_set(
             self.protocol,
             self.registry,
             results,
-            self.documents,
+            documents,
             phases=["stage0_smoke"],
             dataset_root=self.dataset_root,
             evidence_root=self.evidence_root,

@@ -54,8 +54,8 @@ from scripts.policy_improvement_schema import (
     canonical_json_bytes,
     load_strict_json,
     policy_variants_for_method,
-    primary_policy_variant_for_method,
     PolicyImprovementSchemaError,
+    primary_policy_variant_for_method,
     RESULT_SCHEMA_VERSION,
     runtime_authorization_sha256,
     SCHEMA_NAME,
@@ -236,7 +236,7 @@ def _absolute_path(value: str, *, name: str, must_exist: bool) -> Path:
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run one authenticated policy_improvement_v1 Stage 0 segment.",
+        description="Run one authenticated policy-improvement Stage 0 segment.",
         allow_abbrev=False,
     )
     parser.add_argument("--policy-improvement-smoke-entrypoint", action="store_true")
@@ -249,7 +249,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument("--dataset-root", required=True)
     parser.add_argument("--train-manifest-sha256", required=True)
-    parser.add_argument("--validation-manifest-sha256", required=True)
+    parser.add_argument("--validation-manifest-sha256")
     parser.add_argument("--evidence-root", required=True)
     parser.add_argument("--source-project-root", required=True)
     arguments = parser.parse_args(list(argv))
@@ -467,6 +467,17 @@ def _load_context(
         )
     protocol = validate_protocol(load_strict_json(protocol_path))
     if (
+        protocol.get("schema_name") == "policy_improvement_protocol_v2"
+        and [
+            authorization.get("schema_name"),
+            authorization.get("schema_version"),
+        ]
+        != protocol["document_schemas"]["runtime_authorization"]
+    ):
+        raise PolicyImprovementSmokeError(
+            "Stage 0 authorization schema differs from protocol v2."
+        )
+    if (
         authorization["protocol_sha256"]
         != hashlib.sha256(canonical_json_bytes(protocol)).hexdigest()
     ):
@@ -482,7 +493,17 @@ def _load_context(
         )
     protocol_sha256 = hashlib.sha256(canonical_json_bytes(protocol)).hexdigest()
     base_configs = load_registered_base_configs(protocol, source_root)
-    registry = generate_registry(protocol, base_configs=base_configs)
+    is_v2 = protocol.get("schema_name") == "policy_improvement_protocol_v2"
+    populations_document: object | None = None
+    if is_v2:
+        from scripts.policy_improvement_populations import load_registered_populations
+
+        populations_document = load_registered_populations(protocol, source_root)
+    registry = generate_registry(
+        protocol,
+        base_configs=base_configs,
+        populations_value=populations_document,
+    )
     registry_sha256 = hashlib.sha256(canonical_json_bytes(registry)).hexdigest()
     if (
         authorization.get("schema_name")
@@ -559,7 +580,6 @@ def _load_context(
             "source_manifest_sha256",
         )
     }
-    is_v2 = protocol.get("schema_name") == "policy_improvement_protocol_v2"
     verified_dataset = verify_dataset(
         dataset_root,
         owner_root=dataset_root.parent,
@@ -581,11 +601,17 @@ def _load_context(
             "Dataset verification omitted ordered-record identities."
         )
     expected_manifest_hashes = {
-        "train": _sha256(arguments.train_manifest_sha256, name="train manifest"),
-        "validation": _sha256(
-            arguments.validation_manifest_sha256, name="validation manifest"
-        ),
+        "train": _sha256(arguments.train_manifest_sha256, name="train manifest")
     }
+    if is_v2:
+        if arguments.validation_manifest_sha256 is not None:
+            raise PolicyImprovementSmokeError(
+                "Protocol v2 Stage 0 must not accept a validation manifest argument."
+            )
+    else:
+        expected_manifest_hashes["validation"] = _sha256(
+            arguments.validation_manifest_sha256, name="validation manifest"
+        )
     registered_manifest_hashes: dict[str, str] = {}
     for split in ("train", "validation", "test"):
         registration = dataset_registration["splits"][split]["manifest_sha256"]
@@ -762,9 +788,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
     )
     stage0_population: Mapping[str, Any] | None = None
     if is_v2:
-        from scripts.policy_improvement_populations import (
-            load_registered_populations,
-        )
+        from scripts.policy_improvement_populations import load_registered_populations
 
         population_document = load_registered_populations(
             context.protocol,
@@ -2509,9 +2533,16 @@ def _registered_result_document(
         "payload": payload,
     }
     validate_result(document)
-    from scripts.policy_improvement_v2_schema import bind_v2_result_to_row
+    from scripts.policy_improvement_populations import load_registered_populations
+    from scripts.policy_improvement_v2_schema import bind_v2_result_to_registration
 
-    bind_v2_result_to_row(document, context.row)
+    bind_v2_result_to_registration(
+        document,
+        context.row,
+        context.protocol,
+        context.registry,
+        load_registered_populations(context.protocol, context.source_root),
+    )
     return document
 
 

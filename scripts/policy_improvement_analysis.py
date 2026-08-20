@@ -20,10 +20,10 @@ from scripts.policy_improvement_audit import (
 )
 from scripts.policy_improvement_registry import load_registered_base_configs
 from scripts.policy_improvement_schema import (
-    PolicyImprovementSchemaError,
     canonical_json_bytes,
     load_strict_json,
     load_strict_json_bytes,
+    PolicyImprovementSchemaError,
     runtime_authorization_sha256,
     validate_amendment_history,
     validate_protocol,
@@ -463,9 +463,18 @@ def analyze_stage2_confirmatory(
     test_open_digest = hashlib.sha256(
         canonical_json_bytes(test_open_record)
     ).hexdigest()
+    is_v2 = protocol.get("schema_name") == "policy_improvement_protocol_v2"
     analysis: dict[str, Any] = {
-        "schema_name": "policy_improvement_registered_analysis_v1",
-        "schema_version": ANALYSIS_SCHEMA_VERSION,
+        "schema_name": (
+            str(protocol["document_schemas"]["analysis"][0])
+            if is_v2
+            else "policy_improvement_registered_analysis_v1"
+        ),
+        "schema_version": (
+            int(protocol["document_schemas"]["analysis"][1])
+            if is_v2
+            else ANALYSIS_SCHEMA_VERSION
+        ),
         "status": "complete",
         "phase": "stage2_confirmatory",
         "snapshot_kind": "interaction_matched",
@@ -513,6 +522,16 @@ def analyze_stage2_confirmatory(
             "policy-improvement-analysis launcher role."
         ),
     }
+    if is_v2:
+        analysis.update(
+            {
+                "protocol_id": protocol["protocol_id"],
+                "protocol_schema_name": protocol["schema_name"],
+                "protocol_schema_version": protocol["schema_version"],
+                "runtime_authorization_schema_name": authorization["schema_name"],
+                "runtime_authorization_schema_version": authorization["schema_version"],
+            }
+        )
     canonical_json_bytes(analysis)
     return analysis
 

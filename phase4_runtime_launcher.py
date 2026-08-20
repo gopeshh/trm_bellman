@@ -860,8 +860,9 @@ def _normalize_child_args(
             "--policy-improvement-row-id",
             "--policy-improvement-smoke-segment",
             "--train-manifest-sha256",
-            "--validation-manifest-sha256",
         }
+        if not policy_protocol_v2:
+            allowed_value_options.add("--validation-manifest-sha256")
         if arguments == ["--help"]:
             return [
                 "--policy-improvement-smoke-entrypoint",

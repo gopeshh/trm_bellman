@@ -19,14 +19,14 @@ from pathlib import Path
 from typing import Any
 
 from scripts.policy_improvement_schema import (
-    METHOD_IDS,
-    REGISTRY_ROW_SCHEMA_VERSION,
-    SCHEMA_NAME,
-    PolicyImprovementSchemaError,
     amendment_history_sha256,
     canonical_json_bytes,
     effective_config_sha256,
     load_strict_json,
+    METHOD_IDS,
+    PolicyImprovementSchemaError,
+    REGISTRY_ROW_SCHEMA_VERSION,
+    SCHEMA_NAME,
     stage3_method_id,
     validate_amendment_history,
     validate_protocol,
@@ -492,6 +492,7 @@ def generate_registry(
     amendment_history: Sequence[object] | None = None,
     *,
     base_configs: Mapping[str, Mapping[str, object]] | None = None,
+    populations_value: object | None = None,
 ) -> dict[str, Any]:
     """Generate the exact registry for one immutable amendment-history prefix."""
 
@@ -499,9 +500,18 @@ def generate_registry(
     if protocol.get("schema_name") == "policy_improvement_protocol_v2":
         from scripts.policy_improvement_v2_registry import generate_v2_registry
 
+        if amendment_history is not None and len(amendment_history) != 0:
+            raise PolicyImprovementSchemaError(
+                "Protocol v2 registry generation does not accept v1 amendment history."
+            )
+        if populations_value is None:
+            raise PolicyImprovementSchemaError(
+                "Protocol v2 registry generation requires its authenticated "
+                "population document."
+            )
         return generate_v2_registry(
             protocol,
-            [] if amendment_history is None else amendment_history,
+            populations_value,
             base_configs=base_configs,
         )
     if base_configs is None:
@@ -545,6 +555,7 @@ def validate_registry_document(
     amendment_history: Sequence[object] | None = None,
     *,
     base_configs: Mapping[str, Mapping[str, object]] | None = None,
+    populations_value: object | None = None,
 ) -> dict[str, Any]:
     """Authenticate the immutable base registry and derive the active prefix.
 
@@ -560,14 +571,21 @@ def validate_registry_document(
     if isinstance(protocol_value, Mapping) and protocol_value.get("schema_name") == (
         "policy_improvement_protocol_v2"
     ):
-        from scripts.policy_improvement_v2_registry import (
-            validate_v2_registry_document,
-        )
+        from scripts.policy_improvement_v2_registry import validate_v2_registry_document
 
+        if amendment_history is not None and len(amendment_history) != 0:
+            raise PolicyImprovementSchemaError(
+                "Protocol v2 registry validation does not accept v1 amendment history."
+            )
+        if populations_value is None:
+            raise PolicyImprovementSchemaError(
+                "Protocol v2 registry validation requires its authenticated "
+                "population document."
+            )
         return validate_v2_registry_document(
             value,
             protocol_value,
-            [] if amendment_history is None else amendment_history,
+            populations_value,
             base_configs=base_configs,
         )
     base = generate_registry(protocol_value, [], base_configs=base_configs)

@@ -15,7 +15,6 @@ from typing import Any, Iterator
 
 import numpy as np
 import torch
-
 from dataset.build_policy_improvement_4x4 import verify_dataset
 from policy_improvement_sealed_evidence import (
     authenticate_sealed_checkpoint_field,
@@ -27,9 +26,9 @@ from policy_improvement_smoke_checkpoint import (
     validate_ppo_smoke_checkpoint,
 )
 from policy_improvement_smoke_runtime import (
+    build_stage0_validation_session,
     PolicyImprovementSmokeError,
     SmokeContext,
-    build_stage0_validation_session,
     stage0_model_state_identity,
     validate_policy_improvement_smoke_identity,
 )
@@ -39,16 +38,13 @@ from scripts.policy_improvement_registry import (
     load_registered_base_configs,
 )
 from scripts.policy_improvement_schema import (
-    PolicyImprovementSchemaError,
     canonical_json_bytes,
+    PolicyImprovementSchemaError,
     validate_protocol,
     validate_registry_row,
     validate_runtime_authorization,
 )
-from utils.run_identity import (
-    canonical_json_sha256,
-    discover_clean_git_source,
-)
+from utils.run_identity import canonical_json_sha256, discover_clean_git_source
 
 
 _REQUEST_FIELDS = {
@@ -412,9 +408,15 @@ def _build_context(
             "Stage-0 originating runtime is not authorized for this producer."
         )
 
+    populations_document: object | None = None
+    if protocol.get("schema_name") == "policy_improvement_protocol_v2":
+        from scripts.policy_improvement_populations import load_registered_populations
+
+        populations_document = load_registered_populations(protocol, project_root)
     registry = generate_registry(
         protocol,
         base_configs=load_registered_base_configs(protocol, project_root),
+        populations_value=populations_document,
     )
     matching_rows = [
         item for item in registry["rows"] if item["run_id"] == row["run_id"]

@@ -24,26 +24,26 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from scripts.policy_improvement_evidence import (
+    authenticate_complete_generation,
+    authenticate_failed_attempt,
+)
 from scripts.policy_improvement_registry import (
     generate_registry,
     load_registered_base_configs,
     registry_sha256,
     validate_registry_document,
 )
-from scripts.policy_improvement_evidence import (
-    authenticate_complete_generation,
-    authenticate_failed_attempt,
-)
 from scripts.policy_improvement_schema import (
-    PHASE_CONTRACTS,
-    PHASE_AMENDMENT_PREFIX_LENGTH,
-    SCREEN_SELECTION_METHOD_ORDER,
-    PolicyImprovementSchemaError,
     amendment_history_sha256,
     canonical_json_bytes,
     load_strict_json,
     load_strict_json_bytes,
+    PHASE_AMENDMENT_PREFIX_LENGTH,
+    PHASE_CONTRACTS,
+    PolicyImprovementSchemaError,
     runtime_authorization_sha256,
+    SCREEN_SELECTION_METHOD_ORDER,
     validate_amendment_history,
     validate_protocol,
     validate_result,
@@ -52,9 +52,9 @@ from scripts.policy_improvement_schema import (
 )
 from scripts.policy_improvement_test_open import authenticate_test_open
 from utils.source_identity import (
+    behavior_source_relative_paths_from_inventory,
     SOURCE_MANIFEST_RELATIVE_PATH,
     SourceIdentityError,
-    behavior_source_relative_paths_from_inventory,
     validate_producer_source_manifest,
 )
 
@@ -1425,6 +1425,7 @@ def _audit_evaluation(
     registered_input_sha256s: Sequence[str],
     registered_puzzle_ids: Sequence[str],
     registered_original_indices: Sequence[int] | None = None,
+    consumed_per_instance_sha256s: set[str],
 ) -> tuple[str, ...]:
     digest = str(
         _available_value(
@@ -1434,6 +1435,7 @@ def _audit_evaluation(
     )
     if digest not in per_instance_documents:
         raise PolicyImprovementSchemaError(f"Missing per-instance artifact {digest}.")
+    consumed_per_instance_sha256s.add(digest)
     document = validate_per_instance_document(per_instance_documents[digest])
     if hashlib.sha256(canonical_json_bytes(document)).hexdigest() != digest:
         raise PolicyImprovementSchemaError(
@@ -1827,6 +1829,17 @@ def audit_result_set(
     protocol = validate_protocol(protocol_value)
     history = validate_amendment_history(amendment_history, protocol=protocol)
     authorization = validate_runtime_authorization(runtime_authorization)
+    if (
+        protocol.get("schema_name") == "policy_improvement_protocol_v2"
+        and [
+            authorization.get("schema_name"),
+            authorization.get("schema_version"),
+        ]
+        != protocol["document_schemas"]["runtime_authorization"]
+    ):
+        raise PolicyImprovementSchemaError(
+            "Runtime authorization schema differs from the protocol-v2 registration."
+        )
     protocol_digest = hashlib.sha256(canonical_json_bytes(protocol)).hexdigest()
     if authorization["protocol_sha256"] != protocol_digest:
         raise PolicyImprovementSchemaError(
@@ -1864,11 +1877,22 @@ def audit_result_set(
         "policy-improvement-analysis",
     }:
         raise PolicyImprovementSchemaError("Unsupported evidence-audit execution role.")
+    registered_population_document: Mapping[str, Any] | None = None
+    registered_populations: Mapping[str, Any] | None = None
+    if protocol.get("schema_name") == "policy_improvement_protocol_v2":
+        from scripts.policy_improvement_populations import load_registered_populations
+
+        registered_population_document = load_registered_populations(
+            protocol,
+            project_root,
+        )
+        registered_populations = registered_population_document["populations"]
     registry = validate_registry_document(
         registry_value,
         protocol,
         history,
         base_configs=base_configs,
+        populations_value=registered_population_document,
     )
     if (
         not phases
@@ -1919,17 +1943,6 @@ def audit_result_set(
         if _dataset_bindings is None
         else _dataset_bindings
     )
-    registered_populations: Mapping[str, Any] | None = None
-    if protocol.get("schema_name") == "policy_improvement_protocol_v2":
-        from scripts.policy_improvement_populations import (
-            load_registered_populations,
-        )
-
-        registered_populations = load_registered_populations(
-            protocol,
-            project_root,
-        )["populations"]
-
     if _verify_amendment_evidence and len(history) > 1:
         evidence_amendments = (
             (1, "stage0_smoke", 0),
@@ -1967,6 +1980,7 @@ def audit_result_set(
                 protocol,
                 prior_history,
                 base_configs=base_configs,
+                populations_value=registered_population_document,
             )
             prior_report = audit_result_set(
                 protocol,
@@ -2092,12 +2106,25 @@ def audit_result_set(
     generation_manifest_sha256s: list[str] = []
     historical_failed_attempt_manifest_sha256s: list[str] = []
     semantic_validation_sha256s: list[str] = []
+    consumed_per_instance_sha256s: set[str] = set()
     for run_id, result_document in by_run_id.items():
         row = rows_by_id[run_id]
         if result_document.get("schema_name") == "policy_improvement_result_v2":
-            from scripts.policy_improvement_v2_schema import bind_v2_result_to_row
+            from scripts.policy_improvement_v2_schema import (
+                bind_v2_result_to_registration,
+            )
 
-            bind_v2_result_to_row(result_document, row)
+            if registered_population_document is None:
+                raise PolicyImprovementSchemaError(
+                    "Protocol v2 result lacks its authenticated population document."
+                )
+            bind_v2_result_to_registration(
+                result_document,
+                row,
+                protocol,
+                registry,
+                registered_population_document,
+            )
         _, result = validated_result_payload(result_document)
         row_digest = hashlib.sha256(canonical_json_bytes(row)).hexdigest()
         exact_bindings = {
@@ -2520,6 +2547,7 @@ def audit_result_set(
                     registered_input_sha256s=registered_inputs,
                     registered_puzzle_ids=registered_puzzle_ids,
                     registered_original_indices=registered_original_indices,
+                    consumed_per_instance_sha256s=consumed_per_instance_sha256s,
                 )
                 if evaluation["policy_variant"] == primary_variant:
                     key = (int(result["seed"]), str(snapshot["snapshot_kind"]))
@@ -2528,9 +2556,25 @@ def audit_result_set(
                         raise PolicyImprovementSchemaError(
                             "Paired methods use different puzzle identities or order."
                         )
+    supplied_per_instance_sha256s = set(per_instance_documents)
+    if consumed_per_instance_sha256s != supplied_per_instance_sha256s:
+        raise PolicyImprovementSchemaError(
+            "Per-instance artifact inventory differs: "
+            f"unreferenced={sorted(supplied_per_instance_sha256s - consumed_per_instance_sha256s)}, "
+            f"missing={sorted(consumed_per_instance_sha256s - supplied_per_instance_sha256s)}."
+        )
+    is_v2_report = registered_population_document is not None
     report = {
-        "schema_name": "policy_improvement_audit_v5",
-        "schema_version": AUDIT_SCHEMA_VERSION,
+        "schema_name": (
+            str(protocol["document_schemas"]["audit"][0])
+            if is_v2_report
+            else "policy_improvement_audit_v5"
+        ),
+        "schema_version": (
+            int(protocol["document_schemas"]["audit"][1])
+            if is_v2_report
+            else AUDIT_SCHEMA_VERSION
+        ),
         "protocol_sha256": protocol_digest,
         "registry_sha256": registry_digest,
         "amendment_history_sha256": history_digest,
@@ -2566,6 +2610,52 @@ def audit_result_set(
             canonical_json_bytes(sorted(semantic_validation_sha256s))
         ).hexdigest(),
     }
+    if is_v2_report:
+        assert registered_population_document is not None
+        population_ids = sorted(
+            {str(row["evaluation_population"]) for row in expected_rows}
+        )
+        populations = registered_population_document["populations"]
+        report.update(
+            {
+                "protocol_id": protocol["protocol_id"],
+                "protocol_schema_name": protocol["schema_name"],
+                "protocol_schema_version": protocol["schema_version"],
+                "registry_schema_name": registry["schema_name"],
+                "registry_schema_version": registry["registry_schema_version"],
+                "population_registry_schema_name": registered_population_document[
+                    "schema_name"
+                ],
+                "population_registry_schema_version": registered_population_document[
+                    "schema_version"
+                ],
+                "population_registry_sha256": hashlib.sha256(
+                    canonical_json_bytes(registered_population_document)
+                ).hexdigest(),
+                "runtime_authorization_schema_name": authorization["schema_name"],
+                "runtime_authorization_schema_version": authorization["schema_version"],
+                "evaluation_populations": [
+                    {
+                        "population_id": population_id,
+                        "split": populations[population_id]["split"],
+                        "count": populations[population_id]["count"],
+                        "binding_sha256": populations[population_id]["binding_sha256"],
+                        "ordered_record_sha256": populations[population_id][
+                            "ordered_record_sha256"
+                        ],
+                        "ordered_input_sha256": populations[population_id][
+                            "ordered_input_sha256"
+                        ],
+                    }
+                    for population_id in population_ids
+                ],
+                "validation_data_opened": any(
+                    str(row["evaluation_split"]) == "validation"
+                    for row in expected_rows
+                ),
+                "test_data_opened": uses_test,
+            }
+        )
     canonical_json_bytes(report)
     return report
 

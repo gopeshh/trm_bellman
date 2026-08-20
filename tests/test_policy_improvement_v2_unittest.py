@@ -25,9 +25,11 @@ from scripts.policy_improvement_registry import (
 )
 from scripts.policy_improvement_schema import (
     PolicyImprovementSchemaError,
+    runtime_authorization_sha256,
     validate_protocol,
     validate_runtime_authorization,
 )
+from scripts.policy_improvement_smoke_plan import render_smoke_plan
 from scripts.policy_improvement_v2_registry import (
     EXPECTED_PHASE_COUNTS,
     generate_v2_registry,
@@ -35,6 +37,7 @@ from scripts.policy_improvement_v2_registry import (
     validate_v2_registry_document,
 )
 from scripts.policy_improvement_v2_schema import (
+    bind_v2_result_to_registration,
     bind_v2_result_to_row,
     canonical_json_bytes,
     IMMUTABLE_DATASET_V1,
@@ -551,6 +554,13 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
         base, row = self._stage0_result()
         validated = validate_v2_result(copy.deepcopy(base))
         bind_v2_result_to_row(validated, row)
+        bind_v2_result_to_registration(
+            validated,
+            row,
+            self.protocol,
+            self.registry,
+            self.populations,
+        )
 
         for field, value in (
             ("run_id", "s0-not-this-run"),
@@ -574,6 +584,29 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
         mixed_population["evaluation_population"] = "validation_select"
         with self.assertRaises(PolicyImprovementV2SchemaError):
             bind_v2_result_to_row(validated, mixed_population)
+
+        for field, value in (
+            ("protocol_sha256", "0" * 64),
+            ("population_registry_sha256", "1" * 64),
+            ("registry_sha256", "2" * 64),
+            ("registry_row_sha256", "3" * 64),
+            ("evaluation_population_binding_sha256", "4" * 64),
+            ("evaluation_population_ordered_record_sha256", "5" * 64),
+            ("evaluation_population_ordered_input_sha256", "6" * 64),
+            ("evaluation_record_count", 7),
+        ):
+            with self.subTest(registration_field=field):
+                hostile = copy.deepcopy(validated)
+                hostile[field] = value
+                validate_v2_result(hostile)
+                with self.assertRaises(PolicyImprovementV2SchemaError):
+                    bind_v2_result_to_registration(
+                        hostile,
+                        row,
+                        self.protocol,
+                        self.registry,
+                        self.populations,
+                    )
 
     def test_runtime_authorization_v3_binds_six_distinct_roles(self) -> None:
         amendment = load_strict_json(THEORY_AMENDMENT)
@@ -641,6 +674,105 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
         )
         with self.assertRaises(PolicyImprovementSchemaError):
             validate_runtime_authorization(swapped)
+
+    def test_v2_smoke_plan_is_train_only(self) -> None:
+        amendment = load_strict_json(THEORY_AMENDMENT)
+        role_names = (
+            "policy-improvement-training",
+            "policy-improvement-evaluation",
+            "policy-improvement-audit",
+            "policy-improvement-analysis",
+            "policy-improvement-full",
+            "policy-improvement-theory-bridge",
+        )
+        authorization = {
+            "schema_name": "policy_improvement_runtime_authorization_v3",
+            "schema_version": 3,
+            "authorization_id": "policy-improvement-v2-stage0-plan",
+            "created_at_utc": "2026-08-19T12:00:00Z",
+            "protocol_sha256": sha256_json(self.protocol),
+            "protocol": {
+                "schema_name": self.protocol["schema_name"],
+                "schema_version": self.protocol["schema_version"],
+                "protocol_id": self.protocol["protocol_id"],
+                "sha256": sha256_json(self.protocol),
+            },
+            "registry": {
+                "schema_name": self.registry["schema_name"],
+                "schema_version": self.registry["registry_schema_version"],
+                "sha256": sha256_json(self.registry),
+            },
+            "amendments": [
+                {
+                    "schema_name": amendment["schema_name"],
+                    "schema_version": amendment["schema_version"],
+                    "amendment_id": amendment["amendment_id"],
+                    "sha256": sha256_json(amendment),
+                }
+            ],
+            "producer_git_commit": "a" * 40,
+            "producer_source_manifest_sha256": "b" * 64,
+            "launcher_sha256": "c" * 64,
+            "roles": [
+                {
+                    "role": role,
+                    "source_git_commit": "a" * 40,
+                    "runtime_sha256": (
+                        "1" * 64 if index < 2 else f"{index + 1:x}" * 64
+                    ),
+                    "runtime_profile_sha256": (
+                        "b" * 64 if index < 2 else f"{index + 7:x}" * 64
+                    ),
+                    "selected_source_manifest_sha256": (
+                        "b" * 64 if index < 2 else f"{index + 7:x}" * 64
+                    ),
+                }
+                for index, role in enumerate(role_names)
+            ],
+        }
+        train_manifest = self.protocol["dataset"]["splits"]["train"]["manifest_sha256"][
+            "value"
+        ]
+        keyword_arguments = {
+            "protocol_path": str(PROTOCOL),
+            "launcher_path": "/artifacts/phase4_runtime_launcher",
+            "training_runtime_path": "/artifacts/upi_trm_train.par",
+            "training_runtime_sha256": "1" * 64,
+            "source_project_root": str(ROOT),
+            "expected_source_git_commit": "a" * 40,
+            "dataset_root": "/evidence/data/policy-improvement-v1-owner/policy-improvement-hard-4x4-v1",
+            "train_manifest_sha256": train_manifest,
+            "validation_manifest_sha256": None,
+            "evidence_root": "/evidence",
+            "runtime_authorization_value": authorization,
+            "runtime_authorization_path": "/evidence/runtime-authorization-v3.json",
+            "expected_runtime_authorization_sha256": runtime_authorization_sha256(
+                authorization
+            ),
+        }
+        plan = render_smoke_plan(self.protocol, **keyword_arguments)
+        self.assertEqual(plan["schema_name"], "policy_improvement_smoke_plan_v2")
+        self.assertEqual(len(plan["rows"]), 4)
+        for row in plan["rows"]:
+            self.assertEqual(row["evaluation_split"], "train")
+            self.assertEqual(row["evaluation_population_id"], "stage0_smoke")
+            for command in row["commands"].values():
+                self.assertNotIn("--validation-manifest-sha256", command)
+                self.assertNotIn("--test-manifest-sha256", command)
+
+        with self.assertRaisesRegex(
+            PolicyImprovementSchemaError,
+            "must not accept a validation manifest",
+        ):
+            render_smoke_plan(
+                self.protocol,
+                **{
+                    **keyword_arguments,
+                    "validation_manifest_sha256": self.protocol["dataset"]["splits"][
+                        "validation"
+                    ]["manifest_sha256"]["value"],
+                },
+            )
 
     def test_population_score_is_namespace_bound(self) -> None:
         record = self.populations["populations"]["stage0_smoke"]["record_sha256s"][0]

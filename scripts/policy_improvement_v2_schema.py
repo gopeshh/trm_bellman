@@ -359,7 +359,7 @@ def validate_v2_protocol(value: object) -> dict[str, Any]:
         "registry_row": [REGISTRY_ROW_SCHEMA_NAME, REGISTRY_ROW_SCHEMA_VERSION],
         "result": [RESULT_SCHEMA_NAME, RESULT_SCHEMA_VERSION],
         "theory_amendment": ["policy_improvement_theory_bridge_amendment_v2", 1],
-        "runtime_authorization": ["policy_improvement_runtime_authorization_v2", 1],
+        "runtime_authorization": ["policy_improvement_runtime_authorization_v3", 3],
         "launcher_request": ["policy_improvement_launcher_request_v2", 1],
         "audit": ["policy_improvement_audit_v2", 1],
         "analysis": ["policy_improvement_registered_analysis_v2", 1],
@@ -1172,6 +1172,58 @@ def bind_v2_result_to_row(
         raise PolicyImprovementV2SchemaError(
             "Result population differs from its registered row."
         )
+
+
+def bind_v2_result_to_registration(
+    result: Mapping[str, Any],
+    row: Mapping[str, Any],
+    protocol: Mapping[str, Any],
+    registry: Mapping[str, Any],
+    population_document: Mapping[str, Any],
+) -> None:
+    """Bind every v2 envelope identity to authenticated registration bytes."""
+
+    bind_v2_result_to_row(result, row)
+    populations = population_document.get("populations")
+    population_id = result["evaluation_population_id"]
+    if not isinstance(populations, Mapping) or population_id not in populations:
+        raise PolicyImprovementV2SchemaError(
+            "Result population is absent from its authenticated population document."
+        )
+    population = _mapping(
+        populations[population_id],
+        path=f"populations.{population_id}",
+    )
+    expected = {
+        "protocol_id": protocol["protocol_id"],
+        "protocol_schema_name": protocol["schema_name"],
+        "protocol_schema_version": protocol["schema_version"],
+        "protocol_sha256": sha256_json(protocol),
+        "population_registry_schema_name": population_document["schema_name"],
+        "population_registry_schema_version": population_document["schema_version"],
+        "population_registry_sha256": sha256_json(population_document),
+        "registry_schema_name": registry["schema_name"],
+        "registry_schema_version": registry["registry_schema_version"],
+        "registry_sha256": sha256_json(registry),
+        "registry_row_schema_name": row["schema_name"],
+        "registry_row_schema_version": row["schema_version"],
+        "registry_row_sha256": sha256_json(row),
+        "evaluation_split": population["split"],
+        "evaluation_population_id": population["population_id"],
+        "evaluation_population_binding_sha256": population["binding_sha256"],
+        "evaluation_population_ordered_record_sha256": population[
+            "ordered_record_sha256"
+        ],
+        "evaluation_population_ordered_input_sha256": population[
+            "ordered_input_sha256"
+        ],
+        "evaluation_record_count": population["count"],
+    }
+    for field, expected_value in expected.items():
+        if result[field] != expected_value:
+            raise PolicyImprovementV2SchemaError(
+                f"Result {field} differs from its authenticated registration."
+            )
 
 
 def validate_checkpoint_schedule(values: object) -> list[int]:

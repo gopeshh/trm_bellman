@@ -59,7 +59,7 @@ def render_smoke_plan(
     expected_source_git_commit: str,
     dataset_root: str,
     train_manifest_sha256: str,
-    validation_manifest_sha256: str,
+    validation_manifest_sha256: str | None,
     evidence_root: str,
     runtime_authorization_value: object,
     runtime_authorization_path: str,
@@ -68,13 +68,20 @@ def render_smoke_plan(
     """Build four two-segment command plans without spawning a process."""
 
     protocol = validate_protocol(protocol_value)
+    is_v2 = protocol.get("schema_name") == "policy_improvement_protocol_v2"
     protocol_file = _absolute_path(protocol_path, name="protocol_path")
     launcher = _absolute_path(launcher_path, name="launcher_path")
     runtime = _absolute_path(training_runtime_path, name="training_runtime_path")
     source_root = _absolute_path(source_project_root, name="source_project_root")
+    populations_document: object | None = None
+    if is_v2:
+        from scripts.policy_improvement_populations import load_registered_populations
+
+        populations_document = load_registered_populations(protocol, source_root)
     registry = generate_registry(
         protocol,
         base_configs=load_registered_base_configs(protocol, source_root),
+        populations_value=populations_document,
     )
     dataset = _absolute_path(dataset_root, name="dataset_root")
     evidence = _absolute_path(evidence_root, name="evidence_root")
@@ -82,6 +89,17 @@ def render_smoke_plan(
         runtime_authorization_path, name="runtime_authorization_path"
     )
     authorization = validate_runtime_authorization(runtime_authorization_value)
+    if (
+        is_v2
+        and [
+            authorization.get("schema_name"),
+            authorization.get("schema_version"),
+        ]
+        != protocol["document_schemas"]["runtime_authorization"]
+    ):
+        raise PolicyImprovementSchemaError(
+            "Runtime authorization schema differs from protocol v2."
+        )
     authorization_digest = _sha256(
         expected_runtime_authorization_sha256,
         name="expected_runtime_authorization_sha256",
@@ -92,9 +110,20 @@ def render_smoke_plan(
         )
     runtime_digest = _sha256(training_runtime_sha256, name="training_runtime_sha256")
     train_digest = _sha256(train_manifest_sha256, name="train_manifest_sha256")
-    validation_digest = _sha256(
-        validation_manifest_sha256, name="validation_manifest_sha256"
-    )
+    if is_v2:
+        if validation_manifest_sha256 is not None:
+            raise PolicyImprovementSchemaError(
+                "Protocol v2 Stage 0 must not accept a validation manifest argument."
+            )
+        validation_digest = None
+    else:
+        if validation_manifest_sha256 is None:
+            raise PolicyImprovementSchemaError(
+                "Protocol v1 Stage 0 requires the validation manifest digest."
+            )
+        validation_digest = _sha256(
+            validation_manifest_sha256, name="validation_manifest_sha256"
+        )
     if _GIT_COMMIT.fullmatch(expected_source_git_commit) is None:
         raise PolicyImprovementSchemaError(
             "expected_source_git_commit must be 40 lowercase hexadecimal characters."
@@ -135,10 +164,10 @@ def render_smoke_plan(
         raise PolicyImprovementSchemaError(
             "The smoke renderer supports only the registered 16/32 split."
         )
-    for split, supplied in (
-        ("train", train_digest),
-        ("validation", validation_digest),
-    ):
+    supplied_manifests = [("train", train_digest)]
+    if validation_digest is not None:
+        supplied_manifests.append(("validation", validation_digest))
+    for split, supplied in supplied_manifests:
         registration = protocol["dataset"]["splits"][split]["manifest_sha256"]
         if registration != {"status": "available", "value": supplied}:
             raise PolicyImprovementSchemaError(
@@ -166,11 +195,11 @@ def render_smoke_plan(
             str(dataset),
             "--train-manifest-sha256",
             train_digest,
-            "--validation-manifest-sha256",
-            validation_digest,
             "--evidence-root",
             str(evidence),
         ]
+        if validation_digest is not None:
+            common_child.extend(["--validation-manifest-sha256", validation_digest])
         launcher_prefix = [
             str(launcher),
             "--purpose",
@@ -206,7 +235,12 @@ def render_smoke_plan(
                 "run_id": run_id,
                 "method_id": method_id,
                 "seed": row["seed"],
-                "evaluation_split": "validation",
+                "evaluation_split": row["evaluation_split"],
+                **(
+                    {"evaluation_population_id": row["evaluation_population"]}
+                    if is_v2
+                    else {}
+                ),
                 "executable": True,
                 "prepare_generation": "env_000000016",
                 "resume_generation": "env_000000032",
@@ -214,7 +248,11 @@ def render_smoke_plan(
             }
         )
     document: dict[str, Any] = {
-        "schema_name": "policy_improvement_smoke_plan_v1",
+        "schema_name": (
+            "policy_improvement_smoke_plan_v2"
+            if is_v2
+            else "policy_improvement_smoke_plan_v1"
+        ),
         "schema_version": PLAN_SCHEMA_VERSION,
         "protocol_id": protocol["protocol_id"],
         "protocol_sha256": hashlib.sha256(canonical_json_bytes(protocol)).hexdigest(),
@@ -237,7 +275,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--expected-source-git-commit", required=True)
     parser.add_argument("--dataset-root", required=True)
     parser.add_argument("--train-manifest-sha256", required=True)
-    parser.add_argument("--validation-manifest-sha256", required=True)
+    parser.add_argument("--validation-manifest-sha256")
     parser.add_argument("--evidence-root", required=True)
     parser.add_argument("--runtime-authorization", required=True)
     parser.add_argument("--expected-runtime-authorization-sha256", required=True)

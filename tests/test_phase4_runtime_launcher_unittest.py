@@ -207,6 +207,76 @@ def _policy_authorization_v2() -> dict[str, object]:
     }
 
 
+def _policy_authorization_v3(root: Path) -> dict[str, object]:
+    def document(relative_path: str) -> tuple[dict[str, object], str]:
+        payload = (root / relative_path).read_bytes()
+        return (
+            json.loads(payload),
+            hashlib.sha256(
+                json.dumps(
+                    json.loads(payload),
+                    allow_nan=False,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("ascii")
+            ).hexdigest(),
+        )
+
+    protocol, protocol_sha256 = document("configs/policy_improvement_v2/protocol.json")
+    registry, registry_sha256 = document("configs/policy_improvement_v2/registry.json")
+    amendment, amendment_sha256 = document(
+        "configs/policy_improvement_v2/amendments/theory_bridge_v2.json"
+    )
+    role_values = {
+        "policy-improvement-training": ("d" * 64, "c" * 64),
+        "policy-improvement-evaluation": ("d" * 64, "c" * 64),
+        "policy-improvement-audit": ("3" * 64, "7" * 64),
+        "policy-improvement-analysis": ("4" * 64, "8" * 64),
+        "policy-improvement-full": ("5" * 64, "b" * 64),
+        "policy-improvement-theory-bridge": ("6" * 64, "9" * 64),
+    }
+    return {
+        "schema_name": "policy_improvement_runtime_authorization_v3",
+        "schema_version": 3,
+        "authorization_id": "strict-launcher-test-v3",
+        "created_at_utc": "2026-08-19T12:00:00Z",
+        "protocol_sha256": protocol_sha256,
+        "protocol": {
+            "schema_name": protocol["schema_name"],
+            "schema_version": protocol["schema_version"],
+            "protocol_id": protocol["protocol_id"],
+            "sha256": protocol_sha256,
+        },
+        "registry": {
+            "schema_name": registry["schema_name"],
+            "schema_version": registry["registry_schema_version"],
+            "sha256": registry_sha256,
+        },
+        "amendments": [
+            {
+                "schema_name": amendment["schema_name"],
+                "schema_version": amendment["schema_version"],
+                "amendment_id": amendment["amendment_id"],
+                "sha256": amendment_sha256,
+            }
+        ],
+        "producer_git_commit": "a" * 40,
+        "producer_source_manifest_sha256": "c" * 64,
+        "launcher_sha256": "e" * 64,
+        "roles": [
+            {
+                "role": role,
+                "source_git_commit": "a" * 40,
+                "runtime_sha256": runtime_sha256,
+                "runtime_profile_sha256": profile_sha256,
+                "selected_source_manifest_sha256": profile_sha256,
+            }
+            for role, (runtime_sha256, profile_sha256) in role_values.items()
+        ],
+    }
+
+
 class Phase4RuntimeLauncherTest(unittest.TestCase):
     def test_policy_smoke_authorization_is_strict_and_stable(self) -> None:
         authorization = {
@@ -433,6 +503,112 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                     protocol_sha256="1" * 64,
                 )
 
+    def test_v3_authorization_binds_exact_registered_documents_and_roles(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        authorization = _policy_authorization_v3(root)
+
+        def write_authorization(directory: Path, value: object) -> tuple[Path, str]:
+            payload = json.dumps(
+                value,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("ascii")
+            path = directory / "authorization-v3.json"
+            path.write_bytes(payload)
+            return path, hashlib.sha256(payload).hexdigest()
+
+        with tempfile.TemporaryDirectory() as directory_name:
+            directory = Path(directory_name)
+            path, digest = write_authorization(directory, authorization)
+            canonical, profile, selected = _load_policy_runtime_authorization(
+                str(path),
+                digest,
+                runtime_sha256="d" * 64,
+                source_git_commit="a" * 40,
+                source_manifest_sha256="c" * 64,
+                launcher_sha256="e" * 64,
+                protocol_sha256=str(authorization["protocol_sha256"]),
+                policy_project_root=str(root),
+            )
+            self.assertEqual(json.loads(canonical), authorization)
+            self.assertEqual(profile, "c" * 64)
+            self.assertEqual(selected, "c" * 64)
+            self.assertEqual(
+                json.loads(
+                    _load_policy_consumer_runtime_authorization(
+                        str(path),
+                        digest,
+                        purpose=POLICY_IMPROVEMENT_FULL_PURPOSE,
+                        runtime_sha256="5" * 64,
+                        source_git_commit="a" * 40,
+                        source_manifest_sha256="b" * 64,
+                        launcher_sha256="e" * 64,
+                        producer_git_commit="a" * 40,
+                        producer_source_manifest_sha256="c" * 64,
+                        protocol_sha256=str(authorization["protocol_sha256"]),
+                        policy_project_root=str(root),
+                    )
+                ),
+                authorization,
+            )
+
+            for label, mutate in (
+                (
+                    "protocol",
+                    lambda value: value["protocol"].__setitem__("sha256", "0" * 64),
+                ),
+                (
+                    "registry",
+                    lambda value: value["registry"].__setitem__("sha256", "1" * 64),
+                ),
+                (
+                    "amendment",
+                    lambda value: value["amendments"][0].__setitem__(
+                        "sha256", "2" * 64
+                    ),
+                ),
+            ):
+                with self.subTest(label=label):
+                    hostile = copy.deepcopy(authorization)
+                    mutate(hostile)
+                    hostile_path, hostile_digest = write_authorization(
+                        directory, hostile
+                    )
+                    with self.assertRaisesRegex(
+                        ConfirmatoryRuntimeError,
+                        "does not bind the exact v2",
+                    ):
+                        _load_policy_runtime_authorization(
+                            str(hostile_path),
+                            hostile_digest,
+                            runtime_sha256="d" * 64,
+                            source_git_commit="a" * 40,
+                            source_manifest_sha256="c" * 64,
+                            launcher_sha256="e" * 64,
+                            protocol_sha256=str(authorization["protocol_sha256"]),
+                            policy_project_root=str(root),
+                        )
+
+            hostile_role = copy.deepcopy(authorization)
+            hostile_role["roles"][0]["runtime_sha256"] = "0" * 64
+            hostile_path, hostile_digest = write_authorization(directory, hostile_role)
+            with self.assertRaisesRegex(
+                ConfirmatoryRuntimeError,
+                "does not authorize this Stage 0",
+            ):
+                _load_policy_runtime_authorization(
+                    str(hostile_path),
+                    hostile_digest,
+                    runtime_sha256="d" * 64,
+                    source_git_commit="a" * 40,
+                    source_manifest_sha256="c" * 64,
+                    launcher_sha256="e" * 64,
+                    protocol_sha256=str(authorization["protocol_sha256"]),
+                    policy_project_root=str(root),
+                )
+
     def test_policy_protocol_digest_is_canonical_and_source_bound(self) -> None:
         protocol = {"protocol_id": "launcher-test", "schema_version": 1}
         with tempfile.TemporaryDirectory() as directory:
@@ -638,6 +814,37 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 "--help",
             ],
         )
+
+    def test_policy_v2_smoke_launcher_accepts_only_train_manifest(self) -> None:
+        arguments = [
+            "--policy-improvement-protocol",
+            "/repo/configs/policy_improvement_v2/protocol.json",
+            "--policy-improvement-row-id",
+            "s0-v2-fixed-base-exact-persistent",
+            "--policy-improvement-smoke-segment",
+            "prepare",
+            "--dataset-root",
+            "/data/frozen",
+            "--train-manifest-sha256",
+            "a" * 64,
+            "--evidence-root",
+            "/evidence",
+        ]
+        normalized = _normalize_child_args(
+            POLICY_SMOKE_PURPOSE,
+            "/repo",
+            arguments,
+            policy_protocol_v2=True,
+        )
+        self.assertNotIn("--validation-manifest-sha256", normalized)
+
+        with self.assertRaises(ConfirmatoryRuntimeError):
+            _normalize_child_args(
+                POLICY_SMOKE_PURPOSE,
+                "/repo",
+                [*arguments, "--validation-manifest-sha256", "b" * 64],
+                policy_protocol_v2=True,
+            )
 
     def test_policy_consumers_own_runtime_and_source_identity_flags(self) -> None:
         for purpose in (

@@ -32,8 +32,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from policy_improvement_sealed_evidence import (
-    SealedCheckpointError,
     seal_authenticated_checkpoint,
+    SealedCheckpointError,
 )
 from scripts.policy_improvement_registry import (
     generate_registry,
@@ -42,15 +42,15 @@ from scripts.policy_improvement_registry import (
     validate_registry_document,
 )
 from scripts.policy_improvement_schema import (
-    PHASE_AMENDMENT_PREFIX_LENGTH,
-    PolicyImprovementSchemaError,
     amendment_history_sha256,
     canonical_json_bytes,
+    PHASE_AMENDMENT_PREFIX_LENGTH,
+    PolicyImprovementSchemaError,
     runtime_authorization_sha256,
-    validate_runtime_authorization,
     validate_amendment_history,
     validate_protocol,
     validate_result,
+    validate_runtime_authorization,
 )
 
 
@@ -369,10 +369,12 @@ def load_registered_full_run(
     protocol_file = _absolute_canonical_file(protocol_path, name="protocol path")
     registry_file = _absolute_canonical_file(registry_path, name="registry path")
     canonical_protocols = {
-        project / "configs/policy_improvement_v1/protocol.json": (
+        project
+        / "configs/policy_improvement_v1/protocol.json": (
             project / "configs/policy_improvement_v1/registry.json"
         ),
-        project / "configs/policy_improvement_v2/protocol.json": (
+        project
+        / "configs/policy_improvement_v2/protocol.json": (
             project / "configs/policy_improvement_v2/registry.json"
         ),
     }
@@ -427,17 +429,26 @@ def load_registered_full_run(
     try:
         history = validate_amendment_history(history, protocol=protocol)
         base_configs = load_registered_base_configs(protocol, project)
+        populations_document: object | None = None
+        if is_v2:
+            from scripts.policy_improvement_populations import (
+                load_registered_populations,
+            )
+
+            populations_document = load_registered_populations(protocol, project)
         raw_registry, _ = _load_authenticated_json(registry_file)
         validate_registry_document(
             raw_registry,
             protocol,
             [],
             base_configs=base_configs,
+            populations_value=populations_document,
         )
         registry = generate_registry(
             protocol,
             history,
             base_configs=base_configs,
+            populations_value=populations_document,
         )
     except PolicyImprovementSchemaError as exc:
         raise FullRuntimeError(
@@ -879,9 +890,13 @@ def resolve_authenticated_full_checkpoint(
         authorization_digest = runtime_authorization_sha256(authorization)
     except PolicyImprovementSchemaError as exc:
         raise FullRuntimeError("Theory runtime authorization is invalid.") from exc
+    expected_authorization_schema = (
+        "policy_improvement_runtime_authorization_v3"
+        if run.protocol.get("schema_name") == "policy_improvement_protocol_v2"
+        else "policy_improvement_runtime_authorization_v2"
+    )
     if (
-        authorization.get("schema_name")
-        != "policy_improvement_runtime_authorization_v2"
+        authorization.get("schema_name") != expected_authorization_schema
         or authorization.get("protocol_sha256") != run.protocol_sha256
         or authorization_digest != run.runtime_authorization_sha256
     ):
