@@ -972,7 +972,9 @@ def _validate_full_checkpoint(
             expected_dataset_provenance=session.dataset_provenance,
             expected_run_identity=session.run_identity,
             expected_checkpoint_sha256=expected_sha256,
-            authorized_originating_runtime_sha256=str(training_role["runtime_sha256"]),
+            authorized_originating_runtime_sha256=str(
+                full_role["runtime_sha256"]
+            ),
         )
         evaluation_states = raw.get(
             "policy_improvement_full_evaluation_state_dicts", {}
@@ -1025,9 +1027,9 @@ def _validate_full_checkpoint(
         "registry_row_sha256": request["registry_row_sha256"],
         "amendment_history_sha256": request["amendment_history_sha256"],
         "runtime_authorization_sha256": authorization_sha256,
-        "training_runtime_sha256": training_role["runtime_sha256"],
-        "training_source_git_commit": training_role["source_git_commit"],
-        "training_source_manifest_sha256": training_role["runtime_profile_sha256"],
+        "training_runtime_sha256": full_role["runtime_sha256"],
+        "training_source_git_commit": full_role["source_git_commit"],
+        "training_source_manifest_sha256": full_role["runtime_profile_sha256"],
         "launcher_sha256": authorization["launcher_sha256"],
         "dataset_manifest_sha256": session.dataset_manifest_sha256,
         "dataset_provenance_sha256": canonical_json_sha256(session.dataset_provenance),

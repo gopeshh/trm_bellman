@@ -529,7 +529,9 @@ class FullBackendIdentityTest(unittest.TestCase):
             [sample["original_dataset_index"] for sample in selected_view.samples],
             selection_indices,
         )
-        run = _v2_run(self.root)
+        v2_root = self.root / "v2-run"
+        v2_root.mkdir()
+        run = _v2_run(v2_root)
         manifest = run.dataset_root / "manifests/validation.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_bytes(b"validation manifest\n")
@@ -1044,7 +1046,7 @@ class FullCheckpointGuardTest(unittest.TestCase):
         quiet_resume.assert_called_once()
         normal_resume.assert_not_called()
 
-    def test_real_tiny_checkpoint_theory_adapter_is_read_only(self) -> None:
+    def test_real_tiny_ppo_checkpoint_is_not_theory_eligible(self) -> None:
         import upi_trm_train
 
         run = _run(self.root)
@@ -1220,6 +1222,7 @@ class FullCheckpointGuardTest(unittest.TestCase):
         self.assertEqual(semantic["checkpoint_sha256"], checkpoint_sha256)
         self.assertEqual(semantic["training_call_delta"], 0)
         self.assertEqual(semantic["optimizer_step_delta"], 0)
+        self.assertIsNone(semantic["theory_model_identity"])
         model_sha256, role_state_sha256s = session_model_state_identity(session)
         checkpoint_validation_sha256 = _digest("checkpoint validation")
         model_state_sha256 = state_dict_sha256(session.model.state_dict())
@@ -1295,190 +1298,32 @@ class FullCheckpointGuardTest(unittest.TestCase):
             "registered_run": run,
             "registered_state_indices": [0],
         }
-        mixed_request = {
-            **request,
-            "identity": {
-                **theory_identity,
-                "checkpoint": {
-                    "sha256": checkpoint_sha256,
-                    "size_bytes": checkpoint.stat().st_size,
-                    "snapshot_kind": "interaction_matched",
-                    "environment_interactions": 16,
-                },
-                "config": {
-                    **theory_identity["config"],
-                    "effective_config_sha256": _digest("mixed config"),
-                },
-            },
-        }
-        wrong_kind_request = {
-            **request,
-            "identity": {
-                **theory_identity,
-                "checkpoint": {
-                    **theory_identity["checkpoint"],
-                    "snapshot_kind": "scheduled",
-                },
-            },
-        }
-        with mock.patch.object(
-            TorchLearnedRunEngine,
-            "_build_session",
-            return_value=session,
+        with (
+            mock.patch.object(
+                TorchLearnedRunEngine,
+                "_build_session",
+                return_value=session,
+            ),
+            _sealed_checkpoint(checkpoint) as descriptor,
+            self.assertRaisesRegex(
+                FullBackendError,
+                "no registered theory model identity",
+            ),
         ):
-            with _sealed_checkpoint(checkpoint) as descriptor:
-                with self.assertRaisesRegex(Exception, "missing or mixed"):
-                    open_theory_bridge_session(
-                        mixed_request,
-                        checkpoint,
-                        expected_checkpoint_sha256=checkpoint_sha256,
-                        sealed_checkpoint_descriptor=descriptor,
-                        authenticated_model_state_sha256=model_sha256,
-                        authenticated_role_state_sha256s=role_state_sha256s,
-                        authenticated_validation_sha256=(checkpoint_validation_sha256),
-                        runtime_identity=runtime,
-                        training_module=upi_trm_train,
-                    )
-            with _sealed_checkpoint(checkpoint) as descriptor:
-                with self.assertRaisesRegex(Exception, "exact registered checkpoint"):
-                    open_theory_bridge_session(
-                        wrong_kind_request,
-                        checkpoint,
-                        expected_checkpoint_sha256=checkpoint_sha256,
-                        sealed_checkpoint_descriptor=descriptor,
-                        authenticated_model_state_sha256=model_sha256,
-                        authenticated_role_state_sha256s=role_state_sha256s,
-                        authenticated_validation_sha256=(checkpoint_validation_sha256),
-                        runtime_identity=runtime,
-                        training_module=upi_trm_train,
-                    )
-            mismatched_roles = {
-                **role_state_sha256s,
-                "model": _digest("another authenticated model role"),
-            }
-            with _sealed_checkpoint(checkpoint) as descriptor:
-                with self.assertRaisesRegex(
-                    FullBackendError,
-                    "Restored theory model differs",
-                ):
-                    open_theory_bridge_session(
-                        request,
-                        checkpoint,
-                        expected_checkpoint_sha256=checkpoint_sha256,
-                        sealed_checkpoint_descriptor=descriptor,
-                        authenticated_model_state_sha256=(
-                            canonical_json_sha256(mismatched_roles)
-                        ),
-                        authenticated_role_state_sha256s=mismatched_roles,
-                        authenticated_validation_sha256=(checkpoint_validation_sha256),
-                        runtime_identity=runtime,
-                        training_module=upi_trm_train,
-                    )
-            with _sealed_checkpoint(checkpoint) as descriptor:
-                adapter = open_theory_bridge_session(
-                    request,
-                    checkpoint,
-                    expected_checkpoint_sha256=checkpoint_sha256,
-                    sealed_checkpoint_descriptor=descriptor,
-                    authenticated_model_state_sha256=model_sha256,
-                    authenticated_role_state_sha256s=role_state_sha256s,
-                    authenticated_validation_sha256=checkpoint_validation_sha256,
-                    runtime_identity=runtime,
-                    training_module=upi_trm_train,
-                )
-        self.addCleanup(adapter.close)
-        before = adapter.read_only_snapshot()
-        states = adapter.registered_states()
-        self.assertEqual(len(states), 1)
-        state = states[0]
-        self.assertAlmostEqual(sum(state.current_probabilities), 1.0, places=6)
-        self.assertAlmostEqual(sum(state.deployed_probabilities), 1.0, places=6)
-        value_n = adapter.endpoint_value(state.state_id, 1)
-        value_m = adapter.endpoint_value(state.state_id, 2)
-        self.assertTrue(math.isfinite(value_n))
-        self.assertTrue(math.isfinite(value_m))
-        action = next(
-            index for index, allowed in enumerate(state.action_mask) if allowed
-        )
-        (outcome,) = adapter.exact_action_outcomes(state.state_id, action)
-        self.assertEqual(outcome.probability, 1.0)
-        self.assertEqual(outcome.terminal, outcome.next_state_id is None)
-        first_rollout = adapter.sample_rollout(state.state_id, 2, 901)
-        second_rollout = adapter.sample_rollout(state.state_id, 2, 901)
-        self.assertEqual(first_rollout, second_rollout)
-        self.assertEqual(adapter.read_only_snapshot(), before)
+            open_theory_bridge_session(
+                request,
+                checkpoint,
+                expected_checkpoint_sha256=checkpoint_sha256,
+                sealed_checkpoint_descriptor=descriptor,
+                authenticated_model_state_sha256=model_sha256,
+                authenticated_role_state_sha256s=role_state_sha256s,
+                authenticated_validation_sha256=checkpoint_validation_sha256,
+                runtime_identity=runtime,
+                training_module=upi_trm_train,
+            )
         self.assertEqual(
             hashlib.sha256(checkpoint.read_bytes()).hexdigest(), checkpoint_sha256
         )
-
-        scheduled_run = replace(
-            run,
-            interaction_checkpoints=(16, 32),
-            final_environment_interactions=32,
-        )
-        scheduled_checkpoint_identity = {
-            **checkpoint_identity,
-            "snapshot_kind": "scheduled",
-        }
-        scheduled_checkpoint = self.root / "tiny-ppo-scheduled.pt"
-        scheduled_checkpoint_sha256 = publish_checkpoint(
-            build_ppo_smoke_checkpoint(
-                session.trainer,
-                identity=scheduled_checkpoint_identity,
-                parent_checkpoint_sha256=None,
-            ),
-            scheduled_checkpoint,
-        )
-        scheduled_identity = {
-            **theory_identity,
-            "checkpoint": {
-                "sha256": scheduled_checkpoint_sha256,
-                "size_bytes": scheduled_checkpoint.stat().st_size,
-                "snapshot_kind": "scheduled",
-                "environment_interactions": 16,
-            },
-        }
-        scheduled_request = {
-            "identity": scheduled_identity,
-            "registered_run": scheduled_run,
-            "registered_state_indices": [0],
-        }
-        with mock.patch.object(
-            TorchLearnedRunEngine,
-            "_build_session",
-            return_value=session,
-        ):
-            with _sealed_checkpoint(scheduled_checkpoint) as descriptor:
-                scheduled_adapter = open_theory_bridge_session(
-                    scheduled_request,
-                    scheduled_checkpoint,
-                    expected_checkpoint_sha256=scheduled_checkpoint_sha256,
-                    sealed_checkpoint_descriptor=descriptor,
-                    authenticated_model_state_sha256=model_sha256,
-                    authenticated_role_state_sha256s=role_state_sha256s,
-                    authenticated_validation_sha256=checkpoint_validation_sha256,
-                    runtime_identity=runtime,
-                    training_module=upi_trm_train,
-                )
-        self.addCleanup(scheduled_adapter.close)
-        self.assertEqual(
-            scheduled_adapter.read_only_snapshot().snapshot_kind,
-            "scheduled",
-        )
-
-        def mutate_gradient() -> None:
-            parameter = next(session.model.parameters())
-            parameter.grad = torch.ones_like(parameter)
-
-        with self.assertRaisesRegex(FullBackendError, "training state"):
-            adapter._guard(mutate_gradient)
-
-        def mutate_optimizer_then_raise() -> None:
-            session.trainer.optimizer.param_groups[0]["lr"] *= 2.0
-            raise RuntimeError("synthetic theory evaluator failure")
-
-        with self.assertRaisesRegex(FullBackendError, "training state"):
-            adapter._guard(mutate_optimizer_then_raise)
 
     def test_real_upi_theory_capabilities_match_frozen_trainer_semantics(self) -> None:
         import upi_trm_train
