@@ -49,6 +49,10 @@ from scripts.policy_improvement_theory_schema_v2 import (
     theory_document_sha256,
     validate_theory_request,
 )
+from scripts.policy_improvement_v2_schema import (
+    bind_v2_result_to_registration,
+    PolicyImprovementV2SchemaError,
+)
 from utils.run_identity import discover_clean_git_source
 
 
@@ -461,6 +465,7 @@ def _stage0_context(
         protocol = validate_protocol(
             _load_stable_json(expected_protocol, label="protocol")
         )
+        population_document = load_registered_populations(protocol, project)
         base_configs = load_registered_base_configs(protocol, project)
         registry_document = _load_stable_json(expected_registry, label="registry")
         registry = validate_registry_document(
@@ -468,8 +473,14 @@ def _stage0_context(
             protocol,
             [],
             base_configs=base_configs,
+            populations_value=population_document,
         )
-        regenerated = generate_registry(protocol, [], base_configs=base_configs)
+        regenerated = generate_registry(
+            protocol,
+            [],
+            base_configs=base_configs,
+            populations_value=population_document,
+        )
     except PolicyImprovementSchemaError as exc:
         raise TheoryBridgeV2Error(
             "Stage 0 protocol or registry cannot be authenticated."
@@ -540,7 +551,6 @@ def _stage0_context(
         raise TheoryBridgeV2Error(
             "Stage 0 theory request differs from its exact registered row."
         )
-    population_document = load_registered_populations(protocol, project)
     population = population_document["populations"]["stage0_smoke"]
     if (
         population.get("split") != "train"
@@ -651,7 +661,14 @@ def _resolve_stage0_checkpoint(
         result_document, result = validated_result_payload(
             _load_stable_json(result_path, label="Stage 0 result")
         )
-    except PolicyImprovementSchemaError as exc:
+        bind_v2_result_to_registration(
+            result_document,
+            context.row,
+            context.protocol,
+            context.registry,
+            load_registered_populations(context.protocol, context.source_root),
+        )
+    except (PolicyImprovementSchemaError, PolicyImprovementV2SchemaError) as exc:
         raise TheoryBridgeV2Error("Stage 0 result schema is invalid.") from exc
     exact_bindings = {
         "run_id": context.row["run_id"],

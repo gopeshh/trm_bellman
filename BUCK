@@ -338,6 +338,7 @@ python_library(
         ":policy_improvement_smoke_runtime",
         ":policy_improvement_theory_bridge_v2_lib",
         ":policy_improvement_theory_schema_v2",
+        ":policy_improvement_v2_schema",
         ":utils",
     ],
 )
