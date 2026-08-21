@@ -2088,6 +2088,8 @@ class Phase4RuntimeSourceIdentityTest(unittest.TestCase):
             "scripts/policy_improvement_populations.py",
             "scripts/policy_improvement_registry.py",
             "scripts/policy_improvement_schema.py",
+            "scripts/policy_improvement_v2_registry.py",
+            "scripts/policy_improvement_v2_schema.py",
             "upi_trm_train.py",
         ):
             destination = root / relative_path
