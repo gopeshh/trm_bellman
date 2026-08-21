@@ -2085,6 +2085,7 @@ class Phase4RuntimeSourceIdentityTest(unittest.TestCase):
             "policy_improvement_smoke_runtime.py",
             "puzzle_dataset.py",
             "runtime_archive_preflight.py",
+            "scripts/policy_improvement_populations.py",
             "scripts/policy_improvement_registry.py",
             "scripts/policy_improvement_schema.py",
             "upi_trm_train.py",
