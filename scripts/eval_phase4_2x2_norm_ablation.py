@@ -693,7 +693,12 @@ def main(*, runtime_attestation: Optional[Dict[str, Any]] = None):
         default="results/paper_ready/phase4_2x2_norm_ablation/v4",
     )
     parser.add_argument("--checkpoint_dir", type=str, default="results/phase4_2x2_norm_ablation")
-    parser.add_argument("--data_dir", type=str, default="data")
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        required=True,
+        help="External root containing the retired sudoku-4x4-trivial diagnostic corpus.",
+    )
     parser.add_argument("--device", type=str, default="cuda")
 
     args = parser.parse_args()

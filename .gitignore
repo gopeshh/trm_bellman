@@ -39,7 +39,6 @@ results/*
 reports/
 figures/
 artifacts/eval_batches/
-documents/results/
 *_export/
 run_output.txt
 *.profraw
@@ -50,15 +49,12 @@ run_output.txt
 /slurm_*.txt
 *.log
 
-# Dataset artifacts (ignore by default, but allow small reproducibility datasets)
+# Dataset artifacts (ignore by default, but retain the tracked compatibility dataset)
 datasets/
 data/*
-!data/sudoku-4x4-trivial/
 !data/iclr-confirmatory-sudoku4x4-v1/
 !data/iclr-confirmatory-sudoku4x4-v1/**
 *.zip
-artifact/*.zip
-artifact/*.zip.sha256
 *.tar
 *.tar.gz
 

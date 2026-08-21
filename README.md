@@ -1,8 +1,7 @@
 # UPI-TRM experiment code
 
-This repository contains the plan-edit MDP, recurrent evaluator, training
-loops, baselines, diagnostics, and authenticated experiment tooling for the
-UPI-TRM paper.
+This repository contains the current UPI-TRM model, plan-edit environment,
+training code, and authenticated policy-improvement experiment pipeline.
 
 ## Experiment status
 
@@ -24,9 +23,8 @@ for the current preparation and Stage 0 work.
 - `rl/value_targets.py`: one-step and fixed-K targets
 - `rl/training_setup.py`: dataset materialization and checker selection
 - `upi_trm_train.py`: main training entry point
-- `run_baseline.py`: external SB3 baseline entry point
-- `scripts/`: evaluation, diagnostics, aggregation, and artifact tools
-- `tests/`: Buck and pytest regression tests
+- `scripts/policy_improvement_*.py`: protocol, evidence, audit, analysis, and theory tools
+- `tests/`: deterministic regression tests
 - `results/README.md`: invalidation notice; generated results remain untracked
 
 ## Data requirements
@@ -34,14 +32,6 @@ for the current preparation and Stage 0 work.
 Real runs require a dataset root with separate `train/` and `test/` directories.
 The loader refuses a missing requested dataset, overlapping train/test records,
 or an evaluation pool smaller than `eval_num_episodes`.
-
-The historical revision config at
-`configs/revision/upi_trm_feasibility_episodic_z_hard_suite_theory_exact.yaml`
-is retained as a non-runnable reference fixture. It is not a registered
-confirmatory assignment, so the main runner rejects it under
-`fixed_base_exact`. The old multi-GPU launcher for that config also exits
-without starting a run. Do not infer a replacement experiment protocol from
-that fixture.
 
 Registered runs log both split sizes and the ordered evaluation-pool hash.
 Preserve those lines with every result artifact. Legacy smoke-only paths may
@@ -166,7 +156,3 @@ do not establish the required sup-norm residuals, invariant-domain bounds,
 policy-overlap constants, or signed occupancy-averaged defect bound. No result
 in this repository turns those assumptions into a claim about SGD, TD, BPTT,
 distillation, learned-model performance, or training dynamics.
-
-UPI outer updates and SB3 environment steps are different budget units.
-Aggregate outputs keep those units separate and do not report a between-method
-gap interval unless a common interaction budget is supplied.

@@ -1,8 +1,0 @@
-# Overlay for the no-mask controlled 2x2 hard-4x4 sweep.
-#
-# Apply this after one of the base table3_hard_controlled configs to restore the
-# pre-constraint-aware action space while keeping the cell-specific contraction
-# and projection settings unchanged.
-
-disable_constraint_masking: true
-disable_value_head_norm: true

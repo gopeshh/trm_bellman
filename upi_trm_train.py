@@ -531,7 +531,7 @@ def build_trainer(
 
 
 # =============================================================================
-# Checkpoint Loading/Saving (aligned with pretrain.py)
+# Checkpoint loading and saving
 # =============================================================================
 
 def load_checkpoint(
@@ -3927,7 +3927,7 @@ def parse_args():
         default=1,
         help="Number of transformer layers in L-level.",
     )
-    # Puzzle embedding arguments (NEW - closes the gap with pretrain.py)
+    # Puzzle embedding arguments.
     parser.add_argument(
         "--puzzle-emb-ndim",
         type=int,
@@ -5143,7 +5143,7 @@ def main():
             "no sparse optimizer is attached."
         )
     elif puzzle_emb_ndim > 0 and hasattr(model, "inner") and hasattr(model.inner, "puzzle_emb"):
-        # Use SignSGD for sparse puzzle embeddings (same as pretrain.py)
+        # Use SignSGD for sparse puzzle embeddings.
         puzzle_emb_optimizer = CastedSparseEmbeddingSignSGD_Distributed(
             model.inner.puzzle_emb.buffers(),
             lr=args.puzzle_emb_lr,

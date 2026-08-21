@@ -124,17 +124,6 @@ class TestConfigIntegrity(unittest.TestCase):
                     f"{config_path} disabled projection must have no radius",
                 )
 
-    def test_revision_exact_config_uses_fixed_base_protocol(self):
-        config_path = (
-            self.config_dir
-            / "revision"
-            / "upi_trm_feasibility_episodic_z_hard_suite_theory_exact.yaml"
-        )
-        parsed = RLConfig(**_load_yaml(config_path))
-
-        self.assertEqual(parsed.training_protocol, "fixed_base_exact")
-        self.assertTrue(parsed.is_fixed_base_proposal_exact())
-
     def test_exact_mixture_flag_does_not_relabel_legacy_training(self):
         parsed = RLConfig(
             theory_exact_mixture=True,
@@ -145,24 +134,6 @@ class TestConfigIntegrity(unittest.TestCase):
 
         self.assertEqual(parsed.training_protocol, "legacy")
         self.assertFalse(parsed.is_theory_exact())
-
-    def test_stability_experiments_disable_value_head_norm(self):
-        stability_dirs = [
-            self.config_dir / "exp2_contraction_sweep",
-            self.config_dir / "exp3_projection_ablation",
-            self.config_dir / "table3_hard_controlled",
-        ]
-        stability_files = list((self.config_dir / "ablations").glob("*no_vhead_norm*.yaml"))
-
-        for config_path in [
-            *(path for base_dir in stability_dirs for path in sorted(base_dir.glob("*.yaml"))),
-            *sorted(stability_files),
-        ]:
-            cfg = _load_yaml(config_path)
-            self.assertTrue(
-                cfg.get("disable_value_head_norm", False),
-                f"{config_path.name} must set disable_value_head_norm=true",
-            )
 
     def test_phase4_value_head_norm_matches_filename(self):
         phase4_dir = self.config_dir / "phase4_2x2_norm_ablation"

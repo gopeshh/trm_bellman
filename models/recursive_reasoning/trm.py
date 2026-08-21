@@ -625,7 +625,7 @@ class TinyRecursiveReasoningModel_ACTV1(nn.Module):
         #
         # NOTE: We use opnorm_clamp instead of spectral_norm because finite
         # diagnostics on this architecture recorded local-Lz estimates above
-        # 10^5 with spectral_norm. See artifact/README_ARTIFACT.md for context.
+        # 10^5 with spectral_norm in the retired exploratory implementation.
         #
         # If you load a checkpoint that was trained WITHOUT contraction:
         # - The pretrained weights will be rescaled by the contraction factors
