@@ -1,14 +1,9 @@
 #!/bin/bash
 # Post-audit 9x9 Sudoku TRM+PPO baseline rerun (3 seeds, 50k steps).
 #
-# Motivation:
-#   The 9x9 comparison in documents/results/9x9_experiments_seed0/EXPERIMENT_REPORT.md
-#   was run in 2026-02 under pre-audit baseline trainer code. The Round 1 & 2
-#   trainer bug fixes (commit 3c2e959) and the follow-up post-audit hygiene
-#   commit (1ab1434) materially changed PPO/A2C/DQN behavior on 4x4 (PPO moved
-#   from 0% to 32% on no-mask hard 4x4). This script reruns only the PPO
-#   baseline at 9x9 to close the same loop. A2C and DQN were 0% both pre- and
-#   post-fix at 4x4 so they are omitted here by design.
+# Historical launcher retained for source archaeology only. Its original
+# report and outputs were invalidated and removed. It is not part of the
+# registered protocol-v2 experiment path and must not be used as paper evidence.
 #
 # Scope:
 #   - Method: TRM+PPO only

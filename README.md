@@ -1,61 +1,20 @@
 # UPI-TRM experiment code
 
-This repository contains the plan-edit MDP, recurrent evaluator, training loops,
-baselines, diagnostics, and retained experiment outputs for the UPI-TRM paper.
-The implementation parity anchor is the manuscript source at paper commit
-`5253692fea5e77cfde3a130c50351183dc0268e3` and implementation source commit
-`de013fd3fcaae8bc80d124c0c868c7c8611aeede` on `full-implementation`. See
-`reports/PAPER_PARITY_REPORT.md` for the executable Algorithm 1/2 mapping and
-the theorem premises that remain conditional.
+This repository contains the plan-edit MDP, recurrent evaluator, training
+loops, baselines, diagnostics, and authenticated experiment tooling for the
+UPI-TRM paper.
 
-## Audit status
+## Experiment status
 
-The July 2026 correctness audit repaired the following implementation paths:
+Historical learned outputs were produced by superseded implementations and
+protocols. They were invalidated and removed from the current branch. They are
+not evidence for the current paper and must not be reconstructed or reused.
+Git history retains the deleted files if a forensic comparison is needed.
 
-- UPI, SB3, and CleanRL Sudoku evaluation use disjoint held-out splits,
-  reject overlapping or undersized pools, and retain ordered-pool SHA-256 values;
-- requested datasets fail closed instead of silently using random dummy data;
-- persistent replay retains recurrent state and collection-time behavior probability;
-- the finite-horizon edit clock is part of each state;
-- terminal targets, fixed-K targets, and exact baseline enumeration share one reward contract;
-- exact fixed-K targets bootstrap from the frozen target evaluator; this is a
-  target-network population backup, not a self-bootstrap with the value head
-  currently being fitted;
-- exact-mixture evaluation evaluates the mixture, not only its old-policy component;
-- evaluation uses a private seeded RNG stream and cannot perturb later training samples;
-- exact per-state advantages remain centered after clipping;
-- fixed-base training collects from one frozen base actor, updates only the
-  policy-independent value head, and evaluates the explicit proposal mixture;
-- projection and projection diagnostics use the same joint latent norm, with
-  an explicit `enabled` mode requiring `R>0` and a `disabled` identity mode;
-- multi-root datasets receive disjoint puzzle-identifier ranges;
-- schema-v5 checkpoints retain training-protocol identity, model construction
-  config, target state, replay,
-  schedulers, counters, optimizer state, dataset identity, and Python/NumPy/Torch
-  RNG state without loading replay onto CUDA;
-- Sudoku and maze dataset builders use a recorded local RNG seed and accept a
-  source revision instead of depending on ambient NumPy state;
-- baseline wrappers treat budget exhaustion as an MDP terminal;
-- aggregate scripts reject missing or mismatched evaluation provenance.
-- Phase 4 `L_preproj` uses the exact plan-conditioned pre-projection recurrent
-  map and the measured joint latent perturbation norm;
-- Phase 4 policy stability uses the production `policy_dist` path, `z_H`, and
-  the task action mask at absolute depths 2, 4, and 8; and
-- Phase 4 schema-v4 publication records bind all 12 strict full checkpoints,
-  configs, diagnostic input bytes, producer and evaluator source bytes, and
-  clean Git identity. Audit and figure consumers reopen the checkpoints,
-  replay retained transitions through the registered environment, and
-  revalidate those identities before consuming a metric;
-- a standard-library Phase 4 launcher authenticates and seals the training,
-  evaluator, audit, or figure PAR before behavior-bearing imports. Every one of the 12
-  records must bind the same independently authorized training PAR digest; and
-- Phase 4 figure output is staged privately and published only after the final
-  source, checkpoint, runtime, and diagnostic-input identity checks pass.
-
-The retained 57.4% UPI-TRM result was evaluated on the first 32 training
-instances. It is in-sample and must not be compared with the 50-instance SB3
-test pool. The checkout also lacks the hard-suite data and checkpoints needed
-to rerun that result. New claims must come from fresh held-out runs.
+The current experiment namespace is `policy-improvement-v2-20260818`. No fresh
+learned result is committed. Stage 1 through Stage 3 remain fail-closed until
+their registered prerequisites are supplied. The test split is not authorized
+for the current preparation and Stage 0 work.
 
 ## Main paths
 
@@ -68,7 +27,7 @@ to rerun that result. New claims must come from fresh held-out runs.
 - `run_baseline.py`: external SB3 baseline entry point
 - `scripts/`: evaluation, diagnostics, aggregation, and artifact tools
 - `tests/`: Buck and pytest regression tests
-- `results/`: retained experiment evidence. Do not delete this tree wholesale.
+- `results/README.md`: invalidation notice; generated results remain untracked
 
 ## Data requirements
 
@@ -158,15 +117,9 @@ buck2 test --local-only @fbcode//mode/opt 'fbcode//buiksat_trm:'
 ```
 
 That package pattern also runs Buck's generated Python type-check targets.
-The final paper-parity runtime selection, including the Phase 4 reporting
-regressions, passed 366/366. The complete changed-surface type gate built all
-30 targets, including synchronization, launcher, Phase 4, source-identity,
-checkpoint, trainer, and CleanRL targets. Exact commands, the historical
-repository-wide diagnostic result, and
-the scope of the executable parity claim are recorded in
-`reports/PAPER_PARITY_REPORT.md`. The full package pattern is not claimed green
-because pre-existing aggregate libraries, tests, runners, diagnostics, and
-experiment scripts retain unrelated type-check debt.
+Do not treat historical test counts or deleted logs as proof for the current
+commit. Record fresh commands and results against the exact source revision
+being evaluated.
 
 In a standard environment with the dependencies installed:
 

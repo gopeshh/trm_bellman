@@ -1,5 +1,0 @@
-algorithm,seed,success_rate_final,success_rate_peak,peak_step,steps_to_100,mean_score_final,run_id
-no_contraction,42,0.42,0.64,19500,N/A,14.72,42_20260109_214022
-no_contraction,123,0.54,0.56,15100,N/A,15.06,123_20260109_214022
-persistent_z_no_contraction,42,0.6,0.7,16600,N/A,14.94,42_20260109_214022
-persistent_z_no_contraction,123,0.52,0.6,15500,N/A,14.78,123_20260109_214022

@@ -1644,8 +1644,8 @@ python_unittest(
     ],
     base_module = "",
     resources = [
-        "AUDIT_REPORT.md",
         "README.md",
+        "results/README.md",
         "scripts/build_artifact_zip.sh",
     ],
     deps = [

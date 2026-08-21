@@ -1,2 +1,0 @@
-{"episodes": 2, "invalid_action_rate": 1.0, "mean_return": -17.36, "mean_steps": 16.0, "split": "test", "step": 32, "success_rate": 0.0}
-{"episodes": 2, "invalid_action_rate": 0.96875, "mean_return": -16.939999999999998, "mean_steps": 16.0, "split": "test", "step": 64, "success_rate": 0.0}

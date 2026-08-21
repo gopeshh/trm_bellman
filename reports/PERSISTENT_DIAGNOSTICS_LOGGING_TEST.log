@@ -1,8 +1,0 @@
-[2026-08-03T14:27:52.042-07:00] Could not connect to buck2 daemon (buck2 daemon is not running), killing daemon..
-[2026-08-03T14:28:06.060-07:00] Connected to new buck2 daemon.
-[2026-08-03T14:28:06.081-07:00] Buck UI: https://www.internalfb.com/buck2/aee88a76-d8f1-46ef-aed3-a03aec7bbd8b
-[2026-08-03T14:28:08.508-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/9007199438921447
-[2026-08-03T14:28:49.022-07:00] RE Session: reSessionID-b37165a0-b619-4953-b8ed-fb9bddb7a880
-[2026-08-03T14:31:09.456-07:00] Network: up 0B  down 296MiB  session reSessionID-b37165a0-b619-4953-b8ed-fb9bddb7a880
-[2026-08-03T14:31:09.456-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/9007199438921447
-Tests finished: [mPass 14[m. Fail 0. Timeout 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0

@@ -252,7 +252,7 @@ class TestResultProvenance(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             file_list = tmp_path / "files.txt"
-            file_list.write_text("README.md\nAUDIT_REPORT.md\n")
+            file_list.write_text("README.md\nresults/README.md\n")
             output_zip = tmp_path / "bundle.zip"
             env = dict(os.environ)
             env["UPI_TRM_ARCHIVE_FILE_LIST"] = str(file_list)
@@ -267,7 +267,7 @@ class TestResultProvenance(unittest.TestCase):
                 self.assertIsNone(archive.testzip())
                 self.assertEqual(
                     set(archive.namelist()),
-                    {"README.md", "AUDIT_REPORT.md", "artifact/SHA256SUMS"},
+                    {"README.md", "results/README.md", "artifact/SHA256SUMS"},
                 )
             subprocess.run(
                 ["sha256sum", "-c", output_zip.name + ".sha256"],

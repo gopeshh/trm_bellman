@@ -1,5 +1,0 @@
-ablation,description,feature_disabled,seed,success_rate,config_file
-No Theory,All Theory Disabled,All features,42,100,ablation_no_theory.yaml
-No Contraction,Contraction Disabled,enable_contraction=false,123,32,ablation_no_contraction.yaml
-No Conservative,Conservative Mixture Disabled,mixture_alpha=1.0,42,30,ablation_no_conservative_mixture.yaml
-No Exact Baseline,Exact Baseline Disabled,exact_baseline_summation=false,42,26,ablation_no_exact_baseline.yaml

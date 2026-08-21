@@ -1,2 +1,0 @@
-batch,n1,n2,delta_V_mean,delta_V_median,delta_V_p90,delta_V_p99,delta_V_max,delta_pi_mean,delta_pi_median,delta_pi_p90,delta_pi_p99,delta_pi_max,delta_z_mean,delta_z_median,delta_z_p90,delta_z_p99,delta_z_max,argmax_agree_rate,saturation_rate
-b0,2,8,0.368565,0.298355,0.647634,2.520405,3.996112,0.001288,0.000679,0.002172,0.010537,0.025104,15.776037,16.367398,18.932974,21.507532,26.109295,0.7500,1.0000

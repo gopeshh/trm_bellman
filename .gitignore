@@ -33,15 +33,22 @@ tensorboard/
 tmp/
 temp/
 outputs/
-results/
 logs/
+results/*
+!results/README.md
+reports/
+figures/
+artifacts/eval_batches/
+documents/results/
+*_export/
+run_output.txt
 *.profraw
 *.pid
 *.lock
 *.partial.*
 *.smoke.log
 /slurm_*.txt
-/*.log
+*.log
 
 # Dataset artifacts (ignore by default, but allow small reproducibility datasets)
 datasets/

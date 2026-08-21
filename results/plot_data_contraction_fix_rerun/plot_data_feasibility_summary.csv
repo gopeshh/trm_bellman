@@ -1,5 +1,0 @@
-algorithm,n_seeds,success_rate_final_mean,success_rate_final_std,success_rate_peak_mean,success_rate_peak_std,mean_score_final_mean,mean_score_final_std
-no_contraction,3,0.933,0.023,0.940,0.020,15.840,0.144
-persistent_z_no_contraction,3,0.933,0.023,0.933,0.023,15.920,0.040
-episodic_contraction,3,0.280,0.087,0.300,0.053,12.727,0.996
-persistent_z,3,0.220,0.220,0.353,0.076,13.687,1.080

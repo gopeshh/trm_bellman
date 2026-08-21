@@ -16,8 +16,8 @@ The archive includes `artifact/SHA256SUMS` for its staged files. The build
 normalizes timestamps and ZIP metadata, so identical inputs produce identical
 archive bytes.
 
-Historical result files are included for provenance, but their presence does
-not validate the corresponding claims. In particular, the retained 57.4%
-UPI-TRM evaluation is in-sample, and the external baseline artifacts do not
-contain the pool hashes required by the repaired aggregator. See the root
-`README.md` and `AUDIT_REPORT.md` before using any result.
+Historical learned-result files are excluded from the current branch because
+they were produced by superseded implementations and protocols. Repository
+archives built from this branch contain source and registered configuration,
+not empirical evidence. See the root `README.md` before interpreting an
+archive.

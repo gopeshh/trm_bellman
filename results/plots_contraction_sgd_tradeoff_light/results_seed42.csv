@@ -1,4 +1,0 @@
-condition,seed,final_success_rate,final_mean_score,final_step
-1_no_contraction,42,0.32,8.787,5000
-2_weak_contraction,42,0.32,8.85,5000
-3_standard_contraction,42,0.32,8.85,5000
