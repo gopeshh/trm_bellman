@@ -635,6 +635,11 @@ python_binary(
     base_module = "",
     main_module = "scripts.policy_improvement_smoke_plan",
     deps = [
+        # generate_registry -> validate_v2_amendment_history imports both theory
+        # schemas at call time to break an import cycle, so the library graph
+        # cannot express them. Bind them at the binary instead.
+        ":policy_improvement_theory_schema",
+        ":policy_improvement_theory_schema_v2",
         ":policy_improvement_smoke_plan_lib",
     ],
 )
@@ -712,6 +717,14 @@ python_binary(
         ":models",
         ":policy_improvement_checkpoint_allowlist",
         ":policy_improvement_smoke_runtime",
+        # Stage 0 calls generate_registry, which imports both theory schemas at
+        # call time to break an import cycle. Bind them at the binary. Neither
+        # is a producer source, so the embedded producer-manifest inventory is
+        # unchanged. Do not move these to :upi_trm_train_lib: that would pull
+        # policy_improvement_theory_schema_v2 into policy_improvement_full,
+        # whose source profile does not list it.
+        ":policy_improvement_theory_schema",
+        ":policy_improvement_theory_schema_v2",
         ":puzzle_dataset_lib",
         ":rl",
         ":runtime_archive_preflight",
