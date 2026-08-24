@@ -663,6 +663,11 @@ python_library(
         "fbsource//third-party/pypi/tqdm:tqdm",
         ":confirmatory_runtime_launcher_lib",
         ":dataset",
+        # phase4_runtime_profile enumerates evaluators/ as producer source, so
+        # the checked-in producer manifest and every training-source profile
+        # already declare these two modules. Without this dep the PARs ship
+        # without them and fail source authentication.
+        ":evaluators",
         ":models",
         ":policy_improvement_checkpoint_allowlist",
         ":policy_improvement_smoke_runtime",
@@ -700,6 +705,10 @@ python_binary(
         "fbsource//third-party/pypi/tqdm:tqdm",
         ":confirmatory_runtime_launcher_lib",
         ":dataset",
+        # Keep in step with :upi_trm_train_lib. The producer manifest declares
+        # evaluators/ as producer source, so the standalone training PAR must
+        # carry it too.
+        ":evaluators",
         ":models",
         ":policy_improvement_checkpoint_allowlist",
         ":policy_improvement_smoke_runtime",
