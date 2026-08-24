@@ -821,6 +821,27 @@ python_unittest(
 )
 
 python_unittest(
+    name = "test_policy_improvement_launcher_identity",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_launcher_identity_unittest.py",
+    ],
+    base_module = "",
+    typing = True,
+    # The real Buck-built launcher, not a synthetic archive. This is the only
+    # test that can detect the checked-in launcher identity drifting away from
+    # what Buck actually produces.
+    resources = {
+        "BUCK": "BUCK",
+        ":phase4_runtime_launcher": "phase4_runtime_launcher.par",
+    },
+    deps = [
+        ":phase4_runtime_profile",
+        ":policy_improvement_runtime_authorization",
+    ],
+)
+
+python_unittest(
     name = "test_policy_improvement_audit",
     srcs = [
         "tests/__init__.py",
@@ -1582,6 +1603,13 @@ python_binary(
     srcs = ["phase4_runtime_launcher.py"],
     base_module = "",
     compile = False,
+    # The launcher authenticates a runtime PAR before any behavior import. Its
+    # authorization boundary pins the exact executable closure, so nothing may
+    # run inside this PAR that the pin does not name. The fbcode macro layer
+    # adds fbcode//python/imports_monitor by default and installs it as a
+    # startup function, which would put import-time telemetry in front of
+    # authentication. Opt out here rather than widening the pinned closure.
+    imports_monitor = False,
     main_module = "phase4_runtime_launcher",
     resources = [
         "configs/iclr_confirmatory/producer_source_manifest.json",

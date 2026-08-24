@@ -80,6 +80,21 @@ _READ_SIZE = 1024 * 1024
 # These identities are from the optimized platform010 phase4 launcher. A Buck
 # bootstrap or toolchain change must fail closed until this reviewed boundary
 # is updated from a freshly built launcher.
+#
+# Rebound on 2026-08-24 against the launcher built by
+#   buck2 build --local-only @fbcode//mode/opt \
+#     fbcode//buiksat_trm:phase4_runtime_launcher
+# from two independent cold Buck2 isolation directories that produced
+# byte-identical artifacts. Three inputs moved since the previous binding:
+# fbsource updated llvm-fb/21/platform010 on 2026-08-20, which relinked both
+# native members; seven pinned support sources changed upstream on 2026-08-18
+# and 2026-08-19; and the launcher target now sets imports_monitor = False so
+# fbcode//python/imports_monitor stays out of the pre-authentication closure.
+# The pinned closure therefore stays at exactly the members below plus the two
+# dynamic members and the authorized profile sources.
+# :test_policy_improvement_launcher_identity validates every constant here
+# against a real Buck-built launcher PAR; keep that target green when
+# rebinding.
 _LAUNCHER_DYNAMIC_SUPPORT_MEMBERS = frozenset(
     {
         "__manifest__.py",
@@ -133,7 +148,7 @@ _LAUNCHER_PINNED_SUPPORT_MEMBERS = (
     "static_extension_finder.py",
 )
 _LAUNCHER_PINNED_SUPPORT_MANIFEST_SHA256 = (
-    "ca176dc0f2544a8da47946713bc9dc41c3fd4b25a1a1550a2c92ba78506691d2"
+    "2bca9c9836b8d3e967bbbdf815ece82c3b8c1fcb0370c89b49f33ce40a05d8ba"
 )
 _LAUNCHER_ARCHIVE_PREFIX_SIZE = 8215
 _LAUNCHER_ARCHIVE_PREFIX_SHA256 = (
@@ -144,17 +159,28 @@ _LAUNCHER_NATIVE_SUPPORT_MEMBERS = (
     "runtime/lib/__python_generated_allocator_preload",
 )
 _LAUNCHER_NATIVE_SUPPORT_MANIFEST_SHA256 = (
-    "4f2d213fe8530f0bbf048de5fc62fd49b8dd1f1dee46cd9d37943440ab29b4ee"
+    "974e9a793a853aead172bb80c899ad6004cd57985a8d81e6dc911fd0232f24a9"
 )
 _LAUNCHER_STARTUP_LOADER_NORMALIZED_SHA256 = (
-    "a0ae1cf90c52a29f713e4713d081c42c60d777755b2a64b673e1dfb5ef0cc80e"
+    "a0e47cb96c58fe681f56c0b690c3de15dc6a756dbff74fb7a79ee9e5622dd280"
 )
+# Exactly the two startup hooks fbcode installs for this target: the static
+# extension loader, and the fork-default hook that fbcode/PACKAGE enables
+# repository-wide. Both modules are already inside the pinned closure. The
+# imports-monitor hook is excluded at the Buck target, not accepted here.
 _LAUNCHER_STARTUP_FUNCTIONS = {
-    "00_STATIC_EXTENSION_FINDER": "static_extension_finder:_initialize"
+    "00_MULTIPROCESSING_FORK_DEFAULT": (
+        "__par__.meta_only.multiprocessing_fork_default:set_fork_default"
+    ),
+    "00_STATIC_EXTENSION_FINDER": "static_extension_finder:_initialize",
 }
+# The optional group matches only the literal fbcode opt-by-default python
+# modifier suffix. Everything else stays anchored: opt build, linux-x86_64,
+# platform010, no sanitizer, and a 16-hex configuration hash.
 _LAUNCHER_LABEL = re.compile(
     r"^(?:fbcode|fbsource)//[A-Za-z0-9_./-]+:phase4_runtime_launcher "
-    r"\(cfg:opt-linux-x86_64-fbcode-platform010-clang[0-9]+-no-san#[0-9a-f]{16}\)$"
+    r"\(cfg:opt-linux-x86_64-fbcode-platform010-clang[0-9]+-no-san"
+    r"(?:-opt-by-default)?#[0-9a-f]{16}\)$"
 )
 
 
