@@ -737,6 +737,58 @@ def _task_config(
     return resolution.checker_fn, task, resolution.checker_kind
 
 
+def build_protocol_v2_model_config(
+    *,
+    architecture: Mapping[str, Any],
+    rl_config: Any,
+    seq_len: int,
+    vocab_size: int,
+    num_identifiers: int,
+    action_count: int,
+) -> dict[str, Any]:
+    """Build the recurrent-evaluator architecture registered by protocol v2.
+
+    Single source of truth for the policy-improvement model shape. The Stage 0
+    session builder and the train-only base-policy producer both call it, so a
+    base artifact can never drift from the architecture the comparison runs
+    construct.
+    """
+
+    hidden_size = int(architecture["hidden_size"])
+    return {
+        "batch_size": rl_config.batch_size,
+        "seq_len": seq_len,
+        "puzzle_emb_ndim": 0,
+        "puzzle_emb_len": 0,
+        "num_puzzle_identifiers": max(num_identifiers, rl_config.batch_size),
+        "vocab_size": vocab_size,
+        "H_cycles": int(architecture["h_cycles"]),
+        "L_cycles": int(architecture["l_cycles"]),
+        "H_layers": 0,
+        "L_layers": int(architecture["l_layers"]),
+        "hidden_size": hidden_size,
+        "expansion": 2.0,
+        "num_heads": max(4, hidden_size // 16),
+        "pos_encodings": "rope",
+        "rms_norm_eps": 1e-5,
+        "rope_theta": 10000.0,
+        "halt_max_steps": 2,
+        "halt_exploration_prob": 0.0,
+        "forward_dtype": "float32",
+        "mlp_t": False,
+        "no_ACT_continue": True,
+        "rl_enable_value_head": True,
+        "rl_enable_contraction": rl_config.enable_contraction,
+        "rl_target_Lz": rl_config.target_Lz,
+        "rl_target_Lv": rl_config.target_Lv,
+        "rl_disable_value_head_norm": rl_config.disable_value_head_norm,
+        "rl_enable_policy_head": True,
+        "rl_num_actions": action_count,
+        "rl_latent_projection_mode": rl_config.latent_projection_mode,
+        "rl_latent_ball_radius": rl_config.latent_ball_radius,
+    }
+
+
 def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
     module.set_global_seed(int(context.row["seed"]))
     method_id = str(context.row["base_method_id"])
@@ -998,39 +1050,14 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
         metadata=metadata,
     )
 
-    architecture = context.protocol["architecture"]
-    model_config = {
-        "batch_size": rl_config.batch_size,
-        "seq_len": seq_len,
-        "puzzle_emb_ndim": 0,
-        "puzzle_emb_len": 0,
-        "num_puzzle_identifiers": max(num_identifiers, rl_config.batch_size),
-        "vocab_size": vocab_size,
-        "H_cycles": int(architecture["h_cycles"]),
-        "L_cycles": int(architecture["l_cycles"]),
-        "H_layers": 0,
-        "L_layers": int(architecture["l_layers"]),
-        "hidden_size": int(architecture["hidden_size"]),
-        "expansion": 2.0,
-        "num_heads": max(4, int(architecture["hidden_size"]) // 16),
-        "pos_encodings": "rope",
-        "rms_norm_eps": 1e-5,
-        "rope_theta": 10000.0,
-        "halt_max_steps": 2,
-        "halt_exploration_prob": 0.0,
-        "forward_dtype": "float32",
-        "mlp_t": False,
-        "no_ACT_continue": True,
-        "rl_enable_value_head": True,
-        "rl_enable_contraction": rl_config.enable_contraction,
-        "rl_target_Lz": rl_config.target_Lz,
-        "rl_target_Lv": rl_config.target_Lv,
-        "rl_disable_value_head_norm": rl_config.disable_value_head_norm,
-        "rl_enable_policy_head": True,
-        "rl_num_actions": action_count,
-        "rl_latent_projection_mode": rl_config.latent_projection_mode,
-        "rl_latent_ball_radius": rl_config.latent_ball_radius,
-    }
+    model_config = build_protocol_v2_model_config(
+        architecture=context.protocol["architecture"],
+        rl_config=rl_config,
+        seq_len=seq_len,
+        vocab_size=vocab_size,
+        num_identifiers=num_identifiers,
+        action_count=action_count,
+    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TinyRecursiveReasoningModel_ACTV1(model_config)
     initialization_sha256 = state_dict_sha256(model.state_dict())

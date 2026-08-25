@@ -203,6 +203,67 @@ python_binary(
 )
 
 python_library(
+    name = "policy_improvement_base_policy_lib",
+    srcs = ["scripts/policy_improvement_base_policy.py"],
+    base_module = "",
+    typing = True,
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":phase4_runtime_profile",
+        ":policy_improvement_smoke_runtime",
+        ":policy_improvement_v2_registry",
+        ":policy_improvement_v2_schema",
+        ":rl",
+        ":upi_trm_train_lib",
+        ":utils",
+    ],
+)
+
+python_binary(
+    name = "policy_improvement_base_policy",
+    srcs = [],
+    base_module = "",
+    compile = False,
+    keep_gpu_sections = True,
+    main_module = "scripts.policy_improvement_base_policy",
+    resources = glob([
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/*.yaml",
+        "configs/policy_improvement_v2/amendments/*.json",
+    ]),
+    deps = [
+        ":policy_improvement_base_policy_lib",
+        # generate_registry imports both theory schemas at call time.
+        ":policy_improvement_theory_schema",
+        ":policy_improvement_theory_schema_v2",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_base_policy",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_base_policy_unittest.py",
+    ],
+    base_module = "",
+    typing = True,
+    resources = glob([
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/*.yaml",
+        "configs/policy_improvement_v2/amendments/*.json",
+        "data/policy-improvement-v1-owner/policy-improvement-hard-4x4-v1/MANIFEST.json",
+        "data/policy-improvement-v1-owner/policy-improvement-hard-4x4-v1/manifests/*.json",
+    ]),
+    deps = [
+        ":policy_improvement_base_policy_lib",
+        ":policy_improvement_v2_registry",
+        ":policy_improvement_v2_schema",
+        ":rl",
+    ],
+)
+
+python_library(
     name = "policy_improvement_evidence",
     srcs = ["scripts/policy_improvement_evidence.py"],
     base_module = "",

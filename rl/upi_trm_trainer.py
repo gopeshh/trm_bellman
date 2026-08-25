@@ -3453,6 +3453,9 @@ class UPITrmTrainer:
         batch_size: int = 64,
         log_interval: int = 10,
         imitation_lr: float = 0.003,  # Separate LR for imitation (higher than RL)
+        demonstration_episodes: Optional[int] = None,
+        demonstration_repeats: int = 10,
+        early_stop_accuracy: Optional[float] = 0.99,
     ) -> Dict[str, float]:
         """
         Pre-train the policy with imitation learning from oracle.
@@ -3467,6 +3470,15 @@ class UPITrmTrainer:
             batch_size: Batch size for imitation updates.
             log_interval: How often to log progress.
             imitation_lr: Learning rate for imitation (default 0.003, higher than RL).
+            demonstration_episodes: Puzzles to draw demonstrations from per repeat.
+                Defaults to the historical min(500, len(dataset)) cap. Pass
+                len(dataset) to cover an entire registered split.
+            demonstration_repeats: Collection passes over the dataset. The
+                oracle is deterministic, so repeats beyond one only duplicate
+                identical demonstrations. Defaults to the historical 10.
+            early_stop_accuracy: Stop once training accuracy reaches this value.
+                Pass None to run the full frozen epoch budget, which is what a
+                budget-selected artifact requires.
         
         Returns:
             Dict with final training stats.
@@ -3479,12 +3491,18 @@ class UPITrmTrainer:
         print("[Imitation] Collecting oracle demonstrations...")
         # Collect more demonstrations by repeating puzzles
         all_demos = []
-        num_repeats = 10  # Repeat each puzzle multiple times for more training data
+        num_repeats = demonstration_repeats
+        if num_repeats < 1:
+            raise ValueError("Imitation demonstration repeats must be positive.")
         for repeat in range(num_repeats):
             demos = self.collect_oracle_demonstrations(
                 dataset=dataset,
                 checker=checker,
-                num_episodes=min(500, len(dataset) if hasattr(dataset, '__len__') else 500),
+                num_episodes=(
+                    demonstration_episodes
+                    if demonstration_episodes is not None
+                    else min(500, len(dataset) if hasattr(dataset, '__len__') else 500)
+                ),
             )
             all_demos.extend(demos)
         print(f"[Imitation] Collected {len(all_demos)} demonstrations")
@@ -3519,8 +3537,10 @@ class UPITrmTrainer:
                 print(f"[Imitation] Epoch {epoch+1}/{num_epochs}: "
                       f"loss={avg_loss:.4f}, accuracy={accuracy:.2%}")
             
-            # Early stopping if perfect
-            if accuracy >= 0.99:
+            # Early stopping if perfect. Disabled when the caller needs the
+            # final checkpoint to be determined by the budget rather than by
+            # observed accuracy.
+            if early_stop_accuracy is not None and accuracy >= early_stop_accuracy:
                 print(f"[Imitation] Early stopping at epoch {epoch+1} with {accuracy:.2%} accuracy")
                 break
         
