@@ -433,17 +433,32 @@ class _Backend:
         miscentered: bool = False,
         carry_depends_on_m: bool = False,
         reorder: bool = False,
+        non_mixture_deployment: bool = False,
+        unnormalized_states: bool = False,
+        masked_leakage: bool = False,
     ) -> None:
         self.identity = copy.deepcopy(identity)
         self.method_id = method_id
         self.miscentered = miscentered
         self.carry_depends_on_m = carry_depends_on_m
         self.reorder = reorder
+        self.non_mixture_deployment = non_mixture_deployment
+        self.unnormalized_states = unnormalized_states
+        self.masked_leakage = masked_leakage
         self.closed = False
         self.transaction_active = False
         self.return_calls: list[tuple[str, int]] = []
         self.paired_return_calls: list[tuple[str, int, float]] = []
         self.mutable = {name: _digest(name) for name in _MUTABLE_NAMES}
+        self.normalization: dict[str, object] = {
+            "kind": "float32_categorical_to_binary64_renormalization",
+            "float32_mass_envelope": 1e-4,
+            "normalized_state_count": 2,
+            "maximum_valid_mass_error": 3.2e-8,
+            "maximum_normalization_correction": 1.1e-9,
+            "masked_entries_zeroed_before_validation": False,
+            "deployed_reconstructed_from_mixture": False,
+        }
         self.states = self._states()
 
     def begin_read_only_evaluation(self) -> None:
@@ -466,6 +481,14 @@ class _Backend:
                 if self.method_id.startswith("fixed_base_exact_")
                 else (0.5, 0.5, 0.0)
             )
+            if self.non_mixture_deployment:
+                # An exact method whose deployed law is not the alpha mixture.
+                deployed = (0.50, 0.50, 0.0)
+            if self.unnormalized_states:
+                # Float32-scale rounding the backend must have removed.
+                current = (0.6, 0.4 + 3e-8, 0.0)
+            if self.masked_leakage:
+                current = (0.6, 0.4, 1e-6)
             state = TheoryStateV2(
                 state_id=f"state-{index}",
                 record_index=index,
@@ -498,6 +521,9 @@ class _Backend:
 
     def registered_states(self) -> tuple[TheoryStateV2, ...]:
         return self.states
+
+    def normalization_diagnostic(self) -> dict[str, object]:
+        return dict(self.normalization)
 
     def endpoint_value(self, state_id: str, depth: int) -> float:
         index = int(state_id.rsplit("-", 1)[-1]) if state_id.startswith("state-") else 0
@@ -958,6 +984,9 @@ class TheoryBridgeV2Test(unittest.TestCase):
 
             def registered_states(self) -> tuple[TheoryStateV2, ...]:
                 return source.registered_states()
+
+            def normalization_diagnostic(self) -> dict[str, Any]:
+                return source.normalization_diagnostic()
 
             def endpoint_value(self, state_id: str, depth: int) -> float:
                 return source.endpoint_value(state_id, depth)
@@ -1754,3 +1783,101 @@ class TheoryBridgeV2Test(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheoryBridgeV2NormalizationTest(unittest.TestCase):
+    """The evaluator keeps its 1e-10 precondition and its mixture check."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.checkpoint = Path(self.temporary.name) / "checkpoint.pt"
+        self.checkpoint.write_bytes(b"synthetic protocol-v2 checkpoint")
+        self.amendment = _amendment()
+        self.identity = _identity(self.amendment, self.checkpoint)
+        self.request = _request(self.amendment, self.identity)
+
+    def test_float32_rounding_is_rejected_at_the_bridge(self) -> None:
+        """The bridge never absorbs rounding; the backend must normalize."""
+
+        backend = _Backend(self.identity, unnormalized_states=True)
+        with self.assertRaisesRegex(
+            TheoryBridgeV2Error, "does not sum to one on valid actions"
+        ):
+            evaluate_theory_bridge_v2(
+                request_document=self.request,
+                amendment_document=self.amendment,
+                checkpoint_path=self.checkpoint,
+                backend=backend,
+            )
+
+    def test_masked_leakage_is_rejected_at_the_bridge(self) -> None:
+        backend = _Backend(self.identity, masked_leakage=True)
+        with self.assertRaisesRegex(TheoryBridgeV2Error, "masked action"):
+            evaluate_theory_bridge_v2(
+                request_document=self.request,
+                amendment_document=self.amendment,
+                checkpoint_path=self.checkpoint,
+                backend=backend,
+            )
+
+    def test_non_mixture_deployment_is_rejected_for_exact_methods(self) -> None:
+        """Normalization must not be able to force mixture equality."""
+
+        backend = _Backend(self.identity, non_mixture_deployment=True)
+        with self.assertRaisesRegex(
+            TheoryBridgeV2Error, "Exact pointwise mixture identity failed"
+        ):
+            evaluate_theory_bridge_v2(
+                request_document=self.request,
+                amendment_document=self.amendment,
+                checkpoint_path=self.checkpoint,
+                backend=backend,
+            )
+
+    def test_normalization_diagnostic_is_reported(self) -> None:
+        backend = _Backend(self.identity)
+        result = evaluate_theory_bridge_v2(
+            request_document=self.request,
+            amendment_document=self.amendment,
+            checkpoint_path=self.checkpoint,
+            backend=backend,
+        )
+        diagnostic = result["normalization_diagnostic"]
+        self.assertEqual(
+            diagnostic["kind"],
+            "float32_categorical_to_binary64_renormalization",
+        )
+        self.assertEqual(diagnostic["maximum_valid_mass_error"], 3.2e-8)
+        self.assertEqual(diagnostic["maximum_normalization_correction"], 1.1e-9)
+        self.assertIs(diagnostic["masked_entries_zeroed_before_validation"], False)
+        self.assertIs(diagnostic["deployed_reconstructed_from_mixture"], False)
+
+    def test_dishonest_normalization_diagnostics_fail_closed(self) -> None:
+        for override, pattern in (
+            ({"masked_entries_zeroed_before_validation": True}, "removed evidence"),
+            ({"deployed_reconstructed_from_mixture": True}, "removed evidence"),
+            ({"maximum_valid_mass_error": 1.0}, "outside the float32 envelope"),
+            ({"maximum_valid_mass_error": -1e-9}, "invalid"),
+            ({"normalized_state_count": -1}, "invalid"),
+        ):
+            with self.subTest(override=override):
+                backend = _Backend(self.identity)
+                backend.normalization.update(override)
+                with self.assertRaisesRegex(TheoryBridgeV2Error, pattern):
+                    evaluate_theory_bridge_v2(
+                request_document=self.request,
+                amendment_document=self.amendment,
+                checkpoint_path=self.checkpoint,
+                backend=backend,
+            )
+
+        backend = _Backend(self.identity)
+        backend.normalization.pop("kind")
+        with self.assertRaisesRegex(TheoryBridgeV2Error, "inventory differs"):
+            evaluate_theory_bridge_v2(
+                request_document=self.request,
+                amendment_document=self.amendment,
+                checkpoint_path=self.checkpoint,
+                backend=backend,
+            )

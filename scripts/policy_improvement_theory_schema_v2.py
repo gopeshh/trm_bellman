@@ -1278,6 +1278,7 @@ def validate_theory_result(value: object, *, request: object) -> dict[str, Any]:
             "states",
             "metrics",
             "deployment_diagnostic",
+            "normalization_diagnostic",
             "monte_carlo_uncertainty",
             "persistent_semantics",
             "read_only_verification",
@@ -1682,6 +1683,50 @@ def validate_theory_result(value: object, *, request: object) -> dict[str, Any]:
         for field in ("mean", "minimum", "maximum")
     ):
         raise TheoryBridgeV2SchemaError("Deployment summary differs from state rows.")
+    # Systems-only record of the exported-vector renormalization. It must show
+    # that masked leakage was preserved for validation and that the deployed
+    # law was not rebuilt from the mixture.
+    normalization = _fields(
+        result["normalization_diagnostic"],
+        {
+            "kind",
+            "float32_mass_envelope",
+            "normalized_state_count",
+            "maximum_valid_mass_error",
+            "maximum_normalization_correction",
+            "masked_entries_zeroed_before_validation",
+            "deployed_reconstructed_from_mixture",
+        },
+        path="result.normalization_diagnostic",
+    )
+    envelope = _number(
+        normalization["float32_mass_envelope"],
+        path="result.normalization_diagnostic.float32_mass_envelope",
+        minimum=0.0,
+    )
+    mass_error = _number(
+        normalization["maximum_valid_mass_error"],
+        path="result.normalization_diagnostic.maximum_valid_mass_error",
+        minimum=0.0,
+    )
+    _number(
+        normalization["maximum_normalization_correction"],
+        path="result.normalization_diagnostic.maximum_normalization_correction",
+        minimum=0.0,
+    )
+    _integer(
+        normalization["normalized_state_count"],
+        path="result.normalization_diagnostic.normalized_state_count",
+        minimum=0,
+    )
+    if (
+        normalization["kind"]
+        != "float32_categorical_to_binary64_renormalization"
+        or normalization["masked_entries_zeroed_before_validation"] is not False
+        or normalization["deployed_reconstructed_from_mixture"] is not False
+        or mass_error > envelope
+    ):
+        raise TheoryBridgeV2SchemaError("Normalization diagnostic is invalid.")
     persistent = _fields(
         result["persistent_semantics"],
         {

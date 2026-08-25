@@ -21,6 +21,8 @@ import torch
 from models.recursive_reasoning.trm import TinyRecursiveReasoningModel_ACTV1
 from policy_improvement_checkpoint_validator import _validate_full_checkpoint
 from policy_improvement_full_backend import (
+    _canonical_masked_probabilities,
+    _FLOAT32_MASS_ENVELOPE,
     _registered_full_result_document,
     _registered_theory_checkpoint_snapshot_kind,
     _select_registered_population,
@@ -1523,3 +1525,119 @@ class FullCheckpointGuardTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CanonicalMaskedProbabilityTest(unittest.TestCase):
+    """The float32 to binary64 renormalization must preserve the law exactly."""
+
+    def _float32_softmax(self, logits: list[float], mask: list[bool]) -> list[float]:
+        tensor = torch.tensor(logits, dtype=torch.float32)
+        tensor = tensor.masked_fill(
+            ~torch.tensor(mask, dtype=torch.bool), float("-inf")
+        )
+        return torch.softmax(tensor, dim=-1).tolist()
+
+    def test_float32_rounding_is_normalized_without_changing_the_law(self) -> None:
+        torch.manual_seed(1257297357)
+        mask = [True] * 3000 + [False] * 1097
+        logits = torch.randn(len(mask)).tolist()
+        raw = self._float32_softmax(logits, mask)
+        raw_mass = math.fsum(value for value, valid in zip(raw, mask) if valid)
+        # A real float32 masked softmax misses one by far more than 1e-10.
+        self.assertGreater(abs(raw_mass - 1.0), 1e-10)
+        self.assertLess(abs(raw_mass - 1.0), _FLOAT32_MASS_ENVELOPE)
+
+        canonical, mass_error, correction = _canonical_masked_probabilities(
+            raw, mask, label="current policy"
+        )
+        canonical_mass = math.fsum(
+            value for value, valid in zip(canonical, mask) if valid
+        )
+        # This is the bridge's precondition, unchanged at 1e-10.
+        self.assertLessEqual(abs(canonical_mass - 1.0), 1e-10)
+        self.assertAlmostEqual(mass_error, abs(raw_mass - 1.0), places=15)
+        self.assertGreaterEqual(correction, 0.0)
+        # The categorical law is preserved: every pairwise ratio is unchanged.
+        first = next(index for index, valid in enumerate(mask) if valid and raw[index])
+        for index, valid in enumerate(mask):
+            if not valid or not raw[index]:
+                continue
+            self.assertAlmostEqual(
+                canonical[index] / canonical[first],
+                raw[index] / raw[first],
+                places=12,
+            )
+
+    def test_masked_leakage_is_scaled_not_zeroed(self) -> None:
+        mask = [True, True, False]
+        raw = [0.5, 0.5, 1e-8]
+        canonical, _, _ = _canonical_masked_probabilities(
+            raw, mask, label="current policy"
+        )
+        # The leak must survive so the bridge's masked-mass check can reject it.
+        self.assertGreater(canonical[2], 0.0)
+        self.assertAlmostEqual(canonical[2], 1e-8, places=15)
+
+    def test_invalid_probabilities_fail_closed(self) -> None:
+        mask = [True, True]
+        for values, mask_values in (
+            ([0.5, -0.5], mask),
+            ([0.5, float("nan")], mask),
+            ([0.5, float("inf")], mask),
+            ([0.0, 0.0], mask),
+            ([0.5, 0.5, 0.5], mask),
+            ([], []),
+            ([0.5, 0.5], [False, False]),
+        ):
+            with self.subTest(values=values, mask=mask_values):
+                with self.assertRaises(FullBackendError):
+                    _canonical_masked_probabilities(
+                        values, mask_values, label="current policy"
+                    )
+
+    def test_mass_outside_the_float32_envelope_fails_closed(self) -> None:
+        mask = [True, True]
+        # An unnormalized weight vector is a structural defect, not rounding.
+        with self.assertRaisesRegex(FullBackendError, "float32 rounding envelope"):
+            _canonical_masked_probabilities([3.0, 4.0], mask, label="current policy")
+        with self.assertRaisesRegex(FullBackendError, "float32 rounding envelope"):
+            _canonical_masked_probabilities(
+                [0.4, 0.4], mask, label="current policy"
+            )
+
+    def test_normalization_does_not_force_mixture_equality(self) -> None:
+        """Deployed stays its own law, so a non-mixture deployment is visible."""
+
+        mask = [True, True, True]
+        alpha = 0.1
+        current = [0.70, 0.20, 0.10]
+        candidate = [0.10, 0.30, 0.60]
+        # A deployed law that is not the alpha mixture, off by well over 1e-6.
+        deployed = [0.50, 0.25, 0.25]
+        normalized = {
+            name: _canonical_masked_probabilities(values, mask, label=name)[0]
+            for name, values in (
+                ("current", current),
+                ("candidate", candidate),
+                ("deployed", deployed),
+            )
+        }
+        mixture = [
+            (1.0 - alpha) * c + alpha * k
+            for c, k in zip(normalized["current"], normalized["candidate"])
+        ]
+        deployment_tv = 0.5 * math.fsum(
+            abs(left - right) for left, right in zip(mixture, normalized["deployed"])
+        )
+        self.assertGreater(deployment_tv, 1e-6)
+
+        # A genuine exact mixture still lands inside the 1e-6 tolerance after
+        # each law is normalized independently.
+        exact = [(1.0 - alpha) * c + alpha * k for c, k in zip(current, candidate)]
+        normalized_exact, _, _ = _canonical_masked_probabilities(
+            exact, mask, label="deployed"
+        )
+        exact_tv = 0.5 * math.fsum(
+            abs(left - right) for left, right in zip(mixture, normalized_exact)
+        )
+        self.assertLessEqual(exact_tv, 1e-6)

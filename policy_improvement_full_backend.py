@@ -2439,6 +2439,65 @@ class _BridgeStateRecord:
     deployed_next_latent: object | None = None
 
 
+# A float32 masked softmax over the plan-edit action set sums to one only to
+# about 1e-7, while the theory bridge requires 1e-10 before its own
+# renormalization. This envelope admits genuine float32 rounding and rejects
+# anything structurally wrong: an unnormalized weight vector, a distribution
+# over the wrong action set, or substantial mass on masked actions.
+_FLOAT32_MASS_ENVELOPE = 1e-4
+
+
+def _canonical_masked_probabilities(
+    values: Sequence[float],
+    mask: Sequence[bool],
+    *,
+    label: str,
+) -> tuple[tuple[float, ...], float, float]:
+    """Re-express one float32 categorical law as a canonical binary64 vector.
+
+    The exported vector holds categorical weights. Dividing by the exact
+    binary64 valid mass preserves the categorical law and lands inside the
+    bridge's 1e-10 precondition without loosening it.
+
+    Every entry is scaled by the same factor, masked entries included, so any
+    masked leakage survives into the bridge's separate masked-mass check
+    instead of being silently zeroed here. The raw valid mass must already sit
+    inside the float32 rounding envelope; anything further out is a structural
+    defect rather than rounding and fails closed.
+
+    Returns the canonical vector, the raw valid-mass error, and the largest
+    per-entry correction the normalization applied.
+    """
+
+    if len(values) != len(mask):
+        raise FullBackendError(f"{label} action inventory differs from its mask.")
+    if not values:
+        raise FullBackendError(f"{label} has an empty action inventory.")
+    checked: list[float] = []
+    for index, value in enumerate(values):
+        item = float(value)
+        if not math.isfinite(item):
+            raise FullBackendError(f"{label}[{index}] is not a finite probability.")
+        if item < 0.0:
+            raise FullBackendError(f"{label}[{index}] is a negative probability.")
+        checked.append(item)
+    if not any(mask):
+        raise FullBackendError(f"{label} has no valid action.")
+    valid_mass = math.fsum(value for value, valid in zip(checked, mask) if valid)
+    if not math.isfinite(valid_mass) or valid_mass <= 0.0:
+        raise FullBackendError(f"{label} has no positive valid probability mass.")
+    mass_error = abs(valid_mass - 1.0)
+    if mass_error > _FLOAT32_MASS_ENVELOPE:
+        raise FullBackendError(
+            f"{label} valid mass is outside the float32 rounding envelope."
+        )
+    canonical = tuple(value / valid_mass for value in checked)
+    correction = max(
+        abs(after - before) for before, after in zip(checked, canonical)
+    )
+    return canonical, mass_error, correction
+
+
 def _tensor_identity(value: torch.Tensor) -> dict[str, object]:
     tensor = value.detach().cpu().contiguous()
     return {
@@ -2540,6 +2599,9 @@ class ReadOnlyTheoryBridgeSession:
             )
         self._states: dict[str, _BridgeStateRecord] = {}
         self._registered: tuple[TheoryBridgeState, ...] | None = None
+        # Systems diagnostics for the float32 to binary64 renormalization.
+        self._normalization_mass_errors: list[float] = []
+        self._normalization_corrections: list[float] = []
         self._auxiliary_models: dict[str, Any] = {}
         self._read_only_transaction: tuple[str, str] | None = None
         if evaluation_state_dicts:
@@ -3043,15 +3105,29 @@ class ReadOnlyTheoryBridgeSession:
                         else [True] * int(deployed_dist.probs.shape[-1])
                     )
                 )
-                record.current_probabilities = tuple(
-                    float(value) for value in current_dist.probs.reshape(-1).tolist()
-                )
-                record.candidate_probabilities = tuple(
-                    float(value) for value in candidate_dist.probs.reshape(-1).tolist()
-                )
-                record.deployed_probabilities = tuple(
-                    float(value) for value in deployed_dist.probs.reshape(-1).tolist()
-                )
+                # Normalize each law independently from its own distribution.
+                # The deployed vector is never reconstructed from current and
+                # candidate: the bridge's exact-mixture identity check must stay
+                # a test of the actual deployed policy.
+                mass_errors: list[float] = []
+                corrections: list[float] = []
+                for attribute, distribution, label in (
+                    ("current_probabilities", current_dist, "current policy"),
+                    ("candidate_probabilities", candidate_dist, "candidate policy"),
+                    ("deployed_probabilities", deployed_dist, "deployed policy"),
+                ):
+                    canonical, mass_error, correction = (
+                        _canonical_masked_probabilities(
+                            distribution.probs.reshape(-1).tolist(),
+                            record.action_mask,
+                            label=label,
+                        )
+                    )
+                    setattr(record, attribute, canonical)
+                    mass_errors.append(mass_error)
+                    corrections.append(correction)
+                self._normalization_mass_errors.append(max(mass_errors))
+                self._normalization_corrections.append(max(corrections))
                 record.deployed_next_latent = (
                     _clone_tree(next_latent)
                     if next_latent is not None
@@ -3092,6 +3168,31 @@ class ReadOnlyTheoryBridgeSession:
             candidate_probabilities=record.candidate_probabilities,
             deployed_probabilities=record.deployed_probabilities,
         )
+
+    def normalization_diagnostic(self) -> dict[str, object]:
+        """Systems-only record of the float32 to binary64 renormalization.
+
+        This is an engineering measurement of exported-vector rounding. It is
+        not a theory quantity and carries no claim about the model.
+        """
+
+        return {
+            "kind": "float32_categorical_to_binary64_renormalization",
+            "float32_mass_envelope": _FLOAT32_MASS_ENVELOPE,
+            "normalized_state_count": len(self._normalization_mass_errors),
+            "maximum_valid_mass_error": (
+                max(self._normalization_mass_errors)
+                if self._normalization_mass_errors
+                else 0.0
+            ),
+            "maximum_normalization_correction": (
+                max(self._normalization_corrections)
+                if self._normalization_corrections
+                else 0.0
+            ),
+            "masked_entries_zeroed_before_validation": False,
+            "deployed_reconstructed_from_mixture": False,
+        }
 
     def registered_states(self) -> tuple[TheoryBridgeState, ...]:
         def build() -> tuple[TheoryBridgeState, ...]:

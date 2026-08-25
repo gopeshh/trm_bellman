@@ -82,6 +82,8 @@ class FullTheorySessionV2(Protocol):
 
     def registered_states(self) -> Sequence[object]: ...
 
+    def normalization_diagnostic(self) -> Mapping[str, object]: ...
+
     def endpoint_value(self, state_id: str, depth: int) -> float: ...
 
     def exact_action_outcomes(self, state_id: str, action_index: int) -> object: ...
@@ -139,6 +141,9 @@ class SealedTheoryBackendV2:
 
     def end_read_only_evaluation(self) -> None:
         self._session.end_read_only_evaluation()
+
+    def normalization_diagnostic(self) -> Mapping[str, object]:
+        return self._session.normalization_diagnostic()
 
     def read_only_snapshot(self) -> ReadOnlySnapshotV2:
         value = self._session.read_only_snapshot_v2()

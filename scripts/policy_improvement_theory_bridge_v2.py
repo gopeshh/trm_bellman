@@ -140,6 +140,8 @@ class TheoryBridgeV2Backend(Protocol):
 
     def registered_states(self) -> Sequence[TheoryStateV2]: ...
 
+    def normalization_diagnostic(self) -> Mapping[str, object]: ...
+
     def endpoint_value(self, state_id: str, depth: int) -> float: ...
 
     def exact_action_outcomes(
@@ -507,6 +509,72 @@ def _summary(values: Sequence[float]) -> dict[str, object]:
         "mean": fmean(checked),
         "minimum": min(checked),
         "maximum": max(checked),
+    }
+
+
+def _normalization_diagnostic(backend: TheoryBridgeV2Backend) -> dict[str, object]:
+    """Validate and copy the backend's renormalization diagnostic.
+
+    Systems measurement only. It records how far the exported float32 vectors
+    were from a normalized law and how much the binary64 renormalization moved
+    them. It is not a theory quantity.
+    """
+
+    supplied = backend.normalization_diagnostic()
+    if not isinstance(supplied, Mapping):
+        raise TheoryBridgeV2Error("Backend normalization diagnostic is not an object.")
+    expected = {
+        "kind",
+        "float32_mass_envelope",
+        "normalized_state_count",
+        "maximum_valid_mass_error",
+        "maximum_normalization_correction",
+        "masked_entries_zeroed_before_validation",
+        "deployed_reconstructed_from_mixture",
+    }
+    if set(supplied) != expected:
+        raise TheoryBridgeV2Error(
+            "Backend normalization diagnostic inventory differs."
+        )
+    envelope = _finite(supplied["float32_mass_envelope"], label="mass envelope")
+    mass_error = _finite(
+        supplied["maximum_valid_mass_error"], label="maximum valid mass error"
+    )
+    correction = _finite(
+        supplied["maximum_normalization_correction"],
+        label="maximum normalization correction",
+    )
+    count = supplied["normalized_state_count"]
+    if (
+        isinstance(count, bool)
+        or not isinstance(count, int)
+        or count < 0
+        or mass_error < 0.0
+        or correction < 0.0
+        or envelope <= 0.0
+    ):
+        raise TheoryBridgeV2Error("Backend normalization diagnostic is invalid.")
+    if mass_error > envelope:
+        raise TheoryBridgeV2Error(
+            "Backend renormalized a distribution outside the float32 envelope."
+        )
+    # The backend must not have hidden masked leakage or rebuilt the deployed
+    # law from the mixture; either would make this evaluator's checks vacuous.
+    if (
+        supplied["masked_entries_zeroed_before_validation"] is not False
+        or supplied["deployed_reconstructed_from_mixture"] is not False
+    ):
+        raise TheoryBridgeV2Error(
+            "Backend normalization removed evidence this evaluator must check."
+        )
+    return {
+        "kind": str(supplied["kind"]),
+        "float32_mass_envelope": envelope,
+        "normalized_state_count": count,
+        "maximum_valid_mass_error": mass_error,
+        "maximum_normalization_correction": correction,
+        "masked_entries_zeroed_before_validation": False,
+        "deployed_reconstructed_from_mixture": False,
     }
 
 
@@ -1155,6 +1223,9 @@ def _evaluate(
             "metric": deployment_metric,
             "summary": _summary(deployment_values),
         },
+        # Systems-only record of the exported-vector renormalization the
+        # backend applies before this evaluator validates any probability.
+        "normalization_diagnostic": _normalization_diagnostic(backend),
         "monte_carlo_uncertainty": {
             "bellman_operator_standard_error": _summary(operator_uncertainty),
             "B_nm_standard_error": _summary(b_uncertainty),
