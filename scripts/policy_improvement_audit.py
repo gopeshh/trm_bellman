@@ -2845,10 +2845,24 @@ def audit_result_set(
             raise PolicyImprovementSchemaError(
                 "Result audit requires frozen dataset and ordered-record identities."
             )
+        # A row that binds a registered training population trains on that
+        # population, not on the whole split, so its result reports the
+        # population's ordered digest. Expect exactly the bound population.
+        training_population_id = row.get("training_population")
+        if training_population_id is None:
+            expected_train_order = train_order["value"]
+        else:
+            if registered_population_document is None:
+                raise PolicyImprovementSchemaError(
+                    "Result audit requires the registered population document."
+                )
+            expected_train_order = registered_population_document["populations"][
+                str(training_population_id)
+            ]["ordered_record_sha256"]
         if (
             result["identities"]["dataset_manifest_sha256"] != dataset_manifest["value"]
             or result["identities"]["train_ordered_records_sha256"]
-            != train_order["value"]
+            != expected_train_order
         ):
             raise PolicyImprovementSchemaError(
                 "Result dataset identities differ from the frozen protocol."
