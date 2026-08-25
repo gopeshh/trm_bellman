@@ -224,6 +224,24 @@ def _available_hex(
     return encoded
 
 
+def _registered_hex(value: object, *, name: str, length: int) -> str:
+    """Validate one bare registered digest.
+
+    Protocol dataset registrations wrap their digests in a frozen
+    ``{"status", "value"}`` envelope, which ``_available_hex`` unwraps.
+    Population documents store the digest directly, so they need this
+    variant. Both enforce the same lowercase-hex shape.
+    """
+
+    if (
+        not isinstance(value, str)
+        or len(value) != length
+        or any(character not in _LOWER_SHA256 for character in value)
+    ):
+        raise PolicyImprovementSmokeError(f"{name} has an invalid digest.")
+    return value
+
+
 def _absolute_path(value: str, *, name: str, must_exist: bool) -> Path:
     path = Path(value)
     if not path.is_absolute() or ".." in path.parts:
@@ -2925,7 +2943,7 @@ def _build_final_result(
         else ordered_record_sha256(dataset_sample_sha256s(session.evaluation_dataset))
     )
     if session.training_population is not None:
-        registered_train_order = _available_hex(
+        registered_train_order = _registered_hex(
             session.training_population["ordered_record_sha256"],
             name="registered training population ordered records",
             length=64,
@@ -2937,7 +2955,7 @@ def _build_final_result(
             length=64,
         )
     if session.evaluation_population is not None:
-        registered_evaluation_order = _available_hex(
+        registered_evaluation_order = _registered_hex(
             session.evaluation_population["ordered_record_sha256"],
             name="registered evaluation population ordered records",
             length=64,
