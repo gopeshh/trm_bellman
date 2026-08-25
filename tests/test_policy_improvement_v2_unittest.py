@@ -18,6 +18,7 @@ from scripts.policy_improvement_populations import (
     load_registered_populations,
     load_strict_json as load_population_json,
     materialize_v2_populations,
+    ordered_sha256,
     PolicyImprovementPopulationError,
     population_binding_sha256,
     population_for_id,
@@ -57,6 +58,7 @@ from scripts.policy_improvement_v2_schema import (
     validate_stage1_configuration_selection,
     validate_v2_amendment_history,
     validate_v2_protocol,
+    validate_v2_registry_row,
     validate_v2_result,
 )
 
@@ -249,6 +251,186 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
             self.assertFalse(row["paper_evidence_eligible"])
             self.assertEqual(row["checkpoint_environment_interactions"], [16, 32])
 
+    def test_stage0_training_complement_is_registered(self) -> None:
+        """Stage 0 trains on the registered complement of its evaluation pool."""
+
+        stage0 = population_for_id(self.populations, "stage0_smoke")
+        training = population_for_id(self.populations, "train_minus_stage0_smoke")
+        self.assertEqual(training["split"], "train")
+        self.assertEqual(training["count"], 1016)
+        self.assertEqual(
+            training["selection_algorithm"],
+            "sha256_namespace_record_sha256_lexicographic_complement_v1",
+        )
+        self.assertEqual(
+            training["selection_namespace"], stage0["selection_namespace"]
+        )
+        # Deterministic complement: index ordered, disjoint, and exhaustive.
+        self.assertEqual(training["indices"], sorted(training["indices"]))
+        self.assertFalse(set(training["indices"]) & set(stage0["indices"]))
+        self.assertEqual(
+            set(training["indices"]) | set(stage0["indices"]), set(range(1024))
+        )
+        self.assertLess(
+            max(zip(stage0["selection_scores"], stage0["indices"])),
+            min(zip(training["selection_scores"], training["indices"])),
+        )
+        for field in ("record_sha256s", "input_sha256s", "selection_scores"):
+            self.assertEqual(len(training[field]), 1016)
+        self.assertEqual(
+            training["binding_sha256"], population_binding_sha256(training)
+        )
+        # Reassembling both halves by index reproduces the registered split.
+        by_index = dict(
+            zip(
+                list(stage0["indices"]) + list(training["indices"]),
+                list(stage0["record_sha256s"]) + list(training["record_sha256s"]),
+            )
+        )
+        self.assertEqual(
+            self.populations["split_ordered_record_sha256"]["train"],
+            ordered_sha256([by_index[index] for index in range(1024)]),
+        )
+        # The protocol, registry, and plan all bind it explicitly.
+        self.assertEqual(
+            self.protocol["training_populations"],
+            {
+                "train_minus_stage0_smoke": {
+                    "population_id": "train_minus_stage0_smoke",
+                    "split": "train",
+                    "count": 1016,
+                    "complement_of": "stage0_smoke",
+                    "used_by_phase": "stage0_smoke",
+                }
+            },
+        )
+        for row in self.registry["rows"]:
+            expected = (
+                "train_minus_stage0_smoke"
+                if row["phase"] == "stage0_smoke"
+                else None
+            )
+            self.assertEqual(row["training_population"], expected, row["run_id"])
+
+    def _corrupted_complement(self, mutate) -> dict:
+        document = copy.deepcopy(self.populations)
+        population = document["populations"]["train_minus_stage0_smoke"]
+        mutate(document, population)
+        population["binding_sha256"] = population_binding_sha256(population)
+        return document
+
+    def test_training_complement_overlap_fails_closed(self) -> None:
+        def mutate(document, population):
+            stage0 = document["populations"]["stage0_smoke"]
+            population["indices"][0] = stage0["indices"][0]
+            population["record_sha256s"][0] = stage0["record_sha256s"][0]
+            population["input_sha256s"][0] = stage0["input_sha256s"][0]
+            population["selection_scores"][0] = stage0["selection_scores"][0]
+            population["ordered_record_sha256"] = ordered_sha256(
+                population["record_sha256s"]
+            )
+            population["ordered_input_sha256"] = ordered_sha256(
+                population["input_sha256s"]
+            )
+
+        with self.assertRaises(PolicyImprovementPopulationError):
+            validate_v2_populations(self._corrupted_complement(mutate))
+
+    def test_training_complement_reordering_fails_closed(self) -> None:
+        def mutate(_document, population):
+            for field in (
+                "indices",
+                "record_sha256s",
+                "input_sha256s",
+                "selection_scores",
+            ):
+                population[field][0], population[field][1] = (
+                    population[field][1],
+                    population[field][0],
+                )
+            population["ordered_record_sha256"] = ordered_sha256(
+                population["record_sha256s"]
+            )
+            population["ordered_input_sha256"] = ordered_sha256(
+                population["input_sha256s"]
+            )
+
+        with self.assertRaisesRegex(
+            PolicyImprovementPopulationError, "registered index order"
+        ):
+            validate_v2_populations(self._corrupted_complement(mutate))
+
+    def test_training_complement_missing_record_fails_closed(self) -> None:
+        def mutate(_document, population):
+            for field in (
+                "indices",
+                "record_sha256s",
+                "input_sha256s",
+                "selection_scores",
+            ):
+                population[field].pop()
+            population["count"] = 1015
+            population["ordered_record_sha256"] = ordered_sha256(
+                population["record_sha256s"]
+            )
+            population["ordered_input_sha256"] = ordered_sha256(
+                population["input_sha256s"]
+            )
+
+        with self.assertRaises(PolicyImprovementPopulationError):
+            validate_v2_populations(self._corrupted_complement(mutate))
+
+    def test_training_complement_extra_record_fails_closed(self) -> None:
+        def mutate(_document, population):
+            # A duplicated train record keeps the registered count but makes
+            # the complement cover one index twice and another not at all.
+            for field in (
+                "indices",
+                "record_sha256s",
+                "input_sha256s",
+                "selection_scores",
+            ):
+                population[field][1] = population[field][0]
+            population["ordered_record_sha256"] = ordered_sha256(
+                population["record_sha256s"]
+            )
+            population["ordered_input_sha256"] = ordered_sha256(
+                population["input_sha256s"]
+            )
+
+        with self.assertRaises(PolicyImprovementPopulationError):
+            validate_v2_populations(self._corrupted_complement(mutate))
+
+    def test_training_population_outside_stage0_fails_closed(self) -> None:
+        """The complement is bound to Stage 0 and may not be reused elsewhere."""
+
+        stage0_row = next(
+            row for row in self.registry["rows"] if row["phase"] == "stage0_smoke"
+        )
+        other_row = next(
+            row for row in self.registry["rows"] if row["phase"] != "stage0_smoke"
+        )
+        validate_v2_registry_row(copy.deepcopy(stage0_row))
+
+        borrowed = copy.deepcopy(other_row)
+        borrowed["training_population"] = "train_minus_stage0_smoke"
+        with self.assertRaisesRegex(
+            PolicyImprovementV2SchemaError, "training-population binding differs"
+        ):
+            validate_v2_registry_row(borrowed)
+
+        unbound = copy.deepcopy(stage0_row)
+        unbound["training_population"] = None
+        with self.assertRaisesRegex(
+            PolicyImprovementV2SchemaError, "training-population binding differs"
+        ):
+            validate_v2_registry_row(unbound)
+
+        unregistered = copy.deepcopy(stage0_row)
+        unregistered["training_population"] = "validation_bridge"
+        with self.assertRaises(PolicyImprovementV2SchemaError):
+            validate_v2_registry_row(unregistered)
+
     def test_validation_partition_is_disjoint_exhaustive_and_ordered(self) -> None:
         select = population_for_id(self.populations, "validation_select")
         bridge = population_for_id(self.populations, "validation_bridge")
@@ -317,8 +499,6 @@ class PolicyImprovementV2RegistrationTest(unittest.TestCase):
         mixed = copy.deepcopy(document)
         population = mixed["populations"]["validation_bridge"]
         population["input_sha256s"][0] = _digest("wrong-input", 0)
-        from scripts.policy_improvement_populations import ordered_sha256
-
         population["ordered_input_sha256"] = ordered_sha256(population["input_sha256s"])
         population["binding_sha256"] = population_binding_sha256(population)
         with self.assertRaises(PolicyImprovementPopulationError):

@@ -237,7 +237,10 @@ def render_smoke_plan(
                 "seed": row["seed"],
                 "evaluation_split": row["evaluation_split"],
                 **(
-                    {"evaluation_population_id": row["evaluation_population"]}
+                    {
+                        "evaluation_population_id": row["evaluation_population"],
+                        "training_population_id": row["training_population"],
+                    }
                     if is_v2
                     else {}
                 ),

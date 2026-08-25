@@ -14,6 +14,8 @@ from typing import Any
 from scripts.policy_improvement_populations import (
     POPULATIONS_SCHEMA_NAME,
     POPULATIONS_SCHEMA_VERSION,
+    STAGE0_EVALUATION_POPULATION_ID,
+    STAGE0_TRAINING_POPULATION_ID,
 )
 
 
@@ -42,6 +44,7 @@ METHOD_IDS = (
     "matched_ppo",
 )
 EXACT_METHOD_IDS = METHOD_IDS[:2]
+STAGE0_PHASE = "stage0_smoke"
 PHASES = (
     "stage0_smoke",
     "stage1_screen",
@@ -352,6 +355,7 @@ def validate_v2_protocol(value: object) -> dict[str, Any]:
             "dataset",
             "population_registry",
             "evaluation_populations",
+            "training_populations",
             "full_execution_gate",
             "grid",
             "methods",
@@ -585,6 +589,24 @@ def validate_v2_protocol(value: object) -> dict[str, Any]:
         },
     }:
         raise PolicyImprovementV2SchemaError("Evaluation populations differ.")
+
+    # Stage 0 trains on the registered complement of its evaluation population
+    # so the schema-v5 train/evaluation disjointness invariant holds without a
+    # Stage 0 exemption. Evaluation stays the frozen eight records.
+    training_populations = _mapping(
+        protocol["training_populations"],
+        path="protocol.training_populations",
+    )
+    if training_populations != {
+        STAGE0_TRAINING_POPULATION_ID: {
+            "population_id": STAGE0_TRAINING_POPULATION_ID,
+            "split": "train",
+            "count": 1016,
+            "complement_of": "stage0_smoke",
+            "used_by_phase": "stage0_smoke",
+        },
+    }:
+        raise PolicyImprovementV2SchemaError("Training populations differ.")
 
     grid = _mapping(protocol["grid"], path="protocol.grid")
     if set(grid) != {
@@ -880,6 +902,7 @@ def validate_v2_registry_row(value: object) -> dict[str, Any]:
             "base_method_id",
             "seed",
             "evaluation_population",
+            "training_population",
             "evaluation_split",
             "n",
             "K",
@@ -943,6 +966,23 @@ def validate_v2_registry_row(value: object) -> dict[str, Any]:
     }[split]
     if population != expected_population:
         raise PolicyImprovementV2SchemaError("Registry-row split binding differs.")
+    # Only Stage 0 evaluates inside the train split, so only Stage 0 binds the
+    # registered training complement. Every other phase must leave it unset,
+    # which keeps the complement from being reused outside Stage 0.
+    training_population = row["training_population"]
+    expected_training_population = (
+        STAGE0_TRAINING_POPULATION_ID if phase == STAGE0_PHASE else None
+    )
+    if training_population is not None:
+        _string(
+            training_population,
+            path="registry_row.training_population",
+            choices={STAGE0_TRAINING_POPULATION_ID},
+        )
+    if training_population != expected_training_population:
+        raise PolicyImprovementV2SchemaError(
+            "Registry-row training-population binding differs."
+        )
     for field in ("n", "K"):
         if row[field] is not None:
             _integer(row[field], path=f"registry_row.{field}", minimum=1)

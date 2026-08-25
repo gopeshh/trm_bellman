@@ -225,6 +225,10 @@ _POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS = (
     "scripts/policy_improvement_registry.py",
     "scripts/policy_improvement_schema.py",
     "scripts/policy_improvement_theory_schema.py",
+    # policy_improvement_full_backend imports this at call time on the
+    # theory-identity path, so both the full and theory-bridge runtimes must
+    # declare and carry it.
+    "scripts/policy_improvement_theory_schema_v2.py",
 )
 POLICY_IMPROVEMENT_FULL_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS,

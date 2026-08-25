@@ -3410,6 +3410,16 @@ def audit_result_set(
         population_ids = sorted(
             {str(row["evaluation_population"]) for row in expected_rows}
         )
+        # Stage 0 trains on the registered complement of its evaluation
+        # population. Report that binding alongside the evaluation populations
+        # so the audit records both halves of the train-split partition.
+        training_population_ids = sorted(
+            {
+                str(row["training_population"])
+                for row in expected_rows
+                if row.get("training_population") is not None
+            }
+        )
         populations = registered_population_document["populations"]
         report.update(
             {
@@ -3443,6 +3453,21 @@ def audit_result_set(
                         ],
                     }
                     for population_id in population_ids
+                ],
+                "training_populations": [
+                    {
+                        "population_id": population_id,
+                        "split": populations[population_id]["split"],
+                        "count": populations[population_id]["count"],
+                        "binding_sha256": populations[population_id]["binding_sha256"],
+                        "ordered_record_sha256": populations[population_id][
+                            "ordered_record_sha256"
+                        ],
+                        "ordered_input_sha256": populations[population_id][
+                            "ordered_input_sha256"
+                        ],
+                    }
+                    for population_id in training_population_ids
                 ],
                 "validation_data_opened": any(
                     str(row["evaluation_split"]) == "validation"

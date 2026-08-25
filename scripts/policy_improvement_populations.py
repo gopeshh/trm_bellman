@@ -20,7 +20,29 @@ DATASET_NAME = "policy-improvement-hard-4x4-v1"
 STAGE0_SELECTION_NAMESPACE = "upi-trm-policy-improvement-v2-stage0-smoke:"
 VALIDATION_PARTITION_NAMESPACE = "upi-trm-policy-improvement-v2-validation-partition:"
 SELECTION_ALGORITHM = "sha256_namespace_record_sha256_lexicographic_v1"
+# The Stage 0 training population is the deterministic complement of the frozen
+# Stage 0 evaluation population inside the same registered train split. It is
+# ordered by original train index, not by selection score, because it is the
+# pool a Stage 0 run trains on rather than a score-ranked selection.
+COMPLEMENT_SELECTION_ALGORITHM = (
+    "sha256_namespace_record_sha256_lexicographic_complement_v1"
+)
 SELECTION_TIE_BREAK = "original_index_ascending"
+STAGE0_EVALUATION_POPULATION_ID = "stage0_smoke"
+STAGE0_TRAINING_POPULATION_ID = "train_minus_stage0_smoke"
+TRAIN_SPLIT_RECORD_COUNT = 1024
+STAGE0_EVALUATION_RECORD_COUNT = 8
+STAGE0_TRAINING_RECORD_COUNT = (
+    TRAIN_SPLIT_RECORD_COUNT - STAGE0_EVALUATION_RECORD_COUNT
+)
+REGISTERED_POPULATION_IDS = (
+    STAGE0_EVALUATION_POPULATION_ID,
+    STAGE0_TRAINING_POPULATION_ID,
+    "validation_select",
+    "validation_bridge",
+)
+_SCORE_ORDERED = "score"
+_INDEX_ORDERED = "index"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -115,6 +137,7 @@ def _population(
     indices: Sequence[int],
     record_sha256s: Sequence[str],
     input_sha256s: Sequence[str],
+    algorithm: str = SELECTION_ALGORITHM,
 ) -> dict[str, object]:
     scores = [derive_population_score(namespace, value) for value in record_sha256s]
     result: dict[str, object] = {
@@ -122,7 +145,7 @@ def _population(
         "split": split,
         "count": len(indices),
         "selection_namespace": namespace,
-        "selection_algorithm": SELECTION_ALGORITHM,
+        "selection_algorithm": algorithm,
         "tie_break": SELECTION_TIE_BREAK,
         "indices": list(indices),
         "record_sha256s": list(record_sha256s),
@@ -179,7 +202,16 @@ def materialize_v2_populations(
             derive_population_score(STAGE0_SELECTION_NAMESPACE, train_records[index]),
             index,
         ),
-    )[:8]
+    )[:STAGE0_EVALUATION_RECORD_COUNT]
+    # Everything the Stage 0 evaluation population did not take, in original
+    # train index order. Stage 0 trains on exactly this complement so the
+    # schema-v5 train/evaluation disjointness invariant holds without a
+    # Stage 0 special case.
+    stage0_training_indices = [
+        index
+        for index in range(len(train_records))
+        if index not in set(stage0_indices)
+    ]
     validation_order = sorted(
         range(len(validation_records)),
         key=lambda index: (
@@ -197,6 +229,17 @@ def materialize_v2_populations(
             indices=stage0_indices,
             record_sha256s=[train_records[index] for index in stage0_indices],
             input_sha256s=[train_inputs[index] for index in stage0_indices],
+        ),
+        STAGE0_TRAINING_POPULATION_ID: _population(
+            population_id=STAGE0_TRAINING_POPULATION_ID,
+            split="train",
+            namespace=STAGE0_SELECTION_NAMESPACE,
+            indices=stage0_training_indices,
+            record_sha256s=[
+                train_records[index] for index in stage0_training_indices
+            ],
+            input_sha256s=[train_inputs[index] for index in stage0_training_indices],
+            algorithm=COMPLEMENT_SELECTION_ALGORITHM,
         ),
         "validation_select": _population(
             population_id="validation_select",
@@ -245,6 +288,8 @@ def _validate_population(
     expected_split: str,
     expected_count: int,
     expected_namespace: str,
+    expected_algorithm: str = SELECTION_ALGORITHM,
+    ordering: str = _SCORE_ORDERED,
 ) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise PolicyImprovementPopulationError(
@@ -275,7 +320,7 @@ def _validate_population(
         or result["split"] != expected_split
         or result["count"] != expected_count
         or result["selection_namespace"] != expected_namespace
-        or result["selection_algorithm"] != SELECTION_ALGORITHM
+        or result["selection_algorithm"] != expected_algorithm
         or result["tie_break"] != SELECTION_TIE_BREAK
     ):
         raise PolicyImprovementPopulationError(
@@ -320,9 +365,19 @@ def _validate_population(
         raise PolicyImprovementPopulationError(
             f"Population {population_id!r} selection scores differ."
         )
-    if list(zip(scores, indices)) != sorted(zip(scores, indices)):
+    if ordering == _SCORE_ORDERED:
+        if list(zip(scores, indices)) != sorted(zip(scores, indices)):
+            raise PolicyImprovementPopulationError(
+                f"Population {population_id!r} is not in registered score order."
+            )
+    elif ordering == _INDEX_ORDERED:
+        if list(indices) != sorted(indices):
+            raise PolicyImprovementPopulationError(
+                f"Population {population_id!r} is not in registered index order."
+            )
+    else:  # pragma: no cover - guarded by the callers below.
         raise PolicyImprovementPopulationError(
-            f"Population {population_id!r} is not in registered score order."
+            f"Population {population_id!r} has an unsupported ordering."
         )
     if result["ordered_record_sha256"] != ordered_sha256(checked_records):
         raise PolicyImprovementPopulationError(
@@ -380,19 +435,26 @@ def validate_v2_populations(
     for split in ("train", "validation"):
         _sha256(split_identity[split], path=f"split_ordered_record_sha256.{split}")
     raw_populations = result["populations"]
-    if not isinstance(raw_populations, Mapping) or set(raw_populations) != {
-        "stage0_smoke",
-        "validation_select",
-        "validation_bridge",
-    }:
+    if not isinstance(raw_populations, Mapping) or set(raw_populations) != set(
+        REGISTERED_POPULATION_IDS
+    ):
         raise PolicyImprovementPopulationError("Population inventory differs.")
     populations = {
         "stage0_smoke": _validate_population(
             raw_populations["stage0_smoke"],
             population_id="stage0_smoke",
             expected_split="train",
-            expected_count=8,
+            expected_count=STAGE0_EVALUATION_RECORD_COUNT,
             expected_namespace=STAGE0_SELECTION_NAMESPACE,
+        ),
+        STAGE0_TRAINING_POPULATION_ID: _validate_population(
+            raw_populations[STAGE0_TRAINING_POPULATION_ID],
+            population_id=STAGE0_TRAINING_POPULATION_ID,
+            expected_split="train",
+            expected_count=STAGE0_TRAINING_RECORD_COUNT,
+            expected_namespace=STAGE0_SELECTION_NAMESPACE,
+            expected_algorithm=COMPLEMENT_SELECTION_ALGORITHM,
+            ordering=_INDEX_ORDERED,
         ),
         "validation_select": _validate_population(
             raw_populations["validation_select"],
@@ -409,6 +471,43 @@ def validate_v2_populations(
             expected_namespace=VALIDATION_PARTITION_NAMESPACE,
         ),
     }
+    # The Stage 0 evaluation population and its registered training complement
+    # must partition the registered train split exactly, must not overlap, and
+    # the complement must be strictly the records the selection did not take.
+    stage0 = populations["stage0_smoke"]
+    training = populations[STAGE0_TRAINING_POPULATION_ID]
+    stage0_indices = list(stage0["indices"])
+    training_indices = list(training["indices"])
+    if set(stage0_indices) & set(training_indices):
+        raise PolicyImprovementPopulationError(
+            "Stage 0 evaluation and training populations overlap."
+        )
+    combined_train = stage0_indices + training_indices
+    if len(combined_train) != TRAIN_SPLIT_RECORD_COUNT or set(combined_train) != set(
+        range(TRAIN_SPLIT_RECORD_COUNT)
+    ):
+        raise PolicyImprovementPopulationError(
+            "Stage 0 populations do not partition the registered train split."
+        )
+    stage0_pairs = list(zip(stage0["selection_scores"], stage0_indices))
+    training_pairs = list(zip(training["selection_scores"], training_indices))
+    if max(stage0_pairs) >= min(training_pairs):
+        raise PolicyImprovementPopulationError(
+            "Stage 0 training complement is not the unselected remainder."
+        )
+    train_by_index = dict(
+        zip(
+            combined_train,
+            list(stage0["record_sha256s"]) + list(training["record_sha256s"]),
+        )
+    )
+    if split_identity["train"] != ordered_sha256(
+        [train_by_index[index] for index in range(TRAIN_SPLIT_RECORD_COUNT)]
+    ):
+        raise PolicyImprovementPopulationError(
+            "Stage 0 populations do not reassemble the registered train split."
+        )
+
     select = populations["validation_select"]
     bridge = populations["validation_bridge"]
     combined_indices = list(select["indices"]) + list(bridge["indices"])
@@ -513,11 +612,7 @@ def population_for_id(
     """Return one validated named population without accepting caller aliases."""
 
     checked = validate_v2_populations(document)
-    if population_id not in {
-        "stage0_smoke",
-        "validation_select",
-        "validation_bridge",
-    }:
+    if population_id not in set(REGISTERED_POPULATION_IDS):
         raise PolicyImprovementPopulationError(
             f"Population {population_id!r} is not registered."
         )

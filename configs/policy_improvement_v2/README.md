@@ -8,15 +8,38 @@ schema name and cannot be accepted as v1.
 `populations.json` freezes all pre-outcome record assignments used before the
 test transaction. Stage 0 contains eight records selected from the 1,024-record
 training split by the lexicographically smallest SHA-256 scores under
-`upi-trm-policy-improvement-v2-stage0-smoke:`. The validation split is sorted
+`upi-trm-policy-improvement-v2-stage0-smoke:`.
+
+`train_minus_stage0_smoke` registers the deterministic complement of that
+selection: the remaining 1,016 train records, in ascending original train
+index order, with explicit indices, record hashes, input hashes, ordered
+digests, and a binding digest. Stage 0 evaluates the eight frozen records and
+trains on their registered complement. Both halves partition the train split
+exactly, and reassembling them by index reproduces the registered
+`split_ordered_record_sha256.train`.
+
+This supersedes the earlier ambiguous statement that Stage 0 "evaluates the
+registered training population", which read as though Stage 0 both trained and
+evaluated on the same 1,024 records. It did, and that violated the schema-v5
+train/evaluation disjointness invariant enforced by `upi_trm_train`. Evaluation
+is unchanged: the same eight records with the same binding digest. Only the
+training pool is now stated explicitly. The general disjointness checks are
+unchanged and Stage 0 has no exemption from them.
+
+`train_minus_stage0_smoke` is bound to Stage 0 alone. The protocol registers it
+under `training_populations`, only Stage 0 registry rows carry it in
+`training_population`, and every other phase must leave that field unset.
+
+The validation split is sorted
 under `upi-trm-policy-improvement-v2-validation-partition:`. Its first 128
 records are `validation_select`; its remaining 128 records are
 `validation_bridge`. Original indices, record hashes, input hashes, ordering
 scores, ordered digests, and population binding digests are explicit. The two
 validation populations are disjoint and exhaustive.
 
-Stage 0 is systems-only. Its four rows evaluate the registered training
-population. Stage 0 cannot affect a method, `n`, `K`, alpha, base policy, or
+Stage 0 is systems-only. Its four rows train on `train_minus_stage0_smoke` and
+evaluate on the disjoint `stage0_smoke` population, both inside the train
+split. Stage 0 cannot affect a method, `n`, `K`, alpha, base policy, or
 stopping decision. A Stage 0 solve rate is not paper evidence.
 
 The immutable base registry contains 139 rows:

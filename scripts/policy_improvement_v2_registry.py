@@ -15,6 +15,7 @@ from typing import Any
 from scripts.policy_improvement_populations import (
     canonical_json_bytes as population_json_bytes,
     load_strict_json as load_population_json,
+    STAGE0_TRAINING_POPULATION_ID,
     validate_v2_populations,
 )
 from scripts.policy_improvement_v2_schema import (
@@ -184,6 +185,7 @@ def _row(
     seed: int,
     evaluation_population: str,
     evaluation_split: str,
+    training_population: str | None = None,
     n: int | None,
     K: int | None,
     alpha: float | None,
@@ -211,6 +213,7 @@ def _row(
             "base_method_id": base_method_id,
             "seed": seed,
             "evaluation_population": evaluation_population,
+            "training_population": training_population,
             "evaluation_split": evaluation_split,
             "n": n,
             "K": K,
@@ -280,6 +283,7 @@ def generate_v2_registry(
                 seed=int(seeds["smoke"][0]),
                 evaluation_population="stage0_smoke",
                 evaluation_split="train",
+                training_population=STAGE0_TRAINING_POPULATION_ID,
                 n=int(stage0["n"]),
                 K=int(stage0["K"]),
                 alpha=float(stage0["alpha"]),

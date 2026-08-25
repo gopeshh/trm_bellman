@@ -156,6 +156,7 @@ class SmokeSession:
     run_identity: dict[str, Any] | None
     evidence_identity: dict[str, Any]
     evaluation_population: dict[str, Any] | None = None
+    training_population: dict[str, Any] | None = None
     evaluation_started: bool = False
 
 
@@ -789,7 +790,10 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
     )
     stage0_population: Mapping[str, Any] | None = None
     if is_v2:
-        from scripts.policy_improvement_populations import load_registered_populations
+        from scripts.policy_improvement_populations import (
+            load_registered_populations,
+            STAGE0_TRAINING_POPULATION_ID,
+        )
 
         population_document = load_registered_populations(
             context.protocol,
@@ -802,17 +806,46 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
             raise PolicyImprovementSmokeError(
                 "Stage 0 row differs from the registered train-only population."
             )
+        stage0_training_population = population_document["populations"][
+            STAGE0_TRAINING_POPULATION_ID
+        ]
+        if context.row.get("training_population") != stage0_training_population.get(
+            "population_id"
+        ):
+            raise PolicyImprovementSmokeError(
+                "Stage 0 row differs from the registered training population."
+            )
         evaluation_dataset = module.select_materialized_dataset_records(
             train_dataset,
             list(stage0_population["indices"]),
             expected_record_sha256s=list(stage0_population["record_sha256s"]),
             expected_input_sha256s=list(stage0_population["input_sha256s"]),
         )
+        # Stage 0 trains on the registered complement of its evaluation
+        # population, so the schema-v5 train/evaluation disjointness invariant
+        # holds without a Stage 0 exemption. The full split above stays bound
+        # for manifest authentication only.
+        training_dataset = module.select_materialized_dataset_records(
+            train_dataset,
+            list(stage0_training_population["indices"]),
+            expected_record_sha256s=list(
+                stage0_training_population["record_sha256s"]
+            ),
+            expected_input_sha256s=list(stage0_training_population["input_sha256s"]),
+        )
+        if set(dataset_input_sha256s(training_dataset)).intersection(
+            dataset_input_sha256s(evaluation_dataset)
+        ):
+            raise PolicyImprovementSmokeError(
+                "Stage 0 training and evaluation inputs overlap."
+            )
         eval_seq_len = seq_len
         eval_vocab_size = vocab_size
         eval_identifiers = 0
         num_identifiers = train_identifiers
     else:
+        stage0_training_population = None
+        training_dataset = train_dataset
         evaluation_dataset, eval_seq_len, eval_vocab_size, eval_identifiers = (
             module.build_dataset_from_paths(
                 dataset_paths=[str(context.dataset_root)],
@@ -871,7 +904,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
         disable_constraint_masking=rl_config.disable_constraint_masking,
     )
     env = PlanEditEnv(
-        dataset=train_dataset, checker=checker, config=env_config, task_config=task
+        dataset=training_dataset, checker=checker, config=env_config, task_config=task
     )
     action_count = seq_len * vocab_size + 1
     env.set_stop_action_id(action_count - 1)
@@ -881,10 +914,12 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
     source = sources[0]
     metadata = {
         "source_build_metadata": sources,
-        "train_pool_sha256": dataset_pool_sha256(train_dataset, len(train_dataset)),
+        "train_pool_sha256": dataset_pool_sha256(
+            training_dataset, len(training_dataset)
+        ),
         "eval_pool_sha256": dataset_pool_sha256(evaluation_dataset, evaluation_count),
         "train_puzzle_identifier_ordered_sha256": ordered_record_sha256(
-            dataset_puzzle_identifier_sha256s(train_dataset)
+            dataset_puzzle_identifier_sha256s(training_dataset)
         ),
         "eval_puzzle_identifier_ordered_sha256": ordered_record_sha256(
             dataset_puzzle_identifier_sha256s(evaluation_dataset)[:evaluation_count]
@@ -897,6 +932,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
         "materialization_seed": 0,
     }
     if stage0_population is not None:
+        assert stage0_training_population is not None
         metadata.update(
             {
                 "evaluation_population_id": stage0_population["population_id"],
@@ -906,13 +942,23 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
                 "evaluation_original_dataset_indices": list(
                     stage0_population["indices"]
                 ),
+                "training_population_id": stage0_training_population[
+                    "population_id"
+                ],
+                "training_population_binding_sha256": stage0_training_population[
+                    "binding_sha256"
+                ],
+                "training_population_ordered_record_sha256": (
+                    stage0_training_population["ordered_record_sha256"]
+                ),
+                "training_population_count": stage0_training_population["count"],
             }
         )
     dataset_provenance = build_dataset_provenance(
         builder_name=str(source["builder_name"]),
         builder_version=source["builder_version"],
         generation_seed=source["generation_seed"],
-        train_record_sha256s=dataset_sample_sha256s(train_dataset),
+        train_record_sha256s=dataset_sample_sha256s(training_dataset),
         eval_record_sha256s=dataset_sample_sha256s(
             evaluation_dataset, count=evaluation_count
         ),
@@ -1059,7 +1105,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
             rl_config=module._config_dict(rl_config),
             model_config=module._config_dict(model.config),
             execution_device=module._canonical_device(device),
-            train_record_count=len(train_dataset),
+            train_record_count=len(training_dataset),
             eval_record_count=evaluation_count,
             dataset_provenance=dataset_provenance,
             initialization_kind="random",
@@ -1085,7 +1131,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
         trainer=trainer,
         rl_config=rl_config,
         env_config=env_config,
-        train_dataset=train_dataset,
+        train_dataset=training_dataset,
         evaluation_dataset=evaluation_dataset,
         checker=checker,
         task_config=task,
@@ -1100,6 +1146,11 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
         evidence_identity=evidence_identity,
         evaluation_population=(
             dict(stage0_population) if stage0_population is not None else None
+        ),
+        training_population=(
+            dict(stage0_training_population)
+            if stage0_training_population is not None
+            else None
         ),
     )
 
@@ -2873,11 +2924,18 @@ def _build_final_result(
         if session.evaluation_population is not None
         else ordered_record_sha256(dataset_sample_sha256s(session.evaluation_dataset))
     )
-    registered_train_order = _available_hex(
-        context.protocol["dataset"]["splits"]["train"]["ordered_record_sha256"],
-        name="registered train ordered records",
-        length=64,
-    )
+    if session.training_population is not None:
+        registered_train_order = _available_hex(
+            session.training_population["ordered_record_sha256"],
+            name="registered training population ordered records",
+            length=64,
+        )
+    else:
+        registered_train_order = _available_hex(
+            context.protocol["dataset"]["splits"]["train"]["ordered_record_sha256"],
+            name="registered train ordered records",
+            length=64,
+        )
     if session.evaluation_population is not None:
         registered_evaluation_order = _available_hex(
             session.evaluation_population["ordered_record_sha256"],

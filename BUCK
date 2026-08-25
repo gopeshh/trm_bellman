@@ -194,6 +194,11 @@ python_binary(
     main_module = "scripts.policy_improvement_runtime_authorization",
     deps = [
         ":policy_improvement_runtime_authorization",
+        # Same call-time import gap as the Stage 0 binaries. This tool reaches
+        # validate_v2_registry_document today rather than generate_registry,
+        # so bind them before it ever takes the other path.
+        ":policy_improvement_theory_schema",
+        ":policy_improvement_theory_schema_v2",
     ],
 )
 
@@ -296,6 +301,9 @@ python_binary(
         ":policy_improvement_full_runtime",
         ":policy_improvement_non_smoke_checkpoint",
         ":policy_improvement_theory_schema",
+        # policy_improvement_full_backend imports this at call time on the
+        # theory-identity path. The full source profile declares it too.
+        ":policy_improvement_theory_schema_v2",
         ":runtime_archive_preflight",
     ],
 )
