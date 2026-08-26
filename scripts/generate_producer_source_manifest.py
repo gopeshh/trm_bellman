@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+_MODULE_ROOT = Path(__file__).resolve().parents[1]
+if str(_MODULE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_MODULE_ROOT))
 
 from utils.source_identity import (
     SOURCE_MANIFEST_RELATIVE_PATH,
@@ -18,7 +20,22 @@ from utils.source_identity import (
 
 
 def main() -> None:
-    root = ROOT
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--root",
+        default=None,
+        help=(
+            "Repository root to hash. Required when this runs from a packaged "
+            "archive, whose link tree is not the repository."
+        ),
+    )
+    arguments = parser.parse_args()
+    root = Path(arguments.root).resolve() if arguments.root else _MODULE_ROOT
+    if not (root / "utils/source_identity.py").is_file():
+        raise SystemExit(f"{root} is not a producer source root.")
     destination = root / SOURCE_MANIFEST_RELATIVE_PATH
     payload = json.dumps(
         build_producer_source_manifest(root),

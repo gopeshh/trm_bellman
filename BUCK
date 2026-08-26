@@ -264,6 +264,41 @@ python_unittest(
 )
 
 python_library(
+    name = "policy_improvement_base_policy_restore",
+    srcs = ["scripts/policy_improvement_base_policy_restore.py"],
+    base_module = "",
+    typing = True,
+    deps = [
+        ":policy_improvement_v2_schema",
+        ":rl",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_base_policy_restore",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_base_policy_restore_unittest.py",
+    ],
+    base_module = "",
+    typing = True,
+    resources = glob([
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/*.yaml",
+        "configs/policy_improvement_v2/amendments/*.json",
+    ]),
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        ":models",
+        ":phase4_runtime_launcher_lib",
+        ":policy_improvement_base_policy_restore",
+        ":policy_improvement_smoke_runtime",
+        ":policy_improvement_v2_schema",
+        ":rl",
+    ],
+)
+
+python_library(
     name = "policy_improvement_evidence",
     srcs = ["scripts/policy_improvement_evidence.py"],
     base_module = "",
@@ -278,6 +313,7 @@ python_library(
     srcs = ["scripts/policy_improvement_full_runtime.py"],
     base_module = "",
     deps = [
+        ":policy_improvement_base_policy_restore",
         ":policy_improvement_populations",
         ":policy_improvement_registry",
         ":policy_improvement_schema",
@@ -320,6 +356,7 @@ python_library(
         "fbsource//third-party/pypi/pyyaml:pyyaml",
         "fbsource//third-party/pypi/torch:torch",
         ":models",
+        ":policy_improvement_base_policy_restore",
         ":policy_improvement_full_runtime",
         ":policy_improvement_non_smoke_checkpoint",
         ":policy_improvement_schema",
@@ -1668,6 +1705,23 @@ python_library(
     name = "phase4_runtime_profile",
     srcs = ["phase4_runtime_profile.py"],
     base_module = "",
+)
+
+python_library(
+    name = "source_identity",
+    srcs = ["utils/source_identity.py"],
+    base_module = "",
+    typing = True,
+)
+
+python_binary(
+    name = "generate_producer_source_manifest",
+    srcs = ["scripts/generate_producer_source_manifest.py"],
+    base_module = "",
+    main_module = "scripts.generate_producer_source_manifest",
+    deps = [
+        ":source_identity",
+    ],
 )
 
 python_library(

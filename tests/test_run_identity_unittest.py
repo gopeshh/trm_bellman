@@ -341,6 +341,41 @@ class RunIdentityTest(unittest.TestCase):
         self.assertEqual(identity["initialization"]["artifact_sha256"], digest)
         self.assertNotIn(artifact_path, canonical_json_bytes(identity).decode("ascii"))
 
+    def test_strict_resume_rejects_a_differing_initialization_identity(self) -> None:
+        """A parent trained from another base cannot be resumed into this run."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._clean_repository(root)
+            expected = self._identity(
+                root,
+                initialization_kind="train_only_pretrained",
+                initialization_artifact_sha256="4c" * 32,
+            )
+
+        self.assertEqual(
+            expected["initialization"],
+            {"kind": "train_only_pretrained", "artifact_sha256": "4c" * 32},
+        )
+
+        divergent = (
+            ("random_parent", {"kind": "random", "artifact_sha256": None}),
+            (
+                "other_base_artifact",
+                {"kind": "train_only_pretrained", "artifact_sha256": "5d" * 32},
+            ),
+            (
+                "warm_started_parent",
+                {"kind": "weights_checkpoint", "artifact_sha256": "4c" * 32},
+            ),
+        )
+        for name, initialization in divergent:
+            with self.subTest(name=name):
+                saved = copy.deepcopy(expected)
+                saved["initialization"] = initialization
+                with self.assertRaisesRegex(RunIdentityError, "initialization"):
+                    assert_matching_run_identity(saved, expected)
+
     def test_validation_rejects_ambiguous_or_inconsistent_fields(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -394,6 +429,14 @@ class RunIdentityTest(unittest.TestCase):
         checkpoint_without_artifact = copy.deepcopy(base)
         checkpoint_without_artifact["initialization"]["kind"] = "weights_checkpoint"
         cases.append(("missing_artifact", checkpoint_without_artifact, "64 lowercase"))
+
+        # The Stage 1 base policy is a registered kind, but it still has to name
+        # the checkpoint file it was restored from.
+        base_without_artifact = copy.deepcopy(base)
+        base_without_artifact["initialization"]["kind"] = "train_only_pretrained"
+        cases.append(
+            ("missing_base_artifact", base_without_artifact, "64 lowercase")
+        )
 
         fabricated_kind = copy.deepcopy(base)
         fabricated_kind["initialization"] = {

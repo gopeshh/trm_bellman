@@ -46,10 +46,10 @@
     "models/recursive_reasoning/trm.py": "5f9db04c79883fb6343ccc07c93fd1e2a7f89ff30171e694ab1d5e1e5fcabe09",
     "models/sparse_embedding.py": "28040c620fb621b45bb5e1c58283678ddfbceb3d394499d066b9224dacc871ad",
     "models/value_head.py": "d3f098775bc16c97bbac2b188fd4bc8f0cdd4cdb1bb1e7041e552eedbebf9b21",
-    "phase4_runtime_profile.py": "e6896bcb83e3294067bb03818dfc7028c21b7a34fb17af3200462845fbc3f196",
+    "phase4_runtime_profile.py": "946986e7c3d4dd71dcaa10bdefbfb593da861350bc0ab6bd0651d827da46829c",
     "policy_improvement_checkpoint_allowlist.py": "fa22df0101cf3ab73f6e817c5d5483e6ec785e15df0672fd72e22dc651895476",
     "policy_improvement_smoke_checkpoint.py": "c0c884d3a3d828ed10ef01f6f43b461cc71dc4915514bf3d37317ac6c203dfa9",
-    "policy_improvement_smoke_runtime.py": "b64b20e668f2911b6c838bc0ac5ff129b852d41d09e9c3c4bf652fe4c06dc228",
+    "policy_improvement_smoke_runtime.py": "074ed03b8ff6d06895ef63b6a709fbc1f2cdf67bdb5e11f8e96f768c8a929761",
     "puzzle_dataset.py": "4da6f12bca6a3a8e9632ded72311b3be842a159b76c54b9f3ee048d8ecd42702",
     "rl/__init__.py": "8372404af3b6f4fb62d16ebd2fcc694d40815fdfdb02b940ece46f39496ff968",
     "rl/algos/__init__.py": "00b8facf52d55849039bba6c8a88a899d9194be33a8b73e9b108dc691840d77b",
@@ -81,7 +81,7 @@
     "utils/dataset_provenance.py": "8a1bed78a77e9896520db67a29328ec9058370f47056043b62d57cc1c9d6d02a",
     "utils/evaluation_artifacts.py": "d5fc640c7ca0f238a5819ba2ae0e3d2454c7e9011818ed3cc29276ef42f79146",
     "utils/lipschitz.py": "361254016d0bab61a07e8e8ae7a9a84403784755eae50e243cc310c590268fbc",
-    "utils/run_identity.py": "af64163b7eb74b2ceb28e86b2cd45edf2f94f7799e15b4225a7a7e44e4420807",
+    "utils/run_identity.py": "a353457692eadb42bb2cfba1b336eb071589ac5fb3a3f394a9c7c22f8e765d08",
     "utils/seeding.py": "1ed299ba22625bbe0e0056d4a3daca463c82c06436663a53817e1f6a83141265",
     "utils/source_identity.py": "9c850ed9b4c6175fb95898485bffb86be7200c2e1bf4edfa822676449a10cb0f"
   }

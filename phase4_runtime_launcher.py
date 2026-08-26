@@ -1092,6 +1092,11 @@ def _normalize_child_args(
             "--row-id",
             "--amendment",
         }
+        if purpose == POLICY_IMPROVEMENT_FULL_PURPOSE:
+            # Stage 1 restores the registered train-only base policy. The path
+            # is a caller argument; the runtime authenticates it against the
+            # validated base-policy amendment before deserializing anything.
+            value_options.add("--base-policy-artifact")
         if purpose == POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE:
             value_options.update({"--request", "--checkpoint"})
         flag_options = (
@@ -1104,6 +1109,8 @@ def _normalize_child_args(
             "--dataset-root",
             "--row-id",
         }
+        if purpose == POLICY_IMPROVEMENT_FULL_PURPOSE:
+            required_options.add("--base-policy-artifact")
         if purpose == POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE:
             required_options.update({"--request", "--checkpoint"})
         values: dict[str, list[str]] = {option: [] for option in value_options}
@@ -1184,6 +1191,8 @@ def _normalize_child_args(
             assert runtime_authorization_sha256 is not None
             return [
                 *common,
+                "--base-policy-artifact",
+                values["--base-policy-artifact"][0],
                 "--runtime-authorization-sha256",
                 runtime_authorization_sha256,
                 *(["--print-contract"] if "--print-contract" in flags else []),

@@ -730,6 +730,8 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                 },
             ],
         }
+        authenticated_base_policy = object()
+        base_policy_artifact = "/registered/base_policy.pt"
         with (
             mock.patch(
                 "scripts.policy_improvement_full_runtime.validate_protocol",
@@ -760,10 +762,16 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                     *([selection] if len(history) == 4 else []),
                 ],
             ) as validate_history,
+            mock.patch(
+                "scripts.policy_improvement_full_runtime."
+                "authenticate_base_policy_artifact",
+                return_value=authenticated_base_policy,
+            ) as authenticate,
         ):
+            # The registered base artifact is mandatory for learned execution.
             with self.assertRaisesRegex(
                 FullRuntimeError,
-                "learned execution remains blocked",
+                "requires the registered train-only base-policy artifact",
             ):
                 load_registered_full_run(
                     project_root=self.project,
@@ -776,6 +784,24 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                     runtime_authorization_sha256=authorization_sha256,
                     environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
                 )
+            # The Stage 1 screen: three amendments, no V_select yet. It stops
+            # at the first registered checkpoint, so it needs no cross-
+            # generation continuation.
+            screen_run = load_registered_full_run(
+                project_root=self.project,
+                protocol_path=protocol_path,
+                registry_path=registry_path,
+                amendment_paths=[theory_path, base_policy_path, compute_path],
+                evidence_root=self.evidence,
+                dataset_root=registered_dataset,
+                row_id=str(row["run_id"]),
+                runtime_authorization_sha256=authorization_sha256,
+                environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
+                base_policy_artifact=base_policy_artifact,
+            )
+            self.assertEqual(screen_run.interaction_checkpoints, (10000,))
+            self.assertEqual(screen_run.final_environment_interactions, 10000)
+            self.assertIs(screen_run.base_policy, authenticated_base_policy)
             with self.assertRaisesRegex(
                 FullRuntimeError,
                 "requires an authenticated V_select configuration selection",
@@ -791,6 +817,7 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                     runtime_authorization_sha256=authorization_sha256,
                     environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
                     require_stage1_selection=True,
+                    base_policy_artifact=base_policy_artifact,
                 )
             selected_run = load_registered_full_run(
                 project_root=self.project,
@@ -808,8 +835,16 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                 runtime_authorization_sha256=authorization_sha256,
                 environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
                 require_stage1_selection=True,
+                base_policy_artifact=base_policy_artifact,
             )
             self.assertEqual(len(selected_run.amendment_history), 4)
+            self.assertIs(selected_run.base_policy, authenticated_base_policy)
+            self.assertEqual(
+                authenticate.call_args.args, (base_policy_artifact,)
+            )
+            self.assertEqual(
+                authenticate.call_args.kwargs, {"amendment": base_policy}
+            )
             rejected_selection = copy.deepcopy(selection)
             rejected_selection["selected_configurations"][0]["n"] = 4
             validate_history.side_effect = lambda history, **_: [
@@ -835,6 +870,7 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                     runtime_authorization_sha256=authorization_sha256,
                     environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
                     require_stage1_selection=True,
+                    base_policy_artifact=base_policy_artifact,
                 )
             validate_history.side_effect = lambda history, **_: [
                 theory,
@@ -864,6 +900,7 @@ class FullRuntimeRegistrationTest(unittest.TestCase):
                     runtime_authorization_sha256=authorization_sha256,
                     environment={"RUN_UPITRM_FULL_EXPERIMENTS": "1"},
                     require_stage1_selection=True,
+                    base_policy_artifact=base_policy_artifact,
                 )
         self.assertEqual(
             selected_run.interaction_checkpoints,

@@ -737,6 +737,11 @@ def _task_config(
     return resolution.checker_fn, task, resolution.checker_kind
 
 
+# Stage 0 initialization is fixed. The registered train-only base policy is a
+# Stage 1 artifact and is deliberately not reachable from this runtime.
+STAGE0_INITIALIZATION_KIND = "random"
+
+
 def build_protocol_v2_model_config(
     *,
     architecture: Mapping[str, Any],
@@ -1153,7 +1158,9 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
             train_record_count=len(training_dataset),
             eval_record_count=evaluation_count,
             dataset_provenance=dataset_provenance,
-            initialization_kind="random",
+            # Stage 0 is systems-only and always starts from random weights.
+            # It must never consume the registered train-only base policy.
+            initialization_kind=STAGE0_INITIALIZATION_KIND,
             initialization_artifact_sha256=None,
             registered_assignment={
                 "attempt_index": 0,
@@ -1167,7 +1174,7 @@ def _build_session(context: SmokeContext, module: Any) -> SmokeSession:
             git_lookup_root=context.source_root,
             effective_config=exact_effective,
             dataset_provenance=dataset_provenance,
-            initialization_kind="random",
+            initialization_kind=STAGE0_INITIALIZATION_KIND,
             initialization_artifact_sha256=None,
         )
 

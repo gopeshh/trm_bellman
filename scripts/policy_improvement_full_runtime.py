@@ -41,6 +41,10 @@ from scripts.policy_improvement_registry import (
     registry_sha256,
     validate_registry_document,
 )
+from scripts.policy_improvement_base_policy_restore import (
+    authenticate_base_policy_artifact,
+    AuthenticatedBasePolicy,
+)
 from scripts.policy_improvement_schema import (
     amendment_history_sha256,
     canonical_json_bytes,
@@ -105,6 +109,7 @@ class RegisteredFullRun:
     test_open_sha256: str | None
     dataset_root: Path | None = None
     population_document: dict[str, Any] | None = None
+    base_policy: Any = None
 
 
 @dataclass(frozen=True)
@@ -355,11 +360,13 @@ def load_registered_full_run(
     row_id: str,
     runtime_authorization_sha256: str,
     dataset_root: str | Path | None = None,
+    base_policy_artifact: str | Path | None = None,
     environment: Mapping[str, str] | None = None,
     require_stage1_selection: bool = False,
 ) -> RegisteredFullRun:
     """Authenticate one concrete non-smoke row and freeze its exact schedules."""
 
+    authenticated_base_policy: AuthenticatedBasePolicy | None = None
     env = os.environ if environment is None else environment
     if env.get(FULL_EXECUTION_ENV) != FULL_EXECUTION_VALUE:
         raise FullRuntimeError(
@@ -489,12 +496,25 @@ def load_registered_full_run(
                     "Validation-bridge evaluation requires an authenticated "
                     "V_select configuration selection."
                 )
-            if not require_stage1_selection:
+            # The screen's first generation restores the registered train-only
+            # base artifact and stops at the first registered checkpoint, so it
+            # needs no cross-generation continuation. Anything that continues
+            # past that checkpoint still does, and stays blocked.
+            if selection is not None and not require_stage1_selection:
                 raise FullRuntimeError(
-                    "Protocol v2 learned execution remains blocked until train-only "
-                    "base-artifact restore and cross-generation continuation are "
-                    "implemented."
+                    "Protocol v2 continuation past the first registered "
+                    "checkpoint remains blocked until cross-generation "
+                    "continuation is implemented."
                 )
+            if base_policy_artifact is None:
+                raise FullRuntimeError(
+                    "Protocol v2 learned execution requires the registered "
+                    "train-only base-policy artifact."
+                )
+            authenticated_base_policy = authenticate_base_policy_artifact(
+                base_policy_artifact,
+                amendment=base_policy,
+            )
         else:
             history = validate_amendment_history(history, protocol=protocol)
     except (
@@ -705,6 +725,7 @@ def load_registered_full_run(
         evaluation_records=evaluation_records,
         test_open_sha256=test_open_digest,
         dataset_root=materialized_dataset,
+        base_policy=authenticated_base_policy,
         population_document=(
             dict(populations_document)
             if isinstance(populations_document, Mapping)
@@ -2260,6 +2281,7 @@ def main(
     parser.add_argument("--dataset-root", required=True)
     parser.add_argument("--row-id", required=True)
     parser.add_argument("--runtime-authorization-sha256", required=True)
+    parser.add_argument("--base-policy-artifact")
     parser.add_argument("--print-contract", action="store_true")
     arguments = parser.parse_args(argv)
     run = load_registered_full_run(
@@ -2271,6 +2293,7 @@ def main(
         row_id=arguments.row_id,
         runtime_authorization_sha256=arguments.runtime_authorization_sha256,
         dataset_root=arguments.dataset_root,
+        base_policy_artifact=arguments.base_policy_artifact,
     )
     if arguments.print_contract:
         contract = execution_contract(run)

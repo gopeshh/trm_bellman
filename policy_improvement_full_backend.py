@@ -46,6 +46,7 @@ from policy_improvement_sealed_evidence import (
 from policy_improvement_smoke_runtime import (
     _evaluation_payload as evaluate_registered_policy,
     _variant_specs as registered_variant_specs,
+    build_protocol_v2_model_config,
     build_stage0_validation_session,
     SmokeContext,
     SmokeSession,
@@ -180,6 +181,12 @@ def _require_registered_dataset_root(run: RegisteredFullRun) -> Path:
     if run.dataset_root != registered_root:
         raise FullBackendError("Dataset root differs from protocol registration.")
     return registered_root
+
+
+from scripts.policy_improvement_base_policy_restore import (
+    apply_base_policy_state,
+    BASE_POLICY_INITIALIZATION_KIND,
+)
 
 
 class FullBackendError(RuntimeError):
@@ -1261,41 +1268,41 @@ class TorchLearnedRunEngine:
                 "materialization_seed": 0,
             },
         )
-        architecture = run.protocol["architecture"]
-        model_config = {
-            "batch_size": rl_config.batch_size,
-            "seq_len": seq_len,
-            "puzzle_emb_ndim": 0,
-            "puzzle_emb_len": 0,
-            "num_puzzle_identifiers": max(num_identifiers, rl_config.batch_size),
-            "vocab_size": vocab_size,
-            "H_cycles": int(architecture["h_cycles"]),
-            "L_cycles": int(architecture["l_cycles"]),
-            "H_layers": 0,
-            "L_layers": int(architecture["l_layers"]),
-            "hidden_size": int(architecture["hidden_size"]),
-            "expansion": 2.0,
-            "num_heads": max(4, int(architecture["hidden_size"]) // 16),
-            "pos_encodings": "rope",
-            "rms_norm_eps": 1e-5,
-            "rope_theta": 10000.0,
-            "halt_max_steps": 2,
-            "halt_exploration_prob": 0.0,
-            "forward_dtype": "float32",
-            "mlp_t": False,
-            "no_ACT_continue": True,
-            "rl_enable_value_head": True,
-            "rl_enable_contraction": rl_config.enable_contraction,
-            "rl_target_Lz": rl_config.target_Lz,
-            "rl_target_Lv": rl_config.target_Lv,
-            "rl_disable_value_head_norm": rl_config.disable_value_head_norm,
-            "rl_enable_policy_head": True,
-            "rl_num_actions": action_count,
-            "rl_latent_projection_mode": rl_config.latent_projection_mode,
-            "rl_latent_ball_radius": rl_config.latent_ball_radius,
-        }
+        # Shared with the Stage 0 session builder and the base-policy producer.
+        # The registered architecture_sha256 is taken over exactly this dict, so
+        # a second inline copy here would silently invalidate the base artifact.
+        model_config = build_protocol_v2_model_config(
+            architecture=run.protocol["architecture"],
+            rl_config=rl_config,
+            seq_len=seq_len,
+            vocab_size=vocab_size,
+            num_identifiers=num_identifiers,
+            action_count=action_count,
+        )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = TinyRecursiveReasoningModel_ACTV1(model_config)
+        # Restore the registered train-only base policy before anything derives
+        # from the model. build_trainer copies these weights into
+        # policy_model_old, policy_model_candidate, and target_model and builds
+        # the optimizers over them, so loading later would leave the frozen base
+        # and its snapshots disagreeing.
+        base_policy = getattr(run, "base_policy", None)
+        if base_policy is None:
+            initialization_kind = "random"
+            initialization_artifact_sha256 = None
+        else:
+            initialization_kind = BASE_POLICY_INITIALIZATION_KIND
+            # Run identity carries the checkpoint file digest, matching the
+            # weights-warm-start convention in upi_trm_train. The model-state
+            # digest is checked here and re-derived as initialization_sha256.
+            initialization_artifact_sha256 = base_policy.checkpoint_sha256
+            restored_model_state_sha256 = apply_base_policy_state(
+                model, base_policy, model_config=model_config
+            )
+            if restored_model_state_sha256 != base_policy.model_state_sha256:
+                raise FullBackendError(
+                    "Restored base policy differs from its registered identity."
+                )
         initialization_sha256 = state_dict_sha256(model.state_dict())
         baseline = self._module.select_baseline_from_configs(None, [str(config_path)])
         trainer = self._module.build_trainer(
@@ -1382,8 +1389,8 @@ class TorchLearnedRunEngine:
                 train_record_count=len(train_dataset),
                 eval_record_count=run.evaluation_records,
                 dataset_provenance=dataset_provenance,
-                initialization_kind="random",
-                initialization_artifact_sha256=None,
+                initialization_kind=initialization_kind,
+                initialization_artifact_sha256=initialization_artifact_sha256,
                 registered_assignment={
                     "attempt_index": 0,
                     "registry_sha256": run.registry_sha256,
@@ -1396,8 +1403,8 @@ class TorchLearnedRunEngine:
                 git_lookup_root=run.project_root,
                 effective_config=exact_effective,
                 dataset_provenance=dataset_provenance,
-                initialization_kind="random",
-                initialization_artifact_sha256=None,
+                initialization_kind=initialization_kind,
+                initialization_artifact_sha256=initialization_artifact_sha256,
             )
         session = LearnedSession(
             run=run,

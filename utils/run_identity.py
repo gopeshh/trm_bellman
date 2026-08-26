@@ -19,7 +19,10 @@ _RUN_ID_PATTERN = re.compile(
 )
 _LOWER_HEX_40_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _LOWER_HEX_64_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-_INITIALIZATION_KINDS = {"random", "weights_checkpoint"}
+# "train_only_pretrained" is the Stage 1 base policy: a frozen artifact
+# trained only on the registered train split. Like "weights_checkpoint" it
+# must name the SHA-256 of the checkpoint file it was restored from.
+_INITIALIZATION_KINDS = {"random", "weights_checkpoint", "train_only_pretrained"}
 _MAX_TRAINING_SEED = 2**32 - 1
 
 
@@ -616,7 +619,9 @@ def validate_run_identity(identity: object) -> dict[str, Any]:
     initialization_kind = initialization["kind"]
     if initialization_kind not in _INITIALIZATION_KINDS:
         raise RunIdentityError(
-            "run_identity.initialization.kind must be 'random' or 'weights_checkpoint'."
+            "run_identity.initialization.kind is not a registered kind: "
+            + ", ".join(sorted(_INITIALIZATION_KINDS))
+            + "."
         )
     artifact_sha256 = initialization["artifact_sha256"]
     if initialization_kind == "random":

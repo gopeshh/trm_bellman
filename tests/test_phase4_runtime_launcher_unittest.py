@@ -921,6 +921,8 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 "stage1-row",
                 "--amendment",
                 "/evidence/compute-freeze.json",
+                "--base-policy-artifact",
+                "/base/base_policy.pt",
                 "--print-contract",
             ],
             runtime_authorization_sha256="4" * 64,
@@ -944,6 +946,8 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                 "/dataset",
                 "--row-id",
                 "stage1-row",
+                "--base-policy-artifact",
+                "/base/base_policy.pt",
                 "--runtime-authorization-sha256",
                 "4" * 64,
                 "--print-contract",
@@ -1638,6 +1642,10 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                                 "/evidence/checkpoint.pt",
                             ]
                         )
+                    else:
+                        runtime_arguments.extend(
+                            ["--base-policy-artifact", "/base/base_policy.pt"]
+                        )
                     launcher_arguments.extend(["--", *runtime_arguments])
                     self.assertEqual(
                         phase4_runtime_launcher.main(launcher_arguments),
@@ -1684,6 +1692,12 @@ class Phase4RuntimeLauncherTest(unittest.TestCase):
                         self.assertIn(
                             "--runtime-authorization-sha256",
                             child_args,
+                        )
+                        self.assertEqual(
+                            child_args[
+                                child_args.index("--base-policy-artifact") + 1
+                            ],
+                            "/base/base_policy.pt",
                         )
                     else:
                         self.assertEqual(
