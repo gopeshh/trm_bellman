@@ -387,7 +387,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         num_identifiers=num_identifiers,
         action_count=action_count,
     )
-    architecture_sha256 = canonical_sha256(model_config)
+    # Two distinct digests, deliberately not interchangeable. The amendment
+    # binds the protocol's registered architecture block; the artifact payload
+    # binds the full model configuration built from it. Conflating them makes
+    # the amendment fail validate_v2_amendment_history at Stage 1 load.
+    registered_architecture_sha256 = canonical_sha256(protocol["architecture"])
+    model_config_sha256 = canonical_sha256(model_config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TinyRecursiveReasoningModel_ACTV1(model_config).to(device)
     initialization_sha256 = state_dict_sha256(model.state_dict())
@@ -436,7 +441,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "imitation_loss": float(stats["imitation_loss"]),
             "imitation_accuracy": float(stats["imitation_accuracy"]),
             "training_procedure_sha256": training_procedure_sha256(),
-            "architecture_sha256": architecture_sha256,
+            "architecture_sha256": model_config_sha256,
             "initialization_sha256": initialization_sha256,
             "wall_time_seconds": round(time.time() - started, 3),
         }
@@ -469,7 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema_version": PRODUCER_SCHEMA_VERSION,
         "initialization_kind": "train_only_pretrained",
         "model_config": model_config,
-        "architecture_sha256": architecture_sha256,
+        "architecture_sha256": model_config_sha256,
         "model_state": model_state,
         "model_state_sha256": model_state_sha256,
         "training_procedure": TRAINING_PROCEDURE,
@@ -492,7 +497,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema_version": PRODUCER_SCHEMA_VERSION,
         "status": "complete",
         "initialization_kind": "train_only_pretrained",
-        "architecture_sha256": architecture_sha256,
+        "architecture_sha256": registered_architecture_sha256,
+        "model_config_sha256": model_config_sha256,
         "model_state_sha256": model_state_sha256,
         "initialization_sha256": initialization_sha256,
         "producer_git_commit": authorized.git_commit,

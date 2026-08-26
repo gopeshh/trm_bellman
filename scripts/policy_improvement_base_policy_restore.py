@@ -194,25 +194,36 @@ def restore_base_policy_state(
     authenticated: AuthenticatedBasePolicy,
     *,
     model_config: Mapping[str, object],
+    protocol_architecture: Mapping[str, object],
 ) -> dict[str, Any]:
     """Deserialize the authenticated artifact and bind its model identity.
 
-    Only reached once the whole-file digest matched. The embedded architecture
-    and model-state digests are then checked against the amendment and against
-    the architecture this run actually constructed, so a base policy trained
-    for a different model shape cannot be loaded.
+    Only reached once the whole-file digest matched. Two different digests are
+    involved and they are deliberately not interchangeable:
+
+    * The amendment's ``architecture_sha256`` is the digest of the protocol's
+      registered ``architecture`` block. That is what the amendment-history
+      validator binds.
+    * The artifact payload's ``architecture_sha256`` is the digest of the full
+      model configuration the producer constructed from that block.
+
+    Both are checked. The registered architecture must be the one this run was
+    handed, and the model configuration the producer used must be byte-identical
+    to the one this run built from it, so a base policy trained for a different
+    model shape cannot be loaded.
     """
 
     import torch
 
     from rl.persistent_diagnostic_checkpoint import state_dict_sha256
 
-    live_architecture = canonical_sha256(dict(model_config))
-    if live_architecture != authenticated.architecture_sha256:
+    if canonical_sha256(dict(protocol_architecture)) != (
+        authenticated.architecture_sha256
+    ):
         raise BasePolicyRestoreError(
-            "Base-policy architecture differs from the architecture this run "
-            "constructed."
+            "Base-policy amendment registers another protocol architecture."
         )
+    live_model_config_sha256 = canonical_sha256(dict(model_config))
     try:
         payload = torch.load(
             authenticated.path, map_location="cpu", weights_only=True
@@ -230,7 +241,6 @@ def restore_base_policy_state(
     ):
         raise BasePolicyRestoreError("Base-policy artifact schema differs.")
     for field, expected in (
-        ("architecture_sha256", authenticated.architecture_sha256),
         ("model_state_sha256", authenticated.model_state_sha256),
         ("training_procedure_sha256", authenticated.training_procedure_sha256),
         ("producer_git_commit", authenticated.producer_git_commit),
@@ -240,11 +250,19 @@ def restore_base_policy_state(
                 f"Base-policy artifact {field} differs from its amendment."
             )
     embedded_config = payload.get("model_config")
-    if not isinstance(embedded_config, Mapping) or canonical_sha256(
-        dict(embedded_config)
-    ) != authenticated.architecture_sha256:
+    if not isinstance(embedded_config, Mapping):
+        raise BasePolicyRestoreError(
+            "Base-policy artifact carries no model configuration."
+        )
+    embedded_sha256 = canonical_sha256(dict(embedded_config))
+    if payload.get("architecture_sha256") != embedded_sha256:
         raise BasePolicyRestoreError(
             "Base-policy embedded model configuration differs from its identity."
+        )
+    if embedded_sha256 != live_model_config_sha256:
+        raise BasePolicyRestoreError(
+            "Base-policy architecture differs from the architecture this run "
+            "constructed."
         )
     state = payload.get("model_state")
     if not isinstance(state, Mapping) or not state:
@@ -262,6 +280,7 @@ def apply_base_policy_state(
     authenticated: AuthenticatedBasePolicy,
     *,
     model_config: Mapping[str, object],
+    protocol_architecture: Mapping[str, object],
 ) -> str:
     """Load the registered base weights into a freshly constructed model.
 
@@ -272,7 +291,11 @@ def apply_base_policy_state(
 
     from rl.persistent_diagnostic_checkpoint import state_dict_sha256
 
-    state = restore_base_policy_state(authenticated, model_config=model_config)
+    state = restore_base_policy_state(
+        authenticated,
+        model_config=model_config,
+        protocol_architecture=protocol_architecture,
+    )
     try:
         model.load_state_dict(state, strict=True)
     except (RuntimeError, KeyError, ValueError) as exc:

@@ -1297,7 +1297,10 @@ class TorchLearnedRunEngine:
             # digest is checked here and re-derived as initialization_sha256.
             initialization_artifact_sha256 = base_policy.checkpoint_sha256
             restored_model_state_sha256 = apply_base_policy_state(
-                model, base_policy, model_config=model_config
+                model,
+                base_policy,
+                model_config=model_config,
+                protocol_architecture=run.protocol["architecture"],
             )
             if restored_model_state_sha256 != base_policy.model_state_sha256:
                 raise FullBackendError(

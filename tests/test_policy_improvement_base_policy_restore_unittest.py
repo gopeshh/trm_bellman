@@ -56,8 +56,12 @@ class _RLConfig:
     latent_ball_radius = 10.0
 
 
+def _protocol() -> dict[str, Any]:
+    return validate_v2_protocol(load_strict_json(V2 / "protocol.json"))
+
+
 def _model_config() -> dict[str, Any]:
-    protocol = validate_v2_protocol(load_strict_json(V2 / "protocol.json"))
+    protocol = _protocol()
     return build_protocol_v2_model_config(
         architecture=protocol["architecture"],
         rl_config=_RLConfig(),
@@ -73,8 +77,12 @@ class BasePolicyRestoreTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
+        self.architecture = _protocol()["architecture"]
         self.model_config = _model_config()
-        self.architecture_sha256 = canonical_sha256(self.model_config)
+        # The amendment binds the protocol architecture; the payload binds the
+        # full model configuration built from it.
+        self.architecture_sha256 = canonical_sha256(self.architecture)
+        self.model_config_sha256 = canonical_sha256(self.model_config)
         torch.manual_seed(1904261137)
         model = TinyRecursiveReasoningModel_ACTV1(self.model_config)
         self.state = {
@@ -90,7 +98,7 @@ class BasePolicyRestoreTest(unittest.TestCase):
             "schema_version": 1,
             "initialization_kind": BASE_POLICY_INITIALIZATION_KIND,
             "model_config": self.model_config,
-            "architecture_sha256": self.architecture_sha256,
+            "architecture_sha256": self.model_config_sha256,
             "model_state": self.state,
             "model_state_sha256": self.model_state_sha256,
             "training_procedure_sha256": "1" * 64,
@@ -154,7 +162,9 @@ class BasePolicyRestoreTest(unittest.TestCase):
         self.assertEqual(authenticated.model_state_sha256, self.model_state_sha256)
         self.assertEqual(authenticated.size_bytes, self.path.stat().st_size)
         restored = restore_base_policy_state(
-            authenticated, model_config=self.model_config
+            authenticated,
+            model_config=self.model_config,
+            protocol_architecture=self.architecture,
         )
         self.assertEqual(state_dict_sha256(restored), self.model_state_sha256)
 
@@ -173,7 +183,10 @@ class BasePolicyRestoreTest(unittest.TestCase):
             )
             digests.append(
                 apply_base_policy_state(
-                    model, authenticated, model_config=self.model_config
+                    model,
+                    authenticated,
+                    model_config=self.model_config,
+                    protocol_architecture=self.architecture,
                 )
             )
         self.assertEqual(digests[0], digests[1])
@@ -212,6 +225,39 @@ class BasePolicyRestoreTest(unittest.TestCase):
         with self.assertRaises(BasePolicyRestoreError):
             authenticate_base_policy_artifact(other, amendment=self.amendment)
 
+    def test_amendment_naming_another_protocol_architecture_is_rejected(
+        self,
+    ) -> None:
+        authenticated = authenticate_base_policy_artifact(
+            self.path, amendment=self.amendment
+        )
+        other = dict(self.architecture)
+        other["hidden_size"] = int(other["hidden_size"]) * 2
+        with self.assertRaisesRegex(
+            BasePolicyRestoreError, "another protocol architecture"
+        ):
+            restore_base_policy_state(
+                authenticated,
+                model_config=self.model_config,
+                protocol_architecture=other,
+            )
+
+    def test_payload_lying_about_its_model_configuration_is_rejected(self) -> None:
+        path = self._write_artifact(
+            "lying_architecture.pt", self._payload(architecture_sha256="d" * 64)
+        )
+        authenticated = authenticate_base_policy_artifact(
+            path, amendment=self._amendment(path)
+        )
+        with self.assertRaisesRegex(
+            BasePolicyRestoreError, "model configuration differs from its identity"
+        ):
+            restore_base_policy_state(
+                authenticated,
+                model_config=self.model_config,
+                protocol_architecture=self.architecture,
+            )
+
     def test_wrong_architecture_is_rejected(self) -> None:
         authenticated = authenticate_base_policy_artifact(
             self.path, amendment=self.amendment
@@ -219,7 +265,11 @@ class BasePolicyRestoreTest(unittest.TestCase):
         other = dict(self.model_config)
         other["hidden_size"] = int(other["hidden_size"]) * 2
         with self.assertRaisesRegex(BasePolicyRestoreError, "architecture differs"):
-            restore_base_policy_state(authenticated, model_config=other)
+            restore_base_policy_state(
+                authenticated,
+                model_config=other,
+                protocol_architecture=self.architecture,
+            )
 
     def test_wrong_model_state_is_rejected(self) -> None:
         torch.manual_seed(7)
@@ -236,7 +286,11 @@ class BasePolicyRestoreTest(unittest.TestCase):
         amendment = self._amendment(path, model_state_sha256=self.model_state_sha256)
         authenticated = authenticate_base_policy_artifact(path, amendment=amendment)
         with self.assertRaisesRegex(BasePolicyRestoreError, "model state differs"):
-            restore_base_policy_state(authenticated, model_config=self.model_config)
+            restore_base_policy_state(
+                authenticated,
+                model_config=self.model_config,
+                protocol_architecture=self.architecture,
+            )
 
     def test_lying_declared_model_state_digest_is_rejected(self) -> None:
         path = self._write_artifact(
@@ -245,7 +299,11 @@ class BasePolicyRestoreTest(unittest.TestCase):
         amendment = self._amendment(path, model_state_sha256=self.model_state_sha256)
         authenticated = authenticate_base_policy_artifact(path, amendment=amendment)
         with self.assertRaisesRegex(BasePolicyRestoreError, "model_state_sha256"):
-            restore_base_policy_state(authenticated, model_config=self.model_config)
+            restore_base_policy_state(
+                authenticated,
+                model_config=self.model_config,
+                protocol_architecture=self.architecture,
+            )
 
     def test_symlinked_and_relative_artifacts_are_rejected(self) -> None:
         link = self.root / "link.pt"
@@ -276,7 +334,11 @@ class BasePolicyRestoreTest(unittest.TestCase):
             path, amendment=self._amendment(path)
         )
         with self.assertRaisesRegex(BasePolicyRestoreError, "schema differs"):
-            restore_base_policy_state(authenticated, model_config=self.model_config)
+            restore_base_policy_state(
+                authenticated,
+                model_config=self.model_config,
+                protocol_architecture=self.architecture,
+            )
 
     def test_foreign_producer_commit_is_rejected(self) -> None:
         path = self._write_artifact(
@@ -285,7 +347,11 @@ class BasePolicyRestoreTest(unittest.TestCase):
         amendment = self._amendment(path, producer_git_commit="a" * 40)
         authenticated = authenticate_base_policy_artifact(path, amendment=amendment)
         with self.assertRaisesRegex(BasePolicyRestoreError, "producer_git_commit"):
-            restore_base_policy_state(authenticated, model_config=self.model_config)
+            restore_base_policy_state(
+                authenticated,
+                model_config=self.model_config,
+                protocol_architecture=self.architecture,
+            )
 
 
 class Stage0IsolationTest(unittest.TestCase):
