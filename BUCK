@@ -393,8 +393,15 @@ python_binary(
         "configs/policy_improvement_v2/*.json",
         "configs/policy_improvement_v2/*.yaml",
         "configs/policy_improvement_v2/amendments/*.json",
+        "configs/policy_improvement_exp1b/*.json",
+        "configs/policy_improvement_exp1b/amendments/*.json",
     ]),
     deps = [
+        # Experiment 1B Stage A is imported dynamically off the launcher-owned
+        # marker, so the PAR must declare it directly. It deliberately does not
+        # reach the Stage B theory backend: that module is selected by the exact
+        # source profile, and the full profile does not carry it.
+        ":policy_improvement_exp1b_runtime",
         ":policy_improvement_full_backend",
         ":policy_improvement_full_runtime",
         ":policy_improvement_non_smoke_checkpoint",
@@ -481,8 +488,19 @@ python_binary(
         "configs/policy_improvement_v2/*.json",
         "configs/policy_improvement_v2/*.yaml",
         "configs/policy_improvement_v2/amendments/*.json",
+        "configs/policy_improvement_exp1b/*.json",
+        "configs/policy_improvement_exp1b/amendments/*.json",
     ]),
     deps = [
+        # Stage B restores a sealed checkpoint through the sanctioned allowlist
+        # loader, which `open_exp1b_sealed_evaluation_session` imports at call
+        # time so the full PAR does not pick it up.
+        ":policy_improvement_checkpoint_allowlist",
+        # The publication gate runs the independent consumer before any result
+        # is written, so the evaluator PAR carries it.
+        ":policy_improvement_exp1b_auditor",
+        ":policy_improvement_exp1b_runtime",
+        ":policy_improvement_exp1b_theory_backend",
         ":policy_improvement_full_backend",
         ":policy_improvement_theory_backend",
         ":policy_improvement_theory_backend_v2",
@@ -1934,5 +1952,237 @@ python_unittest(
         "fbsource//third-party/pypi/pytest:pytest",
         ":rl",
         "//caffe2:torch",
+    ],
+)
+
+# --- Experiment 1B reduced study --------------------------------------------
+#
+# Standard-library only, except the Stage A/B Torch work which lives in
+# `:policy_improvement_full_backend`. Dependency edges here mirror the module
+# imports exactly, because the exact source profiles are compared against the
+# built PAR's selected sources: a transitive edge that pulls a
+# `scripts/policy_improvement_*.py` module into a PAR whose profile omits it
+# fails archive validation.
+
+python_library(
+    name = "policy_improvement_exp1_diagnostics",
+    srcs = ["scripts/policy_improvement_exp1_diagnostics.py"],
+    base_module = "",
+)
+
+python_library(
+    name = "policy_improvement_exp1b_bootstrap",
+    srcs = ["scripts/policy_improvement_exp1b_bootstrap.py"],
+    base_module = "",
+)
+
+python_library(
+    name = "policy_improvement_exp1b_schema",
+    srcs = ["scripts/policy_improvement_exp1b_schema.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_exp1b_bootstrap",
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_exp1b_evidence",
+    srcs = ["scripts/policy_improvement_exp1b_evidence.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_exp1b_schema",
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_exp1b_bridge",
+    srcs = ["scripts/policy_improvement_exp1b_bridge.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_exp1_diagnostics",
+        ":policy_improvement_exp1b_evidence",
+        ":policy_improvement_exp1b_schema",
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_exp1b_aggregate",
+    srcs = ["scripts/policy_improvement_exp1b_aggregate.py"],
+    base_module = "",
+    # The auditor is NOT a dependency: `validated_exp1b_document` imports it at
+    # call time so the full PAR, which never publishes, does not carry it. The
+    # theory-bridge PAR declares it directly instead.
+    deps = [
+        ":policy_improvement_exp1_diagnostics",
+        ":policy_improvement_exp1b_bootstrap",
+        ":policy_improvement_exp1b_bridge",
+        ":policy_improvement_exp1b_schema",
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_exp1b_session",
+    srcs = ["scripts/policy_improvement_exp1b_session.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_exp1b_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_exp1b_theory_backend",
+    srcs = ["scripts/policy_improvement_exp1b_theory_backend.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_exp1b_evidence",
+        ":policy_improvement_exp1b_schema",
+        ":policy_improvement_schema",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_exp1b_auditor",
+    srcs = ["scripts/policy_improvement_exp1b_auditor.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_exp1b_bootstrap",
+        ":policy_improvement_exp1b_schema",
+        ":policy_improvement_schema",
+    ],
+)
+
+# Independent Experiment 1B audit consumer. Its own binary on purpose: a
+# producer PAR must not be able to run it, and it must not be able to reach a
+# producer's Torch stack. Reads a published result plus four registered
+# documents; no dataset, no checkpoint, no evidence payload.
+python_binary(
+    name = "policy_improvement_exp1b_auditor_bin",
+    base_module = "",
+    compile = False,
+    main_module = "scripts.policy_improvement_exp1b_auditor",
+    resources = glob([
+        "configs/policy_improvement_exp1b/*.json",
+        "configs/policy_improvement_exp1b/amendments/*.json",
+    ]) + [
+        # The parent population registry. The census-ordering rederivation is
+        # not optional any more, so the binary that advertises it has to ship
+        # the document it rederives from.
+        "configs/policy_improvement_v2/populations.json",
+    ],
+    deps = [
+        ":phase4_runtime_profile",
+        ":policy_improvement_exp1b_auditor",
+    ],
+)
+
+python_library(
+    name = "policy_improvement_exp1b_runtime",
+    srcs = ["scripts/policy_improvement_exp1b_runtime.py"],
+    base_module = "",
+    deps = [
+        ":policy_improvement_exp1b_aggregate",
+        ":policy_improvement_exp1b_bridge",
+        ":policy_improvement_exp1b_evidence",
+        ":policy_improvement_exp1b_schema",
+        ":policy_improvement_exp1b_session",
+        ":policy_improvement_schema",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_exp1_diagnostics",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_exp1_diagnostics_unittest.py",
+    ],
+    base_module = "",
+    typing = True,
+    deps = [
+        ":policy_improvement_exp1_diagnostics",
+        # The oracle half of this suite compares the finite-reference bound
+        # against the v2 theory bridge's own arithmetic, so the test module
+        # imports it at module scope. Without this edge all 46 tests die at
+        # import in a hermetic runfiles tree; a standalone checkout hides it
+        # because the whole repository is already on sys.path.
+        ":policy_improvement_theory_bridge_v2_lib",
+    ],
+)
+
+python_unittest(
+    name = "test_policy_improvement_exp1b",
+    srcs = [
+        "tests/__init__.py",
+        "tests/test_policy_improvement_exp1b_unittest.py",
+    ],
+    base_module = "",
+    typing = True,
+    # The wiring tests read these files by path, so every one of them must be
+    # declared or the hermetic runfiles tree will not contain it.
+    resources = glob([
+        "configs/policy_improvement_exp1b/*.json",
+        "configs/policy_improvement_exp1b/amendments/*.json",
+        "configs/policy_improvement_v2/*.json",
+        "configs/policy_improvement_v2/*.yaml",
+        "configs/policy_improvement_v2/amendments/*.json",
+    ]) + [
+        "BUCK",
+        "phase4_runtime_launcher.py",
+        "phase4_runtime_profile.py",
+        "policy_improvement_full_backend.py",
+        "policy_improvement_full_entrypoint.py",
+        "policy_improvement_theory_bridge_entrypoint.py",
+        "scripts/policy_improvement_exp1b_aggregate.py",
+        "scripts/policy_improvement_exp1b_auditor.py",
+        "scripts/policy_improvement_exp1b_bootstrap.py",
+        "scripts/policy_improvement_exp1b_bridge.py",
+        "scripts/policy_improvement_exp1b_evidence.py",
+        "scripts/policy_improvement_exp1b_runtime.py",
+        "scripts/policy_improvement_exp1b_schema.py",
+        "scripts/policy_improvement_exp1b_session.py",
+        "scripts/policy_improvement_exp1b_theory_backend.py",
+        "scripts/policy_improvement_schema.py",
+        "scripts/policy_improvement_theory_backend_v2.py",
+    ],
+    # Imported directly by the test module. Declaring these files as resources
+    # does not make them importable; only a dependency does.
+    deps = [
+        # Five Torch-gated classes hold eleven methods between them, and each
+        # class self-skips on `importlib.util.find_spec("torch")`. Without this
+        # edge the PAR has no Torch and all eleven skip while the suite still
+        # reports OK. Four of them then execute the real serialization path:
+        # `Exp1bTorchFourModuleRoundTripTest` seals through
+        # `seal_exp1b_training_checkpoint`, reloads through
+        # `load_data_only_checkpoint`, and restores all four module states into
+        # fresh modules. The other three that remain skipped are unimplemented
+        # placeholders, not capability skips -- see the handoff.
+        "fbsource//third-party/pypi/torch:torch",
+        ":confirmatory_runtime_launcher_lib",
+        ":phase4_runtime_launcher_lib",
+        ":phase4_runtime_profile",
+        # `Exp1bBaseArtifactBufferTest` imports this module directly. Declaring
+        # a file as a resource puts it in the runfiles tree; only a dependency
+        # makes it importable.
+        ":policy_improvement_base_policy_restore",
+        # `Exp1bTorchSealedCheckpointTest` and
+        # `Exp1bTorchFourModuleRoundTripTest` import the backend directly, and
+        # the round trip calls its serializer. It is also a resource above, for
+        # the tests that read it as source; that is not an import edge.
+        ":policy_improvement_full_backend",
+        ":policy_improvement_exp1_diagnostics",
+        ":policy_improvement_exp1b_aggregate",
+        ":policy_improvement_exp1b_auditor",
+        ":policy_improvement_exp1b_bootstrap",
+        ":policy_improvement_exp1b_bridge",
+        ":policy_improvement_exp1b_evidence",
+        ":policy_improvement_exp1b_runtime",
+        ":policy_improvement_exp1b_schema",
+        ":policy_improvement_exp1b_session",
+        ":policy_improvement_exp1b_theory_backend",
+        ":policy_improvement_schema",
+        ":policy_improvement_theory_bridge_v2_lib",
     ],
 )

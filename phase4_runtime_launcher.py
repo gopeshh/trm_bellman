@@ -61,6 +61,11 @@ POLICY_IMPROVEMENT_ANALYSIS_PURPOSE = "policy-improvement-analysis"
 POLICY_IMPROVEMENT_FULL_PURPOSE = "policy-improvement-full"
 POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE = "policy-improvement-throughput"
 POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE = "policy-improvement-theory-bridge"
+# Experiment 1B reduced study. Both purposes map onto existing roles, exactly
+# as policy-improvement-throughput does, so RUNTIME_ROLES_V2 stays a closed
+# six-tuple and the v3 authorization schema needs no bump.
+POLICY_IMPROVEMENT_EXP1B_TRAINING_PURPOSE = "policy-improvement-exp1b-training"
+POLICY_IMPROVEMENT_EXP1B_BRIDGE_PURPOSE = "policy-improvement-exp1b-bridge"
 POLICY_IMPROVEMENT_FULL_LAUNCHER_SHA256_ENV = "UPI_TRM_POLICY_FULL_LAUNCHER_SHA256"
 POLICY_IMPROVEMENT_THEORY_BRIDGE_LAUNCHER_SHA256_ENV = (
     "UPI_TRM_POLICY_THEORY_BRIDGE_LAUNCHER_SHA256"
@@ -89,6 +94,12 @@ _PURPOSE_TO_PROFILE = {
     POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE: (
         POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE
     ),
+    POLICY_IMPROVEMENT_EXP1B_TRAINING_PURPOSE: (
+        POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE
+    ),
+    POLICY_IMPROVEMENT_EXP1B_BRIDGE_PURPOSE: (
+        POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE
+    ),
 }
 _LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _LOWER_COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -113,6 +124,89 @@ _POLICY_V2_REGISTRY_RELATIVE_PATH = "configs/policy_improvement_v2/registry.json
 _POLICY_V2_THEORY_AMENDMENT_RELATIVE_PATH = (
     "configs/policy_improvement_v2/amendments/theory_bridge_v2.json"
 )
+_EXP1B_PROTOCOL_RELATIVE_PATH = "configs/policy_improvement_exp1b/protocol.json"
+_EXP1B_REGISTRY_RELATIVE_PATH = "configs/policy_improvement_exp1b/registry.json"
+_EXP1B_AMENDMENT_RELATIVE_PATH = (
+    "configs/policy_improvement_exp1b/amendments/reduced_study_exp1b.json"
+)
+#: The owner-signed admission amendment is a caller-supplied **external** path.
+#: It deliberately does not live in the source checkout: source authorization
+#: requires an exact clean commit and rejects any untracked or modified file, so
+#: a signed document placed inside the tree is refused before launch, and a
+#: committed one that must name its own commit is circular. The launcher owns
+#: the option and enforces the external, absolute, non-traversing shape; the
+#: runtime re-checks it and validates the signature bindings.
+_EXP1B_PARENT_POPULATIONS_RELATIVE_PATH = (
+    "configs/policy_improvement_v2/populations.json"
+)
+_EXP1B_TRAINING_ENTRYPOINT = "--policy-improvement-exp1b-entrypoint"
+_EXP1B_BRIDGE_ENTRYPOINT = "--policy-improvement-exp1b-bridge-entrypoint"
+
+
+def _exp1b_external_admission(arguments: Sequence[str], root: Path) -> str:
+    """Resolve the caller-supplied, launcher-validated signed admission path.
+
+    The launcher owns the *option*, not the *location*: the document is an
+    owner-signed artifact that must not sit inside the immutable source
+    checkout. Enforced here so the refusal happens before any child process
+    starts, and re-enforced in the runtime so a hand-built argv cannot skip it.
+    """
+
+    values = [
+        arguments[index + 1]
+        for index, item in enumerate(arguments)
+        if item == "--execution-admission" and index + 1 < len(arguments)
+    ]
+    if len(values) != 1:
+        raise ConfirmatoryRuntimeError(
+            "Experiment 1B requires exactly one --execution-admission path."
+        )
+    candidate = Path(values[0])
+    if not candidate.is_absolute() or ".." in candidate.parts:
+        raise ConfirmatoryRuntimeError(
+            "Experiment 1B admission path must be absolute and canonical."
+        )
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return str(candidate)
+    raise ConfirmatoryRuntimeError(
+        "Experiment 1B admission must live outside the source checkout; a signed "
+        "artifact inside it makes the tree dirty and fails source authorization."
+    )
+
+
+def _require_options(
+    arguments: Sequence[str],
+    names: Sequence[str],
+    *,
+    label: str,
+) -> dict[str, list[str]]:
+    """Collect exactly-once caller options, rejecting anything unexpected.
+
+    Experiment 1B routes accept only run coordinates from the caller; every
+    document path and the entrypoint marker are launcher-owned.
+    """
+
+    allowed = set(names)
+    values: dict[str, list[str]] = {name: [] for name in names}
+    index = 0
+    while index < len(arguments):
+        item = arguments[index]
+        if item not in allowed:
+            raise ConfirmatoryRuntimeError(
+                f"{label} received an option it does not own: {item!r}."
+            )
+        if index + 1 >= len(arguments):
+            raise ConfirmatoryRuntimeError(f"{label} option {item!r} has no value.")
+        values[item].append(arguments[index + 1])
+        index += 2
+    for name in names:
+        if len(values[name]) != 1:
+            raise ConfirmatoryRuntimeError(
+                f"{label} requires exactly one {name!r}."
+            )
+    return values
 
 
 def _policy_authorization_roles(value: Mapping[str, object]) -> tuple[str, ...]:
@@ -572,6 +666,8 @@ def _load_policy_consumer_runtime_authorization(
             POLICY_IMPROVEMENT_FULL_PURPOSE,
             POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
             POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+            POLICY_IMPROVEMENT_EXP1B_TRAINING_PURPOSE,
+            POLICY_IMPROVEMENT_EXP1B_BRIDGE_PURPOSE,
         }
         and role_names != _POLICY_RUNTIME_ROLES_V2
     ):
@@ -655,6 +751,10 @@ def _load_policy_consumer_runtime_authorization(
         POLICY_IMPROVEMENT_FULL_PURPOSE: POLICY_IMPROVEMENT_FULL_PURPOSE,
         POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE: POLICY_IMPROVEMENT_FULL_PURPOSE,
         POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE: (
+            POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE
+        ),
+        POLICY_IMPROVEMENT_EXP1B_TRAINING_PURPOSE: POLICY_IMPROVEMENT_FULL_PURPOSE,
+        POLICY_IMPROVEMENT_EXP1B_BRIDGE_PURPOSE: (
             POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE
         ),
     }.get(purpose)
@@ -1221,6 +1321,125 @@ def _normalize_child_args(
             "--row-id",
             values["--row-id"][0],
         ]
+    if purpose in {
+        POLICY_IMPROVEMENT_EXP1B_TRAINING_PURPOSE,
+        POLICY_IMPROVEMENT_EXP1B_BRIDGE_PURPOSE,
+    }:
+        # The launcher owns every path the Experiment 1B routes read, and the
+        # entrypoint marker. A caller may supply only the run coordinates.
+        project_root = policy_project_root or source_project_root
+        root = Path(project_root)
+        if not policy_protocol_v2:
+            raise ConfirmatoryRuntimeError(
+                "Experiment 1B requires the protocol-v2 parent registration."
+            )
+        for owned in (
+            _EXP1B_TRAINING_ENTRYPOINT,
+            _EXP1B_BRIDGE_ENTRYPOINT,
+            "--project-root",
+            "--reduced-study-protocol",
+            "--reduced-study-registry",
+            "--reduced-study-amendment",
+            "--parent-protocol",
+            "--parent-registry",
+            "--parent-populations",
+            "--parent-theory-amendment",
+            "--policy-improvement-exp1b-training",
+            "--policy-improvement-exp1b-bridge",
+        ):
+            if contains_option(owned):
+                raise ConfirmatoryRuntimeError(
+                    "Experiment 1B launcher owns its route and document options."
+                )
+        for forbidden in (
+            "--test-open",
+            "--validation-split",
+            "--evaluation-split",
+            "--phase4-publication",
+        ):
+            if contains_option(forbidden):
+                raise ConfirmatoryRuntimeError(
+                    "Experiment 1B rejects held-out and publication options."
+                )
+        if (
+            not isinstance(runtime_authorization_sha256, str)
+            or _LOWER_SHA256.fullmatch(runtime_authorization_sha256) is None
+        ):
+            raise ConfirmatoryRuntimeError(
+                "Experiment 1B lacks its launcher-owned authorization digest."
+            )
+        exp1b_paths = [
+            "--project-root",
+            str(root),
+            "--reduced-study-protocol",
+            str(root / _EXP1B_PROTOCOL_RELATIVE_PATH),
+            "--reduced-study-registry",
+            str(root / _EXP1B_REGISTRY_RELATIVE_PATH),
+            "--reduced-study-amendment",
+            str(root / _EXP1B_AMENDMENT_RELATIVE_PATH),
+            "--execution-admission",
+            _exp1b_external_admission(arguments, root),
+        ]
+        if purpose == POLICY_IMPROVEMENT_EXP1B_TRAINING_PURPOSE:
+            values = _require_options(
+                arguments,
+                (
+                    "--base-policy-artifact",
+                    "--base-policy-amendment",
+                    "--execution-admission",
+                    "--evidence-root",
+                    "--evidence-generation",
+                    "--row-id",
+                    "--seed",
+                ),
+                label="Experiment 1B training",
+            )
+            return [
+                _EXP1B_TRAINING_ENTRYPOINT,
+                "--policy-improvement-exp1b-training",
+                *exp1b_paths,
+                "--base-policy-artifact",
+                values["--base-policy-artifact"][0],
+                "--base-policy-amendment",
+                values["--base-policy-amendment"][0],
+                "--evidence-root",
+                values["--evidence-root"][0],
+                "--evidence-generation",
+                values["--evidence-generation"][0],
+                "--row-id",
+                values["--row-id"][0],
+                "--seed",
+                values["--seed"][0],
+            ]
+        values = _require_options(
+            arguments,
+            (
+                "--execution-admission",
+                "--evidence-root",
+                "--evidence-generation",
+                "--seed-position",
+            ),
+            label="Experiment 1B bridge",
+        )
+        return [
+            _EXP1B_BRIDGE_ENTRYPOINT,
+            "--policy-improvement-exp1b-bridge",
+            *exp1b_paths,
+            "--parent-protocol",
+            str(root / _POLICY_V2_PROTOCOL_RELATIVE_PATH),
+            "--parent-registry",
+            str(root / _POLICY_V2_REGISTRY_RELATIVE_PATH),
+            "--parent-populations",
+            str(root / _EXP1B_PARENT_POPULATIONS_RELATIVE_PATH),
+            "--parent-theory-amendment",
+            str(root / _POLICY_V2_THEORY_AMENDMENT_RELATIVE_PATH),
+            "--evidence-root",
+            values["--evidence-root"][0],
+            "--evidence-generation",
+            values["--evidence-generation"][0],
+            "--seed-position",
+            values["--seed-position"][0],
+        ]
     if purpose != "phase4-training":
         if contains_option("--phase4-publication"):
             raise ConfirmatoryRuntimeError(
@@ -1275,6 +1494,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             POLICY_IMPROVEMENT_AUDIT_PURPOSE,
             POLICY_IMPROVEMENT_ANALYSIS_PURPOSE,
             POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+            POLICY_IMPROVEMENT_EXP1B_BRIDGE_PURPOSE,
         }
         producer_options_present = (
             arguments.producer_source_project_root is not None,
@@ -1298,6 +1518,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             POLICY_IMPROVEMENT_FULL_PURPOSE,
             POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
             POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+            POLICY_IMPROVEMENT_EXP1B_TRAINING_PURPOSE,
+            POLICY_IMPROVEMENT_EXP1B_BRIDGE_PURPOSE,
         }
         if requires_runtime_authorization != all(authorization_options_present):
             raise ConfirmatoryRuntimeError(
@@ -1325,7 +1547,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.runtime_args,
             policy_project_root=(
                 producer_source_root
-                if arguments.purpose == POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE
+                if arguments.purpose
+                in {
+                    POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+                    POLICY_IMPROVEMENT_EXP1B_BRIDGE_PURPOSE,
+                }
                 else source_root
             ),
             runtime_authorization_sha256=(
@@ -1369,6 +1595,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     in {
                         POLICY_IMPROVEMENT_FULL_PURPOSE,
                         POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
+                        POLICY_IMPROVEMENT_EXP1B_TRAINING_PURPOSE,
                     }
                     else None
                 )
@@ -1435,6 +1662,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             POLICY_IMPROVEMENT_FULL_PURPOSE,
             POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
             POLICY_IMPROVEMENT_THEORY_BRIDGE_PURPOSE,
+            POLICY_IMPROVEMENT_EXP1B_TRAINING_PURPOSE,
+            POLICY_IMPROVEMENT_EXP1B_BRIDGE_PURPOSE,
         }:
             assert producer_authorized is not None
             assert arguments.runtime_authorization is not None
@@ -1476,6 +1705,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if arguments.purpose in {
                 POLICY_IMPROVEMENT_FULL_PURPOSE,
                 POLICY_IMPROVEMENT_THROUGHPUT_PURPOSE,
+                POLICY_IMPROVEMENT_EXP1B_TRAINING_PURPOSE,
             }:
                 attestation_environment[POLICY_IMPROVEMENT_FULL_LAUNCHER_SHA256_ENV] = (
                     policy_launcher_sha256

@@ -199,7 +199,14 @@ def _request_schema_name(arguments: list[str]) -> str:
     return document["schema_name"]
 
 
-_request_schema = _request_schema_name(list(sys.argv[1:]))
+_EXP1B_BRIDGE_ENTRYPOINT = "--policy-improvement-exp1b-bridge-entrypoint"
+_exp1b_requested = sys.argv[1:2] == [_EXP1B_BRIDGE_ENTRYPOINT]
+if _EXP1B_BRIDGE_ENTRYPOINT in sys.argv[2:]:
+    raise RuntimeError("Experiment 1B bridge marker is not launcher-owned.")
+
+_request_schema = (
+    None if _exp1b_requested else _request_schema_name(list(sys.argv[1:]))
+)
 _is_v2 = _authorization.get("schema_name") == (
     "policy_improvement_runtime_authorization_v3"
 )
@@ -208,8 +215,12 @@ _expected_request_schema = (
     if _is_v2
     else "policy_improvement_theory_bridge_request_v1"
 )
-if _request_schema != _expected_request_schema:
+if not _exp1b_requested and _request_schema != _expected_request_schema:
     raise RuntimeError("Theory request schema differs from runtime authorization.")
+if _exp1b_requested and not _is_v2:
+    raise RuntimeError(
+        "Experiment 1B requires a v3 policy runtime authorization."
+    )
 _core = importlib.import_module(
     "scripts.policy_improvement_theory_bridge_v2"
     if _is_v2
@@ -242,8 +253,40 @@ _ATTESTATION = {
 }
 
 
+_EXP1B_RUNTIME_ATTESTATION = {
+    "source_git_commit": _ROLE["source_git_commit"],
+    "runtime_sha256": _ROLE["runtime_sha256"],
+    "launcher_sha256": _LAUNCHER_SHA256,
+    "runtime_authorization_sha256": _AUTHORIZATION_SHA256,
+}
+
+
 def main() -> int:
     arguments = list(sys.argv[1:])
+    if _exp1b_requested:
+        # Additive third branch. The v1 and v2 routes above are untouched, and
+        # the standing v2 validation-bridge refusal is not reached from here.
+        arguments.pop(0)
+        exp1b_runtime = importlib.import_module(
+            "scripts.policy_improvement_exp1b_runtime"
+        )
+        exp1b_main = cast(Callable[..., int], getattr(exp1b_runtime, "bridge_main"))
+        # The v2 backend factory is deliberately NOT used here: it takes a v2
+        # theory request and terminates on validation_bridge. Experiment 1B has
+        # its own Stage B backend, built from the route's own authenticated
+        # checkpoints once the route has proved them.
+        exp1b_backend_module = importlib.import_module(
+            "scripts.policy_improvement_exp1b_theory_backend"
+        )
+        exp1b_backend_factory = cast(
+            Callable[..., object],
+            getattr(exp1b_backend_module, "create_exp1b_theory_backend"),
+        )
+        return exp1b_main(
+            arguments,
+            backend_factory=exp1b_backend_factory,
+            runtime_attestation=_EXP1B_RUNTIME_ATTESTATION,
+        )
     if (
         not arguments
         or arguments.pop(0) != "--policy-improvement-theory-bridge-entrypoint"

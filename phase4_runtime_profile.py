@@ -22,6 +22,7 @@ POLICY_IMPROVEMENT_AUDIT_SOURCE_PROFILE = "policy-improvement-audit"
 POLICY_IMPROVEMENT_ANALYSIS_SOURCE_PROFILE = "policy-improvement-analysis"
 POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE = "policy-improvement-full"
 POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE = "policy-improvement-theory-bridge"
+POLICY_IMPROVEMENT_EXP1B_AUDIT_SOURCE_PROFILE = "policy-improvement-exp1b-audit"
 PHASE4_SOURCE_MANIFEST_SCHEMA_VERSION = 1
 # Producer inventory versions, duplicated from utils.source_identity because
 # this module must stay standard-library only: it is imported before runtime
@@ -125,6 +126,9 @@ PHASE4_PROFILE_ENTRYPOINTS = {
     POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE: (
         "policy_improvement_theory_bridge_entrypoint.py",
     ),
+    POLICY_IMPROVEMENT_EXP1B_AUDIT_SOURCE_PROFILE: (
+        "scripts/policy_improvement_exp1b_auditor.py",
+    ),
 }
 POLICY_DATASET_BUILDER_PROFILE_PATHS = (
     "configs/policy_improvement_v1/fixed_base_exact_episodic.yaml",
@@ -166,6 +170,14 @@ _POLICY_IMPROVEMENT_CONFIG_PATHS = (
     "configs/policy_improvement_v2/populations.json",
     "configs/policy_improvement_v2/protocol.json",
     "configs/policy_improvement_v2/registry.json",
+)
+# Experiment 1B reduced study. Deliberately NOT in the shared config set: the
+# audit and analysis binaries package only v1/v2 resources, so adding these
+# there would make their exact profiles disagree with their archives.
+_EXP1B_CONFIG_PATHS = (
+    "configs/policy_improvement_exp1b/amendments/reduced_study_exp1b.json",
+    "configs/policy_improvement_exp1b/protocol.json",
+    "configs/policy_improvement_exp1b/registry.json",
 )
 _POLICY_IMPROVEMENT_V2_SOURCE_PATHS = (
     "scripts/policy_improvement_populations.py",
@@ -223,6 +235,20 @@ _POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS = (
     "policy_improvement_sealed_evidence.py",
     "runtime_archive_preflight.py",
     "scripts/policy_improvement_base_policy_restore.py",
+    # Experiment 1B reduced-study modules. Standard-library only; the full and
+    # theory-bridge runtimes both carry them because the training session and
+    # the bridge route each import part of the set. The runtime module is
+    # imported dynamically off the launcher-owned marker, so it must be
+    # declared here or the archive inventory will not match the profile.
+    *_EXP1B_CONFIG_PATHS,
+    "scripts/policy_improvement_exp1_diagnostics.py",
+    "scripts/policy_improvement_exp1b_aggregate.py",
+    "scripts/policy_improvement_exp1b_bootstrap.py",
+    "scripts/policy_improvement_exp1b_bridge.py",
+    "scripts/policy_improvement_exp1b_evidence.py",
+    "scripts/policy_improvement_exp1b_runtime.py",
+    "scripts/policy_improvement_exp1b_schema.py",
+    "scripts/policy_improvement_exp1b_session.py",
     "scripts/policy_improvement_full_runtime.py",
     "scripts/policy_improvement_throughput.py",
     "scripts/policy_improvement_registry.py",
@@ -239,18 +265,37 @@ POLICY_IMPROVEMENT_FULL_PROFILE_PATHS = (
 )
 POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS = (
     *_POLICY_IMPROVEMENT_FULL_COMMON_PROFILE_PATHS,
+    # Stage B restores a sealed Experiment 1B checkpoint, which deserializes
+    # through the sanctioned allowlist loader. The full PAR never restores, and
+    # `open_exp1b_sealed_evaluation_session` imports the allowlist at call time
+    # rather than module scope, so only this profile carries it.
+    "policy_improvement_checkpoint_allowlist.py",
     "policy_improvement_checkpoint_validator.py",
+    # The publication gate runs the independent audit consumer, so the
+    # evaluator PAR carries it. Stage A never publishes and never imports it.
+    "scripts/policy_improvement_exp1b_auditor.py",
     "policy_improvement_theory_bridge_entrypoint.py",
     "scripts/policy_improvement_audit.py",
     "scripts/policy_improvement_evidence.py",
     "scripts/policy_improvement_populations.py",
     "scripts/policy_improvement_test_open.py",
+    "scripts/policy_improvement_exp1b_theory_backend.py",
     "scripts/policy_improvement_theory_backend.py",
     "scripts/policy_improvement_theory_backend_v2.py",
     "scripts/policy_improvement_theory_bridge.py",
     "scripts/policy_improvement_theory_bridge_v2.py",
     "scripts/policy_improvement_theory_schema_v2.py",
     "scripts/policy_improvement_v2_schema.py",
+)
+POLICY_IMPROVEMENT_EXP1B_AUDIT_PROFILE_PATHS = (
+    *_EXP1B_CONFIG_PATHS,
+    # The parent population registry the census-ordering rederivation reads.
+    "configs/policy_improvement_v2/populations.json",
+    "phase4_runtime_profile.py",
+    "scripts/policy_improvement_exp1b_auditor.py",
+    "scripts/policy_improvement_exp1b_bootstrap.py",
+    "scripts/policy_improvement_exp1b_schema.py",
+    "scripts/policy_improvement_schema.py",
 )
 _EXACT_PROFILE_PATHS = {
     POLICY_DATASET_BUILDER_SOURCE_PROFILE: POLICY_DATASET_BUILDER_PROFILE_PATHS,
@@ -264,6 +309,9 @@ _EXACT_PROFILE_PATHS = {
     POLICY_IMPROVEMENT_FULL_SOURCE_PROFILE: POLICY_IMPROVEMENT_FULL_PROFILE_PATHS,
     POLICY_IMPROVEMENT_THEORY_BRIDGE_SOURCE_PROFILE: (
         POLICY_IMPROVEMENT_THEORY_BRIDGE_PROFILE_PATHS
+    ),
+    POLICY_IMPROVEMENT_EXP1B_AUDIT_SOURCE_PROFILE: (
+        POLICY_IMPROVEMENT_EXP1B_AUDIT_PROFILE_PATHS
     ),
 }
 _PROFILES_WITH_TRAINING_SOURCE = {

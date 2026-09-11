@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
+import json
 import math
 import os
 import stat
@@ -185,6 +187,8 @@ def _require_registered_dataset_root(run: RegisteredFullRun) -> Path:
 
 from scripts.policy_improvement_base_policy_restore import (
     apply_base_policy_state,
+    authenticate_base_policy_artifact,
+    load_base_policy_amendment,
     BASE_POLICY_INITIALIZATION_KIND,
 )
 
@@ -4998,6 +5002,1646 @@ class SealedFullRunBackend(FullRunBackend):
         if not isinstance(result, Mapping):
             raise FullRuntimeError("Throughput backend returned a non-mapping sample.")
         return result
+
+    # --- Experiment 1B, Stage A ---------------------------------------------
+
+    def prepare_exp1b_training(
+        self,
+        *,
+        producer_root: Path,
+        dataset_root: Path,
+        registration: Any,
+        protocol: Mapping[str, object],
+        base_policy_artifact: Path,
+        base_policy_amendment: Path,
+        base_policy_checkpoint_sha256: str,
+        base_policy_model_state_sha256: str,
+        effective_config_sha256: str,
+        runtime_attestation: Any,
+    ) -> Exp1bPreparedTraining:
+        """Build the Torch-bearing callables one reduced-study session needs.
+
+        This does not construct the session. The ordering contract lives in
+        ``scripts/policy_improvement_exp1b_session.py`` and is enforced there, in
+        Torch-free code that the test suite runs on every commit. What happens
+        here is everything that genuinely needs Torch and the registered
+        configuration: authenticating the admitted base artifact, resolving the
+        v2 method template the reduced study inherits, and handing back four
+        callables the session will drive in its own order.
+        """
+
+        if runtime_attestation.runtime_authorization_sha256 != (
+            self._runtime.runtime_authorization_sha256
+        ) or runtime_attestation.runtime_sha256 != self._runtime.runtime_sha256:
+            raise FullBackendError(
+                "Experiment 1B training attestation differs from the sealed runtime."
+            )
+        return _Exp1bTrainingPreparation(
+            producer_root=Path(producer_root),
+            dataset_root=Path(dataset_root),
+            registration=registration,
+            protocol=dict(protocol),
+            base_policy_artifact=Path(base_policy_artifact),
+            base_policy_amendment=Path(base_policy_amendment),
+            base_policy_checkpoint_sha256=str(base_policy_checkpoint_sha256),
+            base_policy_model_state_sha256=str(base_policy_model_state_sha256),
+            effective_config_sha256=str(effective_config_sha256),
+            training_module=self._training_module,
+        ).prepared()
+
+    def run_exp1b_training(self, *, session: Any) -> Exp1bTrainingOutcome:
+        """Drive one reduced-study session to its exact registered budget.
+
+        Exactly ``TERMINAL_ENVIRONMENT_INTERACTIONS`` environment interactions,
+        no evaluation rollouts, and no early stop. The trainer must make forward
+        progress on every step; a step that consumes no interactions would spin.
+        Returns the serialized budget-final checkpoint as bytes -- the runtime
+        publishes it into the owner-controlled evidence generation, so the
+        durability rules live in one place rather than in the Torch layer.
+        """
+
+        target = int(_EXP1B_TERMINAL_ENVIRONMENT_INTERACTIONS)
+        trainer = session.trainer
+        if int(trainer.get_env_step_count()) != 0:
+            raise FullBackendError("Experiment 1B run requires a fresh trainer.")
+        while int(trainer.get_env_step_count()) < target:
+            before = int(trainer.get_env_step_count())
+            trainer.train_step(max_env_steps_to_collect=target - before)
+            after = int(trainer.get_env_step_count())
+            if after <= before:
+                raise FullBackendError(
+                    "Experiment 1B trainer made no progress toward its budget."
+                )
+            if after > target:
+                raise FullBackendError(
+                    "Experiment 1B trainer overshot its registered budget."
+                )
+        interactions = int(trainer.get_env_step_count())
+        if interactions != target:
+            raise FullBackendError(
+                "Experiment 1B run did not stop on its registered budget."
+            )
+        if session.dataset_guard.touched_evaluation_data:
+            raise FullBackendError("Experiment 1B run resolved evaluation data.")
+        return seal_exp1b_training_checkpoint(session=session, module=self._module)
+
+
+def seal_exp1b_training_checkpoint(
+    *, session: Any, module: Any
+) -> Exp1bTrainingOutcome:
+    """Serialize everything Stage B needs to reconstruct the deployed mixture.
+
+    The value model alone is not enough. For the registered
+    ``fixed_base_exact_persistent`` method the trainer keeps three separate
+    modules -- ``policy_model_old`` is the deployed actor, ``policy_model_candidate``
+    receives the policy-gradient updates, and ``target_model`` backs the value
+    bootstrap -- and the exact deployed mixture is a function of the first two.
+    A checkpoint carrying only ``model.state_dict()`` cannot reproduce the policy
+    that generated the run, so Stage B would evaluate a different object than the
+    one Stage A trained.
+
+    Every module is digested individually and the four digests are folded into
+    one ``model_state_sha256`` over the canonical inventory, so a restore can
+    prove module-by-module that it rebuilt the same object.
+    """
+
+    trainer = session.trainer
+    model = session.model
+    modules: dict[str, Any] = {"model": model}
+    for name in ("policy_model_old", "policy_model_candidate", "target_model"):
+        module_object = getattr(trainer, name, None)
+        if module_object is None:
+            raise FullBackendError(
+                f"Experiment 1B trainer exposes no {name}; the deployed mixture "
+                "cannot be reconstructed from this checkpoint."
+            )
+        modules[name] = module_object
+    state_dicts = {name: item.state_dict() for name, item in modules.items()}
+    module_sha256s = {
+        name: state_dict_sha256(state) for name, state in state_dicts.items()
+    }
+    # One folded identity over the whole inventory. Comparing a single module's
+    # digest would let a restore silently substitute any of the other three.
+    model_state_sha256 = canonical_json_sha256(module_sha256s)
+
+    rl_config = module._config_dict(session.trainer.rl_cfg)
+    model_config = trainer._config_to_dict(model.config)
+    # The real trainer counters, not approximations: Stage B compares them
+    # against the run manifest so a restored session can prove it is the
+    # budget-final state and not some earlier or later one.
+    counters = {
+        "environment_interactions": int(trainer.get_env_step_count()),
+        "train_step_count": int(trainer._train_step_count),
+        "value_optimizer_step_count": int(trainer._value_optimizer_step_count),
+        "policy_optimizer_step_count": int(trainer._policy_optimizer_step_count),
+        "distill_optimizer_step_count": int(trainer._distill_optimizer_step_count),
+        "puzzle_optimizer_step_count": int(trainer._puzzle_optimizer_step_count),
+        "exact_centering_batch_count": int(trainer._exact_centering_batch_count),
+    }
+    payload: dict[str, Any] = {
+        "schema_name": EXP1B_CHECKPOINT_SCHEMA_NAME,
+        "schema_version": EXP1B_CHECKPOINT_SCHEMA_VERSION,
+        "run_id": session.run_id,
+        "seed": session.seed,
+        "seed_position": session.seed_position,
+        "applied_seed": session.applied_seed,
+        "method_id": session.method_id,
+        "environment_interactions": counters["environment_interactions"],
+        "counters": counters,
+        "effective_config_sha256": session.effective_config_sha256,
+        "train_split_ordered_record_sha256": session.train_ordered_record_sha256,
+        "train_record_count": session.train_record_count,
+        "dataset_name": session.dataset_name,
+        "training_population_id": session.training_population_id,
+        "initialization_kind": session.initialization_kind,
+        "initialization_artifact_sha256": session.initialization_artifact_sha256,
+        "restored_base_model_state_sha256": session.restored_model_state_sha256,
+        "model_state_sha256": model_state_sha256,
+        "module_state_sha256s": module_sha256s,
+        "model_config": model_config,
+        "rl_config": rl_config,
+        "model_config_sha256": canonical_json_sha256(model_config),
+        "rl_config_sha256": canonical_json_sha256(rl_config),
+        "resolved_evaluation_data": False,
+    }
+    for name, state in state_dicts.items():
+        payload[f"{name}_state_dict"] = state
+
+    buffer = io.BytesIO()
+    torch.save(payload, buffer)
+    checkpoint_bytes = buffer.getvalue()
+    if not checkpoint_bytes:
+        raise FullBackendError("Experiment 1B checkpoint serialization is empty.")
+    return Exp1bTrainingOutcome(
+        checkpoint_bytes=checkpoint_bytes,
+        environment_interactions=counters["environment_interactions"],
+        model_state_sha256=model_state_sha256,
+        module_state_sha256s=dict(module_sha256s),
+        model_config_sha256=str(payload["model_config_sha256"]),
+        rl_config_sha256=str(payload["rl_config_sha256"]),
+        counters=dict(counters),
+    )
+
+
+EXP1B_CHECKPOINT_SCHEMA_NAME = "policy_improvement_exp1b_checkpoint_v2"
+EXP1B_CHECKPOINT_SCHEMA_VERSION = 2
+#: The four modules a reconstructable Experiment 1B checkpoint must carry, in
+#: the order their digests are folded.
+EXP1B_CHECKPOINT_MODULES = (
+    "model",
+    "policy_model_old",
+    "policy_model_candidate",
+    "target_model",
+)
+
+
+#: Duplicated from ``scripts.policy_improvement_exp1b_schema`` so this module
+#: does not import the reduced-study namespace at Torch scope. A consistency
+#: test pins the two together.
+_EXP1B_TERMINAL_ENVIRONMENT_INTERACTIONS = 10000
+_EXP1B_TRAINING_RECORD_COUNT = 1024
+
+
+@dataclass(frozen=True)
+class Exp1bPreparedTraining:
+    """The callables the reduced-study session drives, in its own order."""
+
+    base_policy: Any
+    apply_seed: Callable[[int], None]
+    load_split: Callable[..., Any]
+    model_factory: Callable[[Any], Any]
+    restore_base_policy: Callable[[Any, Any], str]
+    trainer_factory: Callable[[Any, Any, str], Any]
+    model_state_digest: Callable[[Any], str]
+
+
+@dataclass(frozen=True)
+class Exp1bTrainingOutcome:
+    """What one completed reduced-study run hands back for publication."""
+
+    checkpoint_bytes: bytes
+    environment_interactions: int
+    model_state_sha256: str
+    module_state_sha256s: Mapping[str, str]
+    model_config_sha256: str
+    rl_config_sha256: str
+    counters: Mapping[str, int]
+
+
+class _Exp1bTrainingPreparation:
+    """Resolves the registered configuration and closes over the Torch objects."""
+
+    def __init__(
+        self,
+        *,
+        producer_root: Path,
+        dataset_root: Path,
+        registration: Any,
+        protocol: Mapping[str, object],
+        base_policy_artifact: Path,
+        base_policy_amendment: Path,
+        base_policy_checkpoint_sha256: str,
+        base_policy_model_state_sha256: str,
+        effective_config_sha256: str,
+        training_module: Any,
+    ) -> None:
+        self._producer_root = producer_root
+        self._dataset_root = dataset_root
+        self._registration = registration
+        self._protocol = protocol
+        self._module = training_module
+        self._effective_config_sha256 = effective_config_sha256
+        self._model_config: dict[str, object] | None = None
+        self._parent_protocol = self._authenticated_parent_protocol()
+        self._architecture = self._parent_protocol["architecture"]
+        self._rl_config = self._resolve_effective_config()
+        self._base_policy = self._authenticated_base_policy(
+            base_policy_artifact,
+            base_policy_amendment,
+            base_policy_checkpoint_sha256,
+            base_policy_model_state_sha256,
+        )
+
+    # -- registered configuration ------------------------------------------
+
+    def _authenticated_parent_protocol(self) -> Mapping[str, Any]:
+        parent = self._protocol["parent"]
+        assert isinstance(parent, Mapping)
+        path = (
+            self._producer_root / "configs/policy_improvement_v2/protocol.json"
+        ).resolve(strict=True)
+        document = json.loads(path.read_bytes().decode("utf-8"))
+        if canonical_json_sha256(document) != parent["protocol_sha256"]:
+            raise FullBackendError(
+                "Experiment 1B cites a v2 protocol that is not the one on disk."
+            )
+        return document
+
+    def _resolve_effective_config(self) -> Any:
+        registered = self._protocol["effective_config"]
+        assert isinstance(registered, Mapping)
+        if registered["effective_config_sha256"] != self._effective_config_sha256:
+            raise FullBackendError("Experiment 1B effective-config digest differs.")
+        config_path = (
+            self._producer_root / str(registered["base_config_path"])
+        ).resolve(strict=True)
+        try:
+            config_path.relative_to(self._producer_root.resolve())
+        except ValueError as exc:
+            raise FullBackendError(
+                "Experiment 1B base configuration escaped the producer root."
+            ) from exc
+        if file_sha256(config_path) != registered["base_config_sha256"]:
+            raise FullBackendError("Experiment 1B base configuration changed.")
+        layer = yaml.safe_load(config_path.read_bytes().decode("utf-8"))
+        if not isinstance(layer, Mapping):
+            raise FullBackendError("Experiment 1B base configuration is not a mapping.")
+        if canonical_json_sha256(dict(layer)) != (
+            registered["base_canonical_config_sha256"]
+        ):
+            raise FullBackendError(
+                "Experiment 1B base configuration is not the registered canonical form."
+            )
+        overrides = registered["overrides"]
+        assert isinstance(overrides, Mapping)
+        merged = self._module._config_dict(self._module.RLConfig())
+        merged = self._module.merge_rl_config_layer(merged, dict(layer))
+        merged.update(dict(overrides))
+        self._config_path = config_path
+        return self._module.RLConfig(**merged)
+
+    def _authenticated_base_policy(
+        self,
+        artifact: Path,
+        amendment_path: Path,
+        checkpoint_sha256: str,
+        model_state_sha256: str,
+    ) -> Any:
+        amendment = load_base_policy_amendment(amendment_path)
+        authenticated = authenticate_base_policy_artifact(artifact, amendment=amendment)
+        if (
+            authenticated.checkpoint_sha256 != checkpoint_sha256
+            or authenticated.model_state_sha256 != model_state_sha256
+        ):
+            raise FullBackendError(
+                "Admitted base policy differs from the signed execution admission."
+            )
+        registered_training = self._protocol["training_population"]
+        assert isinstance(registered_training, Mapping)
+        if authenticated.training_split_ordered_record_sha256 != (
+            registered_training["ordered_record_sha256"]
+        ):
+            raise FullBackendError(
+                "Admitted base policy was pretrained on a different train split."
+            )
+        return authenticated
+
+    # -- the four callables -------------------------------------------------
+
+    def _load_split(self, root: Any, split: str, count: int) -> Any:
+        from scripts.policy_improvement_exp1b_session import LoadedTrainSplit
+
+        root_path = Path(root)
+        if root_path != self._dataset_root or split != "train":
+            raise FullBackendError(
+                "Experiment 1B dataset loader received a non-train path."
+            )
+        loaded = self._module.build_dataset_from_paths(
+            dataset_paths=[str(root_path)],
+            pool_size=int(count),
+            split=split,
+        )
+        if not isinstance(loaded, tuple) or len(loaded) != 4:
+            raise FullBackendError("Experiment 1B train loader returned invalid data.")
+        train_dataset, seq_len, vocab_size, train_identifiers = loaded
+        registered_training = self._protocol["training_population"]
+        assert isinstance(registered_training, Mapping)
+        self._module._validate_materialized_split_manifest(
+            dataset_root=root_path,
+            split="train",
+            registered_sha256=str(registered_training["split_manifest_sha256"]),
+            dataset=train_dataset,
+        )
+        records = dataset_sample_sha256s(train_dataset)
+        if len(records) != _EXP1B_TRAINING_RECORD_COUNT:
+            raise FullBackendError(
+                "Experiment 1B train loader materialized the wrong record count."
+            )
+        self._seq_len = int(seq_len)
+        self._vocab_size = int(vocab_size)
+        self._train_identifiers = int(train_identifiers)
+        return LoadedTrainSplit(
+            dataset=train_dataset,
+            dataset_root=root_path,
+            split="train",
+            count=len(records),
+            ordered_record_sha256=ordered_record_sha256(records),
+            dataset_manifest_sha256=file_sha256(root_path / "MANIFEST.json"),
+            split_manifest_sha256=file_sha256(root_path / "manifests/train.json"),
+        )
+
+    def _model_factory(self, dataset: Any) -> Any:
+        rl_config = self._rl_config
+        action_count = self._seq_len * self._vocab_size + 1
+        architecture = self._architecture
+        assert isinstance(architecture, Mapping)
+        model_config = {
+            "batch_size": rl_config.batch_size,
+            "seq_len": self._seq_len,
+            "puzzle_emb_ndim": 0,
+            "puzzle_emb_len": 0,
+            "num_puzzle_identifiers": max(
+                self._train_identifiers, rl_config.batch_size
+            ),
+            "vocab_size": self._vocab_size,
+            "H_cycles": int(architecture["h_cycles"]),
+            "L_cycles": int(architecture["l_cycles"]),
+            "H_layers": 0,
+            "L_layers": int(architecture["l_layers"]),
+            "hidden_size": int(architecture["hidden_size"]),
+            "expansion": 2.0,
+            "num_heads": max(4, int(architecture["hidden_size"]) // 16),
+            "pos_encodings": "rope",
+            "rms_norm_eps": 1e-5,
+            "rope_theta": 10000.0,
+            "halt_max_steps": 2,
+            "halt_exploration_prob": 0.0,
+            "forward_dtype": "float32",
+            "mlp_t": False,
+            "no_ACT_continue": True,
+            "rl_enable_value_head": True,
+            "rl_enable_contraction": rl_config.enable_contraction,
+            "rl_target_Lz": rl_config.target_Lz,
+            "rl_target_Lv": rl_config.target_Lv,
+            "rl_disable_value_head_norm": rl_config.disable_value_head_norm,
+            "rl_enable_policy_head": True,
+            "rl_num_actions": action_count,
+            "rl_latent_projection_mode": rl_config.latent_projection_mode,
+            "rl_latent_ball_radius": rl_config.latent_ball_radius,
+        }
+        self._model_config = model_config
+        return TinyRecursiveReasoningModel_ACTV1(model_config)
+
+    def _restore(self, model: Any, base_policy: Any) -> str:
+        if self._model_config is None:
+            raise FullBackendError(
+                "Experiment 1B restore ran before the model was constructed."
+            )
+        return apply_base_policy_state(
+            model,
+            base_policy,
+            model_config=self._model_config,
+            protocol_architecture=self._architecture,
+        )
+
+    def _trainer_factory(
+        self, model: Any, dataset: Any, effective_config_sha256: str
+    ) -> Any:
+        if effective_config_sha256 != self._effective_config_sha256:
+            raise FullBackendError(
+                "Experiment 1B trainer was asked for another effective configuration."
+            )
+        rl_config = self._rl_config
+        engine = self._backend_engine()
+        checker, task, checker_kind = engine._task_config(
+            rl_config, dataset, self._seq_len
+        )
+        env_config = PlanEditEnvConfig(
+            max_edits=rl_config.max_edits,
+            gamma=rl_config.gamma,
+            reward_shaping=rl_config.reward_shaping,
+            vocab_size=self._vocab_size,
+            solved_threshold=(
+                rl_config.solved_threshold
+                if checker_kind in {"solution", "constraint", "progress", "feasibility"}
+                else None
+            ),
+            task_type=rl_config.task_name,
+            stop_action_mode=rl_config.stop_action_mode,
+            stop_action_penalty=rl_config.stop_action_penalty,
+            fail_terminal_reward=rl_config.fail_terminal_reward,
+            solve_terminal_reward=rl_config.solve_terminal_reward,
+            C_max=rl_config.C_max,
+            disable_constraint_masking=rl_config.disable_constraint_masking,
+        )
+        env = PlanEditEnv(
+            dataset=dataset, checker=checker, config=env_config, task_config=task
+        )
+        env.set_stop_action_id(self._seq_len * self._vocab_size)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        baseline = self._module.select_baseline_from_configs(
+            None, [str(self._config_path)]
+        )
+        trainer = self._module.build_trainer(
+            model=model,
+            env=env,
+            rl_cfg=rl_config,
+            device=device,
+            baseline_selection=baseline,
+            cli_baseline=None,
+            verbose=False,
+        )
+        if not isinstance(trainer, UPITrmTrainer):
+            raise FullBackendError("Experiment 1B requires the registered UPI trainer.")
+        trainer.set_checker_fn(checker)
+        return trainer
+
+    def _backend_engine(self) -> TorchLearnedRunEngine:
+        return TorchLearnedRunEngine(self._module)
+
+    def _apply_seed(self, seed: int) -> None:
+        """Seed Python, NumPy, and Torch from the registered run seed.
+
+        The same canonical function the v2 full-run path uses at
+        ``_build_session``. The session calls this before it loads, constructs,
+        or builds anything, so every draw in the run descends from the
+        registered seed rather than ambient process state.
+        """
+
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise FullBackendError("Experiment 1B run seed must be an integer.")
+        self._module.set_global_seed(int(seed))
+
+    def prepared(self) -> Exp1bPreparedTraining:
+        return Exp1bPreparedTraining(
+            base_policy=self._base_policy,
+            apply_seed=self._apply_seed,
+            load_split=self._load_split,
+            model_factory=self._model_factory,
+            restore_base_policy=self._restore,
+            trainer_factory=self._trainer_factory,
+            model_state_digest=lambda model: state_dict_sha256(model.state_dict()),
+        )
+
+
+# --- Experiment 1B Stage B: authenticated read-only restore -----------------
+
+
+class Exp1bSealedEvaluationError(FullBackendError):
+    """Raised when a sealed Experiment 1B checkpoint cannot be restored."""
+
+
+@dataclass(frozen=True)
+class Exp1bCensusMember:
+    """One registered census record, as the route enumerated it."""
+
+    state_id: str
+    record_index: int
+    dataset_record_sha256: str
+
+
+@dataclass
+class _Exp1bStateRecord:
+    """One restored augmented state, derived once and reused for both depths."""
+
+    state_id: str
+    record_index: int
+    dataset_record_sha256: str
+    environment_state: Mapping[str, object]
+    x: Mapping[str, object]
+    plan: Any
+    latent: Any
+    terminal: bool
+    action_mask: tuple[bool, ...] | None = None
+    base_probabilities: tuple[float, ...] | None = None
+    candidate_probabilities: tuple[float, ...] | None = None
+    deployed_probabilities: tuple[float, ...] | None = None
+    normalization_mass_error: float = 0.0
+    deployed_next_latent: Any = None
+    base_next_latent: Any = None
+
+
+def _exp1b_checkpoint_field(
+    payload: Mapping[str, Any], name: str, *, kind: type | tuple[type, ...]
+) -> Any:
+    if name not in payload:
+        raise Exp1bSealedEvaluationError(
+            f"Sealed Experiment 1B checkpoint omits {name!r}."
+        )
+    value = payload[name]
+    if kind is int and (isinstance(value, bool) or not isinstance(value, int)):
+        raise Exp1bSealedEvaluationError(
+            f"Sealed Experiment 1B checkpoint {name!r} is not an integer."
+        )
+    if kind is not int and not isinstance(value, kind):
+        raise Exp1bSealedEvaluationError(
+            f"Sealed Experiment 1B checkpoint {name!r} has the wrong type."
+        )
+    return value
+
+
+class Exp1bSealedEvaluationSession:
+    """One restored Experiment 1B checkpoint, exposed as read-only callables.
+
+    Read-only in the sense that matters: every restored module is put in
+    ``eval()`` with ``requires_grad_(False)``, no optimizer is stepped, and no
+    module is written back. The evaluator walks the registered census once per
+    depth and derives each state's augmented record exactly once, so ``q=2`` and
+    ``q=8`` are evaluated at the *same* state rather than at two independently
+    reset ones.
+
+    The deployed law is the trainer's own ``_mixed_policy_dist``, not a
+    reconstruction from the current and candidate policies. Reconstructing it
+    here would make the bridge's exact-mixture check a test of this module's
+    arithmetic instead of a test of the policy that actually generated the run.
+    """
+
+    def __init__(
+        self,
+        *,
+        module: Any,
+        session_model: Any,
+        trainer: Any,
+        rl_config: Any,
+        env_config: PlanEditEnvConfig,
+        evaluation_dataset: Any,
+        checker: Any,
+        task_config: Any,
+        device: Any,
+        checkpoint_sha256: str,
+        model_state_sha256: str,
+        module_state_sha256s: Mapping[str, str],
+        effective_config_sha256: str,
+        run_id: str,
+        seed: int,
+        seed_position: int,
+        environment_interactions: int,
+        census: Sequence[Exp1bCensusMember],
+        depths: tuple[int, ...],
+        evaluation_population: str,
+    ) -> None:
+        self._module = module
+        self.model = session_model
+        self._trainer = trainer
+        self._rl_config = rl_config
+        self._env_config = env_config
+        self._dataset = evaluation_dataset
+        self._checker = checker
+        self._task_config = task_config
+        self._device = device
+        self.checkpoint_sha256 = checkpoint_sha256
+        self.model_state_sha256 = model_state_sha256
+        self.module_state_sha256s = dict(module_state_sha256s)
+        self.effective_config_sha256 = effective_config_sha256
+        self.run_id = run_id
+        self.seed = seed
+        self.seed_position = seed_position
+        self.environment_interactions = environment_interactions
+        self._depths = tuple(depths)
+        self._population = evaluation_population
+        self._record_digests = dataset_sample_sha256s(evaluation_dataset)
+        self._records: dict[str, _Exp1bStateRecord] = {}
+        self._census = tuple(census)
+        self._by_state_id = {member.state_id: member for member in self._census}
+        if len(self._by_state_id) != len(self._census):
+            raise Exp1bSealedEvaluationError("Census repeats a state identifier.")
+
+    # -- environment and record derivation ----------------------------------
+
+    def _new_environment(self) -> PlanEditEnv:
+        environment = PlanEditEnv(
+            dataset=self._dataset,
+            checker=self._checker,
+            config=self._env_config,
+            task_config=self._task_config,
+        )
+        environment.set_stop_action_id(int(self.model.config.rl_num_actions) - 1)
+        return environment
+
+    def _record(self, state_id: str) -> _Exp1bStateRecord:
+        existing = self._records.get(state_id)
+        if existing is not None:
+            return existing
+        member = self._by_state_id.get(state_id)
+        if member is None:
+            raise Exp1bSealedEvaluationError(
+                "Evaluation requested a state outside the registered census."
+            )
+        position = member.record_index
+        if not 0 <= position < len(self._record_digests):
+            raise Exp1bSealedEvaluationError(
+                "Census record index is outside the evaluation split."
+            )
+        observed_digest = self._record_digests[position]
+        if observed_digest != member.dataset_record_sha256:
+            raise Exp1bSealedEvaluationError(
+                "Census record digest differs from the materialized split."
+            )
+        environment = self._new_environment()
+        x, plan = environment.reset(idx=position)
+        if not isinstance(x, Mapping) or not torch.is_tensor(plan):
+            raise Exp1bSealedEvaluationError(
+                "Restored census state has unsupported tensors."
+            )
+        latent = None
+        if not bool(self._rl_config.episodic_latent):
+            latent = self.model.init_latent(
+                prepare_batch_x(x, device=self._device, batched=False),
+                prepare_plan(plan, device=self._device, batched=False),
+            )
+        record = _Exp1bStateRecord(
+            state_id=state_id,
+            record_index=position,
+            dataset_record_sha256=observed_digest,
+            environment_state=environment.checkpoint_state(),
+            x=_clone_tree(x),
+            plan=plan.detach().clone(),
+            latent=_clone_tree(latent) if latent is not None else None,
+            terminal=False,
+        )
+        self._records[state_id] = record
+        return record
+
+    def _populate(self, record: _Exp1bStateRecord) -> None:
+        """Derive the three laws at this state: base, candidate, deployed.
+
+        The Bellman operator takes the **frozen base** law. That is the whole
+        point of the K=1 contract in
+        ``scripts/policy_improvement_exp1_diagnostics.py``: the operator is the
+        one-step expectation under ``pi_base``, and the deployed mixture is a
+        different object that cannot stand in for it. An earlier version passed
+        ``trainer._mixed_policy_dist`` through as ``base_probabilities``; with
+        ``alpha = 0.1`` and a candidate that has moved, every direct residual and
+        every signed gap was computed under the wrong operator.
+
+        The deployed mixture is still computed, because it is what the run
+        actually deployed: it supplies the successor latent for endpoint
+        evaluation and it is the subject of the mixture-identity diagnostic. It
+        is simply kept separate.
+
+        The three calls mirror ``UPITrmTrainer._probability_mixture_dist``
+        exactly, including the persistent branch's ``n=0`` candidate evaluation
+        at the base call's output latent. Evaluating the candidate anywhere else
+        would compare two laws at two different states.
+        """
+
+        if record.base_probabilities is not None or record.terminal:
+            return
+        trainer = self._trainer
+        deployed_callback = getattr(trainer, "_mixed_policy_dist", None)
+        if not callable(deployed_callback):
+            raise Exp1bSealedEvaluationError(
+                "Restored trainer exposes no exact-mixture deployed policy."
+            )
+        base_model = trainer.policy_model_old
+        candidate_model = trainer.policy_model_candidate
+        if base_model is None or candidate_model is None:
+            raise Exp1bSealedEvaluationError(
+                "Restored trainer exposes no frozen base or candidate policy."
+            )
+        depth = int(self._rl_config.inner_unroll_n)
+        persistent = not bool(self._rl_config.episodic_latent)
+        with torch.no_grad():
+            batched_x = prepare_batch_x(record.x, device=self._device, batched=False)
+            plan = prepare_plan(record.plan, device=self._device, batched=False)
+            environment = self._new_environment()
+            environment.load_checkpoint_state(record.environment_state)
+            raw_mask = environment.get_action_mask()
+            action_mask = (
+                raw_mask.to(self._device) if raw_mask is not None else None
+            )
+
+            base_dist, base_latent = base_model.policy_dist(
+                batched_x,
+                plan,
+                n=depth,
+                action_mask=action_mask,
+                z=record.latent,
+            )
+            if record.latent is not None:
+                candidate_dist, _candidate_latent = candidate_model.policy_dist(
+                    batched_x, plan, n=0, action_mask=action_mask, z=base_latent
+                )
+            else:
+                candidate_dist, _candidate_latent = candidate_model.policy_dist(
+                    batched_x,
+                    plan,
+                    n=depth,
+                    action_mask=action_mask,
+                    z=record.latent,
+                )
+            deployed_dist, next_latent = deployed_callback(
+                batched_x,
+                plan,
+                n=depth,
+                action_mask=action_mask,
+                z=record.latent,
+            )
+
+            record.action_mask = tuple(
+                bool(value)
+                for value in (
+                    raw_mask.tolist()
+                    if raw_mask is not None
+                    else [True] * int(base_dist.probs.shape[-1])
+                )
+            )
+            laws: dict[str, tuple[float, ...]] = {}
+            mass_errors: list[float] = []
+            for name, distribution, label in (
+                ("base", base_dist, "frozen base policy"),
+                ("candidate", candidate_dist, "candidate policy"),
+                ("deployed", deployed_dist, "deployed policy"),
+            ):
+                # Each law is normalized from its own distribution. The deployed
+                # vector is never reconstructed from base and candidate: the
+                # mixture-identity diagnostic has to test the actual deployed
+                # policy, not this module's arithmetic.
+                canonical, mass_error, _correction = _canonical_masked_probabilities(
+                    distribution.probs.reshape(-1).tolist(),
+                    record.action_mask,
+                    label=label,
+                )
+                laws[name] = canonical
+                mass_errors.append(mass_error)
+
+            record.base_probabilities = laws["base"]
+            record.candidate_probabilities = laws["candidate"]
+            record.deployed_probabilities = laws["deployed"]
+            record.normalization_mass_error = max(mass_errors)
+            record.deployed_next_latent = (
+                _clone_tree(next_latent)
+                if next_latent is not None and persistent
+                else None
+            )
+            record.base_next_latent = (
+                _clone_tree(base_latent)
+                if base_latent is not None and persistent
+                else None
+            )
+
+    def _value_at(self, x: Any, plan: Any, latent: Any, depth: int) -> float:
+        with torch.no_grad():
+            value, _ = self.model.used_value(
+                prepare_batch_x(x, device=self._device, batched=False),
+                prepare_plan(plan, device=self._device, batched=False),
+                n=depth,
+                z=latent,
+            )
+            scalar = float(value.reshape(-1)[0].item())
+        if not math.isfinite(scalar):
+            raise Exp1bSealedEvaluationError(
+                "Restored endpoint evaluator returned a nonfinite value."
+            )
+        return scalar
+
+    # -- the four route callables -------------------------------------------
+
+    def endpoint_values(self, state_id: str, depth: int) -> float:
+        """``U_q(s)`` at the registered augmented state."""
+
+        self._require_depth(depth)
+        record = self._record(state_id)
+        if record.terminal:
+            return 0.0
+        return self._value_at(record.x, record.plan, record.latent, depth)
+
+    def action_values(self, state_id: str, depth: int) -> tuple[float, ...]:
+        """``Q_q(s,a) = r_folded + gamma * 1_nonterminal * U_q(s')`` for every action.
+
+        The environment is deterministic, so the expectation is the single
+        outcome. Masked entries are ``0.0``: the diagnostics core validates them
+        for finiteness and never reads them, because a masked action carries no
+        probability mass in the deployed law.
+        """
+
+        self._require_depth(depth)
+        record = self._record(state_id)
+        self._populate(record)
+        assert record.action_mask is not None
+        gamma = float(self._rl_config.gamma)
+        values: list[float] = []
+        for action_index, allowed in enumerate(record.action_mask):
+            if not allowed:
+                values.append(0.0)
+                continue
+            environment = self._new_environment()
+            environment.load_checkpoint_state(record.environment_state)
+            (x_next, plan_next), reward, terminal, _info = environment.step(
+                action_index
+            )
+            if not isinstance(x_next, Mapping) or not torch.is_tensor(plan_next):
+                raise Exp1bSealedEvaluationError(
+                    "Restored outcome produced unsupported state tensors."
+                )
+            folded = float(reward)
+            if not math.isfinite(folded):
+                raise Exp1bSealedEvaluationError(
+                    "Restored outcome produced a nonfinite reward."
+                )
+            if terminal:
+                values.append(folded)
+                continue
+            successor_latent = (
+                record.deployed_next_latent
+                if not bool(self._rl_config.episodic_latent)
+                else None
+            )
+            successor = self._value_at(x_next, plan_next, successor_latent, depth)
+            values.append(folded + gamma * successor)
+        return tuple(values)
+
+    def action_mask(self, state_id: str) -> tuple[bool, ...]:
+        record = self._record(state_id)
+        self._populate(record)
+        assert record.action_mask is not None
+        return record.action_mask
+
+    def base_probabilities(self, state_id: str) -> tuple[float, ...]:
+        """The **frozen base** law, which is the Bellman operator's policy."""
+
+        record = self._record(state_id)
+        self._populate(record)
+        assert record.base_probabilities is not None
+        return record.base_probabilities
+
+    def candidate_probabilities(self, state_id: str) -> tuple[float, ...]:
+        record = self._record(state_id)
+        self._populate(record)
+        assert record.candidate_probabilities is not None
+        return record.candidate_probabilities
+
+    def deployed_probabilities(self, state_id: str) -> tuple[float, ...]:
+        """The exact mixture the run deployed. Never the Bellman operator."""
+
+        record = self._record(state_id)
+        self._populate(record)
+        assert record.deployed_probabilities is not None
+        return record.deployed_probabilities
+
+    def secondary_diagnostics(self) -> dict[str, Any]:
+        """The five separate checks the readiness contract requires per seed.
+
+        Computed here, in the adapter that owns the restored modules, because
+        that is the only place the target network, the candidate law, and the
+        persistent carry are all visible. They are returned as separate records
+        and are never folded into the signed gap: a secondary check that fails
+        refuses the seed instead of perturbing a published number.
+
+        Each mirrors a policy-improvement-v2 quantity rather than defining a new
+        one; the mapping is documented in
+        ``scripts/policy_improvement_exp1b_schema.py``.
+        """
+
+        from scripts.policy_improvement_exp1b_schema import (
+            CENTERING_PARITY_KIND,
+            CENTERING_PARITY_TOLERANCE,
+            DEPLOYMENT_MISMATCH_KIND,
+            MIXTURE_IDENTITY_KIND,
+            MIXTURE_IDENTITY_TOLERANCE,
+            PERSISTENT_STATE_KIND,
+            SECONDARY_DIAGNOSTIC_SCHEMA_NAME,
+            SECONDARY_DIAGNOSTIC_SCHEMA_VERSION,
+            TARGET_LAG_KIND,
+            TRAINER_RECONSTRUCTION_CONTRACT,
+        )
+
+        if bool(self._rl_config.episodic_latent):
+            raise Exp1bSealedEvaluationError(
+                "Experiment 1B registers the persistent latent mode."
+            )
+        alpha = float(self._rl_config.mixture_alpha)
+        deployed_depth = int(self._rl_config.inner_unroll_n)
+
+        worst_lag = (-1.0, "")
+        worst_centering = (-1.0, "")
+        worst_defect = (-1.0, "")
+        worst_parity = (-1.0, "")
+        observed_clipping: tuple[str, float | None] | None = None
+        worst_identity = (-1.0, "")
+        worst_mismatch = (-1.0, "")
+        worst_mass = 0.0
+        carried = 0
+        latent_digests: list[str] = []
+        law_digests: list[str] = []
+
+        for member in self._census:
+            record = self._record(member.state_id)
+            self._populate(record)
+            assert record.action_mask is not None
+            assert record.base_probabilities is not None
+            assert record.candidate_probabilities is not None
+            assert record.deployed_probabilities is not None
+            base = record.base_probabilities
+            candidate = record.candidate_probabilities
+            deployed = record.deployed_probabilities
+
+            # 1. Target lag: how far the bootstrap target trails the live value
+            #    head at the deployed depth. v2 name: propagated_target_lag.
+            live = self._value_at(record.x, record.plan, record.latent, deployed_depth)
+            target = self._target_value_at(
+                record.x, record.plan, record.latent, deployed_depth
+            )
+            lag = abs(live - target)
+            if lag > worst_lag[0]:
+                worst_lag = (lag, member.state_id)
+
+            # 2. Centering parity, ported from the v2 oracle
+            #    (scripts/policy_improvement_theory_bridge_v2.py:962-1015). Three
+            #    quantities, not one: the independently constructed tensor's
+            #    residual centering roundoff, the *trainer's* own reconstruction's
+            #    centering defect, and the maximum elementwise disagreement
+            #    between the two. Only the third can see a regression in the
+            #    trainer's masking, clipping, or centering.
+            trainer_advantages, clipping_kind, clip_value = (
+                self._trainer_advantages(record)
+            )
+            if observed_clipping is None:
+                observed_clipping = (clipping_kind, clip_value)
+            elif observed_clipping != (clipping_kind, clip_value):
+                raise Exp1bSealedEvaluationError(
+                    "Trainer clipping contract changed between census states."
+                )
+            action_values_n = self.action_values(member.state_id, deployed_depth)
+            constructed = self._constructed_advantages(
+                record,
+                action_values_n,
+                clipping_kind=clipping_kind,
+                clip_value=clip_value,
+            )
+            roundoff = abs(
+                math.fsum(
+                    probability * advantage
+                    for probability, advantage, allowed in zip(
+                        base, constructed, record.action_mask
+                    )
+                    if allowed
+                )
+            )
+            trainer_defect = abs(
+                math.fsum(
+                    probability * advantage
+                    for probability, advantage, allowed in zip(
+                        base, trainer_advantages, record.action_mask
+                    )
+                    if allowed
+                )
+            )
+            parity_error = max(
+                (
+                    abs(left - right)
+                    for left, right, allowed in zip(
+                        constructed, trainer_advantages, record.action_mask
+                    )
+                    if allowed
+                ),
+                default=0.0,
+            )
+            if roundoff > worst_centering[0]:
+                worst_centering = (roundoff, member.state_id)
+            if trainer_defect > worst_defect[0]:
+                worst_defect = (trainer_defect, member.state_id)
+            if parity_error > worst_parity[0]:
+                worst_parity = (parity_error, member.state_id)
+
+            # 3. Mixture identity: does the deployed law equal the exact
+            #    pointwise mixture of the two? v2 name:
+            #    exact_mixture_deployment_identity_tv.
+            reconstructed = tuple(
+                (1.0 - alpha) * base_probability + alpha * candidate_probability
+                for base_probability, candidate_probability in zip(base, candidate)
+            )
+            identity_tv = 0.5 * math.fsum(
+                abs(left - right) for left, right in zip(reconstructed, deployed)
+            )
+            if identity_tv > worst_identity[0]:
+                worst_identity = (identity_tv, member.state_id)
+
+            # 4. Deployment mismatch: how far the candidate has moved from the
+            #    frozen base. v2 name: candidate_current_tv.
+            mismatch_tv = 0.5 * math.fsum(
+                abs(left - right) for left, right in zip(candidate, base)
+            )
+            if mismatch_tv > worst_mismatch[0]:
+                worst_mismatch = (mismatch_tv, member.state_id)
+            worst_mass = max(worst_mass, float(record.normalization_mass_error))
+
+            # 5. Persistent state: the deployed successor latent must exist and
+            #    be carried at every state. v2 name: persistent_endpoint_witness.
+            if record.deployed_next_latent is None:
+                raise Exp1bSealedEvaluationError(
+                    "Persistent mode lost the deployed successor latent at "
+                    f"{member.state_id!r}."
+                )
+            carried += 1
+            latent_digests.append(
+                canonical_json_sha256(_tree_identity(record.deployed_next_latent))
+            )
+            law_digests.append(
+                canonical_json_sha256(
+                    {
+                        "state_id": member.state_id,
+                        "action_mask": list(record.action_mask),
+                        "base": list(base),
+                        "candidate": list(candidate),
+                        "deployed": list(deployed),
+                    }
+                )
+            )
+
+        if worst_identity[0] > MIXTURE_IDENTITY_TOLERANCE:
+            raise Exp1bSealedEvaluationError(
+                "Exact pointwise mixture identity failed at "
+                f"{worst_identity[1]!r}: {worst_identity[0]!r}."
+            )
+        if worst_centering[0] > CENTERING_PARITY_TOLERANCE:
+            raise Exp1bSealedEvaluationError(
+                "Independently constructed centering roundoff exceeded its "
+                f"tolerance at {worst_centering[1]!r}: {worst_centering[0]!r}."
+            )
+        if worst_parity[0] > CENTERING_PARITY_TOLERANCE:
+            raise Exp1bSealedEvaluationError(
+                "Trainer and independently constructed advantage tensors differ "
+                f"beyond tolerance at {worst_parity[1]!r}: {worst_parity[0]!r}."
+            )
+        if worst_defect[0] > CENTERING_PARITY_TOLERANCE:
+            raise Exp1bSealedEvaluationError(
+                "Trainer exact-advantage centering defect exceeded its tolerance "
+                f"at {worst_defect[1]!r}: {worst_defect[0]!r}."
+            )
+        if observed_clipping is None:
+            raise Exp1bSealedEvaluationError("No census state produced a tensor.")
+        return {
+            "schema_name": SECONDARY_DIAGNOSTIC_SCHEMA_NAME,
+            "schema_version": SECONDARY_DIAGNOSTIC_SCHEMA_VERSION,
+            "target_lag": {
+                "kind": TARGET_LAG_KIND,
+                "maximum_absolute_target_lag": worst_lag[0],
+                "target_lag_witness_state_id": worst_lag[1],
+                "deployed_depth": self._depths[0],
+                "reference_depth": self._depths[1],
+                "target_ema_tau": float(self._rl_config.target_ema_tau),
+                "state_count": len(self._census),
+                "folded_into_signed_gap": False,
+            },
+            "centering_parity": {
+                "kind": CENTERING_PARITY_KIND,
+                "constructed_centering_roundoff": worst_centering[0],
+                "constructed_centering_tolerance": CENTERING_PARITY_TOLERANCE,
+                "centering_witness_state_id": worst_centering[1],
+                "centering_scheme": "exact_statewise",
+                "state_count": len(self._census),
+                "folded_into_signed_gap": False,
+                "training_estimator_centering_defect": worst_defect[0],
+                "training_estimator_parity_max_abs_error": worst_parity[0],
+                "training_estimator_parity_tolerance": CENTERING_PARITY_TOLERANCE,
+                "parity_witness_state_id": worst_parity[1],
+                "centering_defect_witness_state_id": worst_defect[1],
+                "clipping_kind": observed_clipping[0],
+                "clip_value": observed_clipping[1],
+                "trainer_reconstruction": TRAINER_RECONSTRUCTION_CONTRACT,
+            },
+            "mixture_identity": {
+                "kind": MIXTURE_IDENTITY_KIND,
+                "maximum_identity_total_variation": worst_identity[0],
+                "identity_tolerance": MIXTURE_IDENTITY_TOLERANCE,
+                "identity_witness_state_id": worst_identity[1],
+                "mixture_alpha": alpha,
+                "policy_epsilon": float(
+                    getattr(self._rl_config, "policy_epsilon", 0.0)
+                ),
+                "identity_holds": True,
+                "state_count": len(self._census),
+                "deployed_reconstructed_from_mixture": False,
+                "operator_used_base_probabilities": True,
+            },
+            "deployment_mismatch": {
+                "kind": DEPLOYMENT_MISMATCH_KIND,
+                "maximum_candidate_base_total_variation": worst_mismatch[0],
+                "mismatch_witness_state_id": worst_mismatch[1],
+                "maximum_normalization_mass_error": worst_mass,
+                "state_count": len(self._census),
+                "folded_into_signed_gap": False,
+            },
+            "persistent_state": {
+                "kind": PERSISTENT_STATE_KIND,
+                "latent_mode": "persistent",
+                "deployed_transition_depth": deployed_depth,
+                "endpoint_depths": list(self._depths),
+                "carried_successor_latent_sha256": canonical_json_sha256(
+                    latent_digests
+                ),
+                "action_probabilities_sha256": canonical_json_sha256(law_digests),
+                "states_with_carried_latent": carried,
+                "state_count": len(self._census),
+            },
+        }
+
+    def _trainer_advantages(
+        self, record: _Exp1bStateRecord
+    ) -> tuple[tuple[float, ...], str, float | None]:
+        """Reconstruct the exact frozen-checkpoint tensor training itself used.
+
+        Ported from the v2 oracle's ``training_advantage_estimator``
+        (``policy_improvement_full_backend.ReadOnlyTheoryBridgeSession``). It
+        goes through the trainer's own ``compute_exact_baseline_summation`` and
+        ``_clip_and_recenter_advantages``, so a regression in the trainer's
+        masking, clipping, or centering shows up here as a parity error rather
+        than passing silently.
+
+        Uses the **frozen base** law, which is Experiment 1B's operator policy.
+        """
+
+        assert record.action_mask is not None
+        assert record.base_probabilities is not None
+        trainer = self._trainer
+        checker_fn = getattr(trainer, "_checker_fn", None)
+        if checker_fn is None:
+            raise Exp1bSealedEvaluationError(
+                "Restored trainer estimator lacks its checker function."
+            )
+        with torch.no_grad():
+            x_batch = prepare_batch_x(record.x, device=self._device, batched=False)
+            plan = prepare_plan(record.plan, device=self._device, batched=False)
+            mask = torch.tensor(
+                record.action_mask, dtype=torch.bool, device=self._device
+            ).unsqueeze(0)
+            probabilities = torch.tensor(
+                record.base_probabilities,
+                dtype=torch.float32,
+                device=self._device,
+            ).unsqueeze(0)
+            environment = self._new_environment()
+            environment.load_checkpoint_state(record.environment_state)
+            baseline, q_values = compute_exact_baseline_summation(
+                model=trainer.model,
+                x_batch=x_batch,
+                y_batch=plan,
+                env=environment,
+                n=int(self._rl_config.inner_unroll_n),
+                gamma=float(self._rl_config.gamma),
+                checker_fn=checker_fn,
+                action_mask=mask,
+                policy_probs=probabilities,
+                successor_latent=record.deployed_next_latent,
+            )
+            advantages = torch.where(
+                mask,
+                q_values - baseline.unsqueeze(-1),
+                torch.zeros_like(q_values),
+            )
+            configured = getattr(self._rl_config, "advantage_clip", None)
+            if configured is not None and float(configured) > 0.0:
+                clip_value: float | None = float(configured)
+                clipping_kind = "clip_then_exact_recenter"
+                advantages = _clip_and_recenter_advantages(
+                    advantages, probabilities, mask, clip_value
+                )
+            else:
+                clip_value = None
+                clipping_kind = "none"
+            values = tuple(
+                float(item) for item in advantages.reshape(-1).tolist()
+            )
+        if any(
+            not allowed and item != 0.0
+            for allowed, item in zip(record.action_mask, values)
+        ):
+            raise Exp1bSealedEvaluationError(
+                "Trainer estimator assigned an advantage to a masked action."
+            )
+        if any(not math.isfinite(item) for item in values):
+            raise Exp1bSealedEvaluationError(
+                "Trainer estimator produced a nonfinite advantage."
+            )
+        return values, clipping_kind, clip_value
+
+    def _constructed_advantages(
+        self,
+        record: _Exp1bStateRecord,
+        action_values: Sequence[float],
+        *,
+        clipping_kind: str,
+        clip_value: float | None,
+    ) -> tuple[float, ...]:
+        """The independently constructed tensor, mirroring v2 `_centered_advantages`.
+
+        Built from this module's own Q vector and the frozen base law, under the
+        same registered clipping contract. Comparing it elementwise with the
+        trainer's reconstruction is what makes the parity check meaningful.
+        """
+
+        assert record.action_mask is not None
+        assert record.base_probabilities is not None
+        mask = record.action_mask
+        base = record.base_probabilities
+        baseline = math.fsum(
+            probability * value
+            for probability, value, allowed in zip(base, action_values, mask)
+            if allowed
+        )
+        raw = tuple(
+            value - baseline if allowed else 0.0
+            for value, allowed in zip(action_values, mask)
+        )
+        if clipping_kind == "none":
+            return raw
+        if clip_value is None or clip_value <= 0.0:
+            raise Exp1bSealedEvaluationError(
+                "Registered clipping contract is invalid."
+            )
+        clipped = tuple(
+            max(-clip_value, min(clip_value, value)) if allowed else 0.0
+            for value, allowed in zip(raw, mask)
+        )
+        clipped_mean = math.fsum(
+            probability * value
+            for probability, value, allowed in zip(base, clipped, mask)
+            if allowed
+        )
+        return tuple(
+            value - clipped_mean if allowed else 0.0
+            for value, allowed in zip(clipped, mask)
+        )
+
+    def _target_value_at(self, x: Any, plan: Any, latent: Any, depth: int) -> float:
+        with torch.no_grad():
+            value, _ = self._trainer.target_model.used_value(
+                prepare_batch_x(x, device=self._device, batched=False),
+                prepare_plan(plan, device=self._device, batched=False),
+                n=depth,
+                z=latent,
+            )
+            scalar = float(value.reshape(-1)[0].item())
+        if not math.isfinite(scalar):
+            raise Exp1bSealedEvaluationError(
+                "Restored target evaluator returned a nonfinite value."
+            )
+        return scalar
+
+    def _require_depth(self, depth: int) -> None:
+        if isinstance(depth, bool) or not isinstance(depth, int) or depth <= 0:
+            raise Exp1bSealedEvaluationError("Endpoint depth must be positive.")
+        if depth not in self._depths:
+            raise Exp1bSealedEvaluationError(
+                f"Depth {depth} is not one of the registered depths {self._depths}."
+            )
+
+
+def open_exp1b_sealed_evaluation_session(
+    *,
+    checkpoint_path: str | Path,
+    expected_checkpoint_sha256: str,
+    expected_checkpoint_size_bytes: int,
+    expected_model_state_sha256: str,
+    expected_effective_config_sha256: str,
+    expected_environment_interactions: int,
+    run_id: str,
+    seed: int,
+    seed_position: int,
+    census_ordering_sha256: str,
+    census: Sequence[Exp1bCensusMember],
+    depths: Sequence[int],
+    evaluation_population: str,
+    dataset_root: str | Path,
+    evaluation_split: str,
+    evaluation_split_manifest_sha256: str,
+    training_module: Any,
+) -> Exp1bSealedEvaluationSession:
+    """Restore one sealed Experiment 1B checkpoint read-only for the bridge route.
+
+    Every identity is proved before any module is constructed: the checkpoint
+    bytes against their descriptor, the payload schema and its run/seed/budget
+    fields against the registry row, the four module digests and their folded
+    identity against the descriptor's ``model_state_sha256``, the effective
+    configuration against the protocol, and the materialized evaluation split
+    against its registered manifest.
+
+    Deserialization goes through ``load_data_only_checkpoint``: the payload never
+    gets code execution.
+    """
+
+    # Imported at call time, not module scope. This module is packaged into both
+    # the full and the theory-bridge PARs; only the theory-bridge PAR ever
+    # restores a checkpoint, so a module-scope import would drag the allowlist
+    # into the full PAR's selected sources and break its exact profile.
+    from policy_improvement_checkpoint_allowlist import load_data_only_checkpoint
+    from scripts.policy_improvement_exp1b_evidence import (
+        authenticated_checkpoint_bytes,
+        Exp1bEvidenceError,
+    )
+
+    path = Path(checkpoint_path)
+    if not path.is_absolute() or ".." in path.parts:
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint path is not canonical."
+        )
+    expected_digest = _require_digest(
+        expected_checkpoint_sha256, name="Experiment 1B checkpoint SHA-256"
+    )
+    # One open, one read, one buffer. The bytes that are hashed are the bytes
+    # that are deserialized: `authenticated_checkpoint_bytes` returns them and
+    # the load runs from memory, so there is no second read of the path for a
+    # replacement to slip into.
+    try:
+        checkpoint_payload_bytes = authenticated_checkpoint_bytes(
+            path,
+            expected_sha256=expected_digest,
+            # No int() cast: a float or bool size must be refused, not coerced.
+            expected_size_bytes=expected_checkpoint_size_bytes,
+            label="Sealed Experiment 1B checkpoint",
+        )
+    except Exp1bEvidenceError as exc:
+        raise Exp1bSealedEvaluationError(str(exc)) from exc
+    observed_digest = expected_digest
+    payload = load_data_only_checkpoint(io.BytesIO(checkpoint_payload_bytes))
+    if not isinstance(payload, Mapping):
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint payload is not a mapping."
+        )
+
+    if (
+        _exp1b_checkpoint_field(payload, "schema_name", kind=str)
+        != EXP1B_CHECKPOINT_SCHEMA_NAME
+        or _exp1b_checkpoint_field(payload, "schema_version", kind=int)
+        != EXP1B_CHECKPOINT_SCHEMA_VERSION
+    ):
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint schema differs."
+        )
+    if (
+        _exp1b_checkpoint_field(payload, "run_id", kind=str) != run_id
+        or _exp1b_checkpoint_field(payload, "seed", kind=int) != seed
+        or _exp1b_checkpoint_field(payload, "seed_position", kind=int) != seed_position
+        or _exp1b_checkpoint_field(payload, "applied_seed", kind=int) != seed
+    ):
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint is not the registered run."
+        )
+    if (
+        _exp1b_checkpoint_field(payload, "environment_interactions", kind=int)
+        != int(expected_environment_interactions)
+    ):
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint is not the budget-final state."
+        )
+    if (
+        _exp1b_checkpoint_field(payload, "effective_config_sha256", kind=str)
+        != expected_effective_config_sha256
+    ):
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint used another effective configuration."
+        )
+    if _exp1b_checkpoint_field(payload, "resolved_evaluation_data", kind=bool) is not (
+        False
+    ):
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint reports evaluation-data access."
+        )
+    recorded_modules = _exp1b_checkpoint_field(
+        payload, "module_state_sha256s", kind=Mapping
+    )
+    if set(recorded_modules) != set(EXP1B_CHECKPOINT_MODULES):
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint module inventory differs."
+        )
+    folded = canonical_json_sha256(
+        {name: str(recorded_modules[name]) for name in recorded_modules}
+    )
+    if (
+        folded != _exp1b_checkpoint_field(payload, "model_state_sha256", kind=str)
+        or folded != expected_model_state_sha256
+    ):
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B module identities do not fold to the descriptor."
+        )
+    model_config = dict(_exp1b_checkpoint_field(payload, "model_config", kind=Mapping))
+    rl_config_values = dict(
+        _exp1b_checkpoint_field(payload, "rl_config", kind=Mapping)
+    )
+    if (
+        canonical_json_sha256(model_config)
+        != _exp1b_checkpoint_field(payload, "model_config_sha256", kind=str)
+        or canonical_json_sha256(rl_config_values)
+        != _exp1b_checkpoint_field(payload, "rl_config_sha256", kind=str)
+    ):
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B configuration digests do not match their values."
+        )
+
+    # --- the registered evaluation split -----------------------------------
+    root = Path(dataset_root)
+    loaded = training_module.build_dataset_from_paths(
+        dataset_paths=[str(root)],
+        pool_size=None,
+        split=evaluation_split,
+    )
+    if not isinstance(loaded, tuple) or len(loaded) != 4:
+        raise Exp1bSealedEvaluationError(
+            "Experiment 1B evaluation loader returned invalid data."
+        )
+    evaluation_dataset, seq_len, vocab_size, _identifiers = loaded
+    training_module._validate_materialized_split_manifest(
+        dataset_root=root,
+        split=evaluation_split,
+        registered_sha256=str(evaluation_split_manifest_sha256),
+        dataset=evaluation_dataset,
+    )
+
+    members = tuple(census)
+    if not members:
+        raise Exp1bSealedEvaluationError("Experiment 1B census is empty.")
+    recomputed_ordering = canonical_json_sha256(
+        [
+            {
+                "state_id": member.state_id,
+                "record_index": member.record_index,
+                "dataset_record_sha256": member.dataset_record_sha256,
+            }
+            for member in members
+        ]
+    )
+    if recomputed_ordering != census_ordering_sha256:
+        raise Exp1bSealedEvaluationError(
+            "Experiment 1B census ordering differs from the route's binding."
+        )
+
+    # --- rebuild the exact objects the run trained --------------------------
+    rl_config = training_module.RLConfig(**rl_config_values)
+    # The sealed configuration has to be the registered one on the two axes the
+    # evaluator silently depends on. `action_values` discounts successors with
+    # `rl_config.gamma` while the route builds every observation with the
+    # registered GAMMA, so a mismatch would produce a self-consistent but wrong
+    # residual; and the exact-mixture evaluation is only defined when the run
+    # deployed the exact mixture.
+    from scripts.policy_improvement_exp1b_schema import (
+        DEPLOYED_DEPTH_N as _REGISTERED_DEPLOYED_DEPTH,
+        GAMMA as _REGISTERED_GAMMA,
+        MIXTURE_ALPHA as _REGISTERED_ALPHA,
+    )
+
+    if float(rl_config.gamma) != _REGISTERED_GAMMA:
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint was trained at a different discount "
+            f"factor: {rl_config.gamma!r} rather than {_REGISTERED_GAMMA!r}."
+        )
+    if float(rl_config.mixture_alpha) != _REGISTERED_ALPHA:
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint was trained at a different mixture "
+            f"alpha: {rl_config.mixture_alpha!r}."
+        )
+    if int(rl_config.inner_unroll_n) != _REGISTERED_DEPLOYED_DEPTH:
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint deploys a different unroll depth."
+        )
+    if not bool(getattr(rl_config, "theory_exact_mixture", False)):
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint did not deploy the exact mixture; "
+            "its deployed law cannot be evaluated pointwise."
+        )
+    if bool(rl_config.episodic_latent):
+        raise Exp1bSealedEvaluationError(
+            "Experiment 1B registers the persistent latent mode."
+        )
+    if float(getattr(rl_config, "policy_epsilon", 0.0)) != 0.0:
+        raise Exp1bSealedEvaluationError(
+            "Sealed Experiment 1B checkpoint deployed epsilon-greedy exploration."
+        )
+    model = TinyRecursiveReasoningModel_ACTV1(model_config)
+    engine = TorchLearnedRunEngine(training_module)
+    checker, task, checker_kind = engine._task_config(
+        rl_config, evaluation_dataset, int(seq_len)
+    )
+    env_config = PlanEditEnvConfig(
+        max_edits=rl_config.max_edits,
+        gamma=rl_config.gamma,
+        reward_shaping=rl_config.reward_shaping,
+        vocab_size=int(vocab_size),
+        solved_threshold=(
+            rl_config.solved_threshold
+            if checker_kind in {"solution", "constraint", "progress", "feasibility"}
+            else None
+        ),
+        task_type=rl_config.task_name,
+        stop_action_mode=rl_config.stop_action_mode,
+        stop_action_penalty=rl_config.stop_action_penalty,
+        fail_terminal_reward=rl_config.fail_terminal_reward,
+        solve_terminal_reward=rl_config.solve_terminal_reward,
+        C_max=rl_config.C_max,
+        disable_constraint_masking=rl_config.disable_constraint_masking,
+    )
+    environment = PlanEditEnv(
+        dataset=evaluation_dataset,
+        checker=checker,
+        config=env_config,
+        task_config=task,
+    )
+    environment.set_stop_action_id(int(seq_len) * int(vocab_size))
+    device = torch.device("cpu")
+    # No YAML layer: the restored `rl_config` is already the effective
+    # configuration the run trained under, and an empty config list selects the
+    # UPI trainer (checked immediately below) rather than a baseline algorithm.
+    # Re-reading the method template here could only disagree with the sealed
+    # configuration, which is the one thing Stage B must not do.
+    baseline = training_module.select_baseline_from_configs(None, [])
+    trainer = training_module.build_trainer(
+        model=model,
+        env=environment,
+        rl_cfg=rl_config,
+        device=device,
+        baseline_selection=baseline,
+        cli_baseline=None,
+        verbose=False,
+    )
+    if not isinstance(trainer, UPITrmTrainer):
+        raise Exp1bSealedEvaluationError(
+            "Experiment 1B restore did not rebuild the registered UPI trainer."
+        )
+    trainer.set_checker_fn(checker)
+
+    modules = {
+        "model": model,
+        "policy_model_old": trainer.policy_model_old,
+        "policy_model_candidate": trainer.policy_model_candidate,
+        "target_model": trainer.target_model,
+    }
+    for name in EXP1B_CHECKPOINT_MODULES:
+        state = payload.get(f"{name}_state_dict")
+        if not isinstance(state, Mapping):
+            raise Exp1bSealedEvaluationError(
+                f"Sealed Experiment 1B checkpoint omits {name}_state_dict."
+            )
+        target = modules[name]
+        if target is None:
+            raise Exp1bSealedEvaluationError(
+                f"Restored trainer exposes no {name} to restore into."
+            )
+        target.load_state_dict(state)
+        observed = state_dict_sha256(target.state_dict())
+        if observed != recorded_modules[name]:
+            raise Exp1bSealedEvaluationError(
+                f"Restored {name} differs from its sealed digest."
+            )
+    # Read-only from here: nothing in this session may train or accumulate grad.
+    for target in modules.values():
+        target.eval()
+        for parameter in target.parameters():
+            parameter.requires_grad_(False)
+
+    return Exp1bSealedEvaluationSession(
+        module=training_module,
+        session_model=model,
+        trainer=trainer,
+        rl_config=rl_config,
+        env_config=env_config,
+        evaluation_dataset=evaluation_dataset,
+        checker=checker,
+        task_config=task,
+        device=device,
+        checkpoint_sha256=observed_digest,
+        model_state_sha256=folded,
+        module_state_sha256s={
+            name: str(recorded_modules[name]) for name in EXP1B_CHECKPOINT_MODULES
+        },
+        effective_config_sha256=str(payload["effective_config_sha256"]),
+        run_id=run_id,
+        seed=seed,
+        seed_position=seed_position,
+        environment_interactions=int(payload["environment_interactions"]),
+        census=members,
+        depths=tuple(int(item) for item in depths),
+        evaluation_population=evaluation_population,
+    )
 
 
 def _failed_snapshot(reason: str, kind: str) -> dict[str, object]:

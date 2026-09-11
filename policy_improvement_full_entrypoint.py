@@ -19,6 +19,7 @@ from runtime_archive_preflight import preflight_runtime
 _FULL_RUNTIME_ROLE = "policy-improvement-full"
 _FULL_LAUNCHER_SHA256_ENV = "UPI_TRM_POLICY_FULL_LAUNCHER_SHA256"
 _THROUGHPUT_ENTRYPOINT = "--policy-improvement-throughput-entrypoint"
+_EXP1B_ENTRYPOINT = "--policy-improvement-exp1b-entrypoint"
 _LOWER_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 _PREFLIGHT = preflight_runtime(
@@ -118,12 +119,19 @@ sys.pycache_prefix = str(Path(_RUNTIME_BYTECODE_CACHE.name).resolve())
 throughput_requested = sys.argv[1:2] == [_THROUGHPUT_ENTRYPOINT]
 if _THROUGHPUT_ENTRYPOINT in sys.argv[2:]:
     raise RuntimeError("Throughput entrypoint marker is not launcher-owned.")
+exp1b_requested = sys.argv[1:2] == [_EXP1B_ENTRYPOINT]
+if _EXP1B_ENTRYPOINT in sys.argv[2:]:
+    raise RuntimeError("Experiment 1B entrypoint marker is not launcher-owned.")
+if throughput_requested and exp1b_requested:  # pragma: no cover - argv is a list
+    raise RuntimeError("Exactly one launcher-owned entrypoint marker is allowed.")
 backend_module = importlib.import_module("policy_improvement_full_backend")
-runtime_module = importlib.import_module(
-    "scripts.policy_improvement_throughput"
-    if throughput_requested
-    else "scripts.policy_improvement_full_runtime"
-)
+if exp1b_requested:
+    _runtime_module_name = "scripts.policy_improvement_exp1b_runtime"
+elif throughput_requested:
+    _runtime_module_name = "scripts.policy_improvement_throughput"
+else:
+    _runtime_module_name = "scripts.policy_improvement_full_runtime"
+runtime_module = importlib.import_module(_runtime_module_name)
 training_module = importlib.import_module("upi_trm_train")
 backend_class = getattr(backend_module, "SealedFullRunBackend")
 backend = backend_class(
@@ -147,6 +155,24 @@ backend = backend_class(
 main = cast(Callable[..., int], getattr(runtime_module, "main"))
 
 
+_EXP1B_ATTESTATION = {
+    "source_git_commit": _PREFLIGHT.source_git_commit,
+    "runtime_sha256": _PREFLIGHT.runtime_sha256,
+    "launcher_sha256": launcher_sha256,
+    "runtime_authorization_sha256": _PREFLIGHT.policy_runtime_authorization_sha256,
+}
+
+
 if __name__ == "__main__":
-    runtime_arguments = sys.argv[2:] if throughput_requested else sys.argv[1:]
+    # Every launcher-owned marker is stripped before the handler sees argv.
+    marked = throughput_requested or exp1b_requested
+    runtime_arguments = sys.argv[2:] if marked else sys.argv[1:]
+    if exp1b_requested:
+        raise SystemExit(
+            main(
+                runtime_arguments,
+                backend=backend,
+                runtime_attestation=_EXP1B_ATTESTATION,
+            )
+        )
     raise SystemExit(main(runtime_arguments, backend=backend))

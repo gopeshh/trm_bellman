@@ -18,10 +18,11 @@ Stage 0 does not use this path. Its rows keep random initialization.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,12 @@ class AuthenticatedBasePolicy:
     training_dataset_manifest_sha256: str
     device: int
     inode: int
+    #: The exact bytes that were authenticated. Held so restoration deserializes
+    #: *these*, not whatever the pathname resolves to later. Hashing a path and
+    #: then reopening it is two reads of two possibly different files, and the
+    #: artifact is owner-writable. Excluded from repr and equality: it is large,
+    #: and the whole-file digest above is already the identity.
+    payload_bytes: bytes = field(default=b"", repr=False, compare=False)
 
 
 def canonical_sha256(value: object) -> str:
@@ -153,12 +160,15 @@ def authenticate_base_policy_artifact(
     try:
         opened = os.fstat(descriptor)
         digest = hashlib.sha256()
+        chunks: list[bytes] = []
         with os.fdopen(descriptor, "rb", closefd=False) as handle:
             for block in iter(lambda: handle.read(_READ_SIZE), b""):
                 digest.update(block)
+                chunks.append(block)
         after = os.fstat(descriptor)
     finally:
         os.close(descriptor)
+    payload_bytes = b"".join(chunks)
     if len({_file_identity(before), _file_identity(opened), _file_identity(after)}) != 1:
         raise BasePolicyRestoreError(
             "Base-policy artifact changed while it was authenticated."
@@ -166,6 +176,12 @@ def authenticate_base_policy_artifact(
     if digest.hexdigest() != registered["checkpoint_sha256"]:
         raise BasePolicyRestoreError(
             "Base-policy artifact digest differs from its registered amendment."
+        )
+    if len(payload_bytes) != before.st_size or (
+        hashlib.sha256(payload_bytes).hexdigest() != registered["checkpoint_sha256"]
+    ):
+        raise BasePolicyRestoreError(
+            "Base-policy artifact buffer does not match the authenticated digest."
         )
 
     return AuthenticatedBasePolicy(
@@ -187,6 +203,7 @@ def authenticate_base_policy_artifact(
         ],
         device=before.st_dev,
         inode=before.st_ino,
+        payload_bytes=payload_bytes,
     )
 
 
@@ -213,6 +230,37 @@ def restore_base_policy_state(
     model shape cannot be loaded.
     """
 
+    # Validate the authenticated record before importing Torch. The guard below
+    # is the one that stops a hand-built record from ever reaching a loader, and
+    # it must be reachable in a checkout that has no Torch at all.
+    buffer = authenticated.payload_bytes
+    if (
+        not isinstance(buffer, bytes)
+        or len(buffer) != authenticated.size_bytes
+        or hashlib.sha256(buffer).hexdigest() != authenticated.checkpoint_sha256
+    ):
+        raise BasePolicyRestoreError(
+            "Authenticated base policy carries no verified byte buffer; it was "
+            "not produced by authenticate_base_policy_artifact."
+        )
+    # The artifact must still be the one that was authenticated. This cannot
+    # change what is deserialized -- that is already fixed in memory -- but a
+    # replacement is reported rather than silently tolerated.
+    try:
+        current = Path(authenticated.path).lstat()
+    except OSError as exc:
+        raise BasePolicyRestoreError(
+            "Base-policy artifact was replaced between authentication and restore."
+        ) from exc
+    if (
+        current.st_dev != authenticated.device
+        or current.st_ino != authenticated.inode
+        or current.st_size != authenticated.size_bytes
+    ):
+        raise BasePolicyRestoreError(
+            "Base-policy artifact was replaced between authentication and restore."
+        )
+
     import torch
 
     from rl.persistent_diagnostic_checkpoint import state_dict_sha256
@@ -224,9 +272,13 @@ def restore_base_policy_state(
             "Base-policy amendment registers another protocol architecture."
         )
     live_model_config_sha256 = canonical_sha256(dict(model_config))
+    # Deserialize the authenticated buffer, not the pathname. The previous
+    # version reopened `authenticated.path`, so the bytes handed to `torch.load`
+    # were a second read that nothing had authenticated; a replacement between
+    # authentication and restore changed them silently.
     try:
         payload = torch.load(
-            authenticated.path, map_location="cpu", weights_only=True
+            io.BytesIO(buffer), map_location="cpu", weights_only=True
         )
     except Exception as exc:  # noqa: BLE001 - torch raises many unpickling types
         raise BasePolicyRestoreError(
