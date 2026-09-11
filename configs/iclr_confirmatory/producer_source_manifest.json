@@ -46,7 +46,7 @@
     "models/recursive_reasoning/trm.py": "5f9db04c79883fb6343ccc07c93fd1e2a7f89ff30171e694ab1d5e1e5fcabe09",
     "models/sparse_embedding.py": "28040c620fb621b45bb5e1c58283678ddfbceb3d394499d066b9224dacc871ad",
     "models/value_head.py": "d3f098775bc16c97bbac2b188fd4bc8f0cdd4cdb1bb1e7041e552eedbebf9b21",
-    "phase4_runtime_profile.py": "946986e7c3d4dd71dcaa10bdefbfb593da861350bc0ab6bd0651d827da46829c",
+    "phase4_runtime_profile.py": "e634d0b6a6518a33b295c57448c14c3fa900e01255648675ddb93deabe24601b",
     "policy_improvement_checkpoint_allowlist.py": "fa22df0101cf3ab73f6e817c5d5483e6ec785e15df0672fd72e22dc651895476",
     "policy_improvement_smoke_checkpoint.py": "c0c884d3a3d828ed10ef01f6f43b461cc71dc4915514bf3d37317ac6c203dfa9",
     "policy_improvement_smoke_runtime.py": "074ed03b8ff6d06895ef63b6a709fbc1f2cdf67bdb5e11f8e96f768c8a929761",
