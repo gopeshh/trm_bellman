@@ -381,6 +381,11 @@ python_library(
 
 python_binary(
     name = "policy_improvement_full",
+    # Standalone (ZIP) PAR. Both validate_runtime_archive and the runtime
+    # authorization minter open a runtime artifact with ZipFile and refuse
+    # anything else, so an inplace bootstrap PAR cannot be authenticated or
+    # bound into an authorization. Packaging attribute only.
+    package_style = "standalone",
     srcs = ["policy_improvement_full_entrypoint.py"],
     base_module = "",
     compile = False,
@@ -476,6 +481,11 @@ python_library(
 
 python_binary(
     name = "policy_improvement_theory_bridge",
+    # Standalone (ZIP) PAR. Both validate_runtime_archive and the runtime
+    # authorization minter open a runtime artifact with ZipFile and refuse
+    # anything else, so an inplace bootstrap PAR cannot be authenticated or
+    # bound into an authorization. Packaging attribute only.
+    package_style = "standalone",
     srcs = ["policy_improvement_theory_bridge_entrypoint.py"],
     base_module = "",
     compile = False,
@@ -583,6 +593,11 @@ python_library(
 
 python_binary(
     name = "policy_improvement_audit",
+    # Standalone (ZIP) PAR. Both validate_runtime_archive and the runtime
+    # authorization minter open a runtime artifact with ZipFile and refuse
+    # anything else, so an inplace bootstrap PAR cannot be authenticated or
+    # bound into an authorization. Packaging attribute only.
+    package_style = "standalone",
     srcs = [
         "policy_improvement_consumer_entrypoint.py",
         "scripts/policy_improvement_audit.py",
@@ -636,6 +651,11 @@ python_library(
 
 python_binary(
     name = "policy_improvement_analysis",
+    # Standalone (ZIP) PAR. Both validate_runtime_archive and the runtime
+    # authorization minter open a runtime artifact with ZipFile and refuse
+    # anything else, so an inplace bootstrap PAR cannot be authenticated or
+    # bound into an authorization. Packaging attribute only.
+    package_style = "standalone",
     srcs = [
         "policy_improvement_consumer_entrypoint.py",
         "scripts/policy_improvement_analysis.py",
@@ -1813,6 +1833,11 @@ python_library(
 
 python_binary(
     name = "run_phase4_training",
+    # Standalone (ZIP) PAR. Both validate_runtime_archive and the runtime
+    # authorization minter open a runtime artifact with ZipFile and refuse
+    # anything else, so an inplace bootstrap PAR cannot be authenticated or
+    # bound into an authorization. Packaging attribute only.
+    package_style = "standalone",
     srcs = ["scripts/run_phase4_training.py"],
     base_module = "",
     main_module = "scripts.run_phase4_training",
