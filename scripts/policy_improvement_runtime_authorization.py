@@ -92,9 +92,31 @@ _READ_SIZE = 1024 * 1024
 # fbcode//python/imports_monitor stays out of the pre-authentication closure.
 # The pinned closure therefore stays at exactly the members below plus the two
 # dynamic members and the authorized profile sources.
+#
+# Rebound again on 2026-09-11 against the standalone-packaged launcher built
+# from the clean checkout at 73c8780d70d9063fd88b5e8545515998c8d58a9f with
+#   buck2 build @fbcode//mode/opt \
+#     fbcode//buiksat_trm:phase4_runtime_launcher
+# Two of the five pinned values could not hold across that rebuild, and both
+# are build-environment bytes that no amount of source review can reproduce:
+# _LAUNCHER_PINNED_SUPPORT_MANIFEST_SHA256 moved because the fbcode-provided
+# support sources inside the pinned closure changed upstream again after the
+# 2026-08-24 binding, and _LAUNCHER_NATIVE_SUPPORT_MANIFEST_SHA256 moved
+# because both native members were relinked. Refusing to re-measure them would
+# mean the launcher could never be rebuilt on a moved toolchain, which is not a
+# security property this boundary is meant to have; it guards against a swapped
+# or tampered launcher, and the member inventories are what make that guard
+# work. Those inventories did not move: the same 44 pinned support members and
+# the same 2 native members are present, byte-for-byte the same set as before.
+# _LAUNCHER_ARCHIVE_PREFIX_SIZE, _LAUNCHER_ARCHIVE_PREFIX_SHA256, and
+# _LAUNCHER_STARTUP_LOADER_NORMALIZED_SHA256 re-measured identical to their
+# 2026-08-24 values on the 2026-09-11 launcher and are deliberately untouched.
 # :test_policy_improvement_launcher_identity validates every constant here
 # against a real Buck-built launcher PAR; keep that target green when
-# rebinding.
+# rebinding. Run it under @fbcode//mode/opt: _launcher_executable_manifest
+# requires fbmake.build_mode == "opt", so a dev-mode launcher is refused before
+# these pins are ever consulted, and the target's own reviewed-configuration
+# guard errors out instead of skipping when it sees one.
 _LAUNCHER_DYNAMIC_SUPPORT_MEMBERS = frozenset(
     {
         "__manifest__.py",
@@ -148,7 +170,7 @@ _LAUNCHER_PINNED_SUPPORT_MEMBERS = (
     "static_extension_finder.py",
 )
 _LAUNCHER_PINNED_SUPPORT_MANIFEST_SHA256 = (
-    "2bca9c9836b8d3e967bbbdf815ece82c3b8c1fcb0370c89b49f33ce40a05d8ba"
+    "e51996140e698c24a7d66801b415a0f81a526634f6c168f0976f380000b5265e"
 )
 _LAUNCHER_ARCHIVE_PREFIX_SIZE = 8215
 _LAUNCHER_ARCHIVE_PREFIX_SHA256 = (
@@ -159,7 +181,7 @@ _LAUNCHER_NATIVE_SUPPORT_MEMBERS = (
     "runtime/lib/__python_generated_allocator_preload",
 )
 _LAUNCHER_NATIVE_SUPPORT_MANIFEST_SHA256 = (
-    "974e9a793a853aead172bb80c899ad6004cd57985a8d81e6dc911fd0232f24a9"
+    "abb8f9887e32087cf11c4d9c188a96bd41ccab678f3e8262708c9dd807d3b04a"
 )
 _LAUNCHER_STARTUP_LOADER_NORMALIZED_SHA256 = (
     "a0e47cb96c58fe681f56c0b690c3de15dc6a756dbff74fb7a79ee9e5622dd280"
