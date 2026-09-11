@@ -696,6 +696,12 @@ python_library(
 
 python_binary(
     name = "policy_dataset_builder",
+    # Standalone (ZIP) PAR. `validate_runtime_archive` opens the runtime
+    # artifact with `ZipFile` and refuses anything else, so the inplace
+    # bootstrap PAR the default style produces cannot be authenticated by
+    # the launcher. This is a packaging attribute only: no source, resource,
+    # or dependency changes, and no effect on compile mode.
+    package_style = "standalone",
     srcs = ["policy_dataset_builder_entrypoint.py"],
     base_module = "",
     compile = False,
@@ -1763,6 +1769,12 @@ python_library(
 
 python_binary(
     name = "phase4_runtime_launcher",
+    # Standalone (ZIP) PAR. `validate_runtime_archive` opens the runtime
+    # artifact with `ZipFile` and refuses anything else, so the inplace
+    # bootstrap PAR the default style produces cannot be authenticated by
+    # the launcher. This is a packaging attribute only: no source, resource,
+    # or dependency changes, and no effect on compile mode.
+    package_style = "standalone",
     srcs = ["phase4_runtime_launcher.py"],
     base_module = "",
     compile = False,
