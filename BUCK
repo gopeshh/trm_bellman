@@ -835,6 +835,14 @@ python_library(
 
 python_binary(
     name = "upi_trm_train",
+    # Standalone (ZIP) PAR. This is the Phase 4 confirmatory training runtime
+    # the launcher authenticates and the runtime authorization minter binds as
+    # --training-runtime; both open it with ZipFile and refuse anything else,
+    # so an inplace bootstrap PAR cannot be authenticated. Packaging attribute
+    # only: no source, resource, or dependency change, and no effect on
+    # compile mode. Do not confuse this target with :run_phase4_training,
+    # which is the orchestrator that *takes* this PAR as an argument.
+    package_style = "standalone",
     srcs = ["upi_trm_train.py"],
     base_module = "",
     compile = False,
