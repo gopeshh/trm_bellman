@@ -111,9 +111,9 @@
   "terminal_environment_interactions": 10000,
   "training_population": {
     "count": 1024,
-    "dataset_manifest_sha256": "2572bb79faeec976dc83cb75b8520e59691a7c9dc3f8fe252554fc29bfe90ccd",
-    "dataset_name": "policy-improvement-hard-4x4-v1",
-    "dataset_root": "data/policy-improvement-v1-owner/policy-improvement-hard-4x4-v1",
+    "dataset_manifest_sha256": "55bf615ebeaf0f13bad1917dc74fd33f7c9736b7316a0ff15572641cb6470b2a",
+    "dataset_name": "policy-improvement-hard-4x4-v1-regen-20260911",
+    "dataset_root": "data/policy-improvement-v1-owner/policy-improvement-hard-4x4-v1-regen-20260911",
     "ordered_record_sha256": "73110263bb388e0f6e0976156d03f499b83541a58d07c39b8b634e94a98ad446",
     "population_id": "train_full",
     "resolves_evaluation_data": false,

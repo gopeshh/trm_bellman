@@ -161,8 +161,13 @@ TRAINING_SPLIT = "train"
 TRAINING_RECORD_COUNT = 1024
 #: The dataset the parent namespace registers, cited verbatim. Experiment 1B
 #: builds no dataset and selects no records.
-DATASET_NAME = "policy-improvement-hard-4x4-v1"
-DATASET_ROOT = "data/policy-improvement-v1-owner/policy-improvement-hard-4x4-v1"
+#: The regenerated corpus. Content-identical to the v1/v2 registration --
+#: all six content digests and all 128 validation_bridge record digests were
+#: verified equal after publication -- but a distinct entry, because
+#: MANIFEST.json embeds the producer attestation and the original corpus no
+#: longer exists. See configs/policy_improvement_exp1b/REGENERATION.md.
+DATASET_NAME = "policy-improvement-hard-4x4-v1-regen-20260911"
+DATASET_ROOT = "data/policy-improvement-v1-owner/policy-improvement-hard-4x4-v1-regen-20260911"
 PARENT_CONFIG_DIRECTORY = "policy_improvement_v2"
 TERMINAL_ENVIRONMENT_INTERACTIONS = 10000
 DEPLOYED_DEPTH_N = 2
