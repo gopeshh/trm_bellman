@@ -5083,7 +5083,14 @@ class SealedFullRunBackend(FullRunBackend):
             )
         if session.dataset_guard.touched_evaluation_data:
             raise FullBackendError("Experiment 1B run resolved evaluation data.")
-        return seal_exp1b_training_checkpoint(session=session, module=self._module)
+        # self._module belongs to TorchLearnedRunEngine, not to this class. This
+        # backend stores the same object as self._training_module, which is what
+        # prepare_exp1b_training already passes. Reaching for the engine's name
+        # here raised AttributeError *after* the whole 10,000-interaction budget
+        # had been spent, so a seed cost 1h50m to discover it and sealed nothing.
+        return seal_exp1b_training_checkpoint(
+            session=session, module=self._training_module
+        )
 
 
 def seal_exp1b_training_checkpoint(

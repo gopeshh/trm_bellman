@@ -3859,6 +3859,59 @@ class Exp1bProductionBackendTest(unittest.TestCase):
                 f"{name} raises NotImplementedError",
             )
 
+    def test_the_sealed_backend_reads_only_attributes_it_assigns(self) -> None:
+        """Regression: run_exp1b_training read self._module, which never existed.
+
+        Every test that exercises Stage A substitutes its own backend class, so
+        nothing ever ran the real SealedFullRunBackend.run_exp1b_training body.
+        The typo therefore reached production and raised AttributeError on the
+        last line of the training loop -- after the full 10,000-interaction
+        budget had been spent and with nothing sealed. self._module belongs to
+        TorchLearnedRunEngine; this class stores the same object as
+        self._training_module.
+
+        Torch-free by construction: this reads the module as source, so it runs
+        wherever the other checks in this class run.
+        """
+
+        tree = ast.parse(
+            (_ROOT / "policy_improvement_full_backend.py").read_text(encoding="utf-8")
+        )
+        sealed = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef) and node.name == "SealedFullRunBackend"
+        )
+        # FullRunBackend is a Protocol carrying no instance state, so everything
+        # this class reads off self must be assigned or defined right here.
+        assigned = {
+            target.attr
+            for node in ast.walk(sealed)
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "self"
+        }
+        defined = {
+            node.name
+            for node in sealed.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        read = {
+            node.attr
+            for node in ast.walk(sealed)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "self"
+            and isinstance(node.ctx, ast.Load)
+        }
+        self.assertEqual(
+            sorted(read - assigned - defined),
+            [],
+            "SealedFullRunBackend reads an attribute it never assigns.",
+        )
+
     def test_the_full_backend_publishes_the_registered_budget(self) -> None:
         source = (_ROOT / "policy_improvement_full_backend.py").read_text(
             encoding="utf-8"
@@ -4816,6 +4869,178 @@ def _torch_available() -> bool:
     import importlib.util
 
     return importlib.util.find_spec("torch") is not None
+
+
+def _sealed_runtime_identity() -> dict[str, str]:
+    """A field-exact sealed identity the production validator accepts.
+
+    ``SealedRuntimeIdentity.from_mapping`` requires the exact nine-field
+    inventory, an authorized role, real 64-hex digests, a 40-hex commit, and
+    ``runtime_profile_sha256 == selected_source_manifest_sha256 ==
+    source_manifest_sha256``. Building it here rather than stubbing the class
+    keeps the constructor under test too.
+    """
+
+    manifest = _digest("sealed-source-manifest")
+    return {
+        "role": "policy-improvement-full",
+        "runtime_sha256": _digest("sealed-runtime"),
+        "source_git_commit": "0" * 39 + "1",
+        "source_manifest_sha256": manifest,
+        "producer_source_manifest_sha256": _digest("sealed-producer-manifest"),
+        "runtime_profile_sha256": manifest,
+        "selected_source_manifest_sha256": manifest,
+        "runtime_authorization_sha256": _digest("sealed-authorization"),
+        "launcher_sha256": _digest("sealed-launcher"),
+    }
+
+
+class _CountingTrainer:
+    """Reports a monotone environment-step count without any Torch object.
+
+    ``run_exp1b_training`` only ever asks the trainer for its step count and
+    tells it to collect more, so a counter is a faithful stand-in for the loop
+    control the method actually implements.
+    """
+
+    def __init__(self, *, steps_per_call: int) -> None:
+        self._count = 0
+        self._steps_per_call = steps_per_call
+        self.requested_budgets: list[int] = []
+
+    def get_env_step_count(self) -> int:
+        return self._count
+
+    def train_step(self, *, max_env_steps_to_collect: int) -> None:
+        self.requested_budgets.append(int(max_env_steps_to_collect))
+        self._count += min(self._steps_per_call, int(max_env_steps_to_collect))
+
+
+@unittest.skipUnless(_torch_available(), "Torch is not installed in this checkout")
+class Exp1bRealSealedBackendTrainingLoopTest(unittest.TestCase):
+    """Execute the *real* ``SealedFullRunBackend.run_exp1b_training`` body.
+
+    This is the test that was missing. Every other Stage A test substitutes its
+    own backend class (see ``run_exp1b_training`` definitions elsewhere in this
+    file) or asserts only that the production method exists and is not a stub.
+    None of them executes the production body, so ``self._module`` -- an
+    attribute of ``TorchLearnedRunEngine``, never of ``SealedFullRunBackend`` --
+    survived review and reached a real run, where it raised ``AttributeError``
+    on the final statement of the method after the entire 10,000-interaction
+    budget had already been spent.
+
+    Hermetic: no owner artifact, no dataset, no checkpoint, no Torch tensor. The
+    real class is constructed with the real identity validator, and only the
+    two collaborators the method calls out to are stand-ins.
+    """
+
+    def _backend(self, module: object) -> Any:
+        import policy_improvement_full_backend as backend
+
+        return backend.SealedFullRunBackend(
+            runtime_identity=_sealed_runtime_identity(),
+            training_module=module,
+            # A non-None engine keeps TorchLearnedRunEngine out of the picture;
+            # run_exp1b_training never touches the engine.
+            engine=SimpleNamespace(),
+        )
+
+    @contextmanager
+    def _captured_seal(self) -> Any:
+        """Swap the module-level sealer for a recorder, then put it back.
+
+        Patching the callee does not weaken the test: the ``AttributeError``
+        fires while the *argument* is evaluated, before any call happens.
+        """
+
+        import policy_improvement_full_backend as backend
+
+        calls: list[dict[str, Any]] = []
+        original = backend.seal_exp1b_training_checkpoint
+
+        def recorder(*, session: Any, module: Any) -> Any:
+            calls.append({"session": session, "module": module})
+            return "sealed-outcome"
+
+        backend.seal_exp1b_training_checkpoint = recorder
+        try:
+            yield calls
+        finally:
+            backend.seal_exp1b_training_checkpoint = original
+
+    def _session(self, *, steps_per_call: int, touched: bool = False) -> Any:
+        return SimpleNamespace(
+            trainer=_CountingTrainer(steps_per_call=steps_per_call),
+            dataset_guard=SimpleNamespace(touched_evaluation_data=touched),
+        )
+
+    def test_the_real_body_seals_with_this_backends_training_module(self) -> None:
+        """The regression: the sealer must receive ``self._training_module``."""
+
+        import policy_improvement_full_backend as backend
+
+        module = SimpleNamespace(name="training-module")
+        sealed_backend = self._backend(module)
+        session = self._session(steps_per_call=2500)
+        with self._captured_seal() as calls:
+            outcome = sealed_backend.run_exp1b_training(session=session)
+        self.assertEqual(outcome, "sealed-outcome")
+        self.assertEqual(len(calls), 1)
+        self.assertIs(calls[0]["session"], session)
+        self.assertIs(
+            calls[0]["module"],
+            module,
+            "run_exp1b_training must seal with the module this backend holds.",
+        )
+        self.assertEqual(
+            session.trainer.get_env_step_count(),
+            backend._EXP1B_TERMINAL_ENVIRONMENT_INTERACTIONS,
+        )
+
+    def test_the_real_body_stops_exactly_on_the_registered_budget(self) -> None:
+        import policy_improvement_full_backend as backend
+
+        target = backend._EXP1B_TERMINAL_ENVIRONMENT_INTERACTIONS
+        session = self._session(steps_per_call=3000)
+        with self._captured_seal():
+            self._backend(SimpleNamespace()).run_exp1b_training(session=session)
+        trainer = session.trainer
+        self.assertEqual(trainer.get_env_step_count(), target)
+        # The remaining budget must shrink on every call, and the last request
+        # must ask for exactly what is left rather than a fresh full budget.
+        self.assertEqual(
+            trainer.requested_budgets,
+            [target, target - 3000, target - 6000, target - 9000],
+        )
+
+    def test_the_real_body_refuses_a_trainer_that_is_not_fresh(self) -> None:
+        import policy_improvement_full_backend as backend
+
+        session = self._session(steps_per_call=2500)
+        session.trainer.train_step(max_env_steps_to_collect=2500)
+        with self._captured_seal():
+            with self.assertRaises(backend.FullBackendError) as caught:
+                self._backend(SimpleNamespace()).run_exp1b_training(session=session)
+        self.assertIn("fresh trainer", str(caught.exception))
+
+    def test_the_real_body_refuses_a_trainer_that_stalls(self) -> None:
+        import policy_improvement_full_backend as backend
+
+        session = self._session(steps_per_call=0)
+        with self._captured_seal():
+            with self.assertRaises(backend.FullBackendError) as caught:
+                self._backend(SimpleNamespace()).run_exp1b_training(session=session)
+        self.assertIn("no progress", str(caught.exception))
+
+    def test_the_real_body_refuses_a_run_that_resolved_evaluation_data(self) -> None:
+        import policy_improvement_full_backend as backend
+
+        session = self._session(steps_per_call=10000, touched=True)
+        with self._captured_seal() as calls:
+            with self.assertRaises(backend.FullBackendError) as caught:
+                self._backend(SimpleNamespace()).run_exp1b_training(session=session)
+        self.assertIn("resolved evaluation data", str(caught.exception))
+        self.assertEqual(calls, [], "A tainted run must not be sealed.")
 
 
 @unittest.skipUnless(_torch_available(), "Torch is not installed in this checkout")
