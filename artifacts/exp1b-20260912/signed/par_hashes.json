@@ -1,0 +1,38 @@
+{
+  "phase4_runtime_launcher": {
+    "path": "/data/repos/fbsource/buck-out/v2/art/fbcode/bc711a88eedb76ac/buiksat_trm/__phase4_runtime_launcher__/phase4_runtime_launcher.par",
+    "sha256": "f99099ee418647ee970f84c2c6ba6d373cd143676d37498d0124e80b48c289bd",
+    "zip": true,
+    "size": 809958
+  },
+  "upi_trm_train": {
+    "path": "/data/repos/fbsource/buck-out/v2/art/fbcode/40e399fcf13b0098/buiksat_trm/__upi_trm_train__/upi_trm_train.par",
+    "sha256": "45488e959fc713d56efb074dfc8e9fc424d17099ad42746ced3128ff8b6f6716",
+    "zip": true,
+    "size": 1462770118
+  },
+  "policy_improvement_full": {
+    "path": "/data/repos/fbsource/buck-out/v2/art/fbcode/40e399fcf13b0098/buiksat_trm/__policy_improvement_full__/policy_improvement_full.par",
+    "sha256": "ab1648fa773fdb842df4dae2ae1feb75ea29b001e033028547dd3f4e98e24009",
+    "zip": true,
+    "size": 1462984125
+  },
+  "policy_improvement_theory_bridge": {
+    "path": "/data/repos/fbsource/buck-out/v2/art/fbcode/40e399fcf13b0098/buiksat_trm/__policy_improvement_theory_bridge__/policy_improvement_theory_bridge.par",
+    "sha256": "c2ab9aebf98bd5df65dd77bf6953f761cf96254f2f217d266175d9e37ee1415c",
+    "zip": true,
+    "size": 1463096636
+  },
+  "policy_improvement_audit": {
+    "path": "/data/repos/fbsource/buck-out/v2/art/fbcode/40e399fcf13b0098/buiksat_trm/__policy_improvement_audit__/policy_improvement_audit.par",
+    "sha256": "60405d6b2566d5d490183f2f427f7c368223a677798a3429f5fcdf9ca787acda",
+    "zip": true,
+    "size": 1462926856
+  },
+  "policy_improvement_analysis": {
+    "path": "/data/repos/fbsource/buck-out/v2/art/fbcode/40e399fcf13b0098/buiksat_trm/__policy_improvement_analysis__/policy_improvement_analysis.par",
+    "sha256": "5566687b34432a8826a06f25c33d0d2d7d296ac225b046bd62ada032f51fdfab",
+    "zip": true,
+    "size": 1462932377
+  }
+}
