@@ -952,3 +952,418 @@ The machine delivers a fixed ~3.8 steps/min no matter how the work is arranged. 
 reclaim by restructuring; nothing lost by having tried it.
 
 Revised completion: GPU 1 group ~04:35 UTC, GPU 0 group ~06:40 UTC 2026-09-13.
+
+---
+
+# DEADLINE CONSTRAINTS (coordinator, 2026-09-12 ~16:50 PDT / 23:50 UTC)
+
+Machine dies **Sunday 2026-09-13 10:00 PDT = 17:00 UTC**. Nothing here is durable; no reachable
+remote.
+
+## Stage B is validated and it is NOT multi-hour
+
+Smoke-ran Stage B twice against the real launcher, evaluator checkout, and signed documents.
+Both reached `open_authenticated_exp1b_route` in **81-83 s** and failed on exactly one thing:
+
+```text
+Exp1bBridgeError: substitute provenance is unavailable.
+```
+
+That is `provenance.json`, which `finalize_exp1b_evidence` writes only after all eight Stage A
+seals. **Expected at 1/8.** Everything upstream of it already passes: theory-bridge PAR
+authentication, the source profile at `5a0ad34e`, the distinct evaluator checkout at
+`/home/buiksat/trm_bellman_evaluator`, the admission, the runtime authorization, the role
+attestation, and all four parent documents under the producer root. The only unmeasured part of
+Stage B is the census evaluation itself.
+
+## HEAD moved off the admitted commit — caught and restored
+
+The coordinator committed `3dd15aa` ("Add a recovery document and preserve the run notes") onto
+`full-implementation`, which moved the primary checkout's HEAD off `5a0ad34e`. **Stage B would
+have refused**, and re-minting was not an option: the eight Stage A run manifests embed admission
+`c48d67ff…`, so re-signing mid-run would orphan every seal.
+
+Fixed with `git checkout --detach 5a0ad34e`. HEAD is back on the admitted commit with a clean
+tree, and `3dd15aa` is preserved on `full-implementation`. Re-ran the Stage B smoke afterwards:
+still reaches the provenance gate in 81 s, so the restored state authenticates.
+
+**Do not commit to `full-implementation` while the run is live.** The primary checkout must stay
+detached at `5a0ad34e` until the audit finishes.
+
+## Artifact commits: linked worktree, never the pinned checkout
+
+`/home/buiksat/trm_bellman_artifacts` is a `git worktree` on branch `exp1b-artifacts` based at
+`5a0ad34e`. Committing there leaves the primary checkout's HEAD and working tree untouched --
+verified before and after every commit. Driver script `/tmp/commit_artifacts.sh`.
+
+First commit **`c6fe3ae`**: three signed documents, base-policy producer identity, six PAR
+digests, seed-0 run manifest.
+
+**Caveat worth stating plainly: a local commit is not durability.** There is no reachable remote,
+so these commits die with the box exactly like the loose files. What they buy is provenance and a
+single coherent object to copy off, not survival.
+
+---
+
+# Branch layout changed by the coordinator (2026-09-13 ~00:15 UTC)
+
+`exp1b-artifacts` deleted; commit `c6fe3ae` cherry-picked onto `full-implementation` as
+`83fcc9e`; the linked worktree `/home/buiksat/trm_bellman_artifacts` now tracks
+`full-implementation`. Verified: primary checkout still **detached at `5a0ad34e`, 0 dirty**.
+Commit artifacts from the worktree to `full-implementation` from here on.
+
+Durability premise updated by the coordinator: `origin/full-implementation` is reachable and
+already carries `3dd15aa`; they will push `83fcc9e`. So commits there do leave the box. My
+earlier "a local commit is not durability" caveat no longer applies.
+
+# Stage B expected wall clock (estimate, from a call count)
+
+Per seed position the bridge does a 128-member census traversal. `action_values` loops all 97
+actions (`disable_constraint_masking: true`, so nearly all allowed) and per allowed action does
+one env step plus one `_value_at` forward unrolled to the depth, at **both** n=2 and m=8:
+
+```text
+128 members x 97 actions x 2 depths  = ~24,800 unbatched model calls per seed
+                                     = ~198,000 across eight
+```
+
+Unbatched and tiny (hidden_size 64, seq_len 16, H=2/L=2), so latency-bound at a few ms each --
+*not* the 0.70 s/interaction Stage A figure, which is dominated by batched value/policy updates.
+
+**Estimate: 3-15 min per bridge, 25 min - 2 h for all eight.** A bridge would have to exceed
+~70 min to threaten 17:00 UTC given a ~06:50 last seal. Real number lands within minutes of the
+eighth seal; the driver runs position 0 first.
+
+Fallback if bridge 0 is slow: `claim_lease` is per-slot, so all eight bridges can run
+concurrently. Expect the same ~1.2x ceiling measured on Stage A, but it is available.
+
+## Why Stage B could not be measured before the eighth seal
+
+Two independent blocks, both recorded rather than worked around:
+
+1. The bridge refuses without `provenance.json`, which `finalize_exp1b_evidence` writes only
+   after all eight seals. The real path is unreachable until then.
+2. Torch cannot be imported outside the PAR sandbox:
+   `ModuleNotFoundError: No module named 'pyjk'` from `torch/_utils_internal.py:47` when running
+   the test link tree under plain `python3.12`. `pyjk` is a native extension the PAR's static
+   extension finder provides. Timing a forward pass standalone would need a BUCK change, and the
+   primary checkout must stay clean and pinned at `5a0ad34e`.
+
+So the 3-15 min/bridge figure is a call count times a plausible per-call latency, not a
+measurement, and is labelled as such. Decision threshold: **>70 min per bridge threatens 17:00
+UTC.** If bridge 0 exceeds it, run the remaining seven concurrently (per-slot `claim_lease`).
+
+## Results preservation, standing (coordinator, 2026-09-13 ~00:45 UTC)
+
+Commit every result artifact to `full-implementation` from the artifacts worktree **the moment it
+exists**, not batched: each run manifest as it seals, then the published result document, its
+sidecar, the five diagnostic blocks, the paired signed gap g with its 95% interval, and the
+auditor verdict. Small JSON only; checkpoints stay out of git, their digests go in.
+
+Neither agent can push: `GIT_CONFIG_COUNT=3` rewrites SSH GitHub URLs to HTTPS with no
+credentials. That is a deliberate control. **Do not work around it, do not unset it.** Commit
+locally and stop. `/home/buiksat/push-results.sh` is the owner's one-command push;
+a 10-minute cron writes `/home/buiksat/.upi-trm-watchdog/UNPUSHED-RESULTS.txt` when the branch is
+ahead, so a local commit becomes a visible prompt within ten minutes.
+
+On audit completion write `/home/buiksat/.upi-trm-watchdog/EXPERIMENT-COMPLETE` containing the
+result digest and the verdict. That stops the watchdog and the stall cron.
+
+## SEEDS 5, 6, 7 SEALED — 2026-09-13 03:47 UTC
+
+```text
+seed 5  pos 5  EXIT=0  WALL=33466 s  (9 h 17 m)
+seed 6  pos 6  EXIT=0  WALL=33462 s  (9 h 17 m)
+seed 7  pos 7  EXIT=0  WALL=33323 s  (9 h 15 m)
+```
+
+4/8 sealed (positions 0, 5, 6, 7). Manifests committed as `b519884`. GPU 1 now free; seeds 1-4
+continue on GPU 0 at step 250/350.
+
+### Honest verdict on the concurrency experiment: it was a wash, arguably a loss
+
+Solo seed 0 took 1.95 h. The 3-wide GPU 1 group took **9.3 h each**, a 4.8x per-process
+slowdown:
+
+```text
+3 seeds sequential   3 x 1.95 h = 5.85 h
+3 seeds 3-wide                  = 9.30 h      1.6x WORSE
+```
+
+Running three concurrently on one card was **worse than running them one at a time.** The only
+real gain came from using both GPUs at all, not from stacking processes on each. A better plan
+would have been 1 process per GPU, 2 at a time: 8 seeds / 2 GPUs x 1.95 h = 7.8 h, against the
+~11-12 h this run will take.
+
+Recorded as measured. My 1.9 h projection was wrong by ~6x, and the intermediate 1.2x-aggregate
+estimate was still optimistic. The lesson for the next run: on this workload **do not stack more
+than one process per GPU**; CPU% is not a progress metric when CUDA spin-waits.
+
+---
+
+# ALL 8 STAGE A SEEDS SEALED — then Stage B hit a blocking defect
+
+```text
+pos 0  EXIT=0  WALL=7012 s   (1 h 57 m, solo)
+pos 1  EXIT=0  WALL=44588 s  (12 h 23 m)
+pos 2  EXIT=0  WALL=44774 s
+pos 3  EXIT=0  WALL=44783 s
+pos 4  EXIT=0  WALL=44725 s
+pos 5  EXIT=0  WALL=33466 s  (9 h 17 m)
+pos 6  EXIT=0  WALL=33462 s
+pos 7  EXIT=0  WALL=33323 s
+```
+
+`provenance.json` written, `access_state: sealed_octet_complete`, 8 sealed checkpoints, all eight
+registered seed ids present. Manifests committed: `83fcc9e`, `b519884`, `bba9554`.
+
+## Stage B defect — `KeyError: 'split_manifest_sha256'`
+
+```text
+File "scripts/policy_improvement_exp1b_runtime.py", line 1034, in bridge_main
+KeyError: 'split_manifest_sha256'
+```
+
+`bridge_main` reads `evaluation_population["split_manifest_sha256"]`. The registered exp1b
+protocol's `evaluation_population` holds exactly
+`['binding_sha256','count','ordered_record_sha256','population_id','selection_use','split']`.
+Only `training_population` carries `split_manifest_sha256`.
+
+**Third instance of substituted coverage.** `tests/...exp1b_unittest.py:3811` passes
+`evaluation_split_manifest_sha256` directly into the backend inputs, so the extraction in
+`bridge_main` that fails is never executed by any test.
+
+### The value exists and the fix is one line
+
+`configs/policy_improvement_v2/protocol.json#/dataset/splits/validation/manifest_sha256` =
+`a4b1bffb92f9c7c1ebe7baf9dcaaed83191f9c6249bec0887ed8ff7fb6b4a937`, and
+`sha256sum <regen corpus>/manifests/validation.json` is **byte-identical** to it. The route
+already authenticates the parent protocol against the exp1b protocol's declared
+`parent.protocol_sha256`, so reading it there is sound.
+
+### Why the fix cannot be applied to this evidence
+
+`provenance.json` freezes the producer attestation:
+
+```text
+runtime_sha256                ab1648fa...   (policy_improvement_full PAR)
+runtime_authorization_sha256  20c898ee...
+launcher_sha256               f99099ee...
+source_git_commit             5a0ad34e...
+admission_sha256              c48d67ff...
+```
+
+`attestation_matches_authorization` (`policy_improvement_exp1b_schema.py:1866`) compares **all
+five**. `scripts/policy_improvement_exp1b_runtime.py` is in **both** the full and theory source
+profiles, so any edit changes the full PAR digest, forcing a re-mint, which changes the
+authorization digest, which the frozen provenance no longer matches. Keeping the old full PAR
+instead fails the minter's `assert_phase4_archive_matches_profile` against the fixed checkout.
+**There is no variant that preserves the eight seals.**
+
+This is the integrity design working as intended, and its corollary is that a Stage B defect
+discovered after Stage A costs a full Stage A re-run.
+
+### Sweep for more of the same class
+
+Every literal key the Stage B path reads out of the registered documents:
+
+```text
+OK   runtime.py:1032  evaluation_population['split']
+MISS runtime.py:1034  evaluation_population['split_manifest_sha256']
+OK   runtime.py:1030  registered_training['dataset_root']
+OK   bridge.py:834    registered_training['ordered_record_sha256']
+```
+
+Exactly one miss. That closes this defect class, not others.
+`Exp1bSealedEvaluationSession` (nine methods, the whole Stage B numerical surface) still has zero
+real coverage and has never executed.
+
+### Timing against the 17:00 UTC cutoff (assessed 07:25 UTC)
+
+```text
+fix + rebuild + re-mint + re-sign        0.5 h
+Stage A re-run, 1 proc/GPU, 4 rounds     7.8 h   (floor; stacking measured worse)
+Stage B (unmeasured)                     1.0 h
+audit + publish                          0.25 h
+final handoff                            0.5 h
+                                        ~10 h -> ~17:25   MISSES
+```
+
+Recommendation given to the coordinator: **do not re-run.** A second defect in a never-executed
+surface would consume the remaining window and produce nothing. Spend it instead on the fix plus
+real-body tests for `bridge_main`'s extraction and `Exp1bSealedEvaluationSession`, committed to
+`full-implementation`, so the next machine succeeds on the first pass.
+
+---
+
+# RUN 3 at dcaf19ef6d8b3f376af5933d86e4363965a2fafb (2026-09-13 07:16 UTC)
+
+Stage B fix committed as `dcaf19e` on `full-implementation`. Implementer took the re-run decision
+without waiting: prep finished in 25 min rather than 30, moving Stage A start to 07:16 instead of
+~07:55, which turned the projection from "misses 17:00" into "fits with ~45 min". Killing it
+costs nothing (GPUs otherwise idle; handoff work needs no GPU).
+
+## Both static sweeps clean across every Stage B module
+
+- missing attribute reads: **0** classes
+- missing registered-document keys: **0**
+
+covering `exp1b_theory_backend`, `exp1b_bridge`, `exp1b_aggregate`, `exp1b_auditor`,
+`exp1b_evidence`, `exp1b_runtime`, `exp1b_session`, `theory_bridge_entrypoint`,
+`full_backend`. The two classes that cost 12.4 h are cleared. **Not** proof Stage B works:
+`Exp1bSealedEvaluationSession` (9 methods) still has no real coverage and has never executed.
+
+## Live identifiers (supersede everything above)
+
+```text
+commit                  dcaf19ef6d8b3f376af5933d86e4363965a2fafb
+runtime authorization   c5d077e0e0b17e2bdb0f444669b7fb8f2a5ce2891dec9161d34a38d51d8da78f
+                        exp1b_runtime_authorization_20260913.json
+base-policy amendment   47b21e8ba6c826838c5251dd382e87f31962f29093c7e67476e8f8c0cbf43881
+                        base_policy_amendment_exp0_20260913.json
+execution admission     92e0ed7933d72f5c3d9e53d3f2b75dd65ab98641f175f91158ece75f40d0f96b
+                        exp1b_execution_admission_20260913.json
+full runtime            09cf7a1f5a1ffe4a72e4163f68e0dfef4d79ddba5287cff79fb0798b952c5216
+theory runtime          c5b9a67a11b68179c9a0ddd168dddf3e9f64502e75a764bf452a3643f4551ebf
+launcher (opt)          f99099ee418647ee970f84c2c6ba6d373cd143676d37498d0124e80b48c289bd
+upi_trm_train           45488e959fc713d56efb074dfc8e9fc424d17099ad42746ced3128ff8b6f6716
+evidence generation     $OWNER/evidence3/gen-20260913
+evaluator checkout      /home/buiksat/trm_bellman_evaluator @ dcaf19e, clean
+```
+
+Scripts: `/tmp/run_seed2.sh`, `/tmp/run_bridge2.sh`, `/tmp/queue.sh` (one process per GPU, 4
+rounds), `/tmp/driver2.sh` (fires all eight bridges on the eighth seal).
+Logs: `/tmp/queue.log`, `/tmp/n_seed<N>.log`, `/tmp/driver2.log`, `/tmp/n_bridge<N>.log`.
+
+## Schedule
+
+```text
+round 0  seeds 0,1  ~09:13      round 2  seeds 4,5  ~13:07
+round 1  seeds 2,3  ~11:10      round 3  seeds 6,7  ~15:04
+Stage B x8 ~16:00   audit ~16:15   deadline 17:00
+```
+
+Round 0 confirmed at 22% / 27% GPU -- the solo profile, no contention.
+
+## Run 2's evidence is dead but recorded
+
+The eight run manifests from the 2026-09-12 run are committed (`83fcc9e`, `b519884`, `bba9554`)
+as the record of what the first attempt produced. Its checkpoints remain in
+`$OWNER/evidence2/exp1b-20260912/` and cannot be used: the fix changed the full PAR digest that
+their provenance froze.
+
+## Stage B numerical surface now has real coverage — and no defect in it
+
+Written while Stage A round 1 ran, on the coordinator's direction. Committed `f8b600f`.
+
+`Exp1bRealSealedEvaluationSessionTest`, nine tests, constructs the **real**
+`Exp1bSealedEvaluationSession` (production builds it at
+`policy_improvement_full_backend.py:6628`; every prior test replaced it with a recorder).
+Stubs only at the dataset/environment and model/trainer boundaries.
+
+Pinned behaviour: depth honoured; `r + gamma * U_q(s')` per allowed action; terminal action takes
+the reward with no bootstrap; Bellman operator reads `policy_model_old` not the deployed mixture;
+persistent branch evaluates the candidate at `n=0` on the base call's output latent (the K=1
+contract); census digest mismatch, unregistered state, unregistered depth and repeated state id
+all refuse; record derived once and shared across q=2 and q=8.
+
+**Falsified.** Three mutations of the production entry point, each red:
+
+```text
+drop the gamma discount                 -> 2 red
+base_model = policy_model_candidate     -> 3 red
+remove the census digest comparison     -> 1 red
+```
+
+Applied to the **fbsource copy only** and reverted immediately. Verified after each: fbsource
+identical to the primary checkout, primary clean at `dcaf19e`, and
+`policy_improvement_full.par` still `09cf7a1f`. The in-flight Stage A rounds were never at risk.
+
+**No defect found.** Whole target: 327 passed, 0 failed, 3 skipped.
+
+### Correction to the coordinator's timing assumption
+
+"A fix landed before 15:04 still makes this run" is **false**. Seeds 0 and 1 sealed at 09:01 and
+09:06; their run manifests freeze `admission_sha256` and the full PAR digest, so any production
+change forces a re-mint and re-sign that invalidates them. Every commit also moves HEAD, and
+rounds 2 and 3 pin `--expected-source-git-commit dcaf19e` against a *clean* checkout, so a dirty
+or moved primary makes them refuse. **No production change is possible until the audit ends.**
+Test-only work is free because tests are in no runtime profile and the artifact commits go to the
+linked worktree, which never moves the primary HEAD.
+
+### Run 3 progress
+
+```text
+round 0  seeds 0,1  sealed 09:01 / 09:06  exit 0  ~105 min each   commit 0b97640
+round 1  seeds 2,3  running
+```
+
+---
+
+# RUN 3 RESULT: all 8 Stage A seeds sealed; Stage B blocked by a FOURTH defect
+
+## Stage A completed cleanly
+
+```text
+pos 0  EXIT=0  WALL=6663 s    pos 4  EXIT=0
+pos 1  EXIT=0  WALL=6300 s    pos 5  EXIT=0
+pos 2  EXIT=0                 pos 6  EXIT=0  WALL=6475 s
+pos 3  EXIT=0                 pos 7  EXIT=0  WALL=6314 s
+```
+
+All eight sealed by 14:32 UTC, ~105-110 min each at one process per GPU. Manifests committed:
+`0b97640`, `13aebbe`, `1ee0fcd`, `cdd06ac`. Provenance written; `access_state`
+`sealed_octet_complete`.
+
+**One process per GPU was the right arrangement** and is the single most useful operational
+finding of this whole exercise: 105 min/seed against 9.3-12.4 h/seed when stacked 3-4 per card.
+
+## Defect 4 — `prepare_exp1b_bridge`, bridge 0, 100 s in
+
+```text
+Exp1bTheoryBackendError: Stage B sealed restore refused: [upi_trm_train] Failed to load
+the requested dataset split='validation' (ValidationError: 1 validation error for
+PuzzleDatasetConfig / global_batch_size / Input should be a valid integer
+[type=int_type, input_value=None, input_type=NoneType])
+```
+
+`open_exp1b_sealed_evaluation_session` called `build_dataset_from_paths(pool_size=None)`.
+`pool_size` is declared `int` and reaches `PuzzleDatasetConfig.global_batch_size`.
+
+**The crash was the lucky outcome.** `pool_size` is a *truncation bound*
+(`rl/training_setup.py`: `if len(samples) >= pool_size: break`). The census size (128) would have
+loaded the first 128 of the 256 registered validation records and misaligned every higher census
+`record_index` — a wrong number rather than a refusal.
+
+### Fixed: `8a55c8d`, corrected by `f4fe002`
+
+`_registered_split_record_count` derives the bound from the split manifest, checking its bytes
+against the digest the admission already pins and requiring `generated_count ==
+len(record_sha256s)`. 256 for validation, 1024 for train. Absent manifest, digest mismatch,
+malformed JSON, missing record list and count disagreement each refuse.
+
+Falsified: `pool_size=None` restored -> red; agreement check dropped -> red.
+
+### Why it escaped, and an error of mine
+
+`Exp1bTorchSealedOpenerTest` *does* drive the real opener, but its fixture passed a bare digest
+for `evaluation_split_manifest_sha256` and stubbed the training module, so no manifest had to
+exist and nothing observed what `pool_size` the loader received. Fixture now materializes a real
+manifest (`f4fe002`) rather than the production check being relaxed.
+
+**I committed `8a55c8d` claiming the suite was green when it was 330/2.** I read the focused run
+and not the full-suite line. Both failures were mine and are fixed. Final: **332 passed, 0
+failed, 4 skipped.**
+
+**Judgement error worth recording:** I identified `prepare_exp1b_bridge`'s happy path as the last
+uncovered link and chose not to test it because it needed a real checkpoint. The nine tests I
+wrote instead found nothing — `Exp1bSealedEvaluationSession` is sound. The defect was one layer
+up, in the surface I skipped.
+
+## This run is also unsalvageable
+
+Provenance pins the authorization digest; fixing the theory backend forces a re-mint that
+invalidates all eight seals. Stage A re-run is 7 h; 2 h 10 m remain. **Four Stage B defects have
+now each cost a full Stage A run**, because the integrity design freezes the runtime set at
+finalization. That is the structural lesson: on this architecture, Stage B must be proven by
+execution *before* Stage A is spent.
