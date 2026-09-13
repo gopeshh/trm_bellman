@@ -5218,6 +5218,85 @@ class _FakeValueModel:
         return torch.zeros(1, 2)
 
 
+class Exp1bStageBArgumentTypeSweepTest(unittest.TestCase):
+    """No Stage B call may pass a literal None where an int is declared.
+
+    Generalizes the defect that killed the 2026-09-13 run: the sealed-evaluation
+    opener passed ``pool_size=None`` to ``build_dataset_from_paths``, which
+    declares ``pool_size: int``. Nothing caught it because the only test that
+    drives the opener stubs the training module, so the annotation was never
+    exercised. This checks the annotation directly, statically, across the whole
+    Stage B path. Torch-free.
+    """
+
+    #: Where the Stage B path calls into.
+    CALLEES = (
+        "rl/training_setup.py",
+        "upi_trm_train.py",
+        "policy_improvement_full_backend.py",
+        "scripts/policy_improvement_exp1b_theory_backend.py",
+        "scripts/policy_improvement_exp1b_bridge.py",
+        "scripts/policy_improvement_exp1b_evidence.py",
+        "scripts/policy_improvement_exp1b_runtime.py",
+    )
+    #: Where the Stage B path calls from.
+    CALLERS = (
+        "policy_improvement_full_backend.py",
+        "scripts/policy_improvement_exp1b_theory_backend.py",
+        "scripts/policy_improvement_exp1b_runtime.py",
+        "scripts/policy_improvement_exp1b_bridge.py",
+    )
+
+    def test_no_none_is_passed_where_a_non_optional_type_is_declared(self) -> None:
+        signatures: dict[str, list[tuple[str, dict[str, tuple[str, bool]]]]] = {}
+        for name in self.CALLEES:
+            path = _ROOT / name
+            if not path.is_file():
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                parameters: dict[str, tuple[str, bool]] = {}
+                for argument in list(node.args.args) + list(node.args.kwonlyargs):
+                    if argument.annotation is None:
+                        continue
+                    annotation = ast.unparse(argument.annotation)
+                    optional = "None" in annotation or annotation.startswith(
+                        "Optional"
+                    )
+                    parameters[argument.arg] = (annotation, optional)
+                signatures.setdefault(node.name, []).append((name, parameters))
+
+        offenders: list[str] = []
+        for name in self.CALLERS:
+            path = _ROOT / name
+            if not path.is_file():
+                continue
+            for node in ast.walk(ast.parse(path.read_text())):
+                if not isinstance(node, ast.Call):
+                    continue
+                called = getattr(node.func, "attr", getattr(node.func, "id", None))
+                if called not in signatures:
+                    continue
+                for keyword in node.keywords:
+                    if keyword.arg is None:
+                        continue
+                    if not (
+                        isinstance(keyword.value, ast.Constant)
+                        and keyword.value.value is None
+                    ):
+                        continue
+                    for source, parameters in signatures[called]:
+                        declared = parameters.get(keyword.arg)
+                        if declared is not None and not declared[1]:
+                            offenders.append(
+                                f"{name}:{node.lineno} {called}"
+                                f"({keyword.arg}=None) but {source} declares "
+                                f"{keyword.arg}: {declared[0]}"
+                            )
+        self.assertEqual(offenders, [])
+
+
 class Exp1bEvaluationSplitPoolSizeTest(unittest.TestCase):
     """Regression: the Stage B opener passed ``pool_size=None`` to the loader.
 
