@@ -84,6 +84,7 @@ from scripts.policy_improvement_exp1b_schema import (
     EXECUTION_ENVIRONMENT_VARIABLE,
     EXECUTION_PURPOSE,
     CENTERING_PARITY_KIND,
+    CENTERING_PARITY_RELATIVE_TOLERANCE,
     CENTERING_PARITY_TOLERANCE,
     DEPLOYMENT_MISMATCH_KIND,
     TRAINER_RECONSTRUCTION_CONTRACT,
@@ -674,6 +675,9 @@ def _secondary_diagnostics(**overrides: Any) -> dict[str, Any]:
             "training_estimator_centering_defect": 8.0e-10,
             "training_estimator_parity_max_abs_error": 3.0e-9,
             "training_estimator_parity_tolerance": CENTERING_PARITY_TOLERANCE,
+            "training_estimator_parity_relative_tolerance": (
+                CENTERING_PARITY_RELATIVE_TOLERANCE
+            ),
             "parity_witness_state_id": _member(9),
             "centering_defect_witness_state_id": _member(4),
             "clipping_kind": "clip_then_exact_recenter",
@@ -7488,6 +7492,7 @@ class Exp1bCenteringParityTest(unittest.TestCase):
                     "training_estimator_centering_defect",
                     "training_estimator_parity_max_abs_error",
                     "training_estimator_parity_tolerance",
+                    "training_estimator_parity_relative_tolerance",
                     "clipping_kind",
                     "clip_value",
                     "trainer_reconstruction",
@@ -7497,6 +7502,16 @@ class Exp1bCenteringParityTest(unittest.TestCase):
                     centering["trainer_reconstruction"],
                     TRAINER_RECONSTRUCTION_CONTRACT,
                 )
+
+    #: The fixture's registered clip, and therefore the parity scale.
+    _FIXTURE_CLIP_VALUE = 10.0
+    #: Derived, never a literal: a hardcoded drift silently stopped refusing
+    #: once the bound gained its scale term, which is how this test first went
+    #: stale. Anything expressed against the bound cannot go stale that way.
+    _PARITY_BOUND = (
+        CENTERING_PARITY_TOLERANCE
+        + CENTERING_PARITY_RELATIVE_TOLERANCE * _FIXTURE_CLIP_VALUE
+    )
 
     def test_a_trainer_parity_error_refuses_the_seed(self) -> None:
         """The mutation this check exists for: the trainer tensor drifts.
@@ -7515,8 +7530,11 @@ class Exp1bCenteringParityTest(unittest.TestCase):
                 centering_parity={
                     # Roundoff still inside tolerance...
                     "constructed_centering_roundoff": 1.1e-9,
-                    # ...while the trainer tensor disagrees elementwise.
-                    "training_estimator_parity_max_abs_error": 5.0e-6,
+                    # ...while the trainer tensor disagrees elementwise, by
+                    # more than float32 representation can account for.
+                    "training_estimator_parity_max_abs_error": (
+                        self._PARITY_BOUND * 1.5
+                    ),
                 }
             )
             with self.assertRaisesRegex(Exp1bBridgeError, "differ beyond tolerance"):
@@ -7529,6 +7547,40 @@ class Exp1bCenteringParityTest(unittest.TestCase):
                     **evaluator,
                 )
             self.assertFalse(fixture.generation().has_payload(0))
+
+    def test_a_float32_scale_parity_error_is_accepted(self) -> None:
+        """The other half of the bound, and the reason it has a scale term.
+
+        A parity error of ``clip_value * eps_f32`` is what a float32 trainer
+        tensor compared against a float64 reference construction produces at
+        the registered clip. The measured Experiment 1B maximum is 1.15e-06,
+        which the inherited absolute-only 1e-06 bound refuses. It has to be
+        accepted, or the check refuses every seed for arithmetic reasons.
+        """
+
+        measured_maximum = 1.15037e-06
+        self.assertGreater(measured_maximum, CENTERING_PARITY_TOLERANCE)
+        self.assertLess(measured_maximum, self._PARITY_BOUND)
+        with TemporaryDirectory() as tmp:
+            fixture = _RouteFixture(Path(tmp))
+            route = fixture.open()
+            item = fixture.sealed[0]
+            evaluator = _evaluator(0)
+            evaluator["secondary_diagnostics"] = _secondary_diagnostics(
+                centering_parity={
+                    "constructed_centering_roundoff": 1.1e-9,
+                    "training_estimator_parity_max_abs_error": measured_maximum,
+                }
+            )
+            route.serve(
+                seed_position=0,
+                seed=item["seed"],
+                run_id=item["run_id"],
+                checkpoint_sha256=item["checkpoint_sha256"],
+                evaluation_population="validation_bridge",
+                **evaluator,
+            )
+            self.assertTrue(fixture.generation().has_payload(0))
 
     def test_a_trainer_centering_defect_refuses_the_seed(self) -> None:
         with TemporaryDirectory() as tmp:

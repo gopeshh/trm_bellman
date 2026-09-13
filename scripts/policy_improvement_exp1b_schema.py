@@ -1008,6 +1008,7 @@ def validate_exp1b_amendment(
             "parent",
             "prior_amendment_history_sha256",
             "bridge_route_id",
+            "centering_contract",
             "validation_data_inspected",
             "test_data_opened",
             "outcome_evidence_inspected",
@@ -1046,6 +1047,67 @@ def validate_exp1b_amendment(
         amendment["prior_amendment_history_sha256"],
         path="exp1b_amendment.prior_amendment_history_sha256",
     )
+    # The one threshold Experiment 1B registers for itself rather than
+    # inheriting. The frozen v2 amendment's parity bound is purely absolute and
+    # cannot be satisfied by a float32 trainer tensor at the registered clip;
+    # see CENTERING_PARITY_RELATIVE_TOLERANCE. Registering the scale term here
+    # keeps the parent artifact byte-identical and keeps the threshold
+    # auditable, rather than leaving it as a bare constant in code.
+    contract = _exact_fields(
+        amendment["centering_contract"],
+        {
+            "inherited_absolute_tolerance_source",
+            "training_estimator_parity_absolute_tolerance",
+            "training_estimator_parity_relative_tolerance",
+            "parity_scale_definition",
+            "trainer_tensor_precision",
+            "constructed_tensor_precision",
+        },
+        path="exp1b_amendment.centering_contract",
+    )
+    _path = "exp1b_amendment.centering_contract"
+    if (
+        _string(
+            contract["inherited_absolute_tolerance_source"],
+            path=f"{_path}.inherited_absolute_tolerance_source",
+        )
+        != "configs/policy_improvement_v2/amendments/theory_bridge_v2.json"
+        or _string(
+            contract["parity_scale_definition"], path=f"{_path}.parity_scale_definition"
+        )
+        != "registered_clip_value"
+        or _string(
+            contract["trainer_tensor_precision"],
+            path=f"{_path}.trainer_tensor_precision",
+        )
+        != "float32"
+        or _string(
+            contract["constructed_tensor_precision"],
+            path=f"{_path}.constructed_tensor_precision",
+        )
+        != "float64"
+    ):
+        raise Exp1bSchemaError(f"{_path} identity differs.")
+    if (
+        _secondary_real(
+            contract["training_estimator_parity_absolute_tolerance"],
+            path=f"{_path}.training_estimator_parity_absolute_tolerance",
+        )
+        != CENTERING_PARITY_TOLERANCE
+    ):
+        raise Exp1bSchemaError(
+            f"{_path} does not inherit the registered absolute parity tolerance."
+        )
+    if (
+        _secondary_real(
+            contract["training_estimator_parity_relative_tolerance"],
+            path=f"{_path}.training_estimator_parity_relative_tolerance",
+        )
+        != CENTERING_PARITY_RELATIVE_TOLERANCE
+    ):
+        raise Exp1bSchemaError(
+            f"{_path} does not register the expected relative parity tolerance."
+        )
     for field in (
         "validation_data_inspected",
         "test_data_opened",
@@ -1520,6 +1582,45 @@ PERSISTENT_STATE_KIND = "persistent_endpoint_carry_v1"
 #:     centering_contract.constructed_centering_roundoff_absolute_tolerance = 1e-06
 MIXTURE_IDENTITY_TOLERANCE = 1e-06
 CENTERING_PARITY_TOLERANCE = 1e-06
+#: The trainer-versus-constructed parity comparison needs one more term, and it
+#: is not a loosening: as registered, that check cannot pass.
+#:
+#: ``training_estimator_parity_max_abs_error`` is an **elementwise** difference
+#: between the trainer's advantage tensor, which is torch float32 on GPU
+#: (policy_improvement_full_backend.py:6177), and an independently constructed
+#: reference, which is Python float64 via ``math.fsum``
+#: (policy_improvement_full_backend.py:6256). Such a difference is bounded below
+#: by ``|advantage| * eps_f32``, so an *absolute* bound on it is really a hidden
+#: bound on advantage magnitude. The registered estimator clips at
+#: ``clip_value`` and then recenters, and every census state saturates that
+#: clip, which makes the ceiling exact rather than statistical:
+#:
+#:     clip_value * eps_f32 = 10 * 1.1920929e-07 = 1.1920929e-06  >  1e-06
+#:
+#: The v2 amendment's own two constants are therefore mutually unsatisfiable in
+#: float32. Measured on the 280-interaction scratch study (seed position 0, all
+#: 128 census states): max parity 1.15037e-06, which is 0.965 * eps_f32
+#: relative, with 10 of 128 states over 1e-06 and none over 1 eps. Seed-,
+#: budget- and data-independent, because the clip pins the scale.
+#:
+#: So the bound gains a term proportional to the *registered* clip value:
+#:
+#:     parity <= CENTERING_PARITY_TOLERANCE
+#:               + CENTERING_PARITY_RELATIVE_TOLERANCE * clip_value
+#:
+#: Keyed on ``clip_value`` and not on a measured maximum, deliberately: a run
+#: must not be able to widen its own tolerance by reporting a larger scale. Four
+#: eps gives a bound of 5.77e-06 at the registered clip, about 5x the observed
+#: ceiling, while still refusing anything algorithmically wrong -- a masking,
+#: clipping, or recentering regression moves this quantity by order 1e-01 to
+#: 1e-03, never into the gap between 1 and 4 eps.
+#:
+#: Registered in configs/policy_improvement_exp1b/amendments/reduced_study_exp1b.json
+#: under ``centering_contract``. The frozen v2 amendment is deliberately left
+#: byte-identical, following the same precedent as the regenerated corpus: a new
+#: constant gets registered in Experiment 1B's own amendment and the exp1b chain
+#: cites it, rather than rewriting a reviewed parent artifact.
+CENTERING_PARITY_RELATIVE_TOLERANCE = 4 * 2.0**-23
 #: Also the frozen v2 amendment's own literal:
 #:   centering_contract.trainer_reconstruction
 TRAINER_RECONSTRUCTION_CONTRACT = (
@@ -1561,6 +1662,9 @@ _SECONDARY_FIELDS: dict[str, tuple[str, ...]] = {
         "training_estimator_centering_defect",
         "training_estimator_parity_max_abs_error",
         "training_estimator_parity_tolerance",
+        # The scale term, so the bound the seed was judged against is
+        # recomputable from the sealed record alone.
+        "training_estimator_parity_relative_tolerance",
         "parity_witness_state_id",
         "centering_defect_witness_state_id",
         "clipping_kind",
@@ -1677,6 +1781,23 @@ def _secondary_centering(block: Mapping[str, Any], *, path: str) -> None:
     ):
         raise Exp1bSchemaError(f"{path} is not the registered centering scheme.")
 
+    # The clipping identity, so a trainer that silently stopped clipping, or
+    # started, is a schema failure rather than an invisible change. Validated
+    # before the parity comparison below, which uses the clip value as its
+    # scale and must not read an unvalidated one.
+    kind = _string(block["clipping_kind"], path=f"{path}.clipping_kind")
+    if kind not in {"none", "clip_then_exact_recenter"}:
+        raise Exp1bSchemaError(f"{path} names an unregistered clipping kind.")
+    clip_value = block["clip_value"]
+    if kind == "none":
+        if clip_value is not None:
+            raise Exp1bSchemaError(f"{path} unclipped estimator named a clip value.")
+        parity_scale = 0.0
+    else:
+        parity_scale = _secondary_real(clip_value, path=f"{path}.clip_value")
+        if parity_scale <= 0.0:
+            raise Exp1bSchemaError(f"{path} clip value must be positive.")
+
     # --- the independent-versus-trainer comparison, ported from v2 -----------
     defect = _secondary_real(
         block["training_estimator_centering_defect"], path=f"{path}.trainer_defect"
@@ -1687,33 +1808,38 @@ def _secondary_centering(block: Mapping[str, Any], *, path: str) -> None:
     parity_tolerance = _secondary_real(
         block["training_estimator_parity_tolerance"], path=f"{path}.parity_tolerance"
     )
+    parity_relative_tolerance = _secondary_real(
+        block["training_estimator_parity_relative_tolerance"],
+        path=f"{path}.parity_relative_tolerance",
+    )
     if defect < 0.0 or parity < 0.0:
         raise Exp1bSchemaError(f"{path} trainer-estimator errors must be nonnegative.")
     if parity_tolerance != CENTERING_PARITY_TOLERANCE:
         raise Exp1bSchemaError(f"{path} uses an unregistered parity tolerance.")
-    if parity > parity_tolerance:
+    if parity_relative_tolerance != CENTERING_PARITY_RELATIVE_TOLERANCE:
+        raise Exp1bSchemaError(
+            f"{path} uses an unregistered relative parity tolerance."
+        )
+    # Absolute floor plus a term in the registered clip value. See
+    # CENTERING_PARITY_RELATIVE_TOLERANCE: the float32 trainer tensor cannot
+    # agree with the float64 reference construction to better than
+    # ``clip_value * eps_f32``, so the absolute term alone is unsatisfiable.
+    parity_bound = parity_tolerance + parity_relative_tolerance * parity_scale
+    if parity > parity_bound:
         raise Exp1bSchemaError(
             f"{path} trainer and independently constructed advantage tensors "
             "differ beyond tolerance."
         )
+    # The centering defect keeps the plain absolute bound. It is a weighted
+    # ``math.fsum`` that is zero in exact arithmetic and the trainer recenters
+    # after clipping, so it stays near float64 precision: measured max
+    # 8.26e-08 against 1e-06, a 12x margin that does not scale with the clip.
     if defect > parity_tolerance:
         raise Exp1bSchemaError(
             f"{path} trainer exact-advantage centering defect exceeds tolerance."
         )
     _string(block["parity_witness_state_id"], path=f"{path}.parity_witness")
     _string(block["centering_defect_witness_state_id"], path=f"{path}.defect_witness")
-    # The clipping identity, so a trainer that silently stopped clipping, or
-    # started, is a schema failure rather than an invisible change.
-    kind = _string(block["clipping_kind"], path=f"{path}.clipping_kind")
-    if kind not in {"none", "clip_then_exact_recenter"}:
-        raise Exp1bSchemaError(f"{path} names an unregistered clipping kind.")
-    clip_value = block["clip_value"]
-    if kind == "none":
-        if clip_value is not None:
-            raise Exp1bSchemaError(f"{path} unclipped estimator named a clip value.")
-    else:
-        if _secondary_real(clip_value, path=f"{path}.clip_value") <= 0.0:
-            raise Exp1bSchemaError(f"{path} clip value must be positive.")
     if (
         _string(block["trainer_reconstruction"], path=f"{path}.trainer_reconstruction")
         != TRAINER_RECONSTRUCTION_CONTRACT

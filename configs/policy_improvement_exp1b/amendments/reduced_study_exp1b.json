@@ -1,6 +1,14 @@
 {
   "amendment_id": "exp1b-reduced-study-open",
   "bridge_route_id": "exp1b_sealed_octet_validation_bridge_v1",
+  "centering_contract": {
+    "constructed_tensor_precision": "float64",
+    "inherited_absolute_tolerance_source": "configs/policy_improvement_v2/amendments/theory_bridge_v2.json",
+    "parity_scale_definition": "registered_clip_value",
+    "trainer_tensor_precision": "float32",
+    "training_estimator_parity_absolute_tolerance": 1e-06,
+    "training_estimator_parity_relative_tolerance": 4.76837158203125e-07
+  },
   "created_at_utc": "2026-09-09T00:00:00Z",
   "outcome_evidence_inspected": false,
   "parent": {

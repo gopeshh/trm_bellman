@@ -5932,6 +5932,7 @@ class Exp1bSealedEvaluationSession:
 
         from scripts.policy_improvement_exp1b_schema import (
             CENTERING_PARITY_KIND,
+            CENTERING_PARITY_RELATIVE_TOLERANCE,
             CENTERING_PARITY_TOLERANCE,
             DEPLOYMENT_MISMATCH_KIND,
             MIXTURE_IDENTITY_KIND,
@@ -6086,6 +6087,16 @@ class Exp1bSealedEvaluationSession:
                 )
             )
 
+        # Hoisted above the refusals: the parity bound below is scaled by the
+        # registered clip value, so the clipping identity has to be in hand
+        # before anything is judged against it.
+        if observed_clipping is None:
+            raise Exp1bSealedEvaluationError("No census state produced a tensor.")
+        parity_scale = 0.0 if observed_clipping[1] is None else float(observed_clipping[1])
+        parity_bound = (
+            CENTERING_PARITY_TOLERANCE + CENTERING_PARITY_RELATIVE_TOLERANCE * parity_scale
+        )
+
         if worst_identity[0] > MIXTURE_IDENTITY_TOLERANCE:
             raise Exp1bSealedEvaluationError(
                 "Exact pointwise mixture identity failed at "
@@ -6096,18 +6107,25 @@ class Exp1bSealedEvaluationSession:
                 "Independently constructed centering roundoff exceeded its "
                 f"tolerance at {worst_centering[1]!r}: {worst_centering[0]!r}."
             )
-        if worst_parity[0] > CENTERING_PARITY_TOLERANCE:
+        # Absolute floor plus a term in the clip value. The trainer tensor is
+        # float32 and the constructed reference is float64, so this elementwise
+        # difference cannot go below ``clip_value * eps_f32``; the inherited
+        # absolute-only bound is unsatisfiable at the registered clip. See
+        # ``CENTERING_PARITY_RELATIVE_TOLERANCE``.
+        if worst_parity[0] > parity_bound:
             raise Exp1bSealedEvaluationError(
                 "Trainer and independently constructed advantage tensors differ "
-                f"beyond tolerance at {worst_parity[1]!r}: {worst_parity[0]!r}."
+                f"beyond tolerance at {worst_parity[1]!r}: {worst_parity[0]!r} "
+                f"exceeds {parity_bound!r}."
             )
+        # The defect keeps the plain absolute bound: it is zero in exact
+        # arithmetic and the trainer recenters after clipping, so it does not
+        # scale with the clip.
         if worst_defect[0] > CENTERING_PARITY_TOLERANCE:
             raise Exp1bSealedEvaluationError(
                 "Trainer exact-advantage centering defect exceeded its tolerance "
                 f"at {worst_defect[1]!r}: {worst_defect[0]!r}."
             )
-        if observed_clipping is None:
-            raise Exp1bSealedEvaluationError("No census state produced a tensor.")
         return {
             "schema_name": SECONDARY_DIAGNOSTIC_SCHEMA_NAME,
             "schema_version": SECONDARY_DIAGNOSTIC_SCHEMA_VERSION,
@@ -6132,6 +6150,9 @@ class Exp1bSealedEvaluationSession:
                 "training_estimator_centering_defect": worst_defect[0],
                 "training_estimator_parity_max_abs_error": worst_parity[0],
                 "training_estimator_parity_tolerance": CENTERING_PARITY_TOLERANCE,
+                "training_estimator_parity_relative_tolerance": (
+                    CENTERING_PARITY_RELATIVE_TOLERANCE
+                ),
                 "parity_witness_state_id": worst_parity[1],
                 "centering_defect_witness_state_id": worst_defect[1],
                 "clipping_kind": observed_clipping[0],
