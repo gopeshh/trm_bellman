@@ -2451,6 +2451,116 @@ class Exp1bLauncherDispatchTest(unittest.TestCase):
                 with self.subTest(model=model, members=sorted(names)):
                     self.assertIn(shadow, names)
 
+    def test_bridge_main_only_reads_keys_the_protocol_registers(self) -> None:
+        """Regression: bridge_main read evaluation_population['split_manifest_sha256'].
+
+        That key exists on ``training_population`` and not on
+        ``evaluation_population``, so Stage B raised ``KeyError`` before it
+        could serve a single seed -- and it surfaced only after all eight
+        Stage A seeds had sealed, by which point the frozen provenance made the
+        fix unappliable to that evidence. No test caught it because every
+        Stage B test hands ``evaluation_split_manifest_sha256`` straight to the
+        backend, skipping the extraction that failed.
+
+        This checks the extraction itself against the committed protocol, so
+        any literal key read off a registered population must actually be
+        there. Torch-free.
+        """
+
+        source = (_ROOT / "scripts" / "policy_improvement_exp1b_runtime.py").read_text()
+        tree = ast.parse(source)
+        bridge = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "bridge_main"
+        )
+        protocol = json.loads(
+            (
+                _ROOT / "configs" / "policy_improvement_exp1b" / "protocol.json"
+            ).read_text()
+        )
+        # The local names bridge_main binds to registered population documents.
+        bound = {
+            "evaluation_population": protocol["evaluation_population"],
+            "registered_training": protocol["training_population"],
+        }
+        read: list[tuple[str, str, int]] = [
+            (node.value.id, node.slice.value, node.lineno)
+            for node in ast.walk(bridge)
+            if isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in bound
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+        ]
+        self.assertTrue(read, "bridge_main reads no registered population keys")
+        missing = [
+            f"{name}[{key!r}] at line {line}"
+            for name, key, line in read
+            if key not in bound[name]
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            "bridge_main reads a key the registered Experiment 1B protocol "
+            "does not define.",
+        )
+
+    def test_the_evaluation_split_digest_comes_from_the_parent_protocol(self) -> None:
+        """The replacement must return the registered value, not a plausible one."""
+
+        import scripts.policy_improvement_exp1b_runtime as runtime
+
+        parent = _ROOT / "configs" / "policy_improvement_v2" / "protocol.json"
+        registered = json.loads(parent.read_text())["dataset"]["splits"]
+        for split in ("train", "validation", "test"):
+            with self.subTest(split=split):
+                self.assertEqual(
+                    runtime._registered_split_manifest_sha256(parent, split=split),
+                    registered[split]["manifest_sha256"]["value"],
+                )
+
+    def test_the_evaluation_split_digest_refuses_rather_than_inventing(self) -> None:
+        """An absent, unavailable, or malformed slot must raise, not degrade."""
+
+        import scripts.policy_improvement_exp1b_runtime as runtime
+
+        parent = json.loads(
+            (
+                _ROOT / "configs" / "policy_improvement_v2" / "protocol.json"
+            ).read_text()
+        )
+        directory = Path(self.enterContext(TemporaryDirectory()))
+
+        def written(document: object) -> Path:
+            path = directory / f"parent-{abs(hash(repr(document)))}.json"
+            path.write_text(json.dumps(document), encoding="ascii")
+            return path
+
+        unavailable = json.loads(json.dumps(parent))
+        unavailable["dataset"]["splits"]["validation"]["manifest_sha256"] = {
+            "status": "unavailable",
+            "value": "not_collected_by_registered_protocol",
+        }
+        malformed = json.loads(json.dumps(parent))
+        malformed["dataset"]["splits"]["validation"]["manifest_sha256"] = {
+            "status": "available",
+            "value": "NOTAHEXDIGEST",
+        }
+        absent = json.loads(json.dumps(parent))
+        del absent["dataset"]["splits"]["validation"]
+
+        for label, document, expected in (
+            ("unavailable", unavailable, "unavailable"),
+            ("malformed", malformed, "malformed"),
+            ("absent", absent, "registers no"),
+        ):
+            with self.subTest(case=label):
+                with self.assertRaisesRegex(runtime.Exp1bRuntimeError, expected):
+                    runtime._registered_split_manifest_sha256(
+                        written(document), split="validation"
+                    )
+
     def test_runtime_handlers_exist_and_fail_closed(self) -> None:
         import scripts.policy_improvement_exp1b_runtime as runtime
 

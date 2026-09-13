@@ -186,6 +186,53 @@ def _stable_document(path: Path, *, label: str) -> tuple[Mapping[str, Any], str]
     return parsed, exp1b_document_sha256(parsed)
 
 
+def _registered_split_manifest_sha256(path: Path, *, split: str) -> str:
+    """The v2 parent's registered manifest digest for one dataset split.
+
+    Read from the parent protocol rather than the Experiment 1B protocol
+    because only the latter's ``training_population`` carries a split manifest
+    digest; its ``evaluation_population`` does not, and Stage B needs the
+    evaluation split's. Every hop is checked rather than assumed: the parent's
+    digests use the ``{"status": "available", "value": ...}`` slot shape, and an
+    unavailable or malformed slot must refuse rather than produce a plausible
+    string for :func:`_validate_materialized_split_manifest` to compare against.
+    """
+
+    document, _sha256 = _stable_document(path, label="parent protocol")
+    dataset = document.get("dataset")
+    if not isinstance(dataset, Mapping):
+        raise Exp1bRuntimeError("Parent protocol registers no dataset.")
+    splits = dataset.get("splits")
+    if not isinstance(splits, Mapping) or split not in splits:
+        raise Exp1bRuntimeError(
+            f"Parent protocol registers no {split!r} dataset split."
+        )
+    entry = splits[split]
+    if not isinstance(entry, Mapping):
+        raise Exp1bRuntimeError(
+            f"Parent protocol {split!r} split is not an object."
+        )
+    slot = entry.get("manifest_sha256")
+    if not isinstance(slot, Mapping) or set(slot) != {"status", "value"}:
+        raise Exp1bRuntimeError(
+            f"Parent protocol {split!r} split manifest digest is not a slot."
+        )
+    if slot["status"] != "available":
+        raise Exp1bRuntimeError(
+            f"Parent protocol {split!r} split manifest digest is unavailable."
+        )
+    value = slot["value"]
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise Exp1bRuntimeError(
+            f"Parent protocol {split!r} split manifest digest is malformed."
+        )
+    return value
+
+
 def _attestation(value: Mapping[str, str] | None) -> Exp1bRuntimeAttestation:
     """Build the runtime attestation from the entrypoint's preflight values."""
 
@@ -1000,6 +1047,18 @@ def bridge_main(
 
     registered_training = study.effective_protocol["training_population"]
     evaluation_population = study.effective_protocol["evaluation_population"]
+    # The Experiment 1B protocol gives `training_population` a
+    # `split_manifest_sha256` but `evaluation_population` none, so reading one
+    # off the evaluation population raised KeyError before Stage B could serve
+    # a single seed. The registered digest for the evaluation split lives in
+    # the v2 parent, and the parent's bytes are already pinned:
+    # `open_authenticated_exp1b_route` refuses unless their digest equals the
+    # `parent.protocol_sha256` the Experiment 1B protocol declares, and that
+    # check has run by the time we get here.
+    evaluation_split_manifest_sha256 = _registered_split_manifest_sha256(
+        parent_paths["parent_protocol_path"],
+        split=str(evaluation_population["split"]),
+    )
     position = int(arguments.seed_position)
     if not 0 <= position < UNITS:
         raise Exp1bRuntimeError("Seed position is outside the registered octet.")
@@ -1030,8 +1089,8 @@ def bridge_main(
                     producer_root / str(registered_training["dataset_root"])
                 ).resolve(),
                 evaluation_split=str(evaluation_population["split"]),
-                evaluation_split_manifest_sha256=str(
-                    evaluation_population["split_manifest_sha256"]
+                evaluation_split_manifest_sha256=(
+                    evaluation_split_manifest_sha256
                 ),
             )
             evaluator = backend.prepare_exp1b_bridge(
