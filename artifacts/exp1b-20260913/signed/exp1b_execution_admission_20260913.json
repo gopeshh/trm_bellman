@@ -1,0 +1,45 @@
+{
+  "amendment_id": "exp1b-execution-admission-20260913",
+  "base_policy_artifact": {
+    "status": "available",
+    "value": {
+      "amendment_sha256": "47b21e8ba6c826838c5251dd382e87f31962f29093c7e67476e8f8c0cbf43881",
+      "checkpoint_sha256": "607c3065aa429522c90b89763d215be49f3ee58bffd493ed9280c09f4d377fe7",
+      "model_state_sha256": "0d18f790d95e4c10269e73a333dd6de9e90dac1f558278cea5709b77190e77c4"
+    }
+  },
+  "created_at_utc": "2026-09-13T07:15:23Z",
+  "execution_allowed": true,
+  "execution_environment": {
+    "environment_variable": "RUN_UPITRM_FULL_EXPERIMENTS",
+    "required_value": "1"
+  },
+  "prior_amendment_sha256": "0f79b1b8ff1098ce4d48cfa196f2a69220f5dfe01f7ac66437c2cd3c93a747a2",
+  "protocol_id": "policy-improvement-exp1b-20260909",
+  "protocol_sha256": "add935bac37aa23578cd0586aa8bbed769172b65380fae6d6ccb7af52371a063",
+  "purpose": "policy_improvement_exp1b_reduced_study",
+  "registry_sha256": "a4441a1758dbc61baed4d87263e593019ae415f4ecab586c549feef643457116",
+  "resolved_slots": [
+    "base_policy_artifact",
+    "runtime_authorization"
+  ],
+  "runtime_authorization": {
+    "status": "available",
+    "value": {
+      "policy-improvement-full": {
+        "authorization_sha256": "c5d077e0e0b17e2bdb0f444669b7fb8f2a5ce2891dec9161d34a38d51d8da78f",
+        "launcher_sha256": "f99099ee418647ee970f84c2c6ba6d373cd143676d37498d0124e80b48c289bd",
+        "runtime_sha256": "09cf7a1f5a1ffe4a72e4163f68e0dfef4d79ddba5287cff79fb0798b952c5216",
+        "source_git_commit": "dcaf19ef6d8b3f376af5933d86e4363965a2fafb"
+      },
+      "policy-improvement-theory-bridge": {
+        "authorization_sha256": "c5d077e0e0b17e2bdb0f444669b7fb8f2a5ce2891dec9161d34a38d51d8da78f",
+        "launcher_sha256": "f99099ee418647ee970f84c2c6ba6d373cd143676d37498d0124e80b48c289bd",
+        "runtime_sha256": "c5b9a67a11b68179c9a0ddd168dddf3e9f64502e75a764bf452a3643f4551ebf",
+        "source_git_commit": "dcaf19ef6d8b3f376af5933d86e4363965a2fafb"
+      }
+    }
+  },
+  "schema_name": "policy_improvement_exp1b_admission_v1",
+  "schema_version": 1
+}
