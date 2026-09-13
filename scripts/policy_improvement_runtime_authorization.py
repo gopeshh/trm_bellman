@@ -117,6 +117,18 @@ _READ_SIZE = 1024 * 1024
 # requires fbmake.build_mode == "opt", so a dev-mode launcher is refused before
 # these pins are ever consulted, and the target's own reviewed-configuration
 # guard errors out instead of skipping when it sees one.
+#
+# Rebound a third time on 2026-09-13, after the work moved from devvm3231 to
+# devvm2667 and the launcher was rebuilt from the clean checkout at
+# 613b5f4 with the same mode/opt command. This time exactly one of the five
+# moved: _LAUNCHER_NATIVE_SUPPORT_MANIFEST_SHA256, because the two native
+# members were compiled and relinked on a different host. The other four
+# re-measured identical, including _LAUNCHER_PINNED_SUPPORT_MANIFEST_SHA256,
+# which had moved on 2026-09-11 and has now held across a host change. Both
+# inventories are again unchanged -- the same 44 pinned support members and the
+# same 2 native members -- so the swapped-launcher guard is intact and this is
+# a re-measurement, not a weakening. A moved pin whose *inventory* also moved
+# would be a different matter and must not be rebound without investigation.
 _LAUNCHER_DYNAMIC_SUPPORT_MEMBERS = frozenset(
     {
         "__manifest__.py",
@@ -181,7 +193,7 @@ _LAUNCHER_NATIVE_SUPPORT_MEMBERS = (
     "runtime/lib/__python_generated_allocator_preload",
 )
 _LAUNCHER_NATIVE_SUPPORT_MANIFEST_SHA256 = (
-    "abb8f9887e32087cf11c4d9c188a96bd41ccab678f3e8262708c9dd807d3b04a"
+    "f8022a4f3092701333aa48146ff325f777f60a8d13eb70b51d4a0a7df6dce18e"
 )
 _LAUNCHER_STARTUP_LOADER_NORMALIZED_SHA256 = (
     "a0e47cb96c58fe681f56c0b690c3de15dc6a756dbff74fb7a79ee9e5622dd280"
