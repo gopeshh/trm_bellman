@@ -6325,6 +6325,59 @@ class Exp1bSealedEvaluationSession:
             )
 
 
+def _registered_split_record_count(
+    *, dataset_root: Path, split: str, registered_sha256: str
+) -> int:
+    """How many records the registered split manifest declares.
+
+    Read here rather than passed in because the digest that pins it is already
+    an argument, so the count cannot disagree with the manifest the admission
+    authorized. The manifest digest is checked before the count is trusted; a
+    manifest that does not match is refused rather than used, since a short
+    count would silently truncate the evaluation split and misalign every
+    census record index.
+    """
+
+    manifest_path = Path(dataset_root) / "manifests" / f"{split}.json"
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+    except OSError as exc:
+        raise Exp1bSealedEvaluationError(
+            f"Registered {split!r} split manifest is absent."
+        ) from exc
+    if hashlib.sha256(manifest_bytes).hexdigest() != registered_sha256:
+        raise Exp1bSealedEvaluationError(
+            f"Materialized {split!r} split manifest differs from the registered "
+            "digest."
+        )
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise Exp1bSealedEvaluationError(
+            f"Registered {split!r} split manifest is not valid JSON."
+        ) from exc
+    if not isinstance(manifest, Mapping):
+        raise Exp1bSealedEvaluationError(
+            f"Registered {split!r} split manifest is not an object."
+        )
+    digests = manifest.get("record_sha256s")
+    if not isinstance(digests, list) or not digests:
+        raise Exp1bSealedEvaluationError(
+            f"Registered {split!r} split manifest declares no records."
+        )
+    declared = manifest.get("generated_count")
+    if not isinstance(declared, int) or isinstance(declared, bool):
+        raise Exp1bSealedEvaluationError(
+            f"Registered {split!r} split manifest declares no record count."
+        )
+    if declared != len(digests):
+        raise Exp1bSealedEvaluationError(
+            f"Registered {split!r} split manifest count disagrees with its "
+            "record digests."
+        )
+    return declared
+
+
 def open_exp1b_sealed_evaluation_session(
     *,
     checkpoint_path: str | Path,
@@ -6468,9 +6521,23 @@ def open_exp1b_sealed_evaluation_session(
 
     # --- the registered evaluation split -----------------------------------
     root = Path(dataset_root)
+    # `pool_size` is a truncation bound, not a batching hint: the loader stops
+    # at `len(samples) >= pool_size` (rl/training_setup.py). `None` made
+    # PuzzleDatasetConfig refuse outright, because `global_batch_size` is typed
+    # `int` -- which is how this surfaced. Passing the census size instead would
+    # have been worse than the crash: it would have loaded the first 128 of the
+    # 256 registered validation records and left every higher census
+    # `record_index` pointing at the wrong row, or silently short. The count is
+    # therefore *derived* from the split manifest whose digest the admission
+    # already pins, never chosen here.
+    registered_records = _registered_split_record_count(
+        dataset_root=root,
+        split=evaluation_split,
+        registered_sha256=evaluation_split_manifest_sha256,
+    )
     loaded = training_module.build_dataset_from_paths(
         dataset_paths=[str(root)],
-        pool_size=None,
+        pool_size=registered_records,
         split=evaluation_split,
     )
     if not isinstance(loaded, tuple) or len(loaded) != 4:

@@ -5200,6 +5200,150 @@ class _FakeValueModel:
         return torch.zeros(1, 2)
 
 
+class Exp1bEvaluationSplitPoolSizeTest(unittest.TestCase):
+    """Regression: the Stage B opener passed ``pool_size=None`` to the loader.
+
+    ``build_dataset_from_paths`` declares ``pool_size: int`` and uses it as a
+    *truncation bound* -- it stops at ``len(samples) >= pool_size``. ``None``
+    reached ``PuzzleDatasetConfig``, whose ``global_batch_size`` is typed
+    ``int``, and Stage B died on the first bridge after all eight Stage A seeds
+    had sealed. This was the fourth defect in a row to surface only at runtime
+    because the path had never been executed.
+
+    The quiet failure matters more than the crash: passing the census size
+    (128) instead of the registered split count (256) would have loaded half
+    the validation split and misaligned every higher census ``record_index``.
+    Torch-free -- source and committed manifests only.
+    """
+
+    def _opener_source(self) -> str:
+        return (_ROOT / "policy_improvement_full_backend.py").read_text()
+
+    def test_the_evaluation_loader_is_never_given_a_none_pool_size(self) -> None:
+        tree = ast.parse(self._opener_source())
+        offenders: list[int] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "attr", getattr(node.func, "id", ""))
+            if name != "build_dataset_from_paths":
+                continue
+            for keyword in node.keywords:
+                if keyword.arg != "pool_size":
+                    continue
+                if (
+                    isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is None
+                ):
+                    offenders.append(node.lineno)
+        self.assertEqual(
+            offenders,
+            [],
+            "build_dataset_from_paths takes pool_size: int and truncates the "
+            "split at it; None makes PuzzleDatasetConfig refuse.",
+        )
+
+    def _manifest(self, count: int) -> tuple[Path, str]:
+        """A split manifest shaped like the registered ones, and its digest."""
+
+        directory = Path(self.enterContext(TemporaryDirectory()))
+        manifests = directory / "manifests"
+        manifests.mkdir()
+        target = manifests / "validation.json"
+        target.write_text(
+            json.dumps(
+                {
+                    "record_sha256s": [_digest(f"r{i}") for i in range(count)],
+                    "generated_count": count,
+                }
+            ),
+            encoding="ascii",
+        )
+        return directory, hashlib.sha256(target.read_bytes()).hexdigest()
+
+    def test_the_registered_record_count_comes_from_the_pinned_manifest(self) -> None:
+        import policy_improvement_full_backend as backend
+
+        for count in (1, 128, 256, 1024):
+            with self.subTest(count=count):
+                directory, digest = self._manifest(count)
+                self.assertEqual(
+                    backend._registered_split_record_count(
+                        dataset_root=directory,
+                        split="validation",
+                        registered_sha256=digest,
+                    ),
+                    count,
+                )
+
+    def test_the_committed_corpus_declares_the_registered_counts(self) -> None:
+        """If the corpus is materialized here, the real numbers must agree."""
+
+        import policy_improvement_full_backend as backend
+
+        root = (
+            _ROOT
+            / "data"
+            / "policy-improvement-v1-owner"
+            / "policy-improvement-hard-4x4-v1-regen-20260911"
+        )
+        if not root.is_dir():
+            self.skipTest("The regenerated corpus is not materialized here.")
+        for split, expected in (("validation", 256), ("train", 1024)):
+            with self.subTest(split=split):
+                manifest = root / "manifests" / f"{split}.json"
+                digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+                self.assertEqual(
+                    backend._registered_split_record_count(
+                        dataset_root=root, split=split, registered_sha256=digest
+                    ),
+                    expected,
+                )
+
+    def test_a_manifest_that_does_not_match_its_digest_refuses(self) -> None:
+        import policy_improvement_full_backend as backend
+
+        directory, _digest_value = self._manifest(256)
+        with self.assertRaises(backend.Exp1bSealedEvaluationError) as caught:
+            backend._registered_split_record_count(
+                dataset_root=directory,
+                split="validation",
+                registered_sha256="0" * 64,
+            )
+        self.assertIn("differs from the registered", str(caught.exception))
+
+    def test_an_absent_manifest_refuses(self) -> None:
+        import policy_improvement_full_backend as backend
+
+        directory = Path(self.enterContext(TemporaryDirectory()))
+        with self.assertRaises(backend.Exp1bSealedEvaluationError) as caught:
+            backend._registered_split_record_count(
+                dataset_root=directory,
+                split="validation",
+                registered_sha256="0" * 64,
+            )
+        self.assertIn("is absent", str(caught.exception))
+
+    def test_a_count_that_disagrees_with_its_digests_refuses(self) -> None:
+        import policy_improvement_full_backend as backend
+
+        directory = Path(self.enterContext(TemporaryDirectory()))
+        manifests = directory / "manifests"
+        manifests.mkdir()
+        target = manifests / "validation.json"
+        target.write_text(
+            json.dumps({"record_sha256s": [_digest("a"), _digest("b")],
+                        "generated_count": 7}),
+            encoding="ascii",
+        )
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        with self.assertRaises(backend.Exp1bSealedEvaluationError) as caught:
+            backend._registered_split_record_count(
+                dataset_root=directory, split="validation", registered_sha256=digest
+            )
+        self.assertIn("disagrees with its record digests", str(caught.exception))
+
+
 @unittest.skipUnless(_torch_available(), "Torch is not installed in this checkout")
 class Exp1bRealSealedEvaluationSessionTest(unittest.TestCase):
     """Execute the *real* ``Exp1bSealedEvaluationSession`` route callables.
