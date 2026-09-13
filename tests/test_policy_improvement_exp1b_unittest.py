@@ -171,6 +171,24 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _write_split_manifest(root: Path, *, split: str, count: int) -> str:
+    """Materialize a registered-shaped split manifest and return its digest."""
+
+    manifests = root / "manifests"
+    manifests.mkdir(parents=True, exist_ok=True)
+    target = manifests / f"{split}.json"
+    target.write_text(
+        json.dumps(
+            {
+                "record_sha256s": [_digest(f"{split}-{i}") for i in range(count)],
+                "generated_count": count,
+            }
+        ),
+        encoding="ascii",
+    )
+    return hashlib.sha256(target.read_bytes()).hexdigest()
+
+
 def _attestation(**overrides: str) -> Exp1bRuntimeAttestation:
     """The **producer** (full-PAR) attestation, unless overridden."""
 
@@ -6049,7 +6067,13 @@ class Exp1bTorchSealedOpenerTest(unittest.TestCase):
             "evaluation_population": "validation_bridge",
             "dataset_root": Path(tmp),
             "evaluation_split": "validation",
-            "evaluation_split_manifest_sha256": _digest("opener-split-manifest"),
+            # A real split manifest, not a bare digest. The opener derives the
+            # loader's truncation bound from this file and checks its bytes
+            # against the digest first, so a fixture that only supplied a
+            # digest let pool_size=None through to the real Stage B run.
+            "evaluation_split_manifest_sha256": _write_split_manifest(
+                Path(tmp), split="validation", count=256
+            ),
         }
         call.update(dict(arguments or {}))
 
