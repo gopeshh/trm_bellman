@@ -19,7 +19,8 @@ import json
 import math
 import os
 import unittest
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from unittest import mock
 from dataclasses import replace
 from functools import lru_cache
 from fractions import Fraction
@@ -5151,6 +5152,292 @@ class Exp1bRealSealedBackendTrainingLoopTest(unittest.TestCase):
                 self._backend(SimpleNamespace()).run_exp1b_training(session=session)
         self.assertIn("resolved evaluation data", str(caught.exception))
         self.assertEqual(calls, [], "A tainted run must not be sealed.")
+
+
+class _FakeDistribution:
+    """Carries a ``probs`` tensor, which is all ``_populate`` reads."""
+
+    def __init__(self, probs: Any) -> None:
+        self.probs = probs
+
+
+class _FakePolicyModel:
+    """Records every ``policy_dist`` call so the K=1 contract can be asserted."""
+
+    def __init__(self, probs: Sequence[float], *, latent: Any = None) -> None:
+        self._probs = list(probs)
+        self._latent = latent
+        self.calls: list[dict[str, Any]] = []
+
+    def policy_dist(
+        self, x: Any, plan: Any, *, n: int, action_mask: Any = None, z: Any = None
+    ) -> tuple[Any, Any]:
+        import torch
+
+        self.calls.append({"n": int(n), "z_is_none": z is None})
+        return _FakeDistribution(torch.tensor([self._probs])), self._latent
+
+
+class _FakeValueModel:
+    """``used_value`` returns a per-depth constant, so depth is observable."""
+
+    def __init__(self, by_depth: Mapping[int, float], *, rl_num_actions: int) -> None:
+        self._by_depth = dict(by_depth)
+        self.config = SimpleNamespace(rl_num_actions=rl_num_actions)
+        self.value_calls: list[int] = []
+
+    def used_value(
+        self, x: Any, plan: Any, *, n: int, z: Any = None
+    ) -> tuple[Any, Any]:
+        import torch
+
+        self.value_calls.append(int(n))
+        return torch.tensor([[self._by_depth[int(n)]]]), None
+
+    def init_latent(self, x: Any, plan: Any) -> Any:
+        import torch
+
+        return torch.zeros(1, 2)
+
+
+@unittest.skipUnless(_torch_available(), "Torch is not installed in this checkout")
+class Exp1bRealSealedEvaluationSessionTest(unittest.TestCase):
+    """Execute the *real* ``Exp1bSealedEvaluationSession`` route callables.
+
+    Stage B's entire numerical surface -- nine methods -- had no test that ever
+    constructed this class. Production builds it at
+    ``policy_improvement_full_backend.py:6628``; every test replaced it wholesale
+    with a recorder. That is the same shape that hid ``self._module`` in
+    ``run_exp1b_training`` and ``evaluation_population['split_manifest_sha256']``
+    in ``bridge_main``, each of which surfaced only after a full Stage A run.
+
+    Stubbed only at the two boundaries the instructions allow: the dataset/
+    environment (``PlanEditEnv``, ``dataset_sample_sha256s``) and the model/
+    trainer. The session class itself, its census binding, its record
+    derivation, its gamma folding and its depth handling are the real code.
+    """
+
+    ACTIONS = 4
+    GAMMA = 0.99
+
+    def _install(self, *, terminal_actions: frozenset[int] = frozenset()) -> Any:
+        """Patch the module-level seams and return the backend module."""
+
+        import torch
+        import policy_improvement_full_backend as backend
+
+        digests = [_digest("record-0"), _digest("record-1")]
+        outer = self
+
+        class _FakeEnv:
+            def __init__(self, **_kwargs: Any) -> None:
+                self.loaded: Any = None
+                self.stop_action_id: int | None = None
+
+            def set_stop_action_id(self, value: int) -> None:
+                self.stop_action_id = int(value)
+
+            def reset(self, *, idx: int) -> tuple[Any, Any]:
+                return {"idx": torch.tensor([idx])}, torch.zeros(1, 2)
+
+            def checkpoint_state(self) -> dict[str, Any]:
+                return {"state": "checkpointed"}
+
+            def load_checkpoint_state(self, state: Any) -> None:
+                self.loaded = state
+
+            def get_action_mask(self) -> Any:
+                return torch.tensor([True] * outer.ACTIONS)
+
+            def step(self, action_index: int) -> tuple[Any, float, bool, dict]:
+                reward = float(action_index) + 0.5
+                terminal = action_index in terminal_actions
+                return (
+                    ({"idx": torch.tensor([action_index])}, torch.zeros(1, 2)),
+                    reward,
+                    terminal,
+                    {},
+                )
+
+        self.enterContext(
+            mock.patch.object(backend, "PlanEditEnv", _FakeEnv)
+        )
+        self.enterContext(
+            mock.patch.object(
+                backend, "dataset_sample_sha256s", lambda dataset: digests
+            )
+        )
+        self.enterContext(
+            mock.patch.object(
+                backend, "prepare_batch_x", lambda x, device=None, batched=True: x
+            )
+        )
+        self.enterContext(
+            mock.patch.object(
+                backend, "prepare_plan", lambda p, device=None, batched=True: p
+            )
+        )
+        self.digests = digests
+        return backend
+
+    def _session(self, backend: Any, **overrides: Any) -> Any:
+        uniform = [1.0 / self.ACTIONS] * self.ACTIONS
+        self.base_model = _FakePolicyModel(uniform)
+        self.candidate_model = _FakePolicyModel(uniform)
+        self.deployed_calls: list[int] = []
+
+        def mixed(x: Any, plan: Any, *, n: int, action_mask: Any = None, z: Any = None):
+            import torch
+
+            self.deployed_calls.append(int(n))
+            return _FakeDistribution(torch.tensor([uniform])), None
+
+        trainer = SimpleNamespace(
+            _mixed_policy_dist=mixed,
+            policy_model_old=self.base_model,
+            policy_model_candidate=self.candidate_model,
+        )
+        self.value_model = _FakeValueModel(
+            {0: 0.0, 2: 10.0, 8: 20.0}, rl_num_actions=self.ACTIONS
+        )
+        member = backend.Exp1bCensusMember(
+            state_id="state-0",
+            record_index=0,
+            dataset_record_sha256=self.digests[0],
+        )
+        arguments: dict[str, Any] = {
+            "module": SimpleNamespace(),
+            "session_model": self.value_model,
+            "trainer": trainer,
+            "rl_config": SimpleNamespace(
+                gamma=self.GAMMA, inner_unroll_n=2, episodic_latent=False
+            ),
+            "env_config": SimpleNamespace(),
+            "evaluation_dataset": SimpleNamespace(),
+            "checker": SimpleNamespace(),
+            "task_config": SimpleNamespace(),
+            "device": "cpu",
+            "checkpoint_sha256": _digest("checkpoint"),
+            "model_state_sha256": _digest("model-state"),
+            "module_state_sha256s": {"model": _digest("model")},
+            "effective_config_sha256": _digest("effective"),
+            "run_id": "exp1b-fixed-base-exact-persistent-seed1",
+            "seed": 1,
+            "seed_position": 0,
+            "environment_interactions": 10000,
+            "census": (member,),
+            "depths": (2, 8),
+            "evaluation_population": "validation_bridge",
+        }
+        arguments.update(overrides)
+        return backend.Exp1bSealedEvaluationSession(**arguments)
+
+    def test_endpoint_values_evaluate_at_the_requested_depth(self) -> None:
+        backend = self._install()
+        session = self._session(backend)
+        self.assertEqual(session.endpoint_values("state-0", 2), 10.0)
+        self.assertEqual(session.endpoint_values("state-0", 8), 20.0)
+        self.assertEqual(self.value_model.value_calls, [2, 8])
+
+    def test_action_values_fold_reward_and_discount_the_successor(self) -> None:
+        """``Q(s,a) = r + gamma * U_q(s')`` for every allowed action."""
+
+        backend = self._install()
+        session = self._session(backend)
+        for depth, successor in ((2, 10.0), (8, 20.0)):
+            with self.subTest(depth=depth):
+                observed = session.action_values("state-0", depth)
+                expected = tuple(
+                    (float(a) + 0.5) + self.GAMMA * successor
+                    for a in range(self.ACTIONS)
+                )
+                self.assertEqual(len(observed), self.ACTIONS)
+                for got, want in zip(observed, expected):
+                    self.assertAlmostEqual(got, want, places=9)
+
+    def test_a_terminal_action_takes_the_reward_with_no_bootstrap(self) -> None:
+        backend = self._install(terminal_actions=frozenset({2}))
+        session = self._session(backend)
+        observed = session.action_values("state-0", 2)
+        self.assertAlmostEqual(observed[2], 2.5, places=9)
+        self.assertAlmostEqual(observed[0], 0.5 + self.GAMMA * 10.0, places=9)
+
+    def test_the_bellman_operator_uses_the_frozen_base_not_the_mixture(self) -> None:
+        """Guards the documented past defect: base must be policy_model_old.
+
+        An earlier version passed the trainer's deployed mixture through as
+        ``base_probabilities``; with alpha = 0.1 and a moved candidate, every
+        residual and every signed gap was then computed under the wrong
+        operator.
+        """
+
+        backend = self._install()
+        moved = [0.7, 0.1, 0.1, 0.1]
+        frozen = [0.25, 0.25, 0.25, 0.25]
+        session = self._session(backend)
+        session._trainer.policy_model_old = _FakePolicyModel(frozen)
+        session._trainer.policy_model_candidate = _FakePolicyModel(moved)
+        observed = session.base_probabilities("state-0")
+        for got, want in zip(observed, frozen):
+            self.assertAlmostEqual(got, want, places=9)
+        self.assertNotEqual(
+            tuple(round(v, 9) for v in observed),
+            tuple(round(v, 9) for v in moved),
+        )
+
+    def test_the_persistent_branch_evaluates_the_candidate_at_n_zero(self) -> None:
+        """The K=1 contract: candidate at n=0 on the base call's output latent."""
+
+        backend = self._install()
+        session = self._session(backend)
+        session.base_probabilities("state-0")
+        self.assertEqual([call["n"] for call in self.base_model.calls], [2])
+        self.assertEqual([call["n"] for call in self.candidate_model.calls], [0])
+        self.assertEqual(self.deployed_calls, [2])
+
+    def test_a_census_record_digest_mismatch_refuses(self) -> None:
+        """The census must bind the materialized split, not merely index it."""
+
+        backend = self._install()
+        member = backend.Exp1bCensusMember(
+            state_id="state-0",
+            record_index=0,
+            dataset_record_sha256=_digest("a-different-record"),
+        )
+        session = self._session(backend, census=(member,))
+        with self.assertRaises(backend.Exp1bSealedEvaluationError) as caught:
+            session.endpoint_values("state-0", 2)
+        self.assertIn("differs from the materialized split", str(caught.exception))
+
+    def test_an_unregistered_state_and_an_unregistered_depth_refuse(self) -> None:
+        backend = self._install()
+        session = self._session(backend)
+        with self.assertRaises(backend.Exp1bSealedEvaluationError):
+            session.endpoint_values("state-not-in-census", 2)
+        with self.assertRaises(backend.Exp1bSealedEvaluationError):
+            session.endpoint_values("state-0", 3)
+
+    def test_a_repeated_census_state_identifier_refuses(self) -> None:
+        backend = self._install()
+        member = backend.Exp1bCensusMember(
+            state_id="state-0",
+            record_index=0,
+            dataset_record_sha256=self.digests[0],
+        )
+        with self.assertRaises(backend.Exp1bSealedEvaluationError) as caught:
+            self._session(backend, census=(member, member))
+        self.assertIn("repeats a state identifier", str(caught.exception))
+
+    def test_the_record_is_derived_once_and_shared_across_depths(self) -> None:
+        """q=2 and q=8 must be evaluated at the same state, not two resets."""
+
+        backend = self._install()
+        session = self._session(backend)
+        session.action_values("state-0", 2)
+        session.action_values("state-0", 8)
+        # _populate short-circuits once base_probabilities is set, so the three
+        # laws are derived exactly once no matter how many depths are walked.
+        self.assertEqual([call["n"] for call in self.base_model.calls], [2])
 
 
 @unittest.skipUnless(_torch_available(), "Torch is not installed in this checkout")
