@@ -107,6 +107,7 @@ from scripts.policy_improvement_exp1b_schema import (
     exp1b_document_sha256,
     PROTOCOL_ID,
     REFERENCE_DEPTH_M,
+    REGISTERED_ADVANTAGE_CLIP,
     REGISTERED_SEEDS,
     registry_rows_by_run_id,
     TERMINAL_ENVIRONMENT_INTERACTIONS,
@@ -7040,6 +7041,82 @@ class Exp1bSecondaryDiagnosticsTest(unittest.TestCase):
                         self._serve_first(route, fixture, **{block: override})
                     self.assertFalse(fixture.generation().has_payload(0))
 
+    def test_the_parity_scale_is_the_registered_clip_not_the_reported_one(self) -> None:
+        """A producer must not be able to buy itself a wider acceptance bound.
+
+        The parity bound is ``1e-06 + 4*2**-23 * clip``. Read the clip from the
+        document and a run reporting 20 instead of the registered 10 gets
+        1.05e-05 instead of 5.77e-06, which is enough room to hide a real
+        defect behind otherwise passing diagnostics.
+        """
+
+        registered = _secondary_diagnostics()
+        validate_secondary_diagnostics(registered, path="probe")
+
+        for label, override in (
+            ("doubled clip alone", {"clip_value": 20.0}),
+            (
+                "doubled clip carrying a parity the registered bound refuses",
+                {
+                    "clip_value": 20.0,
+                    "training_estimator_parity_max_abs_error": 8.0e-6,
+                    "training_estimator_centering_defect": 0.0,
+                },
+            ),
+            ("clip below the registered one", {"clip_value": 5.0}),
+        ):
+            with self.subTest(case=label):
+                document = _secondary_diagnostics(centering_parity=override)
+                with self.assertRaisesRegex(Exp1bSchemaError, "registered advantage clip"):
+                    validate_secondary_diagnostics(document, path="probe")
+
+    def test_the_registered_parity_bound_is_enforced_on_both_terms(self) -> None:
+        """Parity and the centering defect each refuse independently."""
+
+        bound = CENTERING_PARITY_TOLERANCE + CENTERING_PARITY_RELATIVE_TOLERANCE * (
+            REGISTERED_ADVANTAGE_CLIP
+        )
+        self.assertAlmostEqual(bound, 5.76837158203125e-06, places=18)
+
+        for label, override, pattern in (
+            (
+                "parity just over the bound",
+                {"training_estimator_parity_max_abs_error": bound * 1.01},
+                "differ beyond tolerance",
+            ),
+            (
+                "centering defect over its own absolute bound",
+                {"training_estimator_centering_defect": 2.0e-6},
+                "centering defect exceeds",
+            ),
+            (
+                "a widened relative tolerance",
+                {"training_estimator_parity_relative_tolerance": 8 * 2.0**-23},
+                "unregistered relative parity tolerance",
+            ),
+            (
+                "a widened absolute tolerance",
+                {"training_estimator_parity_tolerance": 1.0e-5},
+                "unregistered parity tolerance",
+            ),
+            (
+                "an unregistered clipping mode",
+                {"clipping_kind": "clip_only"},
+                "unregistered clipping kind",
+            ),
+        ):
+            with self.subTest(case=label):
+                document = _secondary_diagnostics(centering_parity=override)
+                with self.assertRaisesRegex(Exp1bSchemaError, pattern):
+                    validate_secondary_diagnostics(document, path="probe")
+
+        # Parity just under the bound must still pass, so the test above is
+        # measuring the threshold and not merely a always-raising path.
+        document = _secondary_diagnostics(
+            centering_parity={"training_estimator_parity_max_abs_error": bound * 0.99}
+        )
+        validate_secondary_diagnostics(document, path="probe")
+
     def test_a_missing_block_is_refused(self) -> None:
         for name in SECONDARY_DIAGNOSTIC_NAMES:
             with self.subTest(missing=name):
@@ -7609,7 +7686,10 @@ class Exp1bCenteringParityTest(unittest.TestCase):
         for override, message in (
             ({"clipping_kind": "none"}, "named a clip value"),
             ({"clipping_kind": "some_other_scheme"}, "unregistered clipping kind"),
-            ({"clip_value": 0.0}, "clip value must be positive"),
+            # Was "clip value must be positive". The scale is now pinned to the
+            # registered advantage clip, so any departure from 10.0 refuses,
+            # which subsumes the old positivity check.
+            ({"clip_value": 0.0}, "registered advantage clip"),
             (
                 {"trainer_reconstruction": "something_else"},
                 "registered reconstruction contract",

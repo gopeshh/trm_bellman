@@ -1582,45 +1582,66 @@ PERSISTENT_STATE_KIND = "persistent_endpoint_carry_v1"
 #:     centering_contract.constructed_centering_roundoff_absolute_tolerance = 1e-06
 MIXTURE_IDENTITY_TOLERANCE = 1e-06
 CENTERING_PARITY_TOLERANCE = 1e-06
-#: The trainer-versus-constructed parity comparison needs one more term, and it
-#: is not a loosening: as registered, that check cannot pass.
+#: The trainer-versus-constructed parity comparison carries one more term.
 #:
 #: ``training_estimator_parity_max_abs_error`` is an **elementwise** difference
 #: between the trainer's advantage tensor, which is torch float32 on GPU
 #: (policy_improvement_full_backend.py:6177), and an independently constructed
 #: reference, which is Python float64 via ``math.fsum``
-#: (policy_improvement_full_backend.py:6256). Such a difference is bounded below
-#: by ``|advantage| * eps_f32``, so an *absolute* bound on it is really a hidden
-#: bound on advantage magnitude. The registered estimator clips at
-#: ``clip_value`` and then recenters, and every census state saturates that
-#: clip, which makes the ceiling exact rather than statistical:
+#: (policy_improvement_full_backend.py:6256).
 #:
-#:     clip_value * eps_f32 = 10 * 1.1920929e-07 = 1.1920929e-06  >  1e-06
+#: Why the absolute term alone did not suffice, stated as measurement rather
+#: than as a theorem. On run5 (8 seeds, all 128 census states each) the observed
+#: maximum parity error per seed was:
 #:
-#: The v2 amendment's own two constants are therefore mutually unsatisfiable in
-#: float32. Measured on the 280-interaction scratch study (seed position 0, all
-#: 128 census states): max parity 1.15037e-06, which is 0.965 * eps_f32
-#: relative, with 10 of 128 states over 1e-06 and none over 1 eps. Seed-,
-#: budget- and data-independent, because the clip pins the scale.
+#:     1.277353e-06  1.385260e-06  1.328253e-06  1.413822e-06
+#:     1.507580e-06  1.468691e-06  1.328038e-06  1.375904e-06
 #:
-#: So the bound gains a term proportional to the *registered* clip value:
+#: Every seed exceeds the registered 1e-06 absolute tolerance, so that bound
+#: alone rejects runs this pipeline has no independent reason to consider wrong.
+#: Earlier measurement on the 280-interaction scratch study agreed: max parity
+#: 1.15037e-06.
+#:
+#: What is NOT claimed. Float32 error is not bounded below by
+#: ``|value| * eps_f32``: 10.0 is exactly representable and the float32 spacing
+#: at 10 is ``2**-20``, so an individual operation there may round exactly. The
+#: earlier text here asserted such a lower bound and concluded the two v2
+#: constants were "mutually unsatisfiable in float32". That was too strong and
+#: has been withdrawn. It is also not claimed that every genuine algorithmic
+#: error exceeds the admitted interval; no operation-level error bound for this
+#: reduction has been established.
+#:
+#: What the term is. A margin proportional to the registered clip value:
 #:
 #:     parity <= CENTERING_PARITY_TOLERANCE
-#:               + CENTERING_PARITY_RELATIVE_TOLERANCE * clip_value
+#:               + CENTERING_PARITY_RELATIVE_TOLERANCE * REGISTERED_ADVANTAGE_CLIP
+#:             = 1e-06 + (4 * 2**-23) * 10 = 5.76837158203125e-06
 #:
-#: Keyed on ``clip_value`` and not on a measured maximum, deliberately: a run
-#: must not be able to widen its own tolerance by reporting a larger scale. Four
-#: eps gives a bound of 5.77e-06 at the registered clip, about 5x the observed
-#: ceiling, while still refusing anything algorithmically wrong -- a masking,
-#: clipping, or recentering regression moves this quantity by order 1e-01 to
-#: 1e-03, never into the gap between 1 and 4 eps.
+#: That is 5.768x the original threshold. The factor of four is an **empirical
+#: engineering margin**, not a derived constant: one eps would give 2.192e-06,
+#: which also accepts every run5 seed with 1.45x headroom over the worst
+#: observation. The wider bound was registered before run5's own errors were
+#: measured. It is not retuned now, because the amendment is digest-bound into
+#: a published chain; the gap is disclosed instead. See the errata note in
+#: artifacts/exp1b-run5-20260913-errata.md.
 #:
-#: Registered in configs/policy_improvement_exp1b/amendments/reduced_study_exp1b.json
-#: under ``centering_contract``. The frozen v2 amendment is deliberately left
+#: Keyed on the registered clip and not on a reported one: see
+#: REGISTERED_ADVANTAGE_CLIP. Registered in
+#: configs/policy_improvement_exp1b/amendments/reduced_study_exp1b.json under
+#: ``centering_contract``. The frozen v2 amendment is deliberately left
 #: byte-identical, following the same precedent as the regenerated corpus: a new
 #: constant gets registered in Experiment 1B's own amendment and the exp1b chain
 #: cites it, rather than rewriting a reviewed parent artifact.
 CENTERING_PARITY_RELATIVE_TOLERANCE = 4 * 2.0**-23
+#: The acceptance scale is the registered training configuration's clip, never a
+#: value the producer reports about itself:
+#:   configs/policy_improvement_v2/fixed_base_exact_persistent.yaml
+#:     advantage_clip: 10.0
+#: That config is authenticated elsewhere in the chain through
+#: ``effective_config_sha256`` in each Stage A run manifest. Before this was
+#: enforced, a producer reporting clip 20 bought itself a 1.05e-05 bound while
+#: every other diagnostic still passed.
+REGISTERED_ADVANTAGE_CLIP = 10.0
 #: Also the frozen v2 amendment's own literal:
 #:   centering_contract.trainer_reconstruction
 TRAINER_RECONSTRUCTION_CONTRACT = (
@@ -1794,9 +1815,16 @@ def _secondary_centering(block: Mapping[str, Any], *, path: str) -> None:
             raise Exp1bSchemaError(f"{path} unclipped estimator named a clip value.")
         parity_scale = 0.0
     else:
-        parity_scale = _secondary_real(clip_value, path=f"{path}.clip_value")
-        if parity_scale <= 0.0:
-            raise Exp1bSchemaError(f"{path} clip value must be positive.")
+        reported = _secondary_real(clip_value, path=f"{path}.clip_value")
+        # The scale is the registered configuration's clip, not the reported
+        # one. Accepting any positive report let a producer widen its own
+        # acceptance bound: clip 20 buys 1.05e-05 instead of 5.77e-06.
+        if reported != REGISTERED_ADVANTAGE_CLIP:
+            raise Exp1bSchemaError(
+                f"{path} reported clip value {reported!r} is not the registered "
+                f"advantage clip {REGISTERED_ADVANTAGE_CLIP!r}."
+            )
+        parity_scale = REGISTERED_ADVANTAGE_CLIP
 
     # --- the independent-versus-trainer comparison, ported from v2 -----------
     defect = _secondary_real(
@@ -1820,10 +1848,10 @@ def _secondary_centering(block: Mapping[str, Any], *, path: str) -> None:
         raise Exp1bSchemaError(
             f"{path} uses an unregistered relative parity tolerance."
         )
-    # Absolute floor plus a term in the registered clip value. See
-    # CENTERING_PARITY_RELATIVE_TOLERANCE: the float32 trainer tensor cannot
-    # agree with the float64 reference construction to better than
-    # ``clip_value * eps_f32``, so the absolute term alone is unsatisfiable.
+    # Absolute floor plus a margin in the registered clip. See
+    # CENTERING_PARITY_RELATIVE_TOLERANCE: measured parity on every run5 seed
+    # exceeded the absolute term alone, so it is a margin justified by
+    # measurement, not a proven float32 lower bound.
     parity_bound = parity_tolerance + parity_relative_tolerance * parity_scale
     if parity > parity_bound:
         raise Exp1bSchemaError(
