@@ -2124,6 +2124,46 @@ python_binary(
     ],
 )
 
+# Read-only Experiment 1B audit replay. This is deliberately a distinct binary
+# from both production roles and records its own artifact digest at execution.
+python_binary(
+    name = "policy_improvement_exp1b_replay",
+    srcs = ["scripts/policy_improvement_exp1b_replay.py"],
+    base_module = "",
+    compile = False,
+    keep_gpu_sections = True,
+    main_module = "scripts.policy_improvement_exp1b_replay",
+    package_style = "standalone",
+    deps = [
+        "fbsource//third-party/pypi/torch:torch",
+        ":policy_improvement_checkpoint_allowlist",
+        ":policy_improvement_exp1_diagnostics",
+        ":policy_improvement_exp1b_auditor",
+        ":policy_improvement_exp1b_bridge",
+        ":policy_improvement_exp1b_evidence",
+        ":policy_improvement_exp1b_schema",
+        ":policy_improvement_exp1b_theory_backend",
+        ":policy_improvement_full_backend",
+        ":policy_improvement_populations",
+        ":policy_improvement_schema",
+        ":policy_improvement_v2_schema",
+        ":rl",
+        ":upi_trm_train_lib",
+        ":utils",
+    ],
+)
+
+# The independent arithmetic consumer has no dependency on the replay producer,
+# Torch, or the production diagnostic and bootstrap implementations.
+python_binary(
+    name = "policy_improvement_exp1b_replay_consumer",
+    srcs = ["scripts/policy_improvement_exp1b_replay_consumer.py"],
+    base_module = "",
+    compile = False,
+    main_module = "scripts.policy_improvement_exp1b_replay_consumer",
+    package_style = "standalone",
+)
+
 python_library(
     name = "policy_improvement_exp1b_runtime",
     srcs = ["scripts/policy_improvement_exp1b_runtime.py"],

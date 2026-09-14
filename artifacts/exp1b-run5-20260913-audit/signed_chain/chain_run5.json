@@ -1,0 +1,12 @@
+{
+ "admission_sha256": "2bbeacf2675e9cb9f3b75c8e475f6ef1620e6d6f59d4c3e04f9974e2472f9a1d",
+ "authorization_sha256": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+ "base_policy_amendment_sha256": "4f12873ac1413860378c72532d6dc5eb6e8793d316bbe5c3025df3b7161a8161",
+ "bridge_runtime_sha256": "77dabda68715e206ba15f676fd4360ef061ab815eafbeb12de0d1bcc849ad177",
+ "commit": "2a14eb656bd983c37b60e92852083524348511d8",
+ "evidence_generation": "gen-20260913-run5",
+ "evidence_root": "/home/buiksat/upi-trm-owner-20260911/evidence4",
+ "full_runtime_sha256": "2a4d3ca7bf44262cb7629526d983031432c9134fa438109a649314339d4ee700",
+ "launcher_sha256": "f4b6458eb025259da5db46835b80e6ee9792b129960540ff55c5fbb5ed56a658",
+ "reduced_study_amendment_sha256": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092"
+}

@@ -1,0 +1,25 @@
+2026-09-14 12:55:28,865 - tritonparse.structured_logging - INFO - TritonTraceHandler: disabled because /logs does not exist
+===========[FB_TRITON]=========== Triton Version: 3.5.0+fb
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "__main__.py", line 927, in <module>
+  File "__main__.py", line 924, in __invoke_main
+  File "__main__.py", line 609, in main
+  File "/proc/self/fd/5/__par__/meta_only/bootstrap.py", line 110, in run_as_main
+  File "/proc/self/fd/5/__par__/bootstrap.py", line 70, in run_as_main
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 1042, in <module>
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 1032, in main
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 965, in _install_output
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 616, in _lossless
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 616, in _lossless
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 618, in _lossless
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 616, in _lossless
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 618, in _lossless
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 616, in _lossless
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 616, in _lossless
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 598, in _lossless
+  File "/proc/self/fd/5/scripts/policy_improvement_exp1b_replay.py", line 592, in _tensor_bytes
+RuntimeError: self.dim() cannot be 0 to view Long as Byte (different element sizes)

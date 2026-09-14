@@ -1,0 +1,14 @@
+[2026-09-14T12:46:52.450-07:00] Buck UI: https://www.internalfb.com/buck2/ac7d250e-8ebb-4f28-a7a2-8096cdcbd31a
+[2026-09-14T12:47:05.602-07:00] RE Session: reSessionID-50e5e74a-c39f-4543-8453-5ec8a1d67e5d
+[2026-09-14T12:47:24.103-07:00] Network: up 88KiB  down 78KiB  session reSessionID-50e5e74a-c39f-4543-8453-5ec8a1d67e5d
+BUILD FAILED
+Error running analysis for `fbcode//buiksat_trm:policy_improvement_exp1b_replay (cfg:opt-linux-x86_64-fbcode-platform010-clang21-no-san#52588bd379d6be4f)`
+
+Caused by:
+    Configured target cycle detected (`->` means "depends on"):
+      fbcode//buiksat_trm:policy_improvement_v2_schema (cfg:opt-linux-x86_64-fbcode-platform010-clang21-no-san#52588bd379d6be4f) ->
+      fbcode//buiksat_trm:policy_improvement_theory_schema_v2 (cfg:opt-linux-x86_64-fbcode-platform010-clang21-no-san#52588bd379d6be4f) ->
+      fbcode//buiksat_trm:policy_improvement_schema (cfg:opt-linux-x86_64-fbcode-platform010-clang21-no-san#52588bd379d6be4f) ->
+      fbcode//buiksat_trm:policy_improvement_v2_schema (cfg:opt-linux-x86_64-fbcode-platform010-clang21-no-san#52588bd379d6be4f)
+    
+fbcode//buiksat_trm:policy_improvement_exp1b_replay_consumer /data/repos/fbsource/buck-out/v2/art/fbcode/52588bd379d6be4f/buiksat_trm/__policy_improvement_exp1b_replay_consumer__/policy_improvement_exp1b_replay_consumer.par

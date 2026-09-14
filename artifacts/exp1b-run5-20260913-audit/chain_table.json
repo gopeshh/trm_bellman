@@ -1,0 +1,282 @@
+[
+ {
+  "link": "exp1b protocol",
+  "expected": "add935bac37aa23578cd0586aa8bbed769172b65380fae6d6ccb7af52371a063",
+  "observed": "add935bac37aa23578cd0586aa8bbed769172b65380fae6d6ccb7af52371a063",
+  "source": "configs/policy_improvement_exp1b/protocol.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "exp1b registry",
+  "expected": "a4441a1758dbc61baed4d87263e593019ae415f4ecab586c549feef643457116",
+  "observed": "a4441a1758dbc61baed4d87263e593019ae415f4ecab586c549feef643457116",
+  "source": "configs/policy_improvement_exp1b/registry.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "exp1b amendment",
+  "expected": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+  "observed": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+  "source": "configs/policy_improvement_exp1b/amendments/reduced_study_exp1b.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "bp amendment -> auth",
+  "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+  "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+  "source": "signed/base_policy_amendment",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "admission[full] -> auth",
+  "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+  "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+  "source": "signed/execution_admission",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "admission[bridge] -> auth",
+  "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+  "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+  "source": "signed/execution_admission",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "admission -> bp amendment",
+  "expected": "4f12873ac1413860378c72532d6dc5eb6e8793d316bbe5c3025df3b7161a8161",
+  "observed": "4f12873ac1413860378c72532d6dc5eb6e8793d316bbe5c3025df3b7161a8161",
+  "source": "signed/execution_admission",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "admission -> exp1b amendment",
+  "expected": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+  "observed": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+  "source": "signed/execution_admission",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "provenance -> admission",
+  "expected": "2bbeacf2675e9cb9f3b75c8e475f6ef1620e6d6f59d4c3e04f9974e2472f9a1d",
+  "observed": "2bbeacf2675e9cb9f3b75c8e475f6ef1620e6d6f59d4c3e04f9974e2472f9a1d",
+  "source": "result/provenance.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "result -> provenance",
+  "expected": "7b08deb85bb00ee8abe1719bcf5f8b48ef332688abca50c3a72b9d637625cac5",
+  "observed": "7b08deb85bb00ee8abe1719bcf5f8b48ef332688abca50c3a72b9d637625cac5",
+  "source": "result/exp1b_result.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "published result digest",
+  "expected": "71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74",
+  "observed": "71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74",
+  "source": "result/exp1b_result.sha256",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "provenance -> manifest[0]",
+  "expected": "a8e76a612b3454070cfe7ef789b640e43b9d01c825ce7d62b10b5e3baa2032f4",
+  "observed": "a8e76a612b3454070cfe7ef789b640e43b9d01c825ce7d62b10b5e3baa2032f4",
+  "source": "checkpoints/seed-0/run_manifest.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "manifest[0] -> checkpoint",
+  "expected": "2046db70131f645fd7c103ca7badba4c73366e441f1b2d7f617163483f3628af",
+  "observed": "2046db70131f645fd7c103ca7badba4c73366e441f1b2d7f617163483f3628af",
+  "source": "checkpoints/seed-0/checkpoint.pt",
+  "convention": "file bytes",
+  "status": "MATCH"
+ },
+ {
+  "link": "result -> payload[0]",
+  "expected": "e4a29d5e9c6581d7495a468c2b79dec50b3d2aca2faf0c020976ab56beb98029",
+  "observed": "e4a29d5e9c6581d7495a468c2b79dec50b3d2aca2faf0c020976ab56beb98029",
+  "source": "payloads/seed-0.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "provenance -> manifest[1]",
+  "expected": "25f74beca06d48a336bbf0508a20e051113138b5bb48c7e6ad6fd3d3c6f82cf4",
+  "observed": "25f74beca06d48a336bbf0508a20e051113138b5bb48c7e6ad6fd3d3c6f82cf4",
+  "source": "checkpoints/seed-1/run_manifest.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "manifest[1] -> checkpoint",
+  "expected": "aae94896308cd6b7ec1abce65ea7f38502a008ffc161447554577f467ae9cb86",
+  "observed": "aae94896308cd6b7ec1abce65ea7f38502a008ffc161447554577f467ae9cb86",
+  "source": "checkpoints/seed-1/checkpoint.pt",
+  "convention": "file bytes",
+  "status": "MATCH"
+ },
+ {
+  "link": "result -> payload[1]",
+  "expected": "af341e393b6a32e6749b099f5f49c5ca09336adced504f85e01f181acacace48",
+  "observed": "af341e393b6a32e6749b099f5f49c5ca09336adced504f85e01f181acacace48",
+  "source": "payloads/seed-1.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "provenance -> manifest[2]",
+  "expected": "1244070ed49f48a5c87981d48e3b4e8635df51cec04c58cf409a804c5bdabf07",
+  "observed": "1244070ed49f48a5c87981d48e3b4e8635df51cec04c58cf409a804c5bdabf07",
+  "source": "checkpoints/seed-2/run_manifest.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "manifest[2] -> checkpoint",
+  "expected": "ffd4bdf56c992b67ac519fd053c0608bd67ece8778223405056b4d6b7347040c",
+  "observed": "ffd4bdf56c992b67ac519fd053c0608bd67ece8778223405056b4d6b7347040c",
+  "source": "checkpoints/seed-2/checkpoint.pt",
+  "convention": "file bytes",
+  "status": "MATCH"
+ },
+ {
+  "link": "result -> payload[2]",
+  "expected": "7c45197c917dc2fba840d9280efc935743f1b19efea562b7b35d9cafabb52397",
+  "observed": "7c45197c917dc2fba840d9280efc935743f1b19efea562b7b35d9cafabb52397",
+  "source": "payloads/seed-2.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "provenance -> manifest[3]",
+  "expected": "f6cfe141fa482be6d80889e171e97b7681c6ae85a70042c026221886c14b4bea",
+  "observed": "f6cfe141fa482be6d80889e171e97b7681c6ae85a70042c026221886c14b4bea",
+  "source": "checkpoints/seed-3/run_manifest.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "manifest[3] -> checkpoint",
+  "expected": "3c744fa10c259b2ac02ad4a3eecd73a808510071b175f5307ff08c4b80d7939c",
+  "observed": "3c744fa10c259b2ac02ad4a3eecd73a808510071b175f5307ff08c4b80d7939c",
+  "source": "checkpoints/seed-3/checkpoint.pt",
+  "convention": "file bytes",
+  "status": "MATCH"
+ },
+ {
+  "link": "result -> payload[3]",
+  "expected": "49f6ee8c13fa113389e8174136f5639ce07843a91fc98136d2629a72d4527064",
+  "observed": "49f6ee8c13fa113389e8174136f5639ce07843a91fc98136d2629a72d4527064",
+  "source": "payloads/seed-3.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "provenance -> manifest[4]",
+  "expected": "6195b6e131492b9cc5fe66c75b9e1e89081edcd777285acd93f832443d2a395f",
+  "observed": "6195b6e131492b9cc5fe66c75b9e1e89081edcd777285acd93f832443d2a395f",
+  "source": "checkpoints/seed-4/run_manifest.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "manifest[4] -> checkpoint",
+  "expected": "277d3f40896dfe88c46b6674c0e3522c498cf5a7a181f60319057cb172c9debd",
+  "observed": "277d3f40896dfe88c46b6674c0e3522c498cf5a7a181f60319057cb172c9debd",
+  "source": "checkpoints/seed-4/checkpoint.pt",
+  "convention": "file bytes",
+  "status": "MATCH"
+ },
+ {
+  "link": "result -> payload[4]",
+  "expected": "a9b427cf9b18d6d8fc305bf27f2ffdb06ad4837b3d938f8ac7d865b36dccf4e8",
+  "observed": "a9b427cf9b18d6d8fc305bf27f2ffdb06ad4837b3d938f8ac7d865b36dccf4e8",
+  "source": "payloads/seed-4.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "provenance -> manifest[5]",
+  "expected": "029d5817813780f1c49e886b90593605fcfc3997ebc0c2b46e6448ee7b329d9d",
+  "observed": "029d5817813780f1c49e886b90593605fcfc3997ebc0c2b46e6448ee7b329d9d",
+  "source": "checkpoints/seed-5/run_manifest.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "manifest[5] -> checkpoint",
+  "expected": "1f7f86017ab27412c66928314a229d9da2ce193d82b08feb33ce7841933e1475",
+  "observed": "1f7f86017ab27412c66928314a229d9da2ce193d82b08feb33ce7841933e1475",
+  "source": "checkpoints/seed-5/checkpoint.pt",
+  "convention": "file bytes",
+  "status": "MATCH"
+ },
+ {
+  "link": "result -> payload[5]",
+  "expected": "9b8704024a9f4326fad24c21f8d8f2db13e6a891a2863bc51d84853ecd9755ba",
+  "observed": "9b8704024a9f4326fad24c21f8d8f2db13e6a891a2863bc51d84853ecd9755ba",
+  "source": "payloads/seed-5.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "provenance -> manifest[6]",
+  "expected": "5dd9e05a3e5be28005bae14db5942efd2e53678128313b01e34e665ee2eef9b1",
+  "observed": "5dd9e05a3e5be28005bae14db5942efd2e53678128313b01e34e665ee2eef9b1",
+  "source": "checkpoints/seed-6/run_manifest.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "manifest[6] -> checkpoint",
+  "expected": "3f049f2586b3b4ec8c6cf5ca2f074d3cd93f9370c7ea3c3aea89788bd2a69d94",
+  "observed": "3f049f2586b3b4ec8c6cf5ca2f074d3cd93f9370c7ea3c3aea89788bd2a69d94",
+  "source": "checkpoints/seed-6/checkpoint.pt",
+  "convention": "file bytes",
+  "status": "MATCH"
+ },
+ {
+  "link": "result -> payload[6]",
+  "expected": "fa4606908d2120d4350015c1f5e068d3ecaef940511a03477b39694f2c292373",
+  "observed": "fa4606908d2120d4350015c1f5e068d3ecaef940511a03477b39694f2c292373",
+  "source": "payloads/seed-6.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "provenance -> manifest[7]",
+  "expected": "5e083e09930fbe459baf42f76502dcc87dbaa39e54898980325ba1322d17a0b5",
+  "observed": "5e083e09930fbe459baf42f76502dcc87dbaa39e54898980325ba1322d17a0b5",
+  "source": "checkpoints/seed-7/run_manifest.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ },
+ {
+  "link": "manifest[7] -> checkpoint",
+  "expected": "877562834327d402be659d597be49461d4822d3d31fab69c4872b92d7bfd7b8e",
+  "observed": "877562834327d402be659d597be49461d4822d3d31fab69c4872b92d7bfd7b8e",
+  "source": "checkpoints/seed-7/checkpoint.pt",
+  "convention": "file bytes",
+  "status": "MATCH"
+ },
+ {
+  "link": "result -> payload[7]",
+  "expected": "1c03e040ffe1df0ff7de4cfeca844f000402cf9ccae90a8268e7011bcc93afa6",
+  "observed": "1c03e040ffe1df0ff7de4cfeca844f000402cf9ccae90a8268e7011bcc93afa6",
+  "source": "payloads/seed-7.json",
+  "convention": "canonical",
+  "status": "MATCH"
+ }
+]

@@ -1,0 +1,24 @@
+{
+  "schema_name": "policy_improvement_exp1b_replay_build_identity_v1",
+  "schema_version": 1,
+  "built_at": "2026-09-14T14:50:37-07:00",
+  "source_base_revision": "2a14eb656bd983c37b60e92852083524348511d8",
+  "producer": {
+    "target": "fbcode//buiksat_trm:policy_improvement_exp1b_replay",
+    "build_mode": "@fbcode//mode/opt",
+    "artifact": "/data/repos/fbsource/buck-out/v2/art/fbcode/52588bd379d6be4f/buiksat_trm/__policy_improvement_exp1b_replay__/policy_improvement_exp1b_replay.par",
+    "size_bytes": 1468017060,
+    "sha256": "fa514950a6533b2de671e53ddbd5ef519528a2fd2fd2e8e384afb1fbe1182a9c",
+    "entrypoint_source_sha256": "247f5f01f3b83730f71f61003c8edf4706e102faa9d45af2a80cdf0d998dd7be"
+  },
+  "consumer": {
+    "target": "fbcode//buiksat_trm:policy_improvement_exp1b_replay_consumer",
+    "build_mode": "@fbcode//mode/opt",
+    "artifact": "/data/repos/fbsource/buck-out/v2/art/fbcode/52588bd379d6be4f/buiksat_trm/__policy_improvement_exp1b_replay_consumer__/policy_improvement_exp1b_replay_consumer.par",
+    "size_bytes": 808703,
+    "sha256": "f9edbcc9808d7a5b64c14487d8c3750d4392d416a9551bcee3b89a9980c5c98c",
+    "entrypoint_source_sha256": "6cdab3e59c5b184deb26e9829d0aeddc0fe855afc9a4a16430aad1bb482fee7f"
+  },
+  "buck_file_sha256": "7e00b099d4815bf4d5f216d057c7eea2cddd4b6fa7067b609e9f734bb6d77e1c",
+  "build_log": "/home/buiksat/upi-trm-audit-20260914/replay/logs/consumer-build-final.log"
+}

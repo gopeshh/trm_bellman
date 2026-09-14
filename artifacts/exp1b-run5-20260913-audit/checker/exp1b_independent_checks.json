@@ -1,0 +1,1878 @@
+{
+  "checks": [
+    {
+      "expected": "71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74",
+      "name": "result canonical digest",
+      "observed": "71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74",
+      "status": "pass"
+    },
+    {
+      "expected": 35,
+      "name": "chain link count",
+      "observed": 35,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "add935bac37aa23578cd0586aa8bbed769172b65380fae6d6ccb7af52371a063",
+        "link": "exp1b protocol",
+        "observed": "add935bac37aa23578cd0586aa8bbed769172b65380fae6d6ccb7af52371a063",
+        "source": "configs/policy_improvement_exp1b/protocol.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 0",
+      "observed": {
+        "convention": "canonical",
+        "expected": "add935bac37aa23578cd0586aa8bbed769172b65380fae6d6ccb7af52371a063",
+        "link": "exp1b protocol",
+        "observed": "add935bac37aa23578cd0586aa8bbed769172b65380fae6d6ccb7af52371a063",
+        "source": "configs/policy_improvement_exp1b/protocol.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "add935bac37aa23578cd0586aa8bbed769172b65380fae6d6ccb7af52371a063",
+      "name": "chain link 0: exp1b protocol",
+      "observed": "add935bac37aa23578cd0586aa8bbed769172b65380fae6d6ccb7af52371a063",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "a4441a1758dbc61baed4d87263e593019ae415f4ecab586c549feef643457116",
+        "link": "exp1b registry",
+        "observed": "a4441a1758dbc61baed4d87263e593019ae415f4ecab586c549feef643457116",
+        "source": "configs/policy_improvement_exp1b/registry.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 1",
+      "observed": {
+        "convention": "canonical",
+        "expected": "a4441a1758dbc61baed4d87263e593019ae415f4ecab586c549feef643457116",
+        "link": "exp1b registry",
+        "observed": "a4441a1758dbc61baed4d87263e593019ae415f4ecab586c549feef643457116",
+        "source": "configs/policy_improvement_exp1b/registry.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "a4441a1758dbc61baed4d87263e593019ae415f4ecab586c549feef643457116",
+      "name": "chain link 1: exp1b registry",
+      "observed": "a4441a1758dbc61baed4d87263e593019ae415f4ecab586c549feef643457116",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+        "link": "exp1b amendment",
+        "observed": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+        "source": "configs/policy_improvement_exp1b/amendments/reduced_study_exp1b.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 2",
+      "observed": {
+        "convention": "canonical",
+        "expected": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+        "link": "exp1b amendment",
+        "observed": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+        "source": "configs/policy_improvement_exp1b/amendments/reduced_study_exp1b.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+      "name": "chain link 2: exp1b amendment",
+      "observed": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "link": "bp amendment -> auth",
+        "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "source": "signed/base_policy_amendment",
+        "status": "MATCH"
+      },
+      "name": "chain table row 3",
+      "observed": {
+        "convention": "canonical",
+        "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "link": "bp amendment -> auth",
+        "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "source": "signed/base_policy_amendment",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+      "name": "chain link 3: bp amendment -> auth",
+      "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "link": "admission[full] -> auth",
+        "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "source": "signed/execution_admission",
+        "status": "MATCH"
+      },
+      "name": "chain table row 4",
+      "observed": {
+        "convention": "canonical",
+        "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "link": "admission[full] -> auth",
+        "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "source": "signed/execution_admission",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+      "name": "chain link 4: admission[full] -> auth",
+      "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "link": "admission[bridge] -> auth",
+        "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "source": "signed/execution_admission",
+        "status": "MATCH"
+      },
+      "name": "chain table row 5",
+      "observed": {
+        "convention": "canonical",
+        "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "link": "admission[bridge] -> auth",
+        "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+        "source": "signed/execution_admission",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+      "name": "chain link 5: admission[bridge] -> auth",
+      "observed": "203621ee0c5eb3d3b042b6d447f2832c4f37c8c99d8ed0f628480f1b30326ab4",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "4f12873ac1413860378c72532d6dc5eb6e8793d316bbe5c3025df3b7161a8161",
+        "link": "admission -> bp amendment",
+        "observed": "4f12873ac1413860378c72532d6dc5eb6e8793d316bbe5c3025df3b7161a8161",
+        "source": "signed/execution_admission",
+        "status": "MATCH"
+      },
+      "name": "chain table row 6",
+      "observed": {
+        "convention": "canonical",
+        "expected": "4f12873ac1413860378c72532d6dc5eb6e8793d316bbe5c3025df3b7161a8161",
+        "link": "admission -> bp amendment",
+        "observed": "4f12873ac1413860378c72532d6dc5eb6e8793d316bbe5c3025df3b7161a8161",
+        "source": "signed/execution_admission",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "4f12873ac1413860378c72532d6dc5eb6e8793d316bbe5c3025df3b7161a8161",
+      "name": "chain link 6: admission -> bp amendment",
+      "observed": "4f12873ac1413860378c72532d6dc5eb6e8793d316bbe5c3025df3b7161a8161",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+        "link": "admission -> exp1b amendment",
+        "observed": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+        "source": "signed/execution_admission",
+        "status": "MATCH"
+      },
+      "name": "chain table row 7",
+      "observed": {
+        "convention": "canonical",
+        "expected": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+        "link": "admission -> exp1b amendment",
+        "observed": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+        "source": "signed/execution_admission",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+      "name": "chain link 7: admission -> exp1b amendment",
+      "observed": "6e3c22a3d412c487498a713e96b2c7a0904188b7baabb8f64ec1e9586a8b3092",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "2bbeacf2675e9cb9f3b75c8e475f6ef1620e6d6f59d4c3e04f9974e2472f9a1d",
+        "link": "provenance -> admission",
+        "observed": "2bbeacf2675e9cb9f3b75c8e475f6ef1620e6d6f59d4c3e04f9974e2472f9a1d",
+        "source": "result/provenance.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 8",
+      "observed": {
+        "convention": "canonical",
+        "expected": "2bbeacf2675e9cb9f3b75c8e475f6ef1620e6d6f59d4c3e04f9974e2472f9a1d",
+        "link": "provenance -> admission",
+        "observed": "2bbeacf2675e9cb9f3b75c8e475f6ef1620e6d6f59d4c3e04f9974e2472f9a1d",
+        "source": "result/provenance.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "2bbeacf2675e9cb9f3b75c8e475f6ef1620e6d6f59d4c3e04f9974e2472f9a1d",
+      "name": "chain link 8: provenance -> admission",
+      "observed": "2bbeacf2675e9cb9f3b75c8e475f6ef1620e6d6f59d4c3e04f9974e2472f9a1d",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "7b08deb85bb00ee8abe1719bcf5f8b48ef332688abca50c3a72b9d637625cac5",
+        "link": "result -> provenance",
+        "observed": "7b08deb85bb00ee8abe1719bcf5f8b48ef332688abca50c3a72b9d637625cac5",
+        "source": "result/exp1b_result.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 9",
+      "observed": {
+        "convention": "canonical",
+        "expected": "7b08deb85bb00ee8abe1719bcf5f8b48ef332688abca50c3a72b9d637625cac5",
+        "link": "result -> provenance",
+        "observed": "7b08deb85bb00ee8abe1719bcf5f8b48ef332688abca50c3a72b9d637625cac5",
+        "source": "result/exp1b_result.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "7b08deb85bb00ee8abe1719bcf5f8b48ef332688abca50c3a72b9d637625cac5",
+      "name": "chain link 9: result -> provenance",
+      "observed": "7b08deb85bb00ee8abe1719bcf5f8b48ef332688abca50c3a72b9d637625cac5",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74",
+        "link": "published result digest",
+        "observed": "71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74",
+        "source": "result/exp1b_result.sha256",
+        "status": "MATCH"
+      },
+      "name": "chain table row 10",
+      "observed": {
+        "convention": "canonical",
+        "expected": "71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74",
+        "link": "published result digest",
+        "observed": "71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74",
+        "source": "result/exp1b_result.sha256",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74",
+      "name": "chain link 10: published result digest",
+      "observed": "71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "a8e76a612b3454070cfe7ef789b640e43b9d01c825ce7d62b10b5e3baa2032f4",
+        "link": "provenance -> manifest[0]",
+        "observed": "a8e76a612b3454070cfe7ef789b640e43b9d01c825ce7d62b10b5e3baa2032f4",
+        "source": "checkpoints/seed-0/run_manifest.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 11",
+      "observed": {
+        "convention": "canonical",
+        "expected": "a8e76a612b3454070cfe7ef789b640e43b9d01c825ce7d62b10b5e3baa2032f4",
+        "link": "provenance -> manifest[0]",
+        "observed": "a8e76a612b3454070cfe7ef789b640e43b9d01c825ce7d62b10b5e3baa2032f4",
+        "source": "checkpoints/seed-0/run_manifest.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "a8e76a612b3454070cfe7ef789b640e43b9d01c825ce7d62b10b5e3baa2032f4",
+      "name": "chain link 11: provenance -> manifest[0]",
+      "observed": "a8e76a612b3454070cfe7ef789b640e43b9d01c825ce7d62b10b5e3baa2032f4",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "file bytes",
+        "expected": "2046db70131f645fd7c103ca7badba4c73366e441f1b2d7f617163483f3628af",
+        "link": "manifest[0] -> checkpoint",
+        "observed": "2046db70131f645fd7c103ca7badba4c73366e441f1b2d7f617163483f3628af",
+        "source": "checkpoints/seed-0/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "name": "chain table row 12",
+      "observed": {
+        "convention": "file bytes",
+        "expected": "2046db70131f645fd7c103ca7badba4c73366e441f1b2d7f617163483f3628af",
+        "link": "manifest[0] -> checkpoint",
+        "observed": "2046db70131f645fd7c103ca7badba4c73366e441f1b2d7f617163483f3628af",
+        "source": "checkpoints/seed-0/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "2046db70131f645fd7c103ca7badba4c73366e441f1b2d7f617163483f3628af",
+      "name": "chain link 12: manifest[0] -> checkpoint",
+      "observed": "2046db70131f645fd7c103ca7badba4c73366e441f1b2d7f617163483f3628af",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "e4a29d5e9c6581d7495a468c2b79dec50b3d2aca2faf0c020976ab56beb98029",
+        "link": "result -> payload[0]",
+        "observed": "e4a29d5e9c6581d7495a468c2b79dec50b3d2aca2faf0c020976ab56beb98029",
+        "source": "payloads/seed-0.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 13",
+      "observed": {
+        "convention": "canonical",
+        "expected": "e4a29d5e9c6581d7495a468c2b79dec50b3d2aca2faf0c020976ab56beb98029",
+        "link": "result -> payload[0]",
+        "observed": "e4a29d5e9c6581d7495a468c2b79dec50b3d2aca2faf0c020976ab56beb98029",
+        "source": "payloads/seed-0.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "e4a29d5e9c6581d7495a468c2b79dec50b3d2aca2faf0c020976ab56beb98029",
+      "name": "chain link 13: result -> payload[0]",
+      "observed": "e4a29d5e9c6581d7495a468c2b79dec50b3d2aca2faf0c020976ab56beb98029",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "25f74beca06d48a336bbf0508a20e051113138b5bb48c7e6ad6fd3d3c6f82cf4",
+        "link": "provenance -> manifest[1]",
+        "observed": "25f74beca06d48a336bbf0508a20e051113138b5bb48c7e6ad6fd3d3c6f82cf4",
+        "source": "checkpoints/seed-1/run_manifest.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 14",
+      "observed": {
+        "convention": "canonical",
+        "expected": "25f74beca06d48a336bbf0508a20e051113138b5bb48c7e6ad6fd3d3c6f82cf4",
+        "link": "provenance -> manifest[1]",
+        "observed": "25f74beca06d48a336bbf0508a20e051113138b5bb48c7e6ad6fd3d3c6f82cf4",
+        "source": "checkpoints/seed-1/run_manifest.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "25f74beca06d48a336bbf0508a20e051113138b5bb48c7e6ad6fd3d3c6f82cf4",
+      "name": "chain link 14: provenance -> manifest[1]",
+      "observed": "25f74beca06d48a336bbf0508a20e051113138b5bb48c7e6ad6fd3d3c6f82cf4",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "file bytes",
+        "expected": "aae94896308cd6b7ec1abce65ea7f38502a008ffc161447554577f467ae9cb86",
+        "link": "manifest[1] -> checkpoint",
+        "observed": "aae94896308cd6b7ec1abce65ea7f38502a008ffc161447554577f467ae9cb86",
+        "source": "checkpoints/seed-1/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "name": "chain table row 15",
+      "observed": {
+        "convention": "file bytes",
+        "expected": "aae94896308cd6b7ec1abce65ea7f38502a008ffc161447554577f467ae9cb86",
+        "link": "manifest[1] -> checkpoint",
+        "observed": "aae94896308cd6b7ec1abce65ea7f38502a008ffc161447554577f467ae9cb86",
+        "source": "checkpoints/seed-1/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "aae94896308cd6b7ec1abce65ea7f38502a008ffc161447554577f467ae9cb86",
+      "name": "chain link 15: manifest[1] -> checkpoint",
+      "observed": "aae94896308cd6b7ec1abce65ea7f38502a008ffc161447554577f467ae9cb86",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "af341e393b6a32e6749b099f5f49c5ca09336adced504f85e01f181acacace48",
+        "link": "result -> payload[1]",
+        "observed": "af341e393b6a32e6749b099f5f49c5ca09336adced504f85e01f181acacace48",
+        "source": "payloads/seed-1.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 16",
+      "observed": {
+        "convention": "canonical",
+        "expected": "af341e393b6a32e6749b099f5f49c5ca09336adced504f85e01f181acacace48",
+        "link": "result -> payload[1]",
+        "observed": "af341e393b6a32e6749b099f5f49c5ca09336adced504f85e01f181acacace48",
+        "source": "payloads/seed-1.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "af341e393b6a32e6749b099f5f49c5ca09336adced504f85e01f181acacace48",
+      "name": "chain link 16: result -> payload[1]",
+      "observed": "af341e393b6a32e6749b099f5f49c5ca09336adced504f85e01f181acacace48",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "1244070ed49f48a5c87981d48e3b4e8635df51cec04c58cf409a804c5bdabf07",
+        "link": "provenance -> manifest[2]",
+        "observed": "1244070ed49f48a5c87981d48e3b4e8635df51cec04c58cf409a804c5bdabf07",
+        "source": "checkpoints/seed-2/run_manifest.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 17",
+      "observed": {
+        "convention": "canonical",
+        "expected": "1244070ed49f48a5c87981d48e3b4e8635df51cec04c58cf409a804c5bdabf07",
+        "link": "provenance -> manifest[2]",
+        "observed": "1244070ed49f48a5c87981d48e3b4e8635df51cec04c58cf409a804c5bdabf07",
+        "source": "checkpoints/seed-2/run_manifest.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "1244070ed49f48a5c87981d48e3b4e8635df51cec04c58cf409a804c5bdabf07",
+      "name": "chain link 17: provenance -> manifest[2]",
+      "observed": "1244070ed49f48a5c87981d48e3b4e8635df51cec04c58cf409a804c5bdabf07",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "file bytes",
+        "expected": "ffd4bdf56c992b67ac519fd053c0608bd67ece8778223405056b4d6b7347040c",
+        "link": "manifest[2] -> checkpoint",
+        "observed": "ffd4bdf56c992b67ac519fd053c0608bd67ece8778223405056b4d6b7347040c",
+        "source": "checkpoints/seed-2/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "name": "chain table row 18",
+      "observed": {
+        "convention": "file bytes",
+        "expected": "ffd4bdf56c992b67ac519fd053c0608bd67ece8778223405056b4d6b7347040c",
+        "link": "manifest[2] -> checkpoint",
+        "observed": "ffd4bdf56c992b67ac519fd053c0608bd67ece8778223405056b4d6b7347040c",
+        "source": "checkpoints/seed-2/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "ffd4bdf56c992b67ac519fd053c0608bd67ece8778223405056b4d6b7347040c",
+      "name": "chain link 18: manifest[2] -> checkpoint",
+      "observed": "ffd4bdf56c992b67ac519fd053c0608bd67ece8778223405056b4d6b7347040c",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "7c45197c917dc2fba840d9280efc935743f1b19efea562b7b35d9cafabb52397",
+        "link": "result -> payload[2]",
+        "observed": "7c45197c917dc2fba840d9280efc935743f1b19efea562b7b35d9cafabb52397",
+        "source": "payloads/seed-2.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 19",
+      "observed": {
+        "convention": "canonical",
+        "expected": "7c45197c917dc2fba840d9280efc935743f1b19efea562b7b35d9cafabb52397",
+        "link": "result -> payload[2]",
+        "observed": "7c45197c917dc2fba840d9280efc935743f1b19efea562b7b35d9cafabb52397",
+        "source": "payloads/seed-2.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "7c45197c917dc2fba840d9280efc935743f1b19efea562b7b35d9cafabb52397",
+      "name": "chain link 19: result -> payload[2]",
+      "observed": "7c45197c917dc2fba840d9280efc935743f1b19efea562b7b35d9cafabb52397",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "f6cfe141fa482be6d80889e171e97b7681c6ae85a70042c026221886c14b4bea",
+        "link": "provenance -> manifest[3]",
+        "observed": "f6cfe141fa482be6d80889e171e97b7681c6ae85a70042c026221886c14b4bea",
+        "source": "checkpoints/seed-3/run_manifest.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 20",
+      "observed": {
+        "convention": "canonical",
+        "expected": "f6cfe141fa482be6d80889e171e97b7681c6ae85a70042c026221886c14b4bea",
+        "link": "provenance -> manifest[3]",
+        "observed": "f6cfe141fa482be6d80889e171e97b7681c6ae85a70042c026221886c14b4bea",
+        "source": "checkpoints/seed-3/run_manifest.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "f6cfe141fa482be6d80889e171e97b7681c6ae85a70042c026221886c14b4bea",
+      "name": "chain link 20: provenance -> manifest[3]",
+      "observed": "f6cfe141fa482be6d80889e171e97b7681c6ae85a70042c026221886c14b4bea",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "file bytes",
+        "expected": "3c744fa10c259b2ac02ad4a3eecd73a808510071b175f5307ff08c4b80d7939c",
+        "link": "manifest[3] -> checkpoint",
+        "observed": "3c744fa10c259b2ac02ad4a3eecd73a808510071b175f5307ff08c4b80d7939c",
+        "source": "checkpoints/seed-3/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "name": "chain table row 21",
+      "observed": {
+        "convention": "file bytes",
+        "expected": "3c744fa10c259b2ac02ad4a3eecd73a808510071b175f5307ff08c4b80d7939c",
+        "link": "manifest[3] -> checkpoint",
+        "observed": "3c744fa10c259b2ac02ad4a3eecd73a808510071b175f5307ff08c4b80d7939c",
+        "source": "checkpoints/seed-3/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "3c744fa10c259b2ac02ad4a3eecd73a808510071b175f5307ff08c4b80d7939c",
+      "name": "chain link 21: manifest[3] -> checkpoint",
+      "observed": "3c744fa10c259b2ac02ad4a3eecd73a808510071b175f5307ff08c4b80d7939c",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "49f6ee8c13fa113389e8174136f5639ce07843a91fc98136d2629a72d4527064",
+        "link": "result -> payload[3]",
+        "observed": "49f6ee8c13fa113389e8174136f5639ce07843a91fc98136d2629a72d4527064",
+        "source": "payloads/seed-3.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 22",
+      "observed": {
+        "convention": "canonical",
+        "expected": "49f6ee8c13fa113389e8174136f5639ce07843a91fc98136d2629a72d4527064",
+        "link": "result -> payload[3]",
+        "observed": "49f6ee8c13fa113389e8174136f5639ce07843a91fc98136d2629a72d4527064",
+        "source": "payloads/seed-3.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "49f6ee8c13fa113389e8174136f5639ce07843a91fc98136d2629a72d4527064",
+      "name": "chain link 22: result -> payload[3]",
+      "observed": "49f6ee8c13fa113389e8174136f5639ce07843a91fc98136d2629a72d4527064",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "6195b6e131492b9cc5fe66c75b9e1e89081edcd777285acd93f832443d2a395f",
+        "link": "provenance -> manifest[4]",
+        "observed": "6195b6e131492b9cc5fe66c75b9e1e89081edcd777285acd93f832443d2a395f",
+        "source": "checkpoints/seed-4/run_manifest.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 23",
+      "observed": {
+        "convention": "canonical",
+        "expected": "6195b6e131492b9cc5fe66c75b9e1e89081edcd777285acd93f832443d2a395f",
+        "link": "provenance -> manifest[4]",
+        "observed": "6195b6e131492b9cc5fe66c75b9e1e89081edcd777285acd93f832443d2a395f",
+        "source": "checkpoints/seed-4/run_manifest.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "6195b6e131492b9cc5fe66c75b9e1e89081edcd777285acd93f832443d2a395f",
+      "name": "chain link 23: provenance -> manifest[4]",
+      "observed": "6195b6e131492b9cc5fe66c75b9e1e89081edcd777285acd93f832443d2a395f",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "file bytes",
+        "expected": "277d3f40896dfe88c46b6674c0e3522c498cf5a7a181f60319057cb172c9debd",
+        "link": "manifest[4] -> checkpoint",
+        "observed": "277d3f40896dfe88c46b6674c0e3522c498cf5a7a181f60319057cb172c9debd",
+        "source": "checkpoints/seed-4/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "name": "chain table row 24",
+      "observed": {
+        "convention": "file bytes",
+        "expected": "277d3f40896dfe88c46b6674c0e3522c498cf5a7a181f60319057cb172c9debd",
+        "link": "manifest[4] -> checkpoint",
+        "observed": "277d3f40896dfe88c46b6674c0e3522c498cf5a7a181f60319057cb172c9debd",
+        "source": "checkpoints/seed-4/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "277d3f40896dfe88c46b6674c0e3522c498cf5a7a181f60319057cb172c9debd",
+      "name": "chain link 24: manifest[4] -> checkpoint",
+      "observed": "277d3f40896dfe88c46b6674c0e3522c498cf5a7a181f60319057cb172c9debd",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "a9b427cf9b18d6d8fc305bf27f2ffdb06ad4837b3d938f8ac7d865b36dccf4e8",
+        "link": "result -> payload[4]",
+        "observed": "a9b427cf9b18d6d8fc305bf27f2ffdb06ad4837b3d938f8ac7d865b36dccf4e8",
+        "source": "payloads/seed-4.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 25",
+      "observed": {
+        "convention": "canonical",
+        "expected": "a9b427cf9b18d6d8fc305bf27f2ffdb06ad4837b3d938f8ac7d865b36dccf4e8",
+        "link": "result -> payload[4]",
+        "observed": "a9b427cf9b18d6d8fc305bf27f2ffdb06ad4837b3d938f8ac7d865b36dccf4e8",
+        "source": "payloads/seed-4.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "a9b427cf9b18d6d8fc305bf27f2ffdb06ad4837b3d938f8ac7d865b36dccf4e8",
+      "name": "chain link 25: result -> payload[4]",
+      "observed": "a9b427cf9b18d6d8fc305bf27f2ffdb06ad4837b3d938f8ac7d865b36dccf4e8",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "029d5817813780f1c49e886b90593605fcfc3997ebc0c2b46e6448ee7b329d9d",
+        "link": "provenance -> manifest[5]",
+        "observed": "029d5817813780f1c49e886b90593605fcfc3997ebc0c2b46e6448ee7b329d9d",
+        "source": "checkpoints/seed-5/run_manifest.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 26",
+      "observed": {
+        "convention": "canonical",
+        "expected": "029d5817813780f1c49e886b90593605fcfc3997ebc0c2b46e6448ee7b329d9d",
+        "link": "provenance -> manifest[5]",
+        "observed": "029d5817813780f1c49e886b90593605fcfc3997ebc0c2b46e6448ee7b329d9d",
+        "source": "checkpoints/seed-5/run_manifest.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "029d5817813780f1c49e886b90593605fcfc3997ebc0c2b46e6448ee7b329d9d",
+      "name": "chain link 26: provenance -> manifest[5]",
+      "observed": "029d5817813780f1c49e886b90593605fcfc3997ebc0c2b46e6448ee7b329d9d",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "file bytes",
+        "expected": "1f7f86017ab27412c66928314a229d9da2ce193d82b08feb33ce7841933e1475",
+        "link": "manifest[5] -> checkpoint",
+        "observed": "1f7f86017ab27412c66928314a229d9da2ce193d82b08feb33ce7841933e1475",
+        "source": "checkpoints/seed-5/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "name": "chain table row 27",
+      "observed": {
+        "convention": "file bytes",
+        "expected": "1f7f86017ab27412c66928314a229d9da2ce193d82b08feb33ce7841933e1475",
+        "link": "manifest[5] -> checkpoint",
+        "observed": "1f7f86017ab27412c66928314a229d9da2ce193d82b08feb33ce7841933e1475",
+        "source": "checkpoints/seed-5/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "1f7f86017ab27412c66928314a229d9da2ce193d82b08feb33ce7841933e1475",
+      "name": "chain link 27: manifest[5] -> checkpoint",
+      "observed": "1f7f86017ab27412c66928314a229d9da2ce193d82b08feb33ce7841933e1475",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "9b8704024a9f4326fad24c21f8d8f2db13e6a891a2863bc51d84853ecd9755ba",
+        "link": "result -> payload[5]",
+        "observed": "9b8704024a9f4326fad24c21f8d8f2db13e6a891a2863bc51d84853ecd9755ba",
+        "source": "payloads/seed-5.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 28",
+      "observed": {
+        "convention": "canonical",
+        "expected": "9b8704024a9f4326fad24c21f8d8f2db13e6a891a2863bc51d84853ecd9755ba",
+        "link": "result -> payload[5]",
+        "observed": "9b8704024a9f4326fad24c21f8d8f2db13e6a891a2863bc51d84853ecd9755ba",
+        "source": "payloads/seed-5.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "9b8704024a9f4326fad24c21f8d8f2db13e6a891a2863bc51d84853ecd9755ba",
+      "name": "chain link 28: result -> payload[5]",
+      "observed": "9b8704024a9f4326fad24c21f8d8f2db13e6a891a2863bc51d84853ecd9755ba",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "5dd9e05a3e5be28005bae14db5942efd2e53678128313b01e34e665ee2eef9b1",
+        "link": "provenance -> manifest[6]",
+        "observed": "5dd9e05a3e5be28005bae14db5942efd2e53678128313b01e34e665ee2eef9b1",
+        "source": "checkpoints/seed-6/run_manifest.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 29",
+      "observed": {
+        "convention": "canonical",
+        "expected": "5dd9e05a3e5be28005bae14db5942efd2e53678128313b01e34e665ee2eef9b1",
+        "link": "provenance -> manifest[6]",
+        "observed": "5dd9e05a3e5be28005bae14db5942efd2e53678128313b01e34e665ee2eef9b1",
+        "source": "checkpoints/seed-6/run_manifest.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "5dd9e05a3e5be28005bae14db5942efd2e53678128313b01e34e665ee2eef9b1",
+      "name": "chain link 29: provenance -> manifest[6]",
+      "observed": "5dd9e05a3e5be28005bae14db5942efd2e53678128313b01e34e665ee2eef9b1",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "file bytes",
+        "expected": "3f049f2586b3b4ec8c6cf5ca2f074d3cd93f9370c7ea3c3aea89788bd2a69d94",
+        "link": "manifest[6] -> checkpoint",
+        "observed": "3f049f2586b3b4ec8c6cf5ca2f074d3cd93f9370c7ea3c3aea89788bd2a69d94",
+        "source": "checkpoints/seed-6/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "name": "chain table row 30",
+      "observed": {
+        "convention": "file bytes",
+        "expected": "3f049f2586b3b4ec8c6cf5ca2f074d3cd93f9370c7ea3c3aea89788bd2a69d94",
+        "link": "manifest[6] -> checkpoint",
+        "observed": "3f049f2586b3b4ec8c6cf5ca2f074d3cd93f9370c7ea3c3aea89788bd2a69d94",
+        "source": "checkpoints/seed-6/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "3f049f2586b3b4ec8c6cf5ca2f074d3cd93f9370c7ea3c3aea89788bd2a69d94",
+      "name": "chain link 30: manifest[6] -> checkpoint",
+      "observed": "3f049f2586b3b4ec8c6cf5ca2f074d3cd93f9370c7ea3c3aea89788bd2a69d94",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "fa4606908d2120d4350015c1f5e068d3ecaef940511a03477b39694f2c292373",
+        "link": "result -> payload[6]",
+        "observed": "fa4606908d2120d4350015c1f5e068d3ecaef940511a03477b39694f2c292373",
+        "source": "payloads/seed-6.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 31",
+      "observed": {
+        "convention": "canonical",
+        "expected": "fa4606908d2120d4350015c1f5e068d3ecaef940511a03477b39694f2c292373",
+        "link": "result -> payload[6]",
+        "observed": "fa4606908d2120d4350015c1f5e068d3ecaef940511a03477b39694f2c292373",
+        "source": "payloads/seed-6.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "fa4606908d2120d4350015c1f5e068d3ecaef940511a03477b39694f2c292373",
+      "name": "chain link 31: result -> payload[6]",
+      "observed": "fa4606908d2120d4350015c1f5e068d3ecaef940511a03477b39694f2c292373",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "5e083e09930fbe459baf42f76502dcc87dbaa39e54898980325ba1322d17a0b5",
+        "link": "provenance -> manifest[7]",
+        "observed": "5e083e09930fbe459baf42f76502dcc87dbaa39e54898980325ba1322d17a0b5",
+        "source": "checkpoints/seed-7/run_manifest.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 32",
+      "observed": {
+        "convention": "canonical",
+        "expected": "5e083e09930fbe459baf42f76502dcc87dbaa39e54898980325ba1322d17a0b5",
+        "link": "provenance -> manifest[7]",
+        "observed": "5e083e09930fbe459baf42f76502dcc87dbaa39e54898980325ba1322d17a0b5",
+        "source": "checkpoints/seed-7/run_manifest.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "5e083e09930fbe459baf42f76502dcc87dbaa39e54898980325ba1322d17a0b5",
+      "name": "chain link 32: provenance -> manifest[7]",
+      "observed": "5e083e09930fbe459baf42f76502dcc87dbaa39e54898980325ba1322d17a0b5",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "file bytes",
+        "expected": "877562834327d402be659d597be49461d4822d3d31fab69c4872b92d7bfd7b8e",
+        "link": "manifest[7] -> checkpoint",
+        "observed": "877562834327d402be659d597be49461d4822d3d31fab69c4872b92d7bfd7b8e",
+        "source": "checkpoints/seed-7/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "name": "chain table row 33",
+      "observed": {
+        "convention": "file bytes",
+        "expected": "877562834327d402be659d597be49461d4822d3d31fab69c4872b92d7bfd7b8e",
+        "link": "manifest[7] -> checkpoint",
+        "observed": "877562834327d402be659d597be49461d4822d3d31fab69c4872b92d7bfd7b8e",
+        "source": "checkpoints/seed-7/checkpoint.pt",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "877562834327d402be659d597be49461d4822d3d31fab69c4872b92d7bfd7b8e",
+      "name": "chain link 33: manifest[7] -> checkpoint",
+      "observed": "877562834327d402be659d597be49461d4822d3d31fab69c4872b92d7bfd7b8e",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "convention": "canonical",
+        "expected": "1c03e040ffe1df0ff7de4cfeca844f000402cf9ccae90a8268e7011bcc93afa6",
+        "link": "result -> payload[7]",
+        "observed": "1c03e040ffe1df0ff7de4cfeca844f000402cf9ccae90a8268e7011bcc93afa6",
+        "source": "payloads/seed-7.json",
+        "status": "MATCH"
+      },
+      "name": "chain table row 34",
+      "observed": {
+        "convention": "canonical",
+        "expected": "1c03e040ffe1df0ff7de4cfeca844f000402cf9ccae90a8268e7011bcc93afa6",
+        "link": "result -> payload[7]",
+        "observed": "1c03e040ffe1df0ff7de4cfeca844f000402cf9ccae90a8268e7011bcc93afa6",
+        "source": "payloads/seed-7.json",
+        "status": "MATCH"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "1c03e040ffe1df0ff7de4cfeca844f000402cf9ccae90a8268e7011bcc93afa6",
+      "name": "chain link 34: result -> payload[7]",
+      "observed": "1c03e040ffe1df0ff7de4cfeca844f000402cf9ccae90a8268e7011bcc93afa6",
+      "status": "pass"
+    },
+    {
+      "expected": 8,
+      "name": "Stage A manifest digest inventory",
+      "observed": 8,
+      "status": "pass"
+    },
+    {
+      "expected": 8,
+      "name": "registered seed inventory",
+      "observed": 8,
+      "status": "pass"
+    },
+    {
+      "expected": "a8e76a612b3454070cfe7ef789b640e43b9d01c825ce7d62b10b5e3baa2032f4",
+      "name": "Stage A manifest digest 0",
+      "observed": "a8e76a612b3454070cfe7ef789b640e43b9d01c825ce7d62b10b5e3baa2032f4",
+      "status": "pass"
+    },
+    {
+      "expected": 0,
+      "name": "Stage A manifest seed position 0",
+      "observed": 0,
+      "status": "pass"
+    },
+    {
+      "expected": 2081976412,
+      "name": "Stage A manifest seed 0",
+      "observed": 2081976412,
+      "status": "pass"
+    },
+    {
+      "expected": "25f74beca06d48a336bbf0508a20e051113138b5bb48c7e6ad6fd3d3c6f82cf4",
+      "name": "Stage A manifest digest 1",
+      "observed": "25f74beca06d48a336bbf0508a20e051113138b5bb48c7e6ad6fd3d3c6f82cf4",
+      "status": "pass"
+    },
+    {
+      "expected": 1,
+      "name": "Stage A manifest seed position 1",
+      "observed": 1,
+      "status": "pass"
+    },
+    {
+      "expected": 781025396,
+      "name": "Stage A manifest seed 1",
+      "observed": 781025396,
+      "status": "pass"
+    },
+    {
+      "expected": "1244070ed49f48a5c87981d48e3b4e8635df51cec04c58cf409a804c5bdabf07",
+      "name": "Stage A manifest digest 2",
+      "observed": "1244070ed49f48a5c87981d48e3b4e8635df51cec04c58cf409a804c5bdabf07",
+      "status": "pass"
+    },
+    {
+      "expected": 2,
+      "name": "Stage A manifest seed position 2",
+      "observed": 2,
+      "status": "pass"
+    },
+    {
+      "expected": 1148619853,
+      "name": "Stage A manifest seed 2",
+      "observed": 1148619853,
+      "status": "pass"
+    },
+    {
+      "expected": "f6cfe141fa482be6d80889e171e97b7681c6ae85a70042c026221886c14b4bea",
+      "name": "Stage A manifest digest 3",
+      "observed": "f6cfe141fa482be6d80889e171e97b7681c6ae85a70042c026221886c14b4bea",
+      "status": "pass"
+    },
+    {
+      "expected": 3,
+      "name": "Stage A manifest seed position 3",
+      "observed": 3,
+      "status": "pass"
+    },
+    {
+      "expected": 913535362,
+      "name": "Stage A manifest seed 3",
+      "observed": 913535362,
+      "status": "pass"
+    },
+    {
+      "expected": "6195b6e131492b9cc5fe66c75b9e1e89081edcd777285acd93f832443d2a395f",
+      "name": "Stage A manifest digest 4",
+      "observed": "6195b6e131492b9cc5fe66c75b9e1e89081edcd777285acd93f832443d2a395f",
+      "status": "pass"
+    },
+    {
+      "expected": 4,
+      "name": "Stage A manifest seed position 4",
+      "observed": 4,
+      "status": "pass"
+    },
+    {
+      "expected": 2143253519,
+      "name": "Stage A manifest seed 4",
+      "observed": 2143253519,
+      "status": "pass"
+    },
+    {
+      "expected": "029d5817813780f1c49e886b90593605fcfc3997ebc0c2b46e6448ee7b329d9d",
+      "name": "Stage A manifest digest 5",
+      "observed": "029d5817813780f1c49e886b90593605fcfc3997ebc0c2b46e6448ee7b329d9d",
+      "status": "pass"
+    },
+    {
+      "expected": 5,
+      "name": "Stage A manifest seed position 5",
+      "observed": 5,
+      "status": "pass"
+    },
+    {
+      "expected": 2279379379,
+      "name": "Stage A manifest seed 5",
+      "observed": 2279379379,
+      "status": "pass"
+    },
+    {
+      "expected": "5dd9e05a3e5be28005bae14db5942efd2e53678128313b01e34e665ee2eef9b1",
+      "name": "Stage A manifest digest 6",
+      "observed": "5dd9e05a3e5be28005bae14db5942efd2e53678128313b01e34e665ee2eef9b1",
+      "status": "pass"
+    },
+    {
+      "expected": 6,
+      "name": "Stage A manifest seed position 6",
+      "observed": 6,
+      "status": "pass"
+    },
+    {
+      "expected": 402312153,
+      "name": "Stage A manifest seed 6",
+      "observed": 402312153,
+      "status": "pass"
+    },
+    {
+      "expected": "5e083e09930fbe459baf42f76502dcc87dbaa39e54898980325ba1322d17a0b5",
+      "name": "Stage A manifest digest 7",
+      "observed": "5e083e09930fbe459baf42f76502dcc87dbaa39e54898980325ba1322d17a0b5",
+      "status": "pass"
+    },
+    {
+      "expected": 7,
+      "name": "Stage A manifest seed position 7",
+      "observed": 7,
+      "status": "pass"
+    },
+    {
+      "expected": 2736405725,
+      "name": "Stage A manifest seed 7",
+      "observed": 2736405725,
+      "status": "pass"
+    },
+    {
+      "expected": 8,
+      "name": "Stage B payload digest inventory",
+      "observed": 8,
+      "status": "pass"
+    },
+    {
+      "expected": "e4a29d5e9c6581d7495a468c2b79dec50b3d2aca2faf0c020976ab56beb98029",
+      "name": "Stage B payload digest 0",
+      "observed": "e4a29d5e9c6581d7495a468c2b79dec50b3d2aca2faf0c020976ab56beb98029",
+      "status": "pass"
+    },
+    {
+      "expected": "af341e393b6a32e6749b099f5f49c5ca09336adced504f85e01f181acacace48",
+      "name": "Stage B payload digest 1",
+      "observed": "af341e393b6a32e6749b099f5f49c5ca09336adced504f85e01f181acacace48",
+      "status": "pass"
+    },
+    {
+      "expected": "7c45197c917dc2fba840d9280efc935743f1b19efea562b7b35d9cafabb52397",
+      "name": "Stage B payload digest 2",
+      "observed": "7c45197c917dc2fba840d9280efc935743f1b19efea562b7b35d9cafabb52397",
+      "status": "pass"
+    },
+    {
+      "expected": "49f6ee8c13fa113389e8174136f5639ce07843a91fc98136d2629a72d4527064",
+      "name": "Stage B payload digest 3",
+      "observed": "49f6ee8c13fa113389e8174136f5639ce07843a91fc98136d2629a72d4527064",
+      "status": "pass"
+    },
+    {
+      "expected": "a9b427cf9b18d6d8fc305bf27f2ffdb06ad4837b3d938f8ac7d865b36dccf4e8",
+      "name": "Stage B payload digest 4",
+      "observed": "a9b427cf9b18d6d8fc305bf27f2ffdb06ad4837b3d938f8ac7d865b36dccf4e8",
+      "status": "pass"
+    },
+    {
+      "expected": "9b8704024a9f4326fad24c21f8d8f2db13e6a891a2863bc51d84853ecd9755ba",
+      "name": "Stage B payload digest 5",
+      "observed": "9b8704024a9f4326fad24c21f8d8f2db13e6a891a2863bc51d84853ecd9755ba",
+      "status": "pass"
+    },
+    {
+      "expected": "fa4606908d2120d4350015c1f5e068d3ecaef940511a03477b39694f2c292373",
+      "name": "Stage B payload digest 6",
+      "observed": "fa4606908d2120d4350015c1f5e068d3ecaef940511a03477b39694f2c292373",
+      "status": "pass"
+    },
+    {
+      "expected": "1c03e040ffe1df0ff7de4cfeca844f000402cf9ccae90a8268e7011bcc93afa6",
+      "name": "Stage B payload digest 7",
+      "observed": "1c03e040ffe1df0ff7de4cfeca844f000402cf9ccae90a8268e7011bcc93afa6",
+      "status": "pass"
+    },
+    {
+      "expected": 8,
+      "name": "result seed count",
+      "observed": 8,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "0.99",
+        "float_hex": "0x1.fae147ae147aep-1"
+      },
+      "name": "result gamma",
+      "observed": {
+        "decimal": "0.99",
+        "float_hex": "0x1.fae147ae147aep-1"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": 1,
+      "name": "result Bellman horizon",
+      "observed": 1,
+      "status": "pass"
+    },
+    {
+      "expected": 2,
+      "name": "result deployed depth",
+      "observed": 2,
+      "status": "pass"
+    },
+    {
+      "expected": 8,
+      "name": "result reference depth",
+      "observed": 8,
+      "status": "pass"
+    },
+    {
+      "expected": 8,
+      "name": "signed gap inventory",
+      "observed": 8,
+      "status": "pass"
+    },
+    {
+      "expected": 8,
+      "name": "seed row inventory",
+      "observed": 8,
+      "status": "pass"
+    },
+    {
+      "expected": 128,
+      "name": "payload state count 0",
+      "observed": 128,
+      "status": "pass"
+    },
+    {
+      "expected": 0,
+      "name": "payload seed position 0",
+      "observed": 0,
+      "status": "pass"
+    },
+    {
+      "expected": 2081976412,
+      "name": "payload seed 0",
+      "observed": 2081976412,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "21.880301018232558",
+        "float_hex": "0x1.5e15b6853f1c0p+4"
+      },
+      "name": "per-seed gap 0: payload",
+      "observed": {
+        "decimal": "21.880301018232558",
+        "float_hex": "0x1.5e15b6853f1c0p+4"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "21.880301018232558",
+        "float_hex": "0x1.5e15b6853f1c0p+4"
+      },
+      "name": "per-seed gap 0: result vector",
+      "observed": {
+        "decimal": "21.880301018232558",
+        "float_hex": "0x1.5e15b6853f1c0p+4"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "21.880301018232558",
+        "float_hex": "0x1.5e15b6853f1c0p+4"
+      },
+      "name": "per-seed gap 0: result row",
+      "observed": {
+        "decimal": "21.880301018232558",
+        "float_hex": "0x1.5e15b6853f1c0p+4"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": 128,
+      "name": "payload state count 1",
+      "observed": 128,
+      "status": "pass"
+    },
+    {
+      "expected": 1,
+      "name": "payload seed position 1",
+      "observed": 1,
+      "status": "pass"
+    },
+    {
+      "expected": 781025396,
+      "name": "payload seed 1",
+      "observed": 781025396,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "12.585726740108612",
+        "float_hex": "0x1.92be460125180p+3"
+      },
+      "name": "per-seed gap 1: payload",
+      "observed": {
+        "decimal": "12.585726740108612",
+        "float_hex": "0x1.92be460125180p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "12.585726740108612",
+        "float_hex": "0x1.92be460125180p+3"
+      },
+      "name": "per-seed gap 1: result vector",
+      "observed": {
+        "decimal": "12.585726740108612",
+        "float_hex": "0x1.92be460125180p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "12.585726740108612",
+        "float_hex": "0x1.92be460125180p+3"
+      },
+      "name": "per-seed gap 1: result row",
+      "observed": {
+        "decimal": "12.585726740108612",
+        "float_hex": "0x1.92be460125180p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": 128,
+      "name": "payload state count 2",
+      "observed": 128,
+      "status": "pass"
+    },
+    {
+      "expected": 2,
+      "name": "payload seed position 2",
+      "observed": 2,
+      "status": "pass"
+    },
+    {
+      "expected": 1148619853,
+      "name": "payload seed 2",
+      "observed": 1148619853,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "10.658699265691894",
+        "float_hex": "0x1.5514107b81780p+3"
+      },
+      "name": "per-seed gap 2: payload",
+      "observed": {
+        "decimal": "10.658699265691894",
+        "float_hex": "0x1.5514107b81780p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "10.658699265691894",
+        "float_hex": "0x1.5514107b81780p+3"
+      },
+      "name": "per-seed gap 2: result vector",
+      "observed": {
+        "decimal": "10.658699265691894",
+        "float_hex": "0x1.5514107b81780p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "10.658699265691894",
+        "float_hex": "0x1.5514107b81780p+3"
+      },
+      "name": "per-seed gap 2: result row",
+      "observed": {
+        "decimal": "10.658699265691894",
+        "float_hex": "0x1.5514107b81780p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": 128,
+      "name": "payload state count 3",
+      "observed": 128,
+      "status": "pass"
+    },
+    {
+      "expected": 3,
+      "name": "payload seed position 3",
+      "observed": 3,
+      "status": "pass"
+    },
+    {
+      "expected": 913535362,
+      "name": "payload seed 3",
+      "observed": 913535362,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "13.393999128162932",
+        "float_hex": "0x1.ac9ba40f43980p+3"
+      },
+      "name": "per-seed gap 3: payload",
+      "observed": {
+        "decimal": "13.393999128162932",
+        "float_hex": "0x1.ac9ba40f43980p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "13.393999128162932",
+        "float_hex": "0x1.ac9ba40f43980p+3"
+      },
+      "name": "per-seed gap 3: result vector",
+      "observed": {
+        "decimal": "13.393999128162932",
+        "float_hex": "0x1.ac9ba40f43980p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "13.393999128162932",
+        "float_hex": "0x1.ac9ba40f43980p+3"
+      },
+      "name": "per-seed gap 3: result row",
+      "observed": {
+        "decimal": "13.393999128162932",
+        "float_hex": "0x1.ac9ba40f43980p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": 128,
+      "name": "payload state count 4",
+      "observed": 128,
+      "status": "pass"
+    },
+    {
+      "expected": 4,
+      "name": "payload seed position 4",
+      "observed": 4,
+      "status": "pass"
+    },
+    {
+      "expected": 2143253519,
+      "name": "payload seed 4",
+      "observed": 2143253519,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "17.06128953192365",
+        "float_hex": "0x1.10fb0abb73300p+4"
+      },
+      "name": "per-seed gap 4: payload",
+      "observed": {
+        "decimal": "17.06128953192365",
+        "float_hex": "0x1.10fb0abb73300p+4"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "17.06128953192365",
+        "float_hex": "0x1.10fb0abb73300p+4"
+      },
+      "name": "per-seed gap 4: result vector",
+      "observed": {
+        "decimal": "17.06128953192365",
+        "float_hex": "0x1.10fb0abb73300p+4"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "17.06128953192365",
+        "float_hex": "0x1.10fb0abb73300p+4"
+      },
+      "name": "per-seed gap 4: result row",
+      "observed": {
+        "decimal": "17.06128953192365",
+        "float_hex": "0x1.10fb0abb73300p+4"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": 128,
+      "name": "payload state count 5",
+      "observed": 128,
+      "status": "pass"
+    },
+    {
+      "expected": 5,
+      "name": "payload seed position 5",
+      "observed": 5,
+      "status": "pass"
+    },
+    {
+      "expected": 2279379379,
+      "name": "payload seed 5",
+      "observed": 2279379379,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "11.247952346485135",
+        "float_hex": "0x1.67ef39c263d80p+3"
+      },
+      "name": "per-seed gap 5: payload",
+      "observed": {
+        "decimal": "11.247952346485135",
+        "float_hex": "0x1.67ef39c263d80p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "11.247952346485135",
+        "float_hex": "0x1.67ef39c263d80p+3"
+      },
+      "name": "per-seed gap 5: result vector",
+      "observed": {
+        "decimal": "11.247952346485135",
+        "float_hex": "0x1.67ef39c263d80p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "11.247952346485135",
+        "float_hex": "0x1.67ef39c263d80p+3"
+      },
+      "name": "per-seed gap 5: result row",
+      "observed": {
+        "decimal": "11.247952346485135",
+        "float_hex": "0x1.67ef39c263d80p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": 128,
+      "name": "payload state count 6",
+      "observed": 128,
+      "status": "pass"
+    },
+    {
+      "expected": 6,
+      "name": "payload seed position 6",
+      "observed": 6,
+      "status": "pass"
+    },
+    {
+      "expected": 402312153,
+      "name": "payload seed 6",
+      "observed": 402312153,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "13.70176978918471",
+        "float_hex": "0x1.b674e5eabbd00p+3"
+      },
+      "name": "per-seed gap 6: payload",
+      "observed": {
+        "decimal": "13.70176978918471",
+        "float_hex": "0x1.b674e5eabbd00p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "13.70176978918471",
+        "float_hex": "0x1.b674e5eabbd00p+3"
+      },
+      "name": "per-seed gap 6: result vector",
+      "observed": {
+        "decimal": "13.70176978918471",
+        "float_hex": "0x1.b674e5eabbd00p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "13.70176978918471",
+        "float_hex": "0x1.b674e5eabbd00p+3"
+      },
+      "name": "per-seed gap 6: result row",
+      "observed": {
+        "decimal": "13.70176978918471",
+        "float_hex": "0x1.b674e5eabbd00p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": 128,
+      "name": "payload state count 7",
+      "observed": 128,
+      "status": "pass"
+    },
+    {
+      "expected": 7,
+      "name": "payload seed position 7",
+      "observed": 7,
+      "status": "pass"
+    },
+    {
+      "expected": 2736405725,
+      "name": "payload seed 7",
+      "observed": 2736405725,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "13.459892571054297",
+        "float_hex": "0x1.aeb770a00b400p+3"
+      },
+      "name": "per-seed gap 7: payload",
+      "observed": {
+        "decimal": "13.459892571054297",
+        "float_hex": "0x1.aeb770a00b400p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "13.459892571054297",
+        "float_hex": "0x1.aeb770a00b400p+3"
+      },
+      "name": "per-seed gap 7: result vector",
+      "observed": {
+        "decimal": "13.459892571054297",
+        "float_hex": "0x1.aeb770a00b400p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "13.459892571054297",
+        "float_hex": "0x1.aeb770a00b400p+3"
+      },
+      "name": "per-seed gap 7: result row",
+      "observed": {
+        "decimal": "13.459892571054297",
+        "float_hex": "0x1.aeb770a00b400p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "14.248703798855473",
+        "float_hex": "0x1.c7f561ab4f350p+3"
+      },
+      "name": "equal-weight mean signed gap",
+      "observed": {
+        "decimal": "14.248703798855473",
+        "float_hex": "0x1.c7f561ab4f350p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "hyndman_fan_type7_two_sided_percentile_v1",
+      "name": "bootstrap interval convention",
+      "observed": "hyndman_fan_type7_two_sided_percentile_v1",
+      "status": "pass"
+    },
+    {
+      "expected": "float_hex_v1",
+      "name": "bootstrap replicate encoding",
+      "observed": "float_hex_v1",
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "0.025",
+        "float_hex": "0x1.999999999999ap-6"
+      },
+      "name": "bootstrap lower probability",
+      "observed": {
+        "decimal": "0.025",
+        "float_hex": "0x1.999999999999ap-6"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "0.975",
+        "float_hex": "0x1.f333333333333p-1"
+      },
+      "name": "bootstrap upper probability",
+      "observed": {
+        "decimal": "0.975",
+        "float_hex": "0x1.f333333333333p-1"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": 10000,
+      "name": "bootstrap replicate count",
+      "observed": 10000,
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "12.185185177643433",
+        "float_hex": "0x1.85ed097735d70p+3"
+      },
+      "name": "bootstrap lower endpoint",
+      "observed": {
+        "decimal": "12.185185177643433",
+        "float_hex": "0x1.85ed097735d70p+3"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "16.739775084598428",
+        "float_hex": "0x1.0bd61e662bef2p+4"
+      },
+      "name": "bootstrap upper endpoint",
+      "observed": {
+        "decimal": "16.739775084598428",
+        "float_hex": "0x1.0bd61e662bef2p+4"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "5.76837158203125e-06",
+        "float_hex": "0x1.831bde82d7b63p-18"
+      },
+      "name": "parity bound arithmetic",
+      "observed": {
+        "decimal": "5.76837158203125e-06",
+        "float_hex": "0x1.831bde82d7b63p-18"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "1.2773528705878334e-06",
+        "float_hex": "0x1.56e3055800000p-20"
+      },
+      "name": "reported parity consistency 0",
+      "observed": {
+        "decimal": "1.2773528705878334e-06",
+        "float_hex": "0x1.56e3055800000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "<= 5.76837158203125e-06 (0x1.831bde82d7b63p-18)",
+      "name": "reported parity bound 0",
+      "observed": {
+        "decimal": "1.2773528705878334e-06",
+        "float_hex": "0x1.56e3055800000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "1.3852601465913494e-06",
+        "float_hex": "0x1.73da5a3800000p-20"
+      },
+      "name": "reported parity consistency 1",
+      "observed": {
+        "decimal": "1.3852601465913494e-06",
+        "float_hex": "0x1.73da5a3800000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "<= 5.76837158203125e-06 (0x1.831bde82d7b63p-18)",
+      "name": "reported parity bound 1",
+      "observed": {
+        "decimal": "1.3852601465913494e-06",
+        "float_hex": "0x1.73da5a3800000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "1.3282533277703124e-06",
+        "float_hex": "0x1.648cdfa800000p-20"
+      },
+      "name": "reported parity consistency 2",
+      "observed": {
+        "decimal": "1.3282533277703124e-06",
+        "float_hex": "0x1.648cdfa800000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "<= 5.76837158203125e-06 (0x1.831bde82d7b63p-18)",
+      "name": "reported parity bound 2",
+      "observed": {
+        "decimal": "1.3282533277703124e-06",
+        "float_hex": "0x1.648cdfa800000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "1.4138221722248545e-06",
+        "float_hex": "0x1.7b851eb000000p-20"
+      },
+      "name": "reported parity consistency 3",
+      "observed": {
+        "decimal": "1.4138221722248545e-06",
+        "float_hex": "0x1.7b851eb000000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "<= 5.76837158203125e-06 (0x1.831bde82d7b63p-18)",
+      "name": "reported parity bound 3",
+      "observed": {
+        "decimal": "1.4138221722248545e-06",
+        "float_hex": "0x1.7b851eb000000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "1.507580318360624e-06",
+        "float_hex": "0x1.94b0217000000p-20"
+      },
+      "name": "reported parity consistency 4",
+      "observed": {
+        "decimal": "1.507580318360624e-06",
+        "float_hex": "0x1.94b0217000000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "<= 5.76837158203125e-06 (0x1.831bde82d7b63p-18)",
+      "name": "reported parity bound 4",
+      "observed": {
+        "decimal": "1.507580318360624e-06",
+        "float_hex": "0x1.94b0217000000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "1.4686912663819385e-06",
+        "float_hex": "0x1.8a3fb20000000p-20"
+      },
+      "name": "reported parity consistency 5",
+      "observed": {
+        "decimal": "1.4686912663819385e-06",
+        "float_hex": "0x1.8a3fb20000000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "<= 5.76837158203125e-06 (0x1.831bde82d7b63p-18)",
+      "name": "reported parity bound 5",
+      "observed": {
+        "decimal": "1.4686912663819385e-06",
+        "float_hex": "0x1.8a3fb20000000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "1.3280378734492615e-06",
+        "float_hex": "0x1.647e115800000p-20"
+      },
+      "name": "reported parity consistency 6",
+      "observed": {
+        "decimal": "1.3280378734492615e-06",
+        "float_hex": "0x1.647e115800000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "<= 5.76837158203125e-06 (0x1.831bde82d7b63p-18)",
+      "name": "reported parity bound 6",
+      "observed": {
+        "decimal": "1.3280378734492615e-06",
+        "float_hex": "0x1.647e115800000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": {
+        "decimal": "1.3759039774186022e-06",
+        "float_hex": "0x1.715766c000000p-20"
+      },
+      "name": "reported parity consistency 7",
+      "observed": {
+        "decimal": "1.3759039774186022e-06",
+        "float_hex": "0x1.715766c000000p-20"
+      },
+      "status": "pass"
+    },
+    {
+      "expected": "<= 5.76837158203125e-06 (0x1.831bde82d7b63p-18)",
+      "name": "reported parity bound 7",
+      "observed": {
+        "decimal": "1.3759039774186022e-06",
+        "float_hex": "0x1.715766c000000p-20"
+      },
+      "status": "pass"
+    }
+  ],
+  "first_failure": null,
+  "schema_name": "exp1b_independent_checks_v1",
+  "schema_version": 1,
+  "status": "pass"
+}

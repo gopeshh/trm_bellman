@@ -1,0 +1,3 @@
+2026-09-14 13:09:44,123 - tritonparse.structured_logging - INFO - TritonTraceHandler: disabled because /logs does not exist
+===========[FB_TRITON]=========== Triton Version: 3.5.0+fb
+exp1b-replay: seed_position=0 gap=21.880301018232558 sha256=97e2e80ace36fc98e46cd6451b0520ea4e1f66ad56e595e62e1f7b01ac2fd202

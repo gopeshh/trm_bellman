@@ -10,10 +10,27 @@ protocols. They were invalidated and removed from the current branch. They are
 not evidence for the current paper and must not be reconstructed or reused.
 Git history retains the deleted files if a forensic comparison is needed.
 
-The current experiment namespace is `policy-improvement-v2-20260818`. No fresh
-learned result is committed. Stage 1 through Stage 3 remain fail-closed until
-their registered prerequisites are supplied. The test split is not authorized
-for the current preparation and Stage 0 work.
+The current experiment namespace is `policy-improvement-v2-20260818`.
+Experiment 1B run5 is the published learned-evaluator diagnostic. Its original,
+unchanged record is in `artifacts/exp1b-run5-20260913/`; the canonical result
+SHA-256 is
+`71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74`.
+The result reports eight signed proxy-radius differences on one registered
+128-state census, with mean `14.248703798855473` and nominal seed-bootstrap
+interval `[12.185185177643433, 16.739775084598428]`.
+
+Verification completed after publication. The additive sibling audit bundle
+records the recovered Stage A manifests, 35-link digest-chain check, sealed
+checkpoint replay, and independent checker. The errata note records the
+pre-run scratch-diagnostic chronology and corrected numerical interpretation.
+Neither addition changes the original PARs, seals, schedule, result, or signed
+documents.
+
+Run5 is a finite-census measurement diagnostic, not a learned-task performance
+result, a uniform theorem-domain certificate, independent training
+replication, or proof of historical execution. Its bootstrap interval is
+conditional on one common base initialization and the fixed census. The test
+split was not authorized for Stage 0 or the run5 preparation.
 
 ## Main paths
 

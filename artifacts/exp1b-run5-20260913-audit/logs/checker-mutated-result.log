@@ -1,0 +1,3 @@
+FAIL result canonical digest: expected="71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74" observed="aa7b396008cc60d786bf80496a8a4848e6374256324d930b0c876154c9417315"
+SUMMARY FAIL first_failure=result canonical digest
+EXIT_CODE=1

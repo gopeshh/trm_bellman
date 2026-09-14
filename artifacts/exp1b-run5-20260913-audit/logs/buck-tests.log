@@ -1,0 +1,45 @@
+[2026-09-14T15:02:46.181-07:00] Buck UI: https://www.internalfb.com/buck2/a375f1a3-f386-4a72-b678-458accb514ea
+[2026-09-14T15:02:49.210-07:00] RE Session: reSessionID-df269a4c-4353-4f20-9708-c8f2d7c4b9ca
+[2026-09-14T15:02:49.872-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/30117822542651099
+[2026-09-14T15:04:24.422-07:00] ↷ Skip: fbcode//buiksat_trm:test_policy_improvement_exp1b - test_base_and_deployed_differ_when_the_candidate_has_moved (tests.test_policy_improvement_exp1b_unittest.Exp1bTorchBaseOperatorTest) (0.1s)
+[2026-09-14T15:04:24.422-07:00] test_base_and_deployed_differ_when_the_candidate_has_moved (tests.test_policy_improvement_exp1b_unittest.Exp1bTorchBaseOperatorTest) ... skipped "Requires a restored four-module checkpoint; see the handoff's unresolved-Torch section for the exact fbsource command."
+[2026-09-14T15:04:24.422-07:00]
+[2026-09-14T15:04:24.422-07:00] ----------------------------------------------------------------------
+[2026-09-14T15:04:24.422-07:00] Ran 1 test in 0.058s
+[2026-09-14T15:04:24.422-07:00]
+[2026-09-14T15:04:24.422-07:00] OK (skipped=1)
+[2026-09-14T15:04:24.422-07:00]
+[2026-09-14T15:04:24.422-07:00] Requires a restored four-module checkpoint; see the handoff's unresolved-Torch section for the exact fbsource command.
+[2026-09-14T15:04:38.245-07:00] ↷ Skip: fbcode//buiksat_trm:test_policy_improvement_exp1b - test_the_committed_corpus_declares_the_registered_counts (tests.test_policy_improvement_exp1b_unittest.Exp1bEvaluationSplitPoolSizeTest) (12.0s)
+[2026-09-14T15:04:38.245-07:00] test_the_committed_corpus_declares_the_registered_counts (tests.test_policy_improvement_exp1b_unittest.Exp1bEvaluationSplitPoolSizeTest)
+[2026-09-14T15:04:38.245-07:00] If the corpus is materialized here, the real numbers must agree. ... /data/repos/fbsource/buck-out/v2/art/fbcode/52588bd379d6be4f/buiksat_trm/__test_policy_improvement_exp1b__/test_policy_improvement_exp1b#link-tree/torch/_utils_internal.py:283: NCCL_DEBUG env var is set to None
+[2026-09-14T15:04:38.245-07:00] /data/repos/fbsource/buck-out/v2/art/fbcode/52588bd379d6be4f/buiksat_trm/__test_policy_improvement_exp1b__/test_policy_improvement_exp1b#link-tree/torch/_utils_internal.py:292: NCCL_DEBUG is WARN from /etc/nccl.conf
+[2026-09-14T15:04:38.245-07:00] skipped 'The regenerated corpus is not materialized here.'
+[2026-09-14T15:04:38.245-07:00]
+[2026-09-14T15:04:38.245-07:00] ----------------------------------------------------------------------
+[2026-09-14T15:04:38.245-07:00] Ran 1 test in 11.990s
+[2026-09-14T15:04:38.245-07:00]
+[2026-09-14T15:04:38.245-07:00] OK (skipped=1)
+[2026-09-14T15:04:38.245-07:00]
+[2026-09-14T15:04:38.245-07:00] The regenerated corpus is not materialized here.
+[2026-09-14T15:04:41.793-07:00] ↷ Skip: fbcode//buiksat_trm:test_policy_improvement_exp1b - test_restore_reproduces_every_module_digest (tests.test_policy_improvement_exp1b_unittest.Exp1bTorchSealedCheckpointTest) (0.0s)
+[2026-09-14T15:04:41.793-07:00] test_restore_reproduces_every_module_digest (tests.test_policy_improvement_exp1b_unittest.Exp1bTorchSealedCheckpointTest) ... skipped "Requires the registered 4x4 dataset and a trained budget-final checkpoint; see the handoff's unresolved-risk section."
+[2026-09-14T15:04:41.793-07:00]
+[2026-09-14T15:04:41.793-07:00] ----------------------------------------------------------------------
+[2026-09-14T15:04:41.793-07:00] Ran 1 test in 0.031s
+[2026-09-14T15:04:41.793-07:00]
+[2026-09-14T15:04:41.793-07:00] OK (skipped=1)
+[2026-09-14T15:04:41.793-07:00]
+[2026-09-14T15:04:41.793-07:00] Requires the registered 4x4 dataset and a trained budget-final checkpoint; see the handoff's unresolved-risk section.
+[2026-09-14T15:04:43.064-07:00] ↷ Skip: fbcode//buiksat_trm:test_policy_improvement_exp1b - test_a_mutated_trainer_estimator_is_caught (tests.test_policy_improvement_exp1b_unittest.Exp1bTorchCenteringParityTest) (0.0s)
+[2026-09-14T15:04:43.064-07:00] test_a_mutated_trainer_estimator_is_caught (tests.test_policy_improvement_exp1b_unittest.Exp1bTorchCenteringParityTest) ... skipped "Requires a restored four-module checkpoint; see the handoff's unresolved-Torch section."
+[2026-09-14T15:04:43.064-07:00]
+[2026-09-14T15:04:43.064-07:00] ----------------------------------------------------------------------
+[2026-09-14T15:04:43.064-07:00] Ran 1 test in 0.041s
+[2026-09-14T15:04:43.064-07:00]
+[2026-09-14T15:04:43.064-07:00] OK (skipped=1)
+[2026-09-14T15:04:43.064-07:00]
+[2026-09-14T15:04:43.064-07:00] Requires a restored four-module checkpoint; see the handoff's unresolved-Torch section.
+[2026-09-14T15:04:58.656-07:00] Network: up 1.4MiB  down 312MiB  session reSessionID-df269a4c-4353-4f20-9708-c8f2d7c4b9ca
+[2026-09-14T15:04:58.656-07:00] Test session: https://www.internalfb.com/intern/testinfra/testrun/30117822542651099
+Tests finished: [mPass 382[m. Fail 0. Timeout 0. Fatal 0. [mSkip 4[m. Omit 0. Infra Failure 0. Build failure 0
