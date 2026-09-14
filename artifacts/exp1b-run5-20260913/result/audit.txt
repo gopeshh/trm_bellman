@@ -1,0 +1,6 @@
+=== auditing /home/buiksat/upi-trm-owner-20260911/evidence4/gen-20260913-run5/exp1b_result.json ===
+exp1b-audit: document_sha256=71f37c6f31d0bb9951b884f5f275e3b9c9bf07d46a836a1da37d9e80c6454e74
+exp1b-audit: mean_signed_gap=14.248703798855473
+exp1b-audit: interval=[12.185185177643433, 16.739775084598428]
+exp1b-audit: checks=document_canonical_digest,registered_identity_and_access_flags,census_member_ordering_rederived_from_registered_population,role_scoped_admission_binding,study_document_bindings,per_seed_bound_algebra,secondary_diagnostics,frozen_bootstrap_interval
+AUDIT EXIT=0
